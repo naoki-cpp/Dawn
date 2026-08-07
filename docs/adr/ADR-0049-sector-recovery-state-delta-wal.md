@@ -4,7 +4,7 @@ title   : Exact Sector recovery with a versioned state-delta journal
 status  : accepted
 date    : 2026-08-06
 deciders: [human, ai-agent]
-related : ADR-0001 (Event Sourcing), ADR-0017 (snapshot compaction), ADR-0021 (Sector-local replication), ADR-0027 (replication crate), ADR-0038 (Station inventory SQLite)
+related : ADR-0001 (Event Sourcing), ADR-0014 (Raft / Transit), ADR-0017 (snapshot compaction), ADR-0021 (Sector-local replication), ADR-0027 (replication crate), ADR-0038 (Station inventory SQLite)
 ---
 
 # ADR-0049 - Exact Sector recovery with a versioned state-delta journal
@@ -12,439 +12,477 @@ related : ADR-0001 (Event Sourcing), ADR-0017 (snapshot compaction), ADR-0021 (S
 ## Context
 
 The current Sector runtime mutates authoritative ECS and aggregate state during a
-command or Tick, then appends the resulting public `DomainEvent`s. That ordering
-cannot make an append failure safe because live state has already changed.
+command or Tick, then appends resulting public `DomainEvent`s. That ordering cannot
+make a storage failure safe because live state has already changed.
 
-The public event catalog is not a complete recovery representation. A Tick may
-advance position, capacitor charge, module cycle counters, lock countdowns,
-flight-mode state, bot state, pending bot commands, and the logical Tick while
-emitting no public event. A snapshot plus a public-event tail therefore cannot
-reproduce an arbitrary acknowledged state between checkpoints.
+The public event catalog is also not a complete recovery representation. A Tick can
+advance position, capacitor charge, module-cycle counters, lock countdowns,
+flight-mode state, bot queues, logical Tick, Player routing state, and other
+authority while emitting no public event. Snapshot + public-event tail therefore
+cannot reconstruct every acknowledged intermediate state.
 
-Input-only deterministic replay is not sufficient either. Combat uses process
-randomness, and exact execution depends on iteration, floating-point, catalog, and
-implementation details that are not a versioned recovery contract. Event-sourcing
-every ECS implementation detail would also couple public business facts to a
-high-volume internal mutation log.
+Input-only deterministic rerun is not an adequate versioned recovery contract
+either. Current behavior can depend on process randomness, floating point,
+iteration order, catalog version, AI implementation, and implementation details
+that are not stable replay inputs.
 
-Issue #284 requires one explicit model before #271 defines the durable journal
-payload and #272 freezes the engine transition boundary.
+Issue #284 requires one explicit authoritative recovery model before #271 freezes
+journal mechanics and #272 freezes the engine transition boundary.
+
+## Scope inside the destructive-refactor work package
+
+This ADR owns the **recovery semantics selected by #284**. It intentionally does
+not decide implementation details already assigned to sibling issues:
+
+- **#271** owns fallible atomic journal framing, indices, commit markers,
+  corruption/torn-write policy, fsync/quorum evidence, and physical retention;
+- **#272** owns the storage-independent engine transition API and bounded
+  prepare -> durable append -> live apply migration;
+- **#275** owns decomposition of `SimulationNode` into explicit state owners;
+- **#276** owns the first-class durable Transit Saga/attempt/receipt model;
+- **#277** owns repository/schema/transaction APIs for admission, identity, and
+  Station projection data;
+- **#280** owns peer transport and the physical snapshot/catch-up transfer path.
+
+Those issues must consume this contract rather than redefine which state is
+recoverable or what acknowledgement means.
 
 ## Normative precedence and amendments
 
-This ADR is accepted and, together with
-`docs/architecture/recovery-contract.md`, is normative for Sector recovery,
-durability, acknowledgement, replication catch-up, and transition ordering.
-Where an older document conflicts with this contract, this ADR takes precedence.
-Specifically, this ADR:
+This ADR and `docs/architecture/recovery-contract.md` are normative for Sector
+recovery, acknowledgement, checkpoint coverage, and the classification of
+state/outputs as authoritative, derived, reliable, or intentionally lossy.
 
-- amends ADR-0001: `DomainEvent`s remain durable public/business facts and audit
-  history, but they are not the sole authority for exact operational state;
-- supersedes the ADR-0017 claim that operational recovery is a snapshot plus a
-  public-event tail or Tick re-execution; operational recovery is a compatible
-  authoritative snapshot plus a committed state-delta tail;
-- supersedes the ADR-0038 claim that SQLite is the independent durable authority
-  for Station inventory and that a journal/SQLite inconsistency window is
-  acceptable; the Sector journal is the authority and SQLite is an idempotent
-  projection;
-- amends INV-001/INV-002/INV-005, `tick-model.md`, and `event-catalog.md` wherever
-  they equate event append with the complete state commit, claim public-event-only
-  recovery, or treat an eventless Tick as having no durable record; and
-- leaves append-only public-event semantics intact. State-delta compaction is a
-  separate recovery-stream operation and never rewrites a committed public event.
+It amends older decisions as follows:
 
-The older normative documents are amended in the same PR. A future change may not
-reintroduce the superseded ordering or recovery claims without a new ADR.
+- **ADR-0001:** `DomainEvent`s remain durable public/business facts, audit history,
+  and projection inputs, but are not the sole exact operational recovery reducer.
+- **ADR-0014:** Transit remains consensus-controlled, but legacy EventStore scans
+  and public Transit event pairs are not the final exact recovery/outbox authority;
+  #276 must use this recovery contract for its durable Saga.
+- **ADR-0017:** operational recovery is not snapshot + public-event tail or
+  historical Tick rerun. It is compatible checkpoint + committed authoritative
+  recovery tail. Public-event hot/cold archival remains a separate concern.
+- **ADR-0038:** SQLite is not an independent Station durability authority. Station
+  mutations participate in Sector recovery authority; SQLite/repository state is
+  an idempotent projection/read model under #277.
+- **INV-001/INV-002/INV-005, tick-model, architecture, ownership, database
+  strategy, and event-catalog:** any statement equating public-event append with
+  the complete transition commit or claiming public-event-only exact recovery is
+  superseded.
+
+Committed public `DomainEvent`s remain append-only facts. Recovery-delta checkpoint
+compaction is a distinct stream operation and does not authorize in-place mutation
+of public history.
 
 ## Decision
 
 Operational Sector recovery uses a **versioned authoritative state-delta journal
-plus periodic full checkpoints**.
+plus periodic versioned checkpoints**.
 
-Public/business `DomainEvent`s are a separate logical output and are not the
-authority for exact state reconstruction. They are nevertheless durable facts:
-the events produced by a transition are committed atomically with its recovery
-delta and reliable effect intents. This prevents a crash after durable state
-commit but before publication from deleting audit or delivery history.
+A committed transition records authoritative outcomes needed for exact recovery,
+not merely commands or RNG inputs. The authoritative delta is distinct from public
+business events, although outputs produced by the same transition share one logical
+atomic visibility boundary.
 
-### Transition contract
+### 1. Transition contract
 
 Every accepted authoritative operation produces one logical transition:
 
 ```text
 current committed state
     -> prepare(input)
-    -> RecoveryDelta + DomainEvents + RuntimeEffects + PreparedMutation
-    -> atomically commit DurableTransitionBatch
-         { RecoveryDelta, DomainEvents, durable effect intents }
-    -> apply PreparedMutation / RecoveryDelta to live state and local projections
-    -> publish DomainEvents / RuntimeEffects / acknowledgement
+    -> RecoveryDelta + DomainEvents + runtime/reliable effects + PreparedMutation
+    -> make the logical transition durable under the selected durability profile
+    -> apply PreparedMutation / RecoveryDelta to local live state
+    -> apply required local projections
+    -> publish public outputs / execute reliable effects
+    -> acknowledge after all acknowledgement conditions are satisfied
 ```
 
-An operation includes:
+An authoritative operation includes:
 
-- one admitted client request;
-- one simulation Tick, including a Tick that emits no `DomainEvent`;
-- one committed Transit, admission, or Station transaction; or
+- an admitted client request that mutates authoritative state;
+- one simulation Tick, including an eventless Tick;
+- an admitted Player/Station/Transit lifecycle mutation; or
 - another explicitly durable Sector mutation.
 
-A failed durable append does not commit the prepared mutation, publish outputs,
-advance the externally visible Tick, or acknowledge success.
+A rejected request that never changes authority does not need a recovery transition
+merely to record rejection telemetry.
 
-After a durable append succeeds, the transition cannot be rejected or forgotten.
-If live application returns an error, panics, or can only partially apply, the
-Sector immediately enters a **fail-stop fenced state**. While fenced it must not:
+A failed durable append cannot commit the prepared live mutation, advance an
+externally visible authoritative Tick, publish success outputs, or acknowledge
+success.
 
-- accept or prepare another authoritative transition;
-- replicate a later range;
-- publish the transition's events or runtime effects;
-- acknowledge success; or
-- serve authoritative state as healthy.
+After durable commit succeeds, the transition cannot be converted into ordinary
+rejection. If local application or a required local projection errors, panics, or
+partially applies, the Sector must fence/fail-stop and recover from durable data
+before serving later authority.
 
-The process must terminate or recover from the journal before resuming. Recovery
-reapplies the committed delta through the same reducer. Continuing from the old
-live state is forbidden.
+### 2. Authoritative recovery payload
 
-### Durable transition batch and physical journal contract
+The versioned `RecoveryDelta` contains enough outcome information to reconstruct
+the exact committed authority without rerunning historical implementation code.
+At minimum the recovery representation can encode:
 
-`DurableTransitionBatch` is one **logical atomic commit envelope**, not one
-indivisible retention blob. The storage format consists of immutable subrecords:
+- format/schema version and Sector identity;
+- catalog/schema fingerprint required to validate recovered values;
+- stable transition identity and authoritative position;
+- Tick before/after where relevant;
+- stable create/delete operations;
+- final-value component/aggregate patches for changed authoritative state;
+- counter/map/set/queue changes outside ECS components;
+- Player ownership and **active-ship routing** changes;
+- Station aggregate changes;
+- Transit/Saga-facing authoritative changes required by #276;
+- enough metadata to detect duplicate, missing, out-of-order, corrupt,
+  wrong-Sector, or incompatible recovery records.
 
-- an authoritative state-delta subrecord;
-- a public-event subrecord, possibly empty;
-- a durable outbox/effect-intent subrecord, possibly empty; and
-- a commit envelope containing transition identity, positions, lengths, hashes,
-  schema/catalog fingerprints, and the visibility commit marker.
+Canonical encoding/order must be deterministic for durable representation. Exact
+physical framing belongs to #271.
 
-The writer may place those subrecords in separate append-only segment families,
-but no reader may observe any of them as committed until all referenced bytes and
-the commit marker are durable. Recovery, publication, replication, and outbox
-readers enumerate only committed envelopes.
+A whole-world clone per transition is not required. #272 may use a reversible write
+set, copy-on-write overlay, prepared values, or another bounded mechanism as long as
+pre-durable live authority is not exposed and the committed result is equivalent to
+applying `RecoveryDelta`.
 
-The transition payload contains, at minimum:
+### 3. Public `DomainEvent`s and reliable effects
 
-- format/schema version;
+`DomainEvent`s remain durable public/business facts when produced, but they are not
+the exact state reducer. A transition may contain zero public events and still be
+fully authoritative/durable.
+
+Public events produced by a committed transition cannot disappear in a crash gap
+between state durability and publication. The logical transition therefore gives
+authoritative recovery data and its public outputs one atomic visibility boundary.
+#271 decides how that logical boundary is physically framed and retained.
+
+Likewise, a post-commit action that must survive a crash needs durable retry state
+or a stronger explicitly idempotent external protocol. The concrete representation
+may be:
+
+- an outbox record inside the #271 logical transition representation;
+- a #276 Transit Saga state/attempt record participating in the same documented
+  recovery boundary; or
+- another mechanism proven to provide the same crash/retry guarantee.
+
+The recovery invariant matters more than the type name `Outbox`.
+
+### 4. Eventless Ticks and queued future intent
+
+Every committed Tick has a recovery position even when no `DomainEvent` is emitted.
+`events_emitted == 0` never means "nothing durable happened".
+
+The pending bot lock-command queue is authoritative while it survives across Tick
+boundaries because it changes the next Tick's outcome. Until redesigned for same-
+Tick consumption, it belongs in checkpoint/delta recovery data.
+
+`pending_auto_jumps` is not allowed to be the sole representation of an already-
+committed Warp continuation. When an `auto_jump` Warp arrival commits, durable
+retry/idempotency state for continuing Transit must exist in the same recovery
+boundary. #276 may ultimately represent that as a `TransitAttemptId` Saga rather
+than a generic outbox intent.
+
+### 5. Player routing state
+
+`ShipRegistry.active_ship` is authoritative Player routing state, not deliberately
+lossy session decoration. It changes:
+
+- which owned Ship receives helm/module commands;
+- whether Undock is legal; and
+- what authoritative routing state a reconnect resumes into.
+
+Therefore `SelectActiveShip` and `Disembark` can require a recovery transition even
+when they emit no public `DomainEvent`. The current snapshot omission is migration
+debt to be removed under #284/#275, not an accepted recovery gap.
+
+Socket handles, transient connection queues, rendered selection, AoI caches, and
+other presentation/session transport objects remain non-authoritative unless a
+future ADR explicitly promotes them.
+
+### 6. Station authority and projection
+
+Station inventory changes participate in the Sector authoritative recovery
+transition. SQLite/repository state does not create a second independent truth.
+
+Normative ordering for a Station-changing transition is:
+
+```text
+prepare authoritative mutation
+    -> durable Sector transition
+    -> local live apply
+    -> idempotent required Station projection
+    -> publish / acknowledge
+```
+
+#277 owns the repository schema/API and may keep one SQLite connection/transaction
+owner for repository concerns, but it must preserve this authority direction.
+
+The Station projection carries:
+
+- transition-id deduplication for Station-changing transitions; and
+- a **global contiguous authoritative `applied_through` position**.
+
+A non-Station transition advances the projection worker's global watermark as an
+explicit no-op. A Station transition advances it only after its Station mutation is
+successfully projected. Thus `applied_through >= promotion_position` has one clear
+meaning and does not confuse "last Station mutation" with "all transitions through
+this point have been considered".
+
+A Station operation is acknowledged only after selected durability, successful
+local live apply, and the required local projection application. Projection failure
+after durable commit fences the owner until catch-up/rebuild succeeds.
+
+### 7. Transit relationship
+
+ADR-0014 remains the behavioral consensus baseline for ownership transfer, but its
+legacy persistence details are amended:
+
+- the public `SectorTransitRequested`/`Completed` events remain public facts where
+  still useful;
+- scanning those events from genesis/hot log is not the final recovery repository;
+- pending retry/receipt/terminal state must be represented by the durable handoff
+  Saga designed in #276;
+- that Saga must participate in this issue's checkpoint, RPO, compaction, crash,
+  and replica-catch-up semantics;
+- reliable Raft proposals cannot be crash-lossy memory-only work.
+
+#276 owns the exact transaction/reconciliation model between Saga repository state
+and the general #271 recovery journal. It may choose to store Saga state directly in
+the general recovery transition or in a repository with explicit reconciliation,
+provided it does not weaken #284's acknowledgement/RPO guarantees.
+
+### 8. Checkpoints and compatibility
+
+A checkpoint is a versioned authoritative recovery point, not merely a performance
+cache. Its complete manifest identifies one authoritative covered position and all
+required members, for example:
+
+- format magic/version;
 - Sector identity and catalog/schema fingerprint;
-- transition identity and covered journal range;
-- Tick before and after the transition;
-- stable ordered create/delete operations;
-- final-value component/aggregate patches for every authoritative field changed;
-- counter/map/set/queue changes that are not ECS components;
-- the transition's public `DomainEvent`s in stable order, possibly empty;
-- durable outbox/effect intents when an external action must survive a crash; and
-- enough metadata to reject a duplicate, gap, incompatible version, wrong Sector,
-  or wrong catalog.
+- covered authoritative journal position;
+- ECS/Simulation/Player snapshot members;
+- Station aggregate checkpoint member when Station state is externalized;
+- Transit/Saga member or references when required by #276's persistence choice;
+- checksums/lengths; and
+- metadata needed to locate retained authoritative/output tails.
 
-Deltas record authoritative outcomes, not only commands or RNG inputs. Recovery
-does not depend on reproducing the current RNG algorithm, hash iteration order,
-floating-point execution path, AI implementation, or catalog version.
+Exact physical file/manifest layout belongs to #271. Snapshot transfer framing
+belongs to #280. Old snapshot compatibility is not required; incompatible or
+incomplete checkpoint data must fail clearly.
 
-The canonical encoded order is deterministic. Entity/component patches are sorted
-by stable domain identity and component tag; unordered maps, sets, and queues are
-serialized through stable ordered views. A whole-world clone is not required: an
-implementation may use a reversible mutation plan, write set, copy-on-write pages,
-or another bounded preparation mechanism.
+The existing crash-safe publication property is retained or strengthened:
+replacement material is written, validated, synced, and atomically selected before
+superseded authoritative recovery data is retired.
 
-### Independent retention and crash-safe compaction
+### 9. Independent retention and compaction
 
-Atomic commit does not force all substreams to share one retention watermark.
-After a validated checkpoint covers a committed position:
+Atomic transition visibility does not require every logical substream to share one
+retention lifetime.
 
-- state-delta subrecords at or before that position may be removed from the hot
-  recovery stream;
-- public-event subrecords remain until their audit/archive retention policy allows
-  removal from the hot tier;
-- outbox subrecords remain until every required delivery consumer has durably
-  advanced beyond them; and
-- the compact commit index retains enough metadata to prove which transition
-  ranges are covered by the checkpoint and which output subrecords still exist.
+After a complete checkpoint covers a position:
 
-Compaction is copy-and-publish, never in-place mutation:
+- covered state-delta material may become eligible for recovery compaction;
+- public events remain according to delivery/audit/archive policy;
+- reliable retry/Saga/output records remain until their durable terminal/delivery
+  condition permits retirement; and
+- #271 must keep enough committed-index metadata to make covered ranges and retained
+  obligations unambiguous.
 
-1. write and validate the new checkpoint or compacted segment set;
-2. fsync all new files and the new manifest;
-3. atomically publish the manifest that selects them;
-4. only then retire old state-delta segments; and
-5. retain old files until recovery can no longer select the previous manifest.
+State checkpoint coverage alone never proves that a public output was delivered or
+that a reliable external obligation reached terminal state.
 
-A crash before manifest publication leaves the previous recovery path intact. A
-crash after publication leaves the new checkpoint plus retained tails intact.
-Public-event and outbox segments cannot be retired merely because state is covered
-by a checkpoint.
+FBD-001 continues to prohibit destructive in-place public-event history mutation.
 
-### Eventless Ticks, pending bot commands, and auto-jump
+### 10. Durability profiles, RPO, and acknowledgement
 
-Every committed Tick writes a recovery transition even when no public event is
-emitted. Tick advancement and all authoritative changes are covered by a journal
-position. `events_emitted == 0` never means that nothing durable happened.
-
-The pending bot lock-command queue is authoritative because it changes the next
-Tick's outcome. Until the Tick pipeline is redesigned to consume those commands in
-the same transition, the queue is included in snapshots and in queue deltas.
-
-`pending_auto_jumps` is **not** allowed to remain a crash-lossy in-memory handoff.
-When a Tick completes an `auto_jump` Warp, that same durable transition records an
-`AutoJumpProposalIntent` (or equivalent) in the outbox with the Ship, gate,
-destination/routing data needed for retry, and the originating transition identity.
-The post-commit runtime may drain an in-memory convenience queue, but that queue is
-only a projection of the durable intent. A crash after Warp arrival and before the
-Raft proposal must cause the intent to be retried after recovery, not silently lost.
-The Raft proposal path must deduplicate by the durable transition/idempotency
-identity so an ambiguous crash can produce a duplicate proposal attempt but not a
-duplicate ownership transition.
-
-### Station inventory authority
-
-Station inventory participates in the same Sector transition and recovery journal.
-The authoritative Station item delta is stored in the same committed envelope as
-ECS, ownership, and public outputs. There is no SQLite/journal two-phase commit and
-no accepted one-sided durability window.
-
-SQLite remains the bounded, lazily loaded query projection used by the runtime. It
-is updated idempotently by `(sector_id, transition_id)` after journal commit. A
-Station transition is acknowledged only after:
-
-1. the journal envelope is durable under the selected durability profile;
-2. the live authoritative reducer succeeds; and
-3. the local SQLite projection has applied that transition idempotently.
-
-If SQLite application fails after durable append, the Sector follows the same
-fail-stop rule and rebuilds or catches up the projection from a versioned Station
-aggregate checkpoint plus committed Station deltas. Reapplying a transition must
-be a no-op after the same `transition_id` is recorded.
-
-To avoid loading all Station inventories into the ECS snapshot, a Sector checkpoint
-manifest may reference a separate versioned Station aggregate checkpoint. The ECS
-snapshot, Station checkpoint, and covered journal position form one validated
-checkpoint set; compaction is forbidden until the complete set is durable and
-mutually consistent.
-
-### Snapshots and checkpoint manifests
-
-A checkpoint is a versioned full authoritative recovery point. Its manifest
-contains or references:
-
-- explicit magic and format versions;
-- Sector identity and catalog/schema fingerprint;
-- the exact committed journal position it covers;
-- the ECS/aggregate snapshot;
-- the Station aggregate checkpoint when Station state exists;
-- checksums and lengths for every member; and
-- output-retention metadata needed to locate retained event/outbox segments.
-
-Snapshots contain authoritative state, including the pending bot command queue,
-but no runtime handles, sockets, transient channel buffers, or already-executed
-external effects. Reliable post-commit actions such as auto-jump Raft proposals are
-represented by retained outbox intents rather than by snapshotting runtime queues.
-
-Recovery loads the newest complete compatible checkpoint set and applies every
-complete committed recovery batch after its covered position. A missing range,
-duplicate, wrong Sector, wrong fingerprint, corrupt member, or incompatible version
-fails recovery explicitly.
-
-### Durability profiles, RPO, acknowledgement, and retries
-
-"RPO 0" is always stated together with a failure domain. #271 must expose the
-configured durability profile and cannot acknowledge a transition before that
-profile's durable-commit condition is satisfied.
+"RPO 0" is always qualified by a failure domain. #284 fixes the semantic profiles;
+#271 owns the storage/quorum evidence and #280 owns transport mechanics.
 
 #### LocalDurable
 
-The commit envelope, all referenced subrecords, and required metadata are written,
-flushed, and `fsync`/equivalent durable before acknowledgement. This profile gives
-**acknowledged RPO 0 for process crash, OS crash/reboot, and abrupt power loss while
-the authoritative storage medium remains readable and preserves completed durable
-writes**. Catastrophic loss or corruption of that device/machine is outside this
-profile's RPO promise.
+Before acknowledgement, the transition satisfies a documented local durable-write
+condition (`fsync`/platform equivalent under #271). It gives **acknowledged RPO 0
+for process crash, OS crash/reboot, and abrupt power loss while the authoritative
+local storage medium remains readable and preserves completed durable writes**.
+Permanent loss/corruption of that machine/storage is outside this profile.
 
 #### ReplicatedDurable
 
-In addition to `LocalDurable`, the committed envelope/range is synchronously made
-durable on the configured replica quorum before acknowledgement. This profile may
-claim **acknowledged RPO 0 for owner-node or owner-storage loss only up to the
-explicitly configured replica-failure tolerance**. #271/#280 must define the quorum,
-ack evidence, and tolerated failures before production documentation makes that
-stronger claim.
+Before acknowledgement, LocalDurable is satisfied and the same committed
+transition is synchronously durable on a configured replica quorum. It may claim
+**acknowledged RPO 0 for owner-node/storage loss only up to the explicitly
+documented replica failure tolerance**.
 
-A deployment must not use an ambiguous phrase such as "production journal mode"
-in place of these failure-domain semantics.
+A ReplicatedDurable implementation may stage committed bytes/evidence on remote
+replicas before the owner's local live apply. This is **durability replication**,
+not proof that the remote replica has applied or may publish/promote that position.
+A staged replica must apply the shared recovery reducer and promotion-critical
+projections before that range becomes applied authority.
 
-- **Unacknowledged operation:** may be absent or durably committed after a crash.
-  Retried operations that require exactly-once semantics use a stable idempotency
-  or transition identity.
-- **RTO:** not yet a numeric production guarantee. Recovery procedure is defined,
-  but maximum tail bytes, transition count, replay duration, reference hardware,
-  and checkpoint cadence remain to be benchmarked in #284. Until that benchmark
-  lands, documents and PRs must not claim a measured RTO.
+If owner live apply fails after quorum durability, already-staged bytes remain valid
+durable recovery material, but the owner fences and no application/publication
+replication may advance beyond its last successfully applied position until
+recovery succeeds.
 
-#271 must expose tail-size and replay-time measurements so checkpoint cadence can
-later enforce the selected RTO budget rather than relying on genesis replay.
+An unacknowledged request may be absent or already durably committed after a crash.
+Retry paths requiring exactly-once domain semantics need stable idempotency identity.
 
-### Durable delivery cursors and external effects
+### 11. Delivery semantics
 
-Public-event and outbox delivery is **at-least-once** unless the downstream system
-provides a stronger idempotent transaction protocol. For every durable consumer:
+Durable public/reliable output delivery is **at-least-once** unless a stronger
+protocol is explicitly provided.
 
-1. read the next committed output after the durable cursor;
-2. attempt delivery with the transition/output idempotency identity;
-3. receive a downstream acknowledgement or equivalent durable idempotency proof;
-4. durably advance that consumer's cursor only after step 3; and
-5. allow compaction past the output only after every required consumer/archive
-   watermark has durably advanced.
+For each durable consumer:
 
-Advancing a cursor before downstream acknowledgement is forbidden because a crash
-could skip an undelivered committed output. Advancing after acknowledgement means a
-crash can repeat delivery before the cursor update becomes durable; consumers must
-therefore tolerate duplicates or use the provided idempotency identity. The Sector
-does not claim exactly-once external side effects from a local cursor alone.
+1. choose next committed output after durable delivery state;
+2. deliver using stable transition/output identity;
+3. obtain downstream acknowledgement or equivalent durable idempotency proof;
+4. only then durably advance consumer delivery state; and
+5. only after all required consumer/archive conditions may retained output become
+   eligible for retirement.
 
-A reliable Raft proposal, including auto-jump, follows the same outbox rule. A
-fire-and-forget runtime effect that is deliberately not recoverable must be
-explicitly classified as such and cannot be required for authoritative continuity.
+A crash after downstream acknowledgement but before delivery-state durability can
+cause duplicate delivery; consumers must tolerate that or provide stronger
+transactional idempotency. A local cursor alone is not exactly-once.
 
-### Replication, catch-up, and promotion
+#271/#276 own concrete cursor/attempt storage as appropriate. The #284 invariant is
+that failover cannot skip a committed undelivered obligation.
 
-Replication publishes only committed envelopes/ranges. A replica applies the same
-recovery reducer used by local recovery before exposing new authoritative state.
+### 12. Replica catch-up and promotion
 
-A snapshot-based catch-up bundle must include:
+#280's physical catch-up path must transport enough data to obtain:
 
-- the complete checkpoint set and covered journal position;
-- every committed authoritative tail record after that position;
-- every retained public-event and outbox segment the replica may need after
-  promotion;
-- durable publication/outbox consumer cursors or an equivalent replicated cursor
-  state; and
-- enough Station checkpoint/delta information to bring the replica's local SQLite
-  projection to a known transition watermark.
+- a complete compatible checkpoint and covered authoritative position;
+- every contiguous authoritative recovery record after that point;
+- retained public/reliable outputs still required after promotion;
+- delivery/retry state sufficient to avoid skipping committed obligations; and
+- projection/checkpoint data required to make local promotion-critical projections
+  current.
 
-A replica is not promotable/servable as healthy until it can prove all of the
-following at the promotion position:
+A replica is promotable through position `P` only after:
 
-1. the authoritative recovery range is contiguous and invariant-valid;
-2. no committed public event or durable effect intent required after promotion is
-   missing;
-3. durable consumer cursors cannot skip an undelivered retained output; and
-4. the local Station SQLite projection watermark is at least the promoted
-   authoritative position, or the projection has been rebuilt to that position
-   before any Station read/write is served.
+1. compatible recovery data exists with no gap through `P`;
+2. the shared recovery reducer has successfully applied through `P`;
+3. invariants validate;
+4. no promotion-critical retained public/reliable output is missing;
+5. delivery/retry state cannot skip an undelivered obligation; and
+6. Station projection `applied_through >= P` before Station reads/writes are served.
 
-A replica that has current ECS state but stale output segments, cursors, or SQLite
-projection remains catch-up-only. Promotion must not expose stale Station inventory.
+Durably staged-but-unapplied quorum bytes do not satisfy promotion by themselves.
 
-Public events are published only after local state commit. Redirects, client
-projections, loadout refreshes, Raft proposals, and other runtime effects execute
-only after local commit. Effects requiring reliable retry have a durable outbox
-intent in the same envelope or use an explicitly idempotent external protocol.
+### 13. Fail-stop rule
 
-### Terminology
+Once a transition is durably committed it cannot be forgotten. A post-durable local
+apply or required projection error/panic/partial apply requires immediate fencing:
 
-- **Recovery record/delta:** authoritative persistence representation used to
-  reconstruct exact committed Sector state.
-- **Domain event:** durable public/business fact produced by a committed transition;
-  stored atomically with it but not used as the exact state reducer.
-- **Runtime effect:** post-commit non-state action; reliable effects have a durable
-  outbox intent or an idempotent protocol.
-- **Checkpoint:** validated manifest plus all authoritative snapshot members at one
-  committed journal position.
-- **Replay:** applying authoritative recovery deltas to a compatible checkpoint.
-  Genesis public-event replay is only an explicitly supported audit/projection
-  operation, not the operational recovery contract.
+- admit/prepare/commit no later authoritative transition;
+- do not publish the failed transition's public/reliable effects;
+- do not acknowledge it;
+- do not advance application/publication replication beyond last successfully
+  applied contiguous position;
+- do not serve the Sector as healthy; and
+- terminate or reconstruct local authority/projections from durable recovery data
+  before resuming.
+
+Durability-quorum copies already staged before the failure may remain; they are not
+healthy applied replicas until their own reducer/projection application succeeds.
+
+### 14. RTO
+
+No numeric production RTO is selected by this architecture slice. #284 must still
+benchmark representative ship counts/eventless Ticks and define:
+
+- maximum authoritative tail transitions/bytes;
+- maximum replay duration on named reference hardware;
+- checkpoint cadence/trigger thresholds; and
+- the production recovery target derived from those measurements.
+
+A recovery procedure is not itself an RTO.
 
 ## Alternatives considered
 
 ### Event-source every authoritative mutation as public events
 
-This can provide exact replay but would make the public event catalog mirror ECS
-implementation details and generate high-volume events for position, capacitor,
-cycle counters, lock countdowns, queues, and other per-Tick state. A dedicated
-state delta keeps recovery mechanics separate from business facts.
+Rejected because it would couple public/business event schemas to high-volume
+internal per-Tick state such as position, capacitor, lock/module counters, queues,
+and routing state.
 
-### Journal deterministic inputs and rerun the Tick
+### Journal deterministic inputs and rerun historical Ticks
 
-This is compact, but the current engine does not expose a versioned guarantee for
-randomness, floating-point behavior, iteration order, AI logic, or catalog changes.
-Old-tail replay would remain code-version-sensitive.
+Rejected because exact old-state reconstruction would remain dependent on RNG,
+floating point, iteration order, catalog version, AI code, and implementation
+version unless those were frozen as a much broader execution ABI.
 
-### Bounded rollback to the last checkpoint
+### Bounded rollback to checkpoint
 
-This is operationally simpler but allows an acknowledged command or Tick to vanish
-after a crash, conflicting with authoritative simulation and replication semantics.
+Rejected because a successful acknowledged operation could disappear after crash,
+contradicting the selected authoritative simulation contract.
 
-### Independent SQLite authority with cross-store reconciliation
+### Independent SQLite Station authority
 
-A recoverable participant protocol could preserve SQLite authority, but it would
-introduce prepare/commit records, reconciliation, timeout, and acknowledgement
-semantics across two stores. Using the Sector journal as the single authority and
-SQLite as an idempotent projection is simpler and preserves one transition commit
-boundary.
+Rejected as the Sector recovery model because it creates a second authority and a
+cross-store atomicity/reconciliation problem. #277 may still use SQLite as a
+repository/projection implementation under the single recovery authority.
 
-### One indivisible physical batch retained to the slowest consumer
+### Public Transit events as the durable handoff repository
 
-This preserves atomicity but retains high-volume state deltas as long as the
-slowest audit or effect consumer. Logical atomic envelopes over independently
-retained immutable substreams preserve the commit boundary without coupling their
-retention lifetimes.
+Retained only as current/legacy behavior while #276 migrates. Long-term retry and
+receipt authority belongs to the explicit durable Saga because log scanning and
+implicit attempt identity are the exact problems #276 is chartered to remove.
 
 ## Consequences
 
-- #271 must store generic/versioned logical transition envelopes atomically and
-  support immutable state, event, and outbox substreams plus a committed index.
-- #271 must expose `LocalDurable`/`ReplicatedDurable`-equivalent commit evidence so
-  acknowledgement has an explicit failure domain.
-- #272 must expose prepare -> persist -> commit, include Station aggregate changes,
-  and implement fail-stop fencing after post-append application failure.
-- ADR-0038's SQLite authority becomes a projection contract; Station writes are
-  journal-authoritative and idempotently projected.
-- Auto-jump Raft proposals become reliable outbox work tied to the Warp transition;
-  an in-memory queue alone cannot represent the obligation.
-- Snapshot schemas and checkpoint manifests become explicitly versioned and
-  fingerprinted.
-- Recovery and replica application share one reducer for authoritative deltas.
-- Replica promotion requires both retained outputs/cursors and a caught-up Station
-  projection, not only ECS state equivalence.
-- Durable output delivery is at-least-once with cursor advance after downstream
-  acknowledgement; exactly-once requires downstream idempotency/transactions.
-- Public event evolution no longer silently changes the recovery contract, while
-  committed facts cannot be lost between state commit and publication.
-- Numeric RTO remains an open benchmark deliverable in #284.
+- #271 must provide a generic/versioned atomic durable-journal substrate capable of
+  storing this recovery representation without hardcoding public `DomainEvent` as
+  the sole payload.
+- #272 must expose a bounded pre-durable transition and commit live authority only
+  after successful durable append.
+- #275 must classify/split state owners according to `recovery-contract.md`,
+  including Player active-ship routing as durable PlayerState.
+- #276 must replace legacy Transit event scans with durable attempt/receipt/retry
+  authority satisfying this contract.
+- #277 must keep repository shape outside the pure engine and preserve Sector-
+  journal authority for Station state.
+- #280 must transport versioned checkpoint/tail/retry data and distinguish staged
+  durability from applied/promotable state.
+- `DomainEvent` remains valuable for public facts/audit/projections without silently
+  defining exact ECS recovery.
+- eventless Ticks and no-public-event authoritative commands become explicitly
+  recoverable.
+- numeric RTO remains an open #284 benchmark deliverable.
 
 ## Implementation sequence
 
-1. Land this accepted decision, the authoritative-state inventory, and crash matrix,
-   while amending conflicting normative documents in the same PR.
-2. In #271, introduce the versioned commit envelope, immutable substreams, atomic
-   commit marker, append receipt, durability-profile evidence, failure injection,
-   and independent retention manifests.
-3. Add a versioned checkpoint manifest covering ECS and Station aggregate state.
-4. In #272, implement one command vertical slice with a bounded prepared write set,
-   append-before-commit, idempotent SQLite projection, and fail-stop tests.
-5. Extend the transition boundary to eventless Ticks and persist the pending bot
-   lock-command queue.
-6. Convert auto-jump to a durable outbox intent and make Raft proposal retry
-   idempotent by transition identity.
-7. Convert Transit, admission, replication, publication cursors, outbox delivery,
-   and checkpointing.
-8. Add snapshot-transfer bundles, Station projection watermarks, and promotion
-   eligibility checks.
-9. Benchmark tail replay and set a numeric RTO/checkpoint policy in #284.
+1. Land this accepted architecture slice and align conflicting normative/entry-point
+   documentation without rewriting unrelated historical specification detail.
+2. #271 implements generic fallible atomic journal framing/durability semantics.
+3. #272 migrates a simple command vertical slice to prepare -> durable -> live apply.
+4. Add versioned checkpoint/recovery-tail support and eventless-Tick coverage.
+5. Migrate Player routing/pending bot state required by the authority inventory.
+6. #277 moves persistence repositories outside the pure engine while preserving
+   Station/identity recovery authority.
+7. #276 replaces Transit scans/retry state with the durable Saga.
+8. #280 consumes the final checkpoint/catch-up representation in peer transport.
+9. #284 runs recovery benchmarks and closes numeric RTO/checkpoint policy.
 
 ## Implementation checklist
 
-- [x] Select the recovery model and exact acknowledged RPO failure domains.
-- [x] Classify current authoritative mutations and runtime-only state.
-- [x] Define crash-point outcomes, acknowledgement ordering, and fail-stop behavior.
-- [x] Select Station journal authority with idempotent SQLite projection.
-- [x] Define independently retained atomic substreams and crash-safe compaction.
-- [x] Define replica catch-up/promotion requirements for outputs and Station projection.
-- [x] Define reliable auto-jump as durable outbox work.
-- [x] Define at-least-once cursor advancement semantics.
-- [ ] Benchmark and define a numeric production RTO/checkpoint budget in #284.
-- [ ] Add generic atomic versioned durable transition envelopes in #271.
-- [ ] Persist public events/outbox intents atomically with each transition.
-- [ ] Add versioned/fingerprinted checkpoint manifests and compatibility tests.
-- [ ] Introduce the prepare -> persist -> commit engine boundary in #272.
-- [ ] Make eventless Ticks and pending bot command queues durable.
-- [ ] Persist/retry auto-jump outbox intents idempotently.
-- [ ] Apply committed deltas through one local/recovery/replica reducer.
+- [x] Select state-delta + versioned-checkpoint recovery model.
+- [x] Define exact acknowledged RPO semantics and failure-domain profiles.
+- [x] Inventory/classify authoritative, derived, reliable, and lossy state/outputs.
+- [x] Define eventless-Tick and active-ship-routing recovery behavior.
+- [x] Define fail-stop ordering after post-durable apply failure.
+- [x] Define Station authority direction and unambiguous global projection watermark.
+- [x] Define reliable auto-jump/Transit continuation invariant without pre-empting #276.
+- [x] Define staged durability replication versus applied/promotable replica state.
+- [x] Define at-least-once durable output semantics.
+- [ ] Benchmark and define numeric production RTO/checkpoint budget in #284.
+- [ ] Implement generic fallible atomic journal in #271.
+- [ ] Implement prepare -> durable -> live apply engine boundary in #272.
+- [ ] Implement versioned checkpoint/tail and eventless-Tick persistence.
+- [ ] Persist Player routing/pending bot authoritative state.
+- [ ] Implement Station projection/repository catch-up under #277.
+- [ ] Implement Transit durable Saga under #276.
+- [ ] Implement final snapshot/catch-up transport under #280.
 - [ ] Add full crash-point and checkpoint-plus-tail equivalence tests.
