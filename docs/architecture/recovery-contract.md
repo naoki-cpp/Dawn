@@ -27,8 +27,9 @@ Work-package ownership is:
 - **#276:** durable Transit Saga/attempt repository and retry lifecycle. It must
   satisfy this recovery contract but owns the concrete Saga representation;
 - **#277:** admission/identity/Station repository schema and transaction APIs.
-  Admission/identity protocol state may be repository-owned authority as specified
-  below; Station world-state authority remains the Sector recovery journal;
+  Admission/identity protocol state and pre-materialization identity consumption
+  may be repository-owned authority as specified below; Station world-state
+  authority remains the Sector recovery journal;
 - **#278:** runtime/application orchestration. It owns configured durability-profile
   selection, replica-set/quorum policy, durability-ack aggregation, owner-epoch/
   fencing integration, and final acknowledgement gating;
@@ -64,6 +65,9 @@ as legacy/current behavior rather than normative recovery authority.
   Sector world state may be authoritative in #277's durable repository. Such
   state must have explicit reconciliation/catch-up semantics and cannot be treated
   as an ordinary Station read-model projection.
+- Once a fresh `PlayerId`/`ShipId` has been durably reserved, allocator recovery
+  must treat it as consumed even if no Ship was ever materialized. A crash may
+  create an ID gap; it may never permit reuse of an exposed/reserved identity.
 - Public-event/outbox delivery is at-least-once unless a stronger downstream
   idempotent transaction protocol is explicitly provided.
 - Generic client commands do **not** currently have a protocol-level request ID.
@@ -82,7 +86,7 @@ as legacy/current behavior rather than normative recovery authority.
 | State / mutation / obligation | Authoritative or reliable? | Current source or mutation site | Required recovery source | Notes |
 |---|---:|---|---|---|
 | Logical `current_tick` | Yes | Incremented before Tick systems | Transition header/delta and checkpoint | Must advance only as part of a durable transition, including eventless Ticks. |
-| Entity/Player ID counters | Yes | Admission/spawn helpers | Counter delta and checkpoint | Reuse after crash violates identity invariants. |
+| Entity/Player allocator watermarks | Yes | Admission/spawn helpers | Checkpoint/RecoveryDelta for materialized allocation **plus every durable #277 reservation/allocator record** | Recovery must choose a next value above every materialized or durably reserved ID. Gaps are allowed; reuse is not. #277 may store an explicit allocator watermark or make reserved rows sufficient to derive it. |
 | Ship existence and type | Yes | Spawn, destroy, assemble, disassemble, Transit | Create/delete delta and checkpoint | Stable `ShipId` is the recovery key, not ECS entity handle. |
 | Player ownership maps | Yes | Admission, Station operations, Transit | Ordered map delta and checkpoint | Materialized world ownership is durable PlayerState under #275. |
 | Active-ship routing map | Yes | Admission, `SelectActiveShip`, `Disembark`, removal/Transit | Ordered map delta and checkpoint | This is authoritative routing state because it changes which ship receives commands and whether Undock is legal. It may have no public `DomainEvent`. The current snapshot omission is implementation debt, not intended lossiness. |
@@ -91,14 +95,16 @@ as legacy/current behavior rather than normative recovery authority.
 | Hull shield/armor/hull/destroyed state | Yes | Combat and repair | Component final-value delta and checkpoint | Public damage/repair events are facts/outputs, not exact reducer authority. |
 | Capacitor current | Yes | Capacitor system every Tick | Component final-value delta and checkpoint | Recharge can occur without a public event. |
 | Fitted slots, active flags, cycle counters, targets | Yes | Fit/Unfit/Activate/Deactivate/Cap/range gate | Component final-value delta and checkpoint | Countdown and forced deactivation affect later combat. |
-| Derived ship stats from fitting/catalog | Reconstructible | `apply_fitting` | Recompute from recovered fitting plus catalog fingerprint | Persist only if a future invariant requires it. |
+| Derived ship stats from fitting/catalog | Reconstructible | `apply_fitting` / `base_stats` | Recompute from recovered ship type/fitting plus catalog fingerprint | Persist only if a future invariant requires it. |
 | Lock entries, states, countdowns | Yes | Lock system and docking cleanup | Component final-value delta and checkpoint | Exact countdown/state must survive restart. |
 | Tackle membership | Yes | Tackle system | Component final-value delta and checkpoint | Prevents Warp/Jump and must survive restart exactly. |
 | Ship cargo and destruction rewards | Yes | Station operations and combat reward | Ordered item-stack delta and checkpoint | Reward mutation can accompany ship deletion. |
 | Docked ship/player Station context | Yes | Dock/Undock/Disembark/Select | Ordered map delta and checkpoint | Required to authorize Station operations. |
 | Station inventory / packaged ships | Yes, Sector-journal-owned aggregate | Station command execution | Station aggregate delta in the same logical transition plus versioned Station checkpoint | SQLite/repository storage is an idempotent projection/read model under this contract; #277 owns its final API/schema. |
-| Prepared fresh-admission reservation | Yes, repository-owned protocol state | `client_admission_prepared` / admission lifecycle | #277 durable AdmissionRepository keyed by stable reserved identities/ticket | Exists before a Ship is materialized. It must survive a returned `Welcome`/retry and is not a Station projection or an ECS RecoveryDelta yet. |
+| Prepared fresh-admission reservation | Yes, repository-owned protocol state | `client_admission_prepared` / admission lifecycle | #277 durable AdmissionRepository keyed by stable reserved identities/ticket, including durable identity consumption | Exists before a Ship is materialized. The reservation must make the IDs non-reusable before `Welcome`. |
 | Admission grant / resume-ticket current and staged binding | Yes, repository-owned identity state | admission commit/resume/rotation | #277 durable IdentityRepository transaction + explicit reconciliation with committed Sector transitions | Ticket rotation and ownership lookup must be crash-safe. Once a Ship is materialized, its world ownership/active routing are also RecoveryDelta authority. |
+| `pending_fresh_admissions` in-memory claim set | Derived concurrency guard | Current admission runtime | Rebuild/reacquire from #277 prepared reservation + live handshake ownership | It must not be the authority for whether an ID is consumed. Crash may release the lock, but not the durable reservation. |
+| `pending_resume_admissions` in-memory claim map | Runtime concurrency guard | Current resume handshake | None; reacquire from durable identity/world state on retry | A crash may release the in-flight lock. It cannot change durable ownership/ticket authority. |
 | Transit ownership/freeze state and current handoff lifecycle state | Yes | Raft-committed Transit apply | Recovery delta/checkpoint plus the durable attempt/receipt authority selected by #276 | Legacy event scans are not the final recovery authority. #276 owns concrete Saga representation and reconciliation. |
 | Bot persistent behavior state | Yes when it affects future decisions | Bot components/state | Component delta and checkpoint | Purely recomputable selection may be derived only when specified. |
 | Pending human command queue | No, until admitted into a transition | Runtime connection | Runtime input queue | Disconnect/crash may require client resubmission. The current generic `ClientRequest` protocol has no request ID, so resubmission is a new request unless an operation-specific idempotency identity exists. |
@@ -107,10 +113,11 @@ as legacy/current behavior rather than normative recovery authority.
 | Auto-jump Raft proposal after Warp arrival | Reliable post-commit obligation | `process_warp` -> `pending_auto_jumps` -> runtime | Durable outbox/idempotent retry intent committed with the Warp transition | Current in-memory queue is convenience only. #276 may represent this as Saga work, but crash after Warp commit must not lose the obligation. |
 | Completed-warp client correction | Runtime presentation output | `completed_warps` | None unless promoted to a reliable protocol | Reconnect/current-state sync may repair presentation. |
 | AoI index and client projections | Derived | Rebuilt/read from committed world | Recompute after recovery | Never journal presentation caches as authority. |
+| Station inventory cache | Derived bounded cache | `station_inventory_cache` | Refill from caught-up Station projection/read model | Never checkpoint/cache-authorize it independently. |
 | Socket/session handles and channel queues | No | Runtime adapters | None | Re-established after recovery. |
 | Journal append receipt / authoritative committed position | Durable runtime metadata | Journal/runtime layer | #271 commit index/checkpoint metadata | Must refer only to committed ranges. |
 | Station projection applied-through position | Durable projection metadata | Runtime repository/projection layer | A contiguous **global authoritative journal position** plus transition-id dedup for Station-changing records | The projection worker advances through every contiguous transition: Station records apply changes; non-Station records are no-op progression. Thus `>= promotion_position` is unambiguous. |
-| Admission/identity repository reconciliation position/state | Durable protocol metadata | Runtime + #277 repositories | Repository transaction metadata and/or stable operation identities defined by #277 | Promotion must not expose stale tickets/prepared admissions. The exact representation need not be the Station projection watermark. |
+| Admission/identity repository reconciliation position/state | Durable protocol metadata | Runtime + #277 repositories | Repository transaction metadata, allocator watermark/reservations, and/or stable operation identities defined by #277 | Promotion must not expose stale tickets/prepared admissions or reuse an already reserved identity. The exact representation need not be the Station projection watermark. |
 | `DomainEvent` list | Durable public fact | Command/Tick output | Public-event subrecord committed with transition; not exact state reducer | Delivery resumes from durable consumer state. |
 | Reliable runtime effects | Reliable post-commit obligation | Runtime/application layer | Outbox/idempotency representation compatible with the transition | Execute only after successful local live apply; delivery state advances after downstream acknowledgement. |
 | Deliberately lossy runtime effects | No | Runtime/application layer | None | Must be explicitly classified and cannot be required for authoritative continuity. |
@@ -201,20 +208,28 @@ protocol authority** instead of pretending they are merely a projection.
 
 The boundary is:
 
-- reserving a fresh `PlayerId`/`ShipId`/resume ticket must make the repository
-  reservation durable before a `Welcome` exposes it;
+- reserving a fresh `PlayerId`/`ShipId`/resume ticket must atomically or
+  equivalently make **both the reservation and identity consumption** durable
+  before a `Welcome` exposes it;
+- #277 may persist an explicit next-ID allocator watermark or make the set of
+  durable reserved/materialized identities sufficient to derive the next value,
+  but restart must choose a value strictly above every consumed identity before
+  accepting another allocation;
+- aborting/expiring a prepared reservation may free protocol resources, but it
+  does **not** make the previously reserved ID reusable;
 - a prepared reservation that has no committed materialization transition remains
   directly retryable/abortable from the #277 repository after restart;
 - once admission materializes a Ship, Sector-world existence, ownership, docking,
-  and active routing are authoritative RecoveryDelta/checkpoint state;
+  Station starter-grant state, and active routing are authoritative
+  RecoveryDelta/checkpoint state; Station SQLite rows are then projection data;
 - the identity repository remains authoritative for current/pending resume-ticket
   bindings and admission protocol bookkeeping;
 - if a world transition commits but a repository finalization step is incomplete,
   restart must reconcile the repository idempotently from a stable admission
   identity before the Sector serves the affected resume/admission path; and
-- promotion requires the admission/identity repository to be caught up or
-  deterministically reconciled for all identities that can be served on the new
-  owner.
+- promotion requires the admission/identity repository and its consumed-ID/
+  allocator state to be caught up or deterministically reconciled for all
+  identities that can be served on the new owner.
 
 #277 owns the exact transaction/schema/reconciliation representation. #278 owns the
 runtime ordering that drives it. Neither may silently treat a stale repository as
@@ -350,9 +365,9 @@ it is not automatically a client-visible idempotency key.
 | After durable commit, before local live apply | Complete transition exists; ReplicatedDurable may already have staged quorum copies | Recovery applies delta | Success may not have been observed | Recovery preserves the committed transition. A protocol retry deduplicates only when it carries a stable operation identity; generic client resubmission is otherwise a new request after state refresh. Staged replicas do not publish/apply implicitly. |
 | During local live apply | Complete transition exists | Recovery reapplies complete delta | No success until local apply completes | Fence immediately; do not continue from old/partial state. |
 | During required Station projection apply | Complete transition exists | Recovery reapplies Station delta idempotently | No acknowledgement | Fence; rebuild/catch up projection before serving authoritative Station work. |
-| After admission reservation durability, before `Welcome` | #277 prepared admission exists | No materialized Ship required yet | Client may have seen nothing | Reuse/abort the same prepared reservation; never allocate a conflicting identity. |
-| After `Welcome`, before admission materialization | #277 prepared admission exists | No materialized Ship yet | Client knows reserved identity/ticket | Resume/retry resolves the same reservation from repository authority. |
-| After admission world transition commit, before identity-repository finalization | Sector transition plus stable admission identity exist | Ship/ownership recover from RecoveryDelta | Client acknowledgement may be absent | Fence the affected admission/resume path until #277 reconciliation completes idempotently; do not create a second Ship/identity. |
+| After admission reservation durability, before `Welcome` | #277 prepared admission + consumed-ID evidence exist | No materialized Ship required yet; recovered allocator is above the reserved IDs | Client may have seen nothing | Reuse/abort the same prepared reservation; never allocate a conflicting identity and never reuse the consumed IDs. |
+| After `Welcome`, before admission materialization | #277 prepared admission + consumed-ID evidence exist | No materialized Ship yet; allocator remains advanced | Client knows reserved identity/ticket | Resume/retry resolves the same reservation from repository authority. Expiry may abandon it but not recycle IDs. |
+| After admission world transition commit, before identity-repository finalization | Sector transition plus stable admission identity exist | Ship/ownership/Station grant recover from RecoveryDelta; allocator remains above consumed IDs | Client acknowledgement may be absent | Fence the affected admission/resume path until #277 reconciliation completes idempotently; do not create a second Ship/identity or duplicate starter grant. |
 | After Warp commit, before handoff proposal | Durable auto-jump/Transit continuation obligation exists | Warp arrival remains committed | Proposal may be absent | Resume durable retry/Saga work using stable identity. |
 | After handoff proposal attempt, before durable delivery/retry progress | Durable obligation exists | Warp arrival remains committed | Proposal may have been accepted | Duplicate attempt is allowed only through idempotent #276 semantics. |
 | After local apply, before public-event delivery | Event subrecord exists | New committed state | Event may not yet be observed | Resume from durable delivery state; never regenerate by rerunning simulation. |
@@ -366,7 +381,7 @@ it is not automatically a client-visible idempotency key.
 | Replica receives partial/out-of-order range | Local applied authority unchanged | Stops at last contiguous applied position | No promoted state | Detect gap/duplicate/version/fingerprint/hash mismatch. |
 | Replica has staged durable bytes but has not applied them | Quorum durability may be satisfied | Applied state lags staged position | Promotion/publication forbidden through staged-only range | Apply shared reducer/projections first. |
 | Replica has state but lacks promotion-critical retained outputs | State may be current | Catch-up-only | Promotion forbidden | Synchronize required outputs/delivery state. |
-| Replica has world state but stale admission/identity repository authority | ECS may be current | Admission/resume service is not safe | Promotion for affected service forbidden | Catch up or deterministically reconcile #277 repository state before serving admission/resume. |
+| Replica has world state but stale admission/identity repository authority | ECS may be current | Admission/resume/allocator service is not safe | Promotion for affected service forbidden | Catch up or deterministically reconcile #277 repository state, including consumed-ID evidence, before serving admission/resume/new allocations. |
 | Replica has applied state/outputs but Station projection watermark trails | State may be current | Catch-up-only for Station-authoritative service | Promotion/Station serving forbidden | Advance global projection watermark through promotion point first. |
 
 ## 7. Checkpoint compatibility
@@ -394,7 +409,8 @@ Repository-owned admission/identity protocol authority need not be serialized in
 the Sector world checkpoint if #277 chooses an independently durable repository.
 If it is externalized, the manifest/promotion procedure must carry enough repository
 version/epoch/reconciliation metadata to prove that the repository can be made
-consistent with the recovered Sector authority before its service is enabled.
+consistent with the recovered Sector authority **and that its consumed-ID state is
+included when computing the next allocator values** before its service is enabled.
 
 Reliable post-commit obligations are retained as durable retry state; snapshotting
 a transient runtime queue is not a substitute.
@@ -411,16 +427,18 @@ independent:
 - public events retain according to audit/archive/delivery policy;
 - reliable retry/outbox records retain until their required delivery/Saga terminal
   condition is durable;
-- repository-owned admission/identity protocol records retain according to #277's
-  terminal/reconciliation rules; and
+- repository-owned admission/identity protocol records and consumed-ID evidence
+  retain according to #277's terminal/reconciliation rules, but ID retirement may
+  never make a previously consumed ID reusable; and
 - #271 must preserve enough committed-index metadata to make recovery ranges and
   remaining output references unambiguous.
 
 Compaction must preserve the parent's existing crash-safe publication property:
 write/validate/sync replacement material -> atomically publish the selecting
 manifest -> only then retire superseded recovery material. No state checkpoint may
-silently discard a still-required public fact, reliable obligation, or repository
-record needed to reconcile an exposed identity.
+silently discard a still-required public fact, reliable obligation, repository
+record needed to reconcile an exposed identity, or the allocator information needed
+to prevent ID reuse.
 
 FBD-001 continues to protect committed public `DomainEvent` history from in-place
 destructive mutation; recovery-delta checkpoint compaction is a distinct stream.
@@ -463,8 +481,9 @@ A snapshot/catch-up representation consumed by #280 must be sufficient to obtain
   obligations;
 - Station checkpoint/delta information sufficient to advance the local projection's
   **global contiguous applied-through position**; and
-- admission/identity repository data or deterministic reconciliation metadata
-  sufficient for #277-backed admission/resume service on the promoted owner.
+- admission/identity repository data or deterministic reconciliation metadata,
+  including consumed-ID/allocator evidence, sufficient for #277-backed
+  admission/resume/new-allocation service on the promoted owner.
 
 Promotion eligibility requires:
 
@@ -473,8 +492,9 @@ Promotion eligibility requires:
 3. successful application of the shared recovery reducer through that position;
 4. no missing promotion-critical retained public/reliable output;
 5. delivery/retry state that cannot skip an undelivered committed obligation;
-6. admission/identity repository authority is caught up or reconciled for every
-   identity the promoted owner may serve;
+6. admission/identity repository authority and consumed-ID/allocator state are
+   caught up or reconciled for every identity/allocation domain the promoted owner
+   may serve;
 7. successful invariant validation; and
 8. `StationProjection.applied_through >= promotion_position` before Station
    reads/writes are served. Non-Station transitions count as explicit no-op
@@ -524,13 +544,16 @@ relevant layer of each guarantee:
 - Station global applied-through watermark advances across non-Station no-op
   transitions and blocks promotion when stale;
 - fresh admission crash before/after `Welcome`, proving the same prepared identity
-  is recovered from #277 authority;
+  is recovered from #277 authority and the allocator advances past it;
+- expiration/abort of a prepared admission never permits reserved ID reuse;
 - admission world commit followed by repository-finalization failure reconciles
-  idempotently without a second Ship/identity;
-- replica promotion cannot serve stale admission/resume repository state;
+  idempotently without a second Ship/identity/starter grant;
+- replica promotion cannot serve stale admission/resume/allocator repository state;
 - `SelectActiveShip`/`Disembark` recovery equivalence even when no public event is
   emitted;
 - pending bot lock-command queue checkpoint-plus-tail equivalence;
+- `pending_fresh_admissions`/`pending_resume_admissions` may be reconstructed or
+  reacquired without becoming durability authority;
 - generic non-idempotent `ClientRequest` is not transparently retried after an
   ambiguous disconnect without a stable request identity;
 - protocols with stable operation IDs deduplicate ambiguous retry as specified;
