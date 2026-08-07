@@ -1,8 +1,11 @@
-//! Station inventory cache + SQLite write-through seam (ADR-0038).
+//! Current Station inventory cache + SQLite write-through seam.
 //!
-//! `station_inventory_db.rs` owns the durable representation. This module owns
-//! the in-memory, bounded cache layered on top of it and the `SimulationNode`
-//! helpers that expose Station inventory to the rest of the Sector runtime.
+//! This is the ADR-0038 implementation baseline: `station_inventory_db.rs`
+//! currently owns the durable SQLite representation, while this module owns the
+//! bounded cache and the `SimulationNode` helpers. ADR-0049 changes the target
+//! authority split: the Sector recovery journal owns the Station aggregate and
+//! SQLite becomes an idempotent projection/read model under #277. Do not infer
+//! the final recovery ordering from this legacy write-through path.
 
 use std::collections::{BTreeMap, VecDeque};
 
@@ -11,12 +14,13 @@ use dawn_event_store::store::EventStore;
 
 use super::{station::StationOperationRejection, SimulationNode};
 
-/// Bounded in-memory cache of recently-touched players' Station inventory
-/// (ADR-0038). SQLite (`station_inventory_db.rs`) is the durable authority;
-/// this only avoids a database round trip for players who were just docked
-/// or just did a Station operation. Eviction never loses data -- every
-/// mutation is already written through to SQLite before the cache is
-/// touched, so an evicted entry just means the next read re-queries SQLite.
+/// Bounded in-memory cache of recently-touched players' Station inventory.
+///
+/// In the current implementation SQLite is the write-through authority for
+/// this cache, so eviction only causes the next read to query SQLite again.
+/// Under ADR-0049/#277, the same cache is a read optimization over the
+/// journal-owned Station aggregate and SQLite projection; that target contract
+/// is not implemented by this module yet.
 pub(super) struct StationInventoryCache {
     entries: std::collections::HashMap<(PlayerId, StationId), BTreeMap<ItemId, u64>>,
     /// Recency order, oldest first. A player can appear more than once (the
@@ -257,10 +261,10 @@ impl<S: EventStore> SimulationNode<S> {
         if count == 0 {
             return Ok(());
         }
-        // SQLite is the authority for the rejection decision -- it may know
-        // about a stack the in-memory cache hasn't loaded yet on a fresh
-        // cache miss. Same write-then-patch-or-reload pattern as
-        // `credit_station_item` above.
+        // The current SQLite-backed path makes the rejection decision here,
+        // because a fresh cache miss may still have a stack in SQLite. The
+        // ADR-0049 target moves this decision to the journal-owned Station
+        // aggregate and keeps SQLite as an idempotent projection.
         self.station_inventory_db
             .try_debit(player_id, station_id, item_id, count)?;
         let already_cached = self

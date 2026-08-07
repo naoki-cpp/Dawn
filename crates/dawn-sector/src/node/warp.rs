@@ -82,9 +82,12 @@ impl<S: EventStore> SimulationNode<S> {
 
     /// Drain auto-jump triggers accumulated during `process_warp()`.
     ///
-    /// The caller (server loop) is responsible for proposing each returned
-    /// `(ship_id, gate_id)` pair to the Raft Log (cluster mode) or ignoring it
-    /// (single-node mode where Jump is not supported).
+    /// The current server loop proposes each returned `(ship_id, gate_id)` pair
+    /// to the Raft log in cluster mode or ignores it in single-node mode where
+    /// Jump is not supported. This in-memory drain is a migration baseline,
+    /// not the durable authority: ADR-0049 requires the Warp transition to
+    /// commit a replayable/idempotent continuation obligation, which #276 may
+    /// represent as Transit Saga state before this queue is drained.
     pub fn drain_pending_auto_jumps(&mut self) -> Vec<(ShipId, JumpGateId)> {
         std::mem::take(&mut self.pending_auto_jumps)
     }
@@ -92,7 +95,9 @@ impl<S: EventStore> SimulationNode<S> {
     /// Drain the ships that finished a warp this tick (ADR-0029 warp-arrival
     /// authority). The serve loop sends each one's owner an authoritative
     /// `PositionSnap` so the client's capped warp-visual dead-reckoning lands
-    /// on the true arrival point. Transient / non-persisted (cleared every tick).
+    /// on the true arrival point. This vector is a lossy presentation queue,
+    /// cleared after delivery; it is separate from the durable auto-jump
+    /// obligation required by ADR-0049.
     pub fn drain_completed_warps(&mut self) -> Vec<ShipId> {
         std::mem::take(&mut self.completed_warps)
     }
