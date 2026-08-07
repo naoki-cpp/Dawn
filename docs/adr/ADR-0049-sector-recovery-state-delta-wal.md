@@ -41,8 +41,9 @@ not decide implementation details already assigned to sibling issues:
 - **#275** owns decomposition of `SimulationNode` into explicit state owners;
 - **#276** owns the first-class durable Transit Saga/attempt/receipt model;
 - **#277** owns repository/schema/transaction APIs for admission, identity, and
-  Station persistence. Admission/identity protocol state may be repository-owned
-  authority; Station world state remains journal-owned;
+  Station persistence. Admission/identity protocol state and pre-materialization
+  identity consumption may be repository-owned authority; Station world state
+  remains journal-owned;
 - **#278** owns runtime/application orchestration, including configured durability
   profile, replica-set/quorum policy, durability receipt aggregation, ownership
   epoch/fencing integration, and final acknowledgement gating;
@@ -95,8 +96,11 @@ atomic visibility boundary.
 Durable protocol state that can exist before or outside materialized Sector world
 state, such as a prepared admission reservation, may live in an explicit repository
 owned by #277/#276 as long as its authority, reconciliation, promotion, and RPO
-relationship to the Sector journal are documented. "Single Sector recovery model"
-does not mean every bounded-context protocol row must be serialized into one file.
+relationship to the Sector journal are documented. A durable fresh-admission
+reservation also permanently **consumes** its reserved `PlayerId` / `ShipId`; a
+later abort may create a gap, but crash recovery must never make that identity
+reusable. "Single Sector recovery model" does not mean every bounded-context
+protocol row must be serialized into one file.
 
 ### 1. Transition contract
 
@@ -257,19 +261,27 @@ would create the wrong authority model.
 #277 may therefore make admission/identity protocol state authoritative in a
 dedicated durable repository, with these invariants:
 
-- a fresh `PlayerId`/`ShipId`/resume-ticket reservation is durable before `Welcome`
-  exposes it;
+- reserving a fresh `PlayerId`/`ShipId`/resume ticket must make **both the
+  reservation and identity consumption durable** before `Welcome` exposes it;
+- #277 may persist an explicit allocator watermark or make the set of durable
+  reserved/materialized identities sufficient to derive it, but restart must
+  choose the next values strictly above every consumed identity before accepting
+  another allocation;
+- aborting or expiring a prepared reservation may free protocol resources, but it
+  must never make its reserved IDs reusable;
 - a prepared reservation survives restart and is retried/aborted using the same
   stable reserved identity rather than allocating a conflicting identity;
 - once admission materializes Sector world state, Ship existence, Player ownership,
-  docking, and active routing are RecoveryDelta/checkpoint authority;
+  docking, Station starter-grant state, and active routing are
+  RecoveryDelta/checkpoint authority; Station SQLite rows are projection data;
 - current/pending resume-ticket bindings and admission protocol bookkeeping remain
   identity-repository authority;
 - if the Sector transition commits while repository finalization is incomplete,
   restart reconciles repository state idempotently from stable admission identity
   before serving the affected admission/resume path; and
-- replica promotion cannot serve admission/resume with stale repository authority;
-  #280/#278 must transfer or reconstruct enough #277 state to reconcile first.
+- replica promotion cannot serve admission/resume **or new allocations** with stale
+  repository/allocator authority; #280/#278 must transfer or reconstruct enough
+  #277 state to reconcile first.
 
 This is an explicit multi-authority bounded-context boundary, not an accidental
 SQLite-vs-journal race. #277 owns the concrete transaction/schema/reconciliation
@@ -316,8 +328,9 @@ incomplete checkpoint data must fail clearly.
 Repository-owned admission/identity protocol authority need not be serialized into
 the world checkpoint if #277 chooses an independently durable repository. In that
 case checkpoint/promotion metadata must make the repository version/epoch or
-required reconciliation point explicit enough to prevent stale admission/resume
-service after failover.
+required reconciliation point explicit enough to prevent stale admission/resume or
+allocator service after failover, and recovered allocator values must account for
+every durably consumed reservation.
 
 The existing crash-safe publication property is retained or strengthened:
 replacement material is written, validated, synced, and atomically selected before
@@ -334,14 +347,16 @@ After a complete checkpoint covers a position:
 - public events remain according to delivery/audit/archive policy;
 - reliable retry/Saga/output records remain until their durable terminal/delivery
   condition permits retirement;
-- admission/identity repository records remain according to #277's terminal and
-  reconciliation rules; and
+- admission/identity repository records and consumed-ID evidence remain according
+  to #277's terminal/reconciliation rules, but retiring a protocol row must never
+  make a previously consumed identity reusable; and
 - #271 must keep enough committed-index metadata to make covered ranges and retained
   obligations unambiguous.
 
 State checkpoint coverage alone never proves that a public output was delivered,
-that a reliable external obligation reached terminal state, or that an externally
-stored identity protocol record is safe to retire.
+that a reliable external obligation reached terminal state, that an externally
+stored identity protocol record is safe to retire, or that a reserved ID can be
+reused.
 
 FBD-001 continues to prohibit destructive in-place public-event history mutation.
 
@@ -446,8 +461,9 @@ ephemeral client never holds public-event compaction open.
 - delivery/retry state sufficient to avoid skipping committed durable obligations;
 - projection/checkpoint data required to make local promotion-critical projections
   current; and
-- admission/identity repository data or deterministic reconciliation metadata
-  sufficient for #277-backed admission/resume service.
+- admission/identity repository data or deterministic reconciliation metadata,
+  including consumed-ID/allocator evidence, sufficient for #277-backed
+  admission/resume/new-allocation service.
 
 A replica is promotable through position `P` only after:
 
@@ -456,8 +472,9 @@ A replica is promotable through position `P` only after:
 3. invariants validate;
 4. no promotion-critical retained public/reliable output is missing;
 5. delivery/retry state cannot skip an undelivered committed obligation;
-6. admission/identity repository authority is caught up or reconciled for every
-   identity the promoted owner may serve; and
+6. admission/identity repository authority and consumed-ID/allocator state are
+   caught up or reconciled for every identity/allocation domain the promoted owner
+   may serve; and
 7. Station projection `applied_through >= P` before Station reads/writes are served.
 
 Durably staged-but-unapplied quorum bytes do not satisfy promotion by themselves.
@@ -473,8 +490,8 @@ immediate fencing:
 - do not acknowledge it;
 - do not advance application/publication replication beyond last successfully
   applied contiguous position;
-- do not serve affected Station/admission/resume paths from stale projections or
-  repositories;
+- do not serve affected Station/admission/resume/allocation paths from stale
+  projections or repositories;
 - do not serve the Sector as healthy; and
 - terminate or reconstruct/reconcile local authority from durable recovery data
   before resuming.
@@ -522,8 +539,8 @@ still use SQLite as the Station projection implementation.
 
 This rejection does **not** prohibit a distinct admission/identity repository from
 being authoritative for protocol state that exists before Sector-world
-materialization. That boundary is accepted only with the explicit reconciliation
-and promotion rules in §6A.
+materialization. That boundary is accepted only with the explicit reconciliation,
+identity-consumption, and promotion rules in §6A.
 
 ### Public Transit events as the durable handoff repository
 
@@ -550,7 +567,8 @@ retry use explicit operation IDs.
 - #276 must replace legacy Transit event scans with durable attempt/receipt/retry
   authority satisfying this contract.
 - #277 must preserve Sector-journal authority for Station world state while making
-  admission/identity repository authority and its reconciliation boundary explicit.
+  admission/identity repository authority, durable consumed-ID/allocator semantics,
+  and its reconciliation boundary explicit.
 - #278 must implement one runtime acknowledgement path, including durability-profile
   selection, replica-set/quorum policy, fencing/owner-epoch validation, repository
   reconciliation policy, and no-transparent-retry behavior for identity-less generic
@@ -573,7 +591,8 @@ retry use explicit operation IDs.
 4. Add versioned checkpoint/recovery-tail support and eventless-Tick coverage.
 5. Migrate Player routing/pending bot state required by the authority inventory.
 6. #277 splits Station projection from authoritative admission/identity repository
-   state and defines crash reconciliation.
+   state, makes reservation/allocator consumption crash-safe, and defines
+   reconciliation.
 7. #276 replaces Transit scans/retry state with the durable Saga.
 8. #278 unifies runtime orchestration and implements durability-profile/quorum/
    fencing/acknowledgement policy.
@@ -589,7 +608,8 @@ retry use explicit operation IDs.
 - [x] Define eventless-Tick and active-ship-routing recovery behavior.
 - [x] Define fail-stop ordering after post-durable apply failure.
 - [x] Define Station authority direction and unambiguous global projection watermark.
-- [x] Define admission/identity repository authority and reconciliation boundary.
+- [x] Define admission/identity repository authority, durable reserved-ID consumption,
+  allocator recovery, and reconciliation boundary.
 - [x] Define reliable auto-jump/Transit continuation invariant without pre-empting #276.
 - [x] Define staged durability replication versus applied/promotable replica state.
 - [x] Assign replica-set/quorum/fencing/ack orchestration to #278.
@@ -601,7 +621,8 @@ retry use explicit operation IDs.
 - [ ] Implement prepare -> durable -> live apply engine boundary in #272.
 - [ ] Implement versioned checkpoint/tail and eventless-Tick persistence.
 - [ ] Persist Player routing/pending bot authoritative state.
-- [ ] Implement Station projection plus admission/identity repository catch-up under #277.
+- [ ] Implement Station projection plus admission/identity repository/allocator
+  catch-up under #277.
 - [ ] Implement Transit durable Saga under #276.
 - [ ] Implement unified runtime durability/quorum/reconciliation policy under #278.
 - [ ] Implement final snapshot/catch-up/durability transport under #280.
