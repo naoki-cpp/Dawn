@@ -1,5 +1,5 @@
 ---
-scope    : Database/storage selection and migration strategy for Sector recovery, public Event history, Station projection, and Market
+scope    : Database/storage selection and migration strategy for Sector recovery, public Event history, Station projection, admission/identity repositories, and Market
 audience : AI Agent / Human Developer
 update   : When persistence ownership, deployment topology, consistency requirements, or database adapters change
 related  : architecture.md, recovery-contract.md, ../adr/ADR-0003-local-first-development.md, ../adr/ADR-0017-snapshot-compaction.md, ../adr/ADR-0034-economy-foundations.md, ../adr/ADR-0038-station-inventory-sqlite.md, ../adr/ADR-0049-sector-recovery-state-delta-wal.md
@@ -9,19 +9,27 @@ related  : architecture.md, recovery-contract.md, ../adr/ADR-0003-local-first-de
 
 ## 1. 結論
 
-SQLite は Dawn の **node-local Station projection/repository** と **単一
-`MarketRuntime` が所有する Market** に引き続き適している。今すぐ別DBへ移行する必要はない。
+SQLite は Dawn の **node-local Station projection**、**admission/identity repository**、
+および **単一 `MarketRuntime` が所有する Market** に引き続き適している。今すぐ別DBへ移行する
+必要はない。
 
-ただし、ADR-0049により「SQLiteを使うか」と「何がSector recovery authorityか」は分離された。
-**Station inventoryのexact Sector authorityはversioned recovery journal/checkpointであり、SQLite
-はidempotent projection/read modelである。** Marketは別bounded contextであり、現時点では自身の
-SQLite transactionがMarket内部のauthorityを持つ。
+ただし、ADR-0049により「SQLiteを使うか」と「何がauthorityか」は明確に分離された。
+
+- **Station inventoryのexact Sector-world authority** はversioned recovery journal/checkpointであり、
+  SQLiteはidempotent projection/read modelである。
+- **prepared admission / resume-ticket lifecycle** はShip materialization前にも存在するため、#277の
+  admission/identity repositoryがdurable protocol authorityを持てる。これはStation projectionとは
+  別のbounded-context authorityであり、Sector transitionとのreconciliation/promotion条件を
+  ADR-0049/recovery-contractが規定する。
+- **Market** は別bounded contextであり、現時点では自身のSQLite transactionがMarket内部の
+  authorityを持つ。
 
 | 用途 | 現在の実装 | Normative / 将来方針 |
 |---|---|---|
 | Sector exact recovery | `FileEventStore` + `StateSnapshot` に依存するlegacy path | ADR-0049 authoritative state-delta journal + versioned checkpoint。#271/#272で移行 |
 | Public `DomainEvent` history | `FileEventStore` hot/cold 2層ログ | append-only public fact/archiveとして維持。exact recoveryとは別watermark |
 | Station inventory | node-local SQLite + bounded cache | Sector recovery authorityをidempotentにproject。#277がrepository/schemaを再編 |
+| Prepared admission / identity / resume tickets | 現在は同じSQLite catch-all内 | #277のdurable protocol repository authority。Sector world-state commitとのreconciliationを明示 |
 | 単一プロセスMarket | SQLite | SQLite継続 |
 | 複数プロセス共有Market | 現在対象外 | PostgreSQLを第一候補として別ADR |
 | 世界全体の分散transaction | 導入しない | 実測要件が出た時点で別設計 |
@@ -41,7 +49,7 @@ newest complete compatible checkpoint
 ```
 
 現在の `FileEventStore` API/formatはこの最終contractをまだ実装していない。#271はfallible atomic
-journal framing、commit evidence、fsync/quorum mode、index/receipt、corruption/compactionを実装する。
+journal framing、commit evidence、fsync/durability evidence、index/receipt、corruption/compactionを実装する。
 #272はjournal ownershipをpure Sector engineの外へ出し、prepare -> durable -> live applyを実装する。
 
 ここで「journal」はRDBMSを意味しない。append-oriented file journalのままでも要件を満たせる。
@@ -54,6 +62,9 @@ hot/cold archival価値は維持するが、public Event tailをexact ECS recove
 
 state-delta checkpoint coverageだけを理由に未配信/未archive public eventを捨ててはならない。
 physical retention/index mechanicsは#271が実装する。
+
+普通のWebSocket/AoI clientはdurable consumerではない。disconnectしたpresentation clientのcursorを
+public-event retentionの必須watermarkにしてはならず、reconnect/current-state syncで修復する。
 
 ### 2.3 Station inventory projection
 
@@ -80,12 +91,41 @@ projectionは少なくとも:
 explicit no-opとして通過する。これによりpromotion pointとprojection freshnessを同じjournal
 coordinateで比較できる。
 
-#277は現在の`StationInventoryDb` catch-allをadmission/identity/Stationのnarrow repositoryへ分割する。
-そのschema/API/SQL transactionは#277の責任であり、SQLiteを独立Sector authorityへ戻してはならない。
-
 SQLiteファイルをnetwork filesystemへ置き、複数nodeから直接openする設計は採らない。
 
-### 2.4 Transit persistence
+### 2.4 Admission / identity protocol repositories
+
+現在の`StationInventoryDb`はStation inventoryだけでなく、prepared admission、grant、Ship ownership、
+current/pending resume ticketまで同じconnectionに保持している。#277ではこれをnarrow repositoryへ
+分割する。
+
+このうち**prepared admission / identity / resume-ticket stateはStation projectionではない**。
+Ship materialization前のprepared rowはSector ECSに対応するRecoveryDeltaがまだ存在しないため、
+#277 repository自身がdurable protocol authorityを持つことをADR-0049は許可する。
+
+必要なordering/reconciliationは次の通り。
+
+```text
+fresh reservation:
+  reserve PlayerId / ShipId / resume ticket durably in #277 repository
+    -> only then expose Welcome
+
+materialization:
+  stable admission identity
+    -> durable Sector RecoveryDelta for Ship/ownership/active routing
+    -> live apply
+    -> idempotent repository grant/ticket finalization or reconciliation
+    -> acknowledge/serve resume path
+```
+
+world transition commit後にrepository finalizationが失敗した場合、同じstable admission identityから
+restart時にreconcileする。別Ship/Playerを再allocateして穴埋めしてはならない。
+
+Replica promotion時も、ECS/RecoveryDeltaがcurrentなだけでは不十分で、promoted nodeがserveする
+identityについて#277 repositoryがcaught-upまたはdeterministically reconciledでなければならない。
+#278がruntime ordering/error policyを所有し、#280が必要なrepository catch-up data/metadataを運ぶ。
+
+### 2.5 Transit persistence
 
 現行Transitはpublic EventStore scanとsnapshot receiptへretry/dedup authorityが分散している。
 これは#276が置換するlegacy implementationである。
@@ -95,7 +135,23 @@ lookupできるSagaへ移行する。Sagaをgeneral recovery journalに直接含
 reconcileするかは#276が決める。ただしADR-0049のRPO/checkpoint/compaction/promotion contractを
 弱めてはならない。
 
-## 3. Market persistence
+## 3. Runtime durability orchestration
+
+`ReplicatedDurable`は単なる「#271がfsyncを増やす」「#280がpacketを送る」という機能ではない。
+Runtimeは、どのreplica setを使うか、quorumが何台か、どのowner epochのreceiptを有効とするか、
+いつacknowledgementしてよいかを一つのpolicyとして扱う必要がある。
+
+役割分担:
+
+- #271: local/remote durable recordとreceipt/evidenceのstorage semantics
+- #278: configured durability profile、replica-set/quorum policy、receipt aggregation、owner epoch/fencing、ack gating
+- #280: durability request/receiptとsnapshot/catch-up byte transport、traffic isolation
+- #284: RPO/failure-domain semantic requirement
+
+`ReplicatedDurable`は#271/#278/#280が一つのquorum/fencing modelを定義・試験するまでproductionで
+有効化/宣伝しない。
+
+## 4. Market persistence
 
 `dawn-market::MarketDb` は注文帳、Currency、Bid escrowを一つのSQLite DBに置く。発注とキャンセルは
 DB transaction内で処理されるため、**Market DB内部**の原子性を持つ。
@@ -105,7 +161,7 @@ DB transaction内で処理されるため、**Market DB内部**の原子性を�
 
 現行`orders` schemaのpre-release互換性は要求しない。必要ならclean schemaへ破壊的に移行できる。
 
-## 4. SQLite の限界と移行トリガー
+## 5. SQLite の限界と移行トリガー
 
 SQLiteは複数readerを扱えるが、一つのDB fileに対するwriterは一つである。データ量だけではなく
 **writer ownershipとfailure model**を移行判断に使う。
@@ -124,7 +180,7 @@ SQLiteは複数readerを扱えるが、一つのDB fileに対するwriterは一�
 - [SQLite: Appropriate Uses For SQLite](https://sqlite.org/whentouse.html)
 - [SQLite: Write-Ahead Logging](https://sqlite.org/wal.html)
 
-## 5. Station と Sector journal の整合性 — ADR-0049で決定済み
+## 6. Station と Sector journal の整合性 — ADR-0049で決定済み
 
 以前この文書は次の2案を未決定としていた。
 
@@ -140,16 +196,10 @@ SQLiteは複数readerを扱えるが、一つのDB fileに対するwriterは一�
 これにより「SQLiteだけ更新済み」「public eventだけappend済み」をsuccess authorityとして許容しない。
 journal durable後のprojection failureはordinary rejectionではなくfail-stop/catch-up対象である。
 
-役割分担:
+この節はStation inventoryについての決定であり、§2.4のpre-materialization admission/identity protocol
+stateまでprojection扱いするものではない。
 
-- #271: journal atomicity/durability mechanics
-- #272: prepare -> durable -> live apply ordering
-- #277: projection/repository transaction/schema
-- #284: authority/RPO/promotion semantics
-
-DB製品をPostgreSQLへ変えてもこのauthority問題は自動解決しないため、製品migrationと混同しない。
-
-## 6. Market と Sector settlement
+## 7. Market と Sector settlement
 
 Market DB内部のorder/Currency/escrowは一transactionにできるが、MarketからSector inventoryへ送る
 `RemoveItemCommand` / `ReturnItemCommand` / `CreditItemCommand` は別authorityを跨ぐ。
@@ -158,14 +208,14 @@ PostgreSQLへ移行してもこの跨ぎが自動的にatomicになるわけで�
 Market独立process化までに必要なdirection:
 
 - Market transactionと同時にsettlement intentを保存するtransactional outbox
-- 各settlementへstable identityを付ける
+- 各settlementへstable identity (`SettlementId`, #279) を付ける
 - Sector側でduplicate settlement適用を無害にする
 - 未配送intentを再送できるdelivery stateを持つ
 
 これはSector recovery journalの一般outboxと概念的には似るが、Market bounded contextのtransaction
-ownershipを保つ。具体設計はそのwork item/ADRで行う。
+ownershipを保つ。具体設計は#279で行う。
 
-## 7. PostgreSQL を将来候補とする理由
+## 8. PostgreSQL を将来候補とする理由
 
 共有Marketの第一候補はPostgreSQLとする。
 
@@ -182,7 +232,7 @@ PostgreSQLもSector recovery journalとのdistributed transactionを自動提供
 - [PostgreSQL: Transaction Isolation](https://www.postgresql.org/docs/current/transaction-iso.html)
 - [PostgreSQL: High Availability, Load Balancing, and Replication](https://www.postgresql.org/docs/current/high-availability.html)
 
-## 8. その他の候補
+## 9. その他の候補
 
 | 候補 | 評価 | 現時点で採用しない理由 |
 |---|---|---|
@@ -192,7 +242,7 @@ PostgreSQLもSector recovery journalとのdistributed transactionを自動提供
 | DuckDB | 分析/オフライン集計 | OLTP authority用途ではない |
 | MySQL / MariaDB | 共有Marketを実装可能 | PostgreSQLよりDawn固有の明確な利点が現時点でない |
 
-## 9. Module / repository seam の方針
+## 10. Module / repository seam の方針
 
 Station inventoryは呼び出し側からSQLite実装を隠せるseamを維持する。ただし#277ではcatch-all
 `StationInventoryDb` forwarding façadeを残すのではなく、admission/identity/Station repositoryを明示的に
@@ -201,24 +251,27 @@ Station inventoryは呼び出し側からSQLite実装を隠せるseamを維持�
 現在の`MarketDb` public interfaceが`rusqlite::Result`を返す点は、2つ目のadapterを導入する時点で
 Market固有errorへ変換する。将来可能性だけを理由に今すぐ抽象traitを増やさない。
 
-## 10. 現在の実行方針
+## 11. 現在の実行方針
 
 移行期間は「current implementation」と「accepted target」を区別する。
 
 Current implementation:
 
-- `FileEventStore` public log + snapshot-era restore pathが存在する
-- Stationはnode-local SQLite + bounded cache
+- `FileEventStore` public log + `StateSnapshot` snapshot-era restore pathが存在する
+- `StationInventoryDb` catch-allはStation inventoryだけでなくadmission/identity rowsも持つ
+- source内の一部コメントはこのlegacy implementationを説明しており、ADR-0049/#277 migration前の
+  behaviorとして読む
 - Marketはsingle `MarketRuntime` + SQLite
 
 Accepted target / work package:
 
-- #284/ADR-0049: exact recovery = versioned checkpoint + authoritative state-delta tail
+- #284/ADR-0049: exact Sector-world recovery = versioned checkpoint + authoritative state-delta tail
 - #271: fallible atomic durable journal
 - #272: pure engineからstorage ownershipを除去
-- #277: Station/admission/identity repositoryを明示化し、Stationはprojectionとしてcatch-up可能にする
+- #277: Station projectionとauthoritative admission/identity repositoryを分離しreconciliationを定義
 - #276: Transit EventStore scanをdurable Sagaへ置換
-- #280: selected recovery representationをpeer catch-up transportへ載せる
+- #278: runtime durability profile/quorum/fencing/repository reconciliation/ack policyを統一
+- #280: selected recovery/repository catch-up/durability representationをpeer transportへ載せる
 
 SQLite fileのnetwork sharing、PostgreSQL/distributed DBの先行導入は行わない。再評価時はbenchmarkだけでなく
 writer数、authority、failure recovery、RPO/RTO、運用負荷を入力として新しいADRを作成する。
