@@ -52,7 +52,7 @@ cargo run -p dawn-simulation --bin simulate --release -- --serve
 cargo run -p dawn-simulation --bin simulate --release -- --serve --cluster
 cargo run -p dawn-simulation --bin simulate --release -- --serve --duel
 cargo run -p dawn-simulation --bin simulate --release -- --serve --duel --enemies 2
-cargo run -p dawn-simulation --bin simulate --release --aoi-bench
+cargo run -p dawn-simulation --bin simulate --release -- --aoi-bench
 ```
 
 **Playing the Godot client against a live server**: `client/dawn_client_gdext.gdextension`
