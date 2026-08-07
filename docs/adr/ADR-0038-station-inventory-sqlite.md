@@ -1,111 +1,125 @@
 ---
 id      : ADR-0038
-title   : Station Inventory — SQLite as the durable authority, lazy-loaded in memory
+title   : Station Inventory — SQLite-backed lazy projection
 status  : accepted
 date    : 2026-07-08
 deciders: [human, ai-agent]
-related : ADR-0034（Economy Foundations §2 Market/データベースの境界 — このADRが宿題として残した storage seam を実装する）, ADR-0017（Event Store 2層ログ・snapshot+tail replay の元設計）, docs/process/roadmap.md §12（Phase 9B 補足「Station inventory の保存戦略」）
+related : ADR-0034（Economy Foundations）, ADR-0049（Sector recovery authority）, docs/process/roadmap.md §12
 ---
 
 # ADR-0038 — Station Inventory SQLite Backing
 
+> **ADR-0049 amendment (2026-08-07):** SQLite は Station inventory の独立した
+> durable authority ではない。Sector journal の authoritative Station delta が真実の
+> 情報源であり、SQLite は `(sector_id, transition_id)` で冪等に更新される bounded/lazy
+> query projection である。旧版で許容していた「SQLite と journal の片側だけ durable」な
+> crash window は撤回する。commit ordering・ack・recovery は ADR-0049 と
+> `docs/architecture/recovery-contract.md` が normative である。
+
 ## 背景
 
 `SimulationNode.station_inventories: BTreeMap<(PlayerId, StationId), BTreeMap<ItemId, u64>>`
-は全プレイヤー分の Station inventory を起動から終了までメモリに常駐させ続け、
-`StateSnapshot`（`persistence/snapshot.rs`）にもその全体を毎回まるごと
-シリアライズしている。プレイヤー人口が増えるほどこれは際限なく肥大化する
-——ADR-0034 §2 が「全プレイヤー分を常時常駐させるのではなく、lazy load /
-write-back cache として扱う余地を残す」と明記しつつ、9B の MVP としては
-意図的に単純化していた部分（"最終形ではなく、storage seam を切った上で
-後から DB-backed 実装へ差し替えられる前提の一時的な単純化"）そのものである。
+は全プレイヤー分の Station inventory を起動から終了までメモリに常駐させ、Snapshotにも
+全体を含めていた。人口と inventory が増えるほど memory/checkpoint cost が増えるため、
+ADR-0034 が残した storage seam を DB-backed implementation へ差し替える必要がある。
 
-`station_inventory_storage()`/`station_inventory_storage_mut()`（`node/station.rs`）
-という seam は ADR-0034 の時点で既に切ってあり、呼び出し側は生の `BTreeMap` を
-直接知らない。今回はこの seam の**内側だけ**を SQLite バックエンドへ差し替える。
+`station_inventory_storage()`/`station_inventory_storage_mut()` の seam により、呼び出し側は
+生の全件 map を直接知らない。SQLite はこの seam の内側で lazy query/projection backend
+として使う。
 
 ## 決定
 
-- Station inventory の**永続化の権威を SQLite に置く**。`credit_station_item`/
-  `try_debit_station_item` は呼ばれるたびに SQLite へ同期的に書き込む。
-- メモリ上には**直近に触れた `(player, station)` だけの有界キャッシュ**を持つ
-  （容量超過分は追い出す。追い出しは常に安全——追い出す時点で既に SQLite へ
-  同期書き込み済みだからflush-before-evictが不要）。
-- `StateSnapshot.station_inventories` フィールドは**今後書かれなくなる**
-  （古い形式のスナップショットを読むための後方互換フィールドとしてのみ残す）。
-  Sector の再起動時に全プレイヤー分をメモリへ丸ごと読み込むコストが消える
-  ——これが今回のユーザー報告「全アイテムをロードしておく必要があるのはまずい」
-  への直接の対処。
+### 1. Authority は Sector journal に置く
 
-  > **訂正（2026-07-28）**: この「後方互換フィールドとしてのみ残す」判断は誤りだった。
-  > postcard は自己記述形式ではないため、フィールドを削った旧形式のスナップショットは
-  > 読み込み自体が `DeserializeUnexpectedEnd` で失敗する（ADR-0017 §6）。つまり
-  > `restore_from` の移行分岐（`migrate_from_snapshot`）は**到達不能**であり、それを
-  > 覆っていたテストもスナップショットをメモリ上で直接組み立てていたため `load` 経路を
-  > 一度も通っていなかった。フィールド・移行メソッド・当該テストはいずれも削除済み。
-  > 本 ADR の実質的な決定（SQLite が耐久性の権威、メモリは有界キャッシュ）は変わらない。
-- `apply_event` のリプレイ側（`PackagedShipBuilt`/`ShipDisassembled`/
-  `ShipAssembled` の3アーム）は Station inventory への `credit`/`try_debit`
-  呼び出しを**取り除く**。理由は次節。
+Build/Disassemble/Assemble/Transfer 等で Station inventory が変わる場合、その item delta は
+ECS/ownership/public outputs と同じ `DurableTransitionBatch` に含めて原子的に commit する。
+SQLite を先に更新してから journal を追記する経路、または SQLite だけを success authority
+とする経路は禁止する。
 
-## ADR-0034 との関係（矛盾ではなく実装）
+Station transition の ordering は:
 
-ADR-0034 §2 は「Tick/commandのたびにSQLを直接叩く権威モデルは採らない」と
-明記しているが、これは「**毎回のドッキング/読み取りでDB往復するモデル**」
-（Marketのような高頻度アクセスを想定した拒否）を指す。本ADRの設計は:
+```text
+prepare authoritative Station + ECS mutation
+  -> durable journal commit
+  -> apply live authoritative reducer
+  -> idempotently apply SQLite projection
+  -> publish outputs / acknowledge
+```
 
-- **読み取り**はキャッシュ優先（miss時のみ1回DBを読み、以降はキャッシュ）。
-  `can_use_station` 等のドッキング判定自体は Station inventory に一切触れない
-  （`docked_players`マップのみで完結）ため、入港のたびにDB往復は発生しない。
-- **書き込み**は Build/Disassemble/Assemble/TransferToStation という、
-  プレイヤーが能動的に押す低頻度の経済アクションでのみ発生する。
-  「command validationはメモリ上のinventoryを使う」というADR-0034の原則は
-  維持している——SQLiteへの同期書き込みは、そのメモリ上の変更に対する
-  耐久化の副作用であって、判定自体をDB越しにするわけではない。
+journal commit 後に SQLite projection が失敗した場合、通常の command rejection には戻さず
+Sector を fail-stop/fence する。journal から authoritative state を復旧し、SQLite projection を
+catch-up/rebuild してから serving を再開する。
 
-つまり本ADRはADR-0034 §2が残した「storage seam を切った上で後から
-DB-backed 実装へ差し替える」という宿題の実装であり、その拒否した代替案
-（高頻度アクセスでのDB権威化）とは別のものである。
+### 2. SQLite は bounded lazy projection
 
-## 正しさの要点: リプレイとの二重適用を避ける
+メモリ上には直近に触れた `(player, station)` だけの有界 cache を持つ。cache miss では SQLite
+から読む。SQLite row は authoritative journal transition を projection した結果であり、各適用は
+`(sector_id, transition_id)` で冪等でなければならない。
 
-現状、`apply_event` の `PackagedShipBuilt`/`ShipDisassembled`/`ShipAssembled`
-アームは `credit_station_item`/`try_debit_station_item` を自分でも呼ぶ。
-これは「スナップショットの `station_inventories` は `snapshot.log_index`
-時点で切り取られており、それより後のイベントだけが再生される」という前提の下で
-正しく機能していた（他の状態と同じ snapshot+tail replay パターン、ADR-0017）。
+projection storage は少なくとも:
 
-SQLite が権威になり、ライブコマンド実行時に同期的に書き込まれるようになると、
-SQLite は**クラッシュ直前まで**の状態を既に持っている。この状態のまま
-`apply_event` のリプレイが同じ `credit`/`try_debit` を再実行すると、
-**二重適用**になる。
+- applied transition identity の重複検出
+- contiguous applied watermark
+- Station item rows
 
-対処: 上記3アームから Station inventory への `credit`/`try_debit` 呼び出しを
-削除する（ship の挿入/削除・tickの更新など、そのアームの他の効果はそのまま
-残す）。ライブ側のコマンドハンドラ（`station.rs`/`inventory.rs`）は元々
-イベント発行前に自分で `credit`/`try_debit` を呼んでいるため、ライブパスの
-挙動は変わらない——リプレイ側の**冗長になった**再構築だけを取り除く。
+を持ち、同じ transition の再適用を no-op にする。replica promotion / recovery 後の serving は、
+この watermark が必要な authoritative position に追いつくまで禁止する。
+
+### 3. Checkpoint は Station aggregate を分離可能
+
+全 Station inventory を ECS `StateSnapshot` に戻す必要はない。ADR-0049 の checkpoint manifest は
+ECS snapshot と別の versioned Station aggregate checkpoint を同じ covered journal position で
+束ねられる。
+
+compaction は ECS snapshot、Station checkpoint、manifest が全て durable/validated になるまで
+行ってはならない。SQLite 自体を唯一の checkpoint と仮定せず、projection rebuild に必要な
+Station checkpoint + committed Station delta tail を保持する。
+
+### 4. Public event replay は Station authority ではない
+
+`PackagedShipBuilt`/`ShipDisassembled`/`ShipAssembled` 等の `DomainEvent` は durable public fact だが、
+Station inventory の exact reducer authority は RecoveryDelta である。したがって public-event replay
+だけで SQLite を更新する設計には戻さない。
+
+既存の `apply_event` から Station credit/debit を外した判断は、「public event を二重適用しない」
+という意味では維持する。ただしその理由は「SQLite が独立 authority だから」ではなく、
+**Station aggregate delta が authoritative recovery stream にあるから**である。
+
+## ADR-0034 との関係
+
+ADR-0034 が避けたのは、毎 Tick/高頻度 read を DB round-trip に依存させる設計である。この ADR は:
+
+- read は bounded cache 優先、miss のみ SQLite
+- write は低頻度 Station action の durable transition に限定
+- command validation は可能な限り loaded projection/cache 上で行う
+- durability authority は SQLite ではなく Sector journal
+
+とするため、DB-backed lazy storage seam の目的を保ちながら cross-store authority を一本化する。
+
+## Crash / retry semantics
+
+- journal append 前に失敗: SQLite projection を変更せず、operation は未commit。
+- journal append 後、live reducer 前に crash: recovery が authoritative Station delta を適用する。
+- live reducer 後、SQLite 前に crash: recovery/catch-up が同じ transition id を SQLite に適用する。
+- SQLite apply 後、ack 前に crash: retry で同じ transition id を再適用しても no-op。
+- replica promotion: local SQLite applied watermark が promotion position 未満なら catch-up-only。
+
+これにより旧ADRが許容していた「SQLiteだけ更新済み / journal未commit」または逆方向の片側 authority
+状態を正常系契約から除外する。
 
 ## 却下した案
 
-- **SQLiteを単なるlazy-loadキャッシュにし、真実の情報源はevent replayのまま**:
-  素直だが、「起動時に全員分をメモリに載せる」問題そのものは解決しない
-  （snapshotの`station_inventories`が残り続ける限り、そこに全員分が集まる）。
-  今回のユーザー報告の直接原因を解消しないため却下。
-- **書き込みを非同期write-behindキューにする**: Station操作はtickごとではなく
-  プレイヤーが能動的に送る低頻度コマンドであり、既に`FileEventStore::append()`
-  がtick終端で同期flushしているのと同程度の負荷でしかない。非同期化の複雑さに
-  見合わないため却下（同期書き込みを採用）。
+- **SQLiteを独立 durable authority のまま維持する**: journal/ECS と cross-store atomicity がなく、
+  recoverable 2PC/participant protocol が必要になる。ADR-0049 はより単純な single journal authority
+  + idempotent projection を採用するため却下。
+- **SQLiteを完全に廃止して全inventoryをECS snapshotへ戻す**: 起動時/メモリ使用量の問題を再導入する。
+- **非同期 write-behind で projection lag を無制限に許す**: Station read の正しさと promotion eligibility
+  が曖昧になる。projection は遅延可能でも watermark で明示し、authoritative serving 前に catch-up する。
 
 ## 帰結
 
-- クラッシュのタイミングによっては、SQLiteへの書き込みとイベントログへの
-  追記の間に**狭い不整合ウィンドウ**が残る（例: Station inventoryは加算済み
-  だが`ShipDisassembled`はログに記録されずshipが残ったまま）。これは
-  M-9（`architecture-review/server-pending.md`）で既に許容している「crash-onlyで
-  narrowな不整合ウィンドウ」と同じクラスのリスクとして許容し、今回は
-  解決しない。
-- `dawn-sector`に`rusqlite`（bundled feature）を追加する。FBD-002
-  （dawn-coreへの外部依存禁止）は`dawn-sector`には適用されない。
-- 実装は `docs/process/roadmap.md` §12 9B補足「Station inventory の保存戦略」
-  を参照。
+- `dawn-sector` の `rusqlite` 利用と bounded lazy cache は維持する。
+- SQLite write API は transition identity を受け取り、冪等適用と contiguous watermark を提供する必要がある。
+- Station command は journal durable commit 前に SQLite を authority として変更してはならない。
+- Station checkpoint/delta と SQLite projection catch-up test は #271/#272/#284 の recovery implementation に含める。
+- 旧版で明記した narrow inconsistency window の許容は撤回する。
