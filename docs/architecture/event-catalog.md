@@ -1,6 +1,6 @@
 ---
 scope    : Complete spec of every Event and Command that exists. The single source of truth for public/domain facts and requests
- audience : AI Agent / Human Developer
+audience : AI Agent / Human Developer
 update   : Must be updated whenever an Event or Command is added or changed
 related  : entity-model.md, tick-model.md, recovery-contract.md, event-schema-evolution.md
 ---
