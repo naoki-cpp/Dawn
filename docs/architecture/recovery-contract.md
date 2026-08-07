@@ -2,21 +2,39 @@
 scope    : Normative Sector recovery sources, durability points, and crash outcomes
 audience : AI Agent / Human Developer
 update   : When authoritative state, transition ordering, snapshots, journal payloads, Station persistence, delivery cursors, or replication semantics change
-related  : ../adr/ADR-0049-sector-recovery-state-delta-wal.md, tick-model.md, event-catalog.md
+related  : ../adr/ADR-0049-sector-recovery-state-delta-wal.md, tick-model.md, event-catalog.md, ../adr/ADR-0014-raft-consensus.md
 ---
 
 # Sector Recovery Contract
 
-This document is the normative inventory and crash matrix for accepted ADR-0049
-and issue #284. It distinguishes exact recovery state from public facts and
-runtime-only effects. It is normative for #271 and #272: adding an authoritative
-field or a reliable post-commit obligation requires assigning it a recovery source
-before the change lands.
+This document is the normative recovery inventory and crash matrix for accepted
+ADR-0049 and issue #284. It decides **what must survive and what a successful
+transition means**. It deliberately does not absorb the implementation decisions
+owned by the dependent refactor issues.
 
-ADR-0001, ADR-0017, ADR-0038, `AI_DEVELOPMENT_GUIDE.md`, `tick-model.md`, and
-`event-catalog.md` are amended in the same PR to match this contract. Public-event
-append is not the complete state commit, SQLite is not an independent Station
-authority, and an eventless Tick still has a durable recovery record.
+Work-package ownership is:
+
+- **#284 / ADR-0049:** authoritative recovery content, exact recovery promise,
+  eventless-Tick behavior, RPO/RTO contract, checkpoint coverage, and the
+  authoritative/derived/lossy classification in this document;
+- **#271:** fallible atomic journal framing, commit markers, durability evidence,
+  fsync/quorum mechanics, corruption handling, indices/receipts, and physical
+  retention implementation;
+- **#272:** storage-independent engine API and prepare -> durable append -> live
+  apply -> post-commit effect ordering;
+- **#275:** in-memory state-owner decomposition. It consumes this table rather
+  than redefining which fields are durable;
+- **#276:** durable Transit Saga/attempt repository and retry lifecycle. It must
+  satisfy this recovery contract but owns the concrete Saga representation;
+- **#277:** admission/identity/Station repository schema and transaction APIs.
+  Repository shape does not create a second Sector recovery authority;
+- **#280:** peer transport, snapshot/catch-up transfer mechanics, and traffic
+  isolation. It transports the representation selected here rather than defining
+  a competing snapshot format or RPO.
+
+Older documents are amended in PR #288 where they make a conflicting recovery
+claim. Historical implementation descriptions may remain when explicitly labeled
+as legacy/current behavior rather than normative recovery authority.
 
 ## 1. Recovery guarantees
 
@@ -24,63 +42,72 @@ authority, and an eventless Tick still has a durable recovery record.
   every committed authoritative recovery batch after its covered position.
 - Public `DomainEvent`s alone are not a complete recovery source.
 - Public events and reliable outbox intents produced by a transition are durable
-  and committed atomically with its authoritative recovery delta.
+  and share the transition's atomic visibility boundary with its authoritative
+  recovery delta.
 - Every committed Tick has a recovery record, including an eventless Tick.
-- Recovery, local commit, and replica application use the same delta reducer and
-  invariant checks.
+- Recovery, local live apply, and replica catch-up use the same recovery-delta
+  semantics and invariant checks.
 - A journal append failure cannot change committed live state or produce
   client-visible success.
-- A post-append live-apply or SQLite-projection failure fences the Sector until
-  journal recovery succeeds; processing from the old live state is forbidden.
-- A completed auto-jump Warp has a durable Raft-proposal obligation; the obligation
-  cannot exist only in `pending_auto_jumps` memory.
-- Public-event/outbox delivery is at-least-once: a durable consumer cursor advances
-  only after downstream acknowledgement or equivalent durable idempotency proof.
-- A replica is promotable only when authoritative state, retained outputs/cursors,
-  and the Station SQLite projection are all caught up to the promotion point.
+- A post-append live-apply or required local-projection failure fences the Sector
+  until journal recovery succeeds; processing from old/partial live state is
+  forbidden.
+- A completed auto-jump Warp has a durable retry obligation; that obligation
+  cannot exist only in `pending_auto_jumps` memory. #276 may later absorb the
+  concrete retry lifecycle into its Transit Saga.
+- Public-event/outbox delivery is at-least-once unless a stronger downstream
+  idempotent transaction protocol is explicitly provided.
+- A replica is promotable only when authoritative recovery data and every
+  promotion-critical retained output/projection are caught up to the required
+  position.
 - "Acknowledged RPO 0" is qualified by the selected durability profile and its
   explicit failure domain; it is never an unqualified machine-loss promise.
 - No numeric production RTO is currently claimed. #284 must benchmark replay
-  tail size/time and set the checkpoint budget before marking RTO complete.
+  tail size/time and set the checkpoint budget before that acceptance item closes.
 
 ## 2. State and obligation classification
 
 | State / mutation / obligation | Authoritative or reliable? | Current source or mutation site | Required recovery source | Notes |
 |---|---:|---|---|---|
-| Logical `current_tick` | Yes | Incremented before Tick systems | Transition header/delta and ECS snapshot | Must advance only after durable append, including eventless Ticks. |
-| Entity/Player ID counters | Yes | Admission/spawn helpers | Counter delta and ECS snapshot | Reuse after crash violates identity invariants. |
-| Ship existence and type | Yes | Spawn, destroy, assemble, disassemble, Transit | Create/delete delta and ECS snapshot | Stable `ShipId` is the recovery key, not ECS entity handle. |
-| Player ownership and active-ship maps | Yes | Admission, Station operations, Transit | Ordered map delta and ECS snapshot | Resume/admission authority depends on exact restoration. |
-| Position, velocity, anchor | Yes | Movement, Warp, docking, Transit, commands | Component final-value delta and ECS snapshot | `VelocityChanged` does not cover every position or representation change. |
-| Thrust/braking and flight modes | Yes | Move/Stop/Approach/Orbit/KeepAtRange/Warp | Component add/remove/update delta and ECS snapshot | Determines future motion even when no event is emitted. |
-| Hull shield/armor/hull/destroyed state | Yes | Combat and repair | Component final-value delta and ECS snapshot | Public damage/repair events are outputs, not reducer authority. |
-| Capacitor current | Yes | Capacitor system every Tick | Component final-value delta and ECS snapshot | Recharge can occur without a public event. |
-| Fitted slots, active flags, cycle counters, targets | Yes | Fit/Unfit/Activate/Deactivate/Cap/range gate | Component final-value delta and ECS snapshot | Countdown and forced deactivation affect later combat. |
-| Derived ship stats from fitting/catalog | Reconstructible | `apply_fitting` | Recompute from recovered fitting plus catalog fingerprint | Persist only when needed for validation. |
-| Lock entries, states, countdowns | Yes | Lock system and docking cleanup | Component final-value delta and ECS snapshot | Snapshot coverage must be complete. |
-| Tackle membership | Yes | Tackle system | Component final-value delta and ECS snapshot | Prevents Warp/Jump and must survive restart exactly. |
-| Ship cargo and destruction rewards | Yes | Station operations and combat reward | Ordered item-stack delta and ECS snapshot | Reward mutation can accompany ship deletion. |
-| Docked ship/player Station context | Yes | Dock/Undock/Disembark/Select | Ordered map delta and ECS snapshot | Required to authorize Station operations. |
-| Station inventory / packaged ships | Yes, journal-owned aggregate | Station command execution and SQLite projection | Station aggregate delta in the same transition envelope plus versioned Station checkpoint | SQLite is an idempotent projection keyed by transition identity, not a second authority. |
-| Transit state, receipts, imported/exported handoff | Yes | Raft-committed Transit apply | Delta and ECS snapshot; durable idempotency identity | External Redirect follows commit and is not recovery state. |
-| Resume-ticket current/staged binding | Yes | Admission and Transit | Delta and ECS snapshot | Ticket rotation must remain retry-safe. |
-| Bot persistent behavior state | Yes when it affects future decisions | Bot components/state | Component delta and ECS snapshot | Purely recomputable selection may be derived only when specified. |
+| Logical `current_tick` | Yes | Incremented before Tick systems | Transition header/delta and checkpoint | Must advance only as part of a durable transition, including eventless Ticks. |
+| Entity/Player ID counters | Yes | Admission/spawn helpers | Counter delta and checkpoint | Reuse after crash violates identity invariants. |
+| Ship existence and type | Yes | Spawn, destroy, assemble, disassemble, Transit | Create/delete delta and checkpoint | Stable `ShipId` is the recovery key, not ECS entity handle. |
+| Player ownership maps | Yes | Admission, Station operations, Transit | Ordered map delta and checkpoint | Ownership is durable PlayerState under #275. |
+| Active-ship routing map | Yes | Admission, `SelectActiveShip`, `Disembark`, removal/Transit | Ordered map delta and checkpoint | This is authoritative routing state because it changes which ship receives commands and whether Undock is legal. It may have no public `DomainEvent`. The current snapshot omission is implementation debt, not intended lossiness. |
+| Position, velocity, anchor | Yes | Movement, Warp, docking, Transit, commands | Component final-value delta and checkpoint | `VelocityChanged` does not cover every exact position/representation change. |
+| Thrust/braking and flight modes | Yes | Move/Stop/Approach/Orbit/KeepAtRange/Warp | Component add/remove/update delta and checkpoint | Determines future motion even when no event is emitted. |
+| Hull shield/armor/hull/destroyed state | Yes | Combat and repair | Component final-value delta and checkpoint | Public damage/repair events are facts/outputs, not exact reducer authority. |
+| Capacitor current | Yes | Capacitor system every Tick | Component final-value delta and checkpoint | Recharge can occur without a public event. |
+| Fitted slots, active flags, cycle counters, targets | Yes | Fit/Unfit/Activate/Deactivate/Cap/range gate | Component final-value delta and checkpoint | Countdown and forced deactivation affect later combat. |
+| Derived ship stats from fitting/catalog | Reconstructible | `apply_fitting` | Recompute from recovered fitting plus catalog fingerprint | Persist only if a future invariant requires it. |
+| Lock entries, states, countdowns | Yes | Lock system and docking cleanup | Component final-value delta and checkpoint | Exact countdown/state must survive restart. |
+| Tackle membership | Yes | Tackle system | Component final-value delta and checkpoint | Prevents Warp/Jump and must survive restart exactly. |
+| Ship cargo and destruction rewards | Yes | Station operations and combat reward | Ordered item-stack delta and checkpoint | Reward mutation can accompany ship deletion. |
+| Docked ship/player Station context | Yes | Dock/Undock/Disembark/Select | Ordered map delta and checkpoint | Required to authorize Station operations. |
+| Station inventory / packaged ships | Yes, Sector-journal-owned aggregate | Station command execution | Station aggregate delta in the same logical transition plus versioned Station checkpoint | SQLite/repository storage is an idempotent projection/read model under this contract; #277 owns its final API/schema. |
+| Transit ownership/freeze state and current handoff lifecycle state | Yes | Raft-committed Transit apply | Recovery delta/checkpoint plus the durable attempt/receipt authority selected by #276 | Legacy event scans are not the final recovery authority. #276 owns concrete Saga representation and reconciliation. |
+| Resume-ticket current/staged binding | Yes | Admission and Transit | Delta/checkpoint or repository state participating in the same documented recovery transition | Ticket rotation must remain retry-safe; #277 owns repository shape. |
+| Bot persistent behavior state | Yes when it affects future decisions | Bot components/state | Component delta and checkpoint | Purely recomputable selection may be derived only when specified. |
 | Pending human command queue | No, until admitted into a transition | Runtime connection | Runtime input queue | Disconnect/crash may require client retry. |
-| Pending bot lock-command queue | Yes until same-Tick consumption replaces it | Produced at end of one Tick, consumed by the next | Ordered queue delta and ECS snapshot | It changes the next Tick's outcome and cannot remain an in-memory gap. |
-| Auto-jump Raft proposal after Warp arrival | Reliable post-commit obligation | `process_warp` -> `pending_auto_jumps` -> `run_runtime_tick` | Durable outbox intent committed with the Warp transition | The in-memory queue is only a convenience projection; crash before `raft.propose` must retry the intent. |
-| Completed-warp client correction | Runtime presentation output | `completed_warps` | None unless delivery is promoted to a reliable protocol | It does not affect authoritative state; reconnect/state sync may repair presentation. |
+| Pending bot lock-command queue | Yes until same-Tick consumption replaces it | Produced at end of one Tick, consumed by next | Ordered queue delta and checkpoint | It changes the next Tick's outcome and cannot remain an in-memory recovery gap. |
+| Auto-jump Raft proposal after Warp arrival | Reliable post-commit obligation | `process_warp` -> `pending_auto_jumps` -> runtime | Durable outbox/idempotent retry intent committed with the Warp transition | Current in-memory queue is convenience only. #276 may represent this as Saga work, but crash after Warp commit must not lose the obligation. |
+| Completed-warp client correction | Runtime presentation output | `completed_warps` | None unless promoted to a reliable protocol | Reconnect/current-state sync may repair presentation. |
 | AoI index and client projections | Derived | Rebuilt/read from committed world | Recompute after recovery | Never journal presentation caches as authority. |
 | Socket/session handles and channel queues | No | Runtime adapters | None | Re-established after recovery. |
-| Replication send position / append receipt | Durable runtime metadata | Runtime/journal layer | Commit index/checkpoint metadata | Must refer only to committed ranges. |
-| Station SQLite applied position | Durable projection metadata | Station projection layer | `(sector_id, transition_id)` dedup records plus projection watermark | Promotion/serving is forbidden while this watermark trails the required authoritative position. |
-| `DomainEvent` list | Durable public fact | Command/Tick output | Public-event subrecord committed with the transition; not used as exact state reducer | Delivery resumes from a durable cursor. |
-| Reliable runtime effects | Reliable post-commit obligation | Runtime/application layer | Outbox subrecord plus idempotency identity | Execute only after local state commit; cursor advances after downstream acknowledgement. |
+| Journal append receipt / authoritative committed position | Durable runtime metadata | Journal/runtime layer | #271 commit index/checkpoint metadata | Must refer only to committed ranges. |
+| Station projection applied-through position | Durable projection metadata | Runtime repository/projection layer | A contiguous **global authoritative journal position** plus transition-id dedup for Station-changing records | The projection worker advances through every contiguous transition: Station records apply changes; non-Station records are no-op progression. Thus `>= promotion_position` is unambiguous. |
+| `DomainEvent` list | Durable public fact | Command/Tick output | Public-event subrecord committed with transition; not exact state reducer | Delivery resumes from durable consumer state. |
+| Reliable runtime effects | Reliable post-commit obligation | Runtime/application layer | Outbox/idempotency representation compatible with the transition | Execute only after successful local live apply; delivery state advances after downstream acknowledgement. |
 | Deliberately lossy runtime effects | No | Runtime/application layer | None | Must be explicitly classified and cannot be required for authoritative continuity. |
+
+Any newly added mutable field or post-commit obligation must be added to this table
+before code lands. #275 may split these rows among sub-aggregates, but may not
+silently downgrade an authoritative row to frame-local state.
 
 ## 3. Transition shape
 
 A prepared transition separates exact recovery state, public facts, and runtime
-effects:
+effects. Names are illustrative; #272 owns the final engine API.
 
 ```rust
 pub struct PreparedSectorTransition {
@@ -97,275 +124,321 @@ pub struct DurableTransitionBatch {
 }
 ```
 
-The durable batch is one logical atomic commit envelope. Its state, event, and
-outbox subrecords may live in separate immutable segment families, but no reader
-may observe any subrecord as committed until all referenced bytes and the envelope
-commit marker are durable under the selected durability profile.
+The durable batch is one **logical atomic visibility envelope**. #271 owns its
+physical framing and may place state/event/outbox bytes in independently retained
+immutable segment families. No recovery/publication reader may observe a subrecord
+as committed unless the enclosing logical transition is committed according to
+#271's documented framing/durability evidence.
 
-`domain_events` may be empty but is never written through a second best-effort
-persistence step. Effects that do not require reliable retry remain post-commit
-runtime outputs; reliable effects are represented by outbox intents in the batch.
+`domain_events` may be empty. Reliable effects are represented by durable retry
+state compatible with the logical transition; deliberately lossy effects remain
+post-commit runtime outputs.
 
-`PreparedMutation` must not mutate the committed live world before durable append.
-It may own old/new values, a reversible write set, or a copy-on-write overlay.
-Its canonical committed result must be equivalent to applying `RecoveryDelta`.
+`PreparedMutation` must not mutate committed live authority before durable append.
+It may own old/new values, a reversible write set, copy-on-write overlay, or another
+bounded representation chosen by #272. Its committed result must be semantically
+equivalent to applying `RecoveryDelta`.
 
-A `RecoveryDelta` is applied through one reducer:
+A `RecoveryDelta` is applied through one reducer contract:
 
 ```text
 apply_recovery_delta(state, delta)
 ```
 
-The same function or shared primitives are used for:
+The same semantics/shared primitives are used for:
 
-- local commit after durable append;
+- local live apply after durable append;
 - checkpoint-tail recovery;
 - replica catch-up; and
 - equivalence/failure-injection tests.
 
-### 3.1 Station inventory projection rule
+### 3.1 Station projection rule
 
-Station item changes are part of `RecoveryDelta`; they are not committed first to
-SQLite. After the journal envelope is durable, the live reducer applies ECS and
-aggregate state, then applies the same Station transition idempotently to SQLite.
-The projection records `(sector_id, transition_id)` and a contiguous applied
-watermark so replaying an already-applied transition is a no-op and promotion can
-prove projection freshness.
+Station item changes are authoritative recovery data; they are not committed first
+to SQLite. After journal commit and successful local recovery-delta application, a
+required local Station projection applies the transition idempotently.
 
-A Station operation is acknowledged only after journal durability, successful
-live application, and successful local SQLite projection. If projection application
-fails after append, the Sector fences and recovers or catches up SQLite from the
-Station checkpoint plus committed Station deltas before serving more authoritative
-work.
+The projection maintains two distinct pieces of metadata:
 
-### 3.2 Auto-jump outbox rule
+1. transition-id deduplication for Station-changing records; and
+2. `projection_applied_through`, a **global contiguous authoritative journal
+   position**. The projection worker advances this watermark across non-Station
+   transitions as explicit no-ops and may advance across a Station transition only
+   after its Station mutation has applied successfully.
 
-When a committed Tick completes a Warp whose `WarpComp::auto_jump` is true, the
-same transition includes a durable `AutoJumpProposalIntent` (name may vary) with:
+A Station operation is acknowledged only after the selected durability condition,
+successful local live apply, and required local Station projection application. If
+projection application fails after append, the Sector fences and catches up/rebuilds
+the projection before serving more authoritative Station work.
 
-- `ship_id` and `gate_id`;
-- resolved route/destination information needed for retry;
-- originating transition/idempotency identity; and
-- any compatibility/version metadata required by the Raft adapter.
+#277 decides the concrete repository/table/transaction API. It must not turn the
+SQLite/repository layer back into a competing independent Sector authority.
 
-`pending_auto_jumps` may continue to exist as an in-memory post-commit work queue,
-but it is derived from the retained outbox. Draining it is not the durable state
-transition. A crash before, during, or after `raft.propose` may cause retry, so the
-proposal/Transit path must deduplicate by the stable intent identity.
+### 3.2 Auto-jump / Transit retry rule
 
-## 4. Fail-stop rule
+When a Tick commits a Warp whose `auto_jump` completes, the same durable transition
+must create enough durable retry identity/state to ensure the subsequent Transit
+request cannot disappear in a crash.
+
+Today that can be described as an `AutoJumpProposalIntent` outbox record with ship,
+gate/route, and stable idempotency identity. #276 is free to absorb this obligation
+into its first-class `TransitAttemptId`/Saga model. The invariant owned by #284 is
+only:
+
+```text
+Warp arrival committed + auto_jump requested
+    => a durable, replayable, idempotent obligation to continue the handoff exists
+       before the transition can be acknowledged as complete.
+```
+
+`pending_auto_jumps` may remain temporarily as an in-memory work queue during
+migration, but it is never the sole recovery source.
+
+## 4. Commit, durability replication, and fail-stop
+
+The normative local ordering consumed by #272 is:
+
+```text
+prepare
+  -> make logical transition durable under selected profile
+  -> apply RecoveryDelta / prepared mutation to local live state
+  -> apply required local projections
+  -> publish public outputs / execute reliable effects
+  -> acknowledge when all acknowledgement conditions are satisfied
+```
+
+For `ReplicatedDurable`, "make durable" may require **durability replication** of
+unapplied committed bytes/evidence to a quorum before the owner's live apply. This
+is distinct from **state/application/publication replication**.
+
+A remote node that has durably staged a transition for quorum purposes must not
+pretend the transition is locally applied, publish its outputs, or become promotable
+through that position until it has successfully applied the shared recovery reducer
+and all promotion-critical projections.
 
 Once an envelope is durably committed, it cannot be converted into an ordinary
-rejection. If live reduction or a required local projection errors, panics, or
-partially applies, the Sector must immediately:
+rejection. If local live reduction or a required local projection errors, panics,
+or partially applies, the owner must immediately:
 
 1. mark itself fenced/unhealthy;
-2. stop admitting, preparing, or committing later transitions;
-3. stop replication beyond the last successfully applied contiguous position;
+2. stop admitting/preparing/committing later transitions;
+3. stop **application/publication replication** beyond its last successfully
+   applied contiguous position (already-staged durability copies may remain);
 4. suppress event delivery, outbox execution, and acknowledgement for the failed
    local apply; and
-5. terminate or reconstruct state/projections from the journal before resuming.
+5. terminate or reconstruct local state/projections from the journal before
+   resuming.
 
-Continuing with the pre-transition live state after a successful append is a
-contract violation.
+Continuing from pre-transition or partially applied live state after successful
+durable commit is a contract violation.
+
+#271 owns how local durability/quorum evidence is encoded and recovered. #280 owns
+how those bytes are transported and isolated from Raft control/bulk traffic. Neither
+issue may weaken the ordering or promotion rules above.
 
 ## 5. Durability profiles and acknowledgement
 
-The system has two semantic durability profiles. Implementations may use different
-names, but must preserve these failure-domain distinctions.
+The system has two semantic profiles. The names may change in #271; the failure
+domains may not be blurred.
 
 ### LocalDurable
 
-Before acknowledgement, the envelope, every referenced subrecord, and required
-commit metadata are written, flushed, and `fsync`/platform-equivalent durable.
-Acknowledged RPO is **zero committed transitions for process crash, OS
-crash/reboot, and abrupt power loss when the authoritative storage medium remains
-readable and preserves completed durable writes**. Loss/corruption of that
-machine/storage device is outside this profile.
+Before acknowledgement, the transition is durable according to #271's documented
+local `fsync`/platform-equivalent guarantee. It provides **acknowledged RPO 0 for
+process crash, OS crash/reboot, and abrupt power loss while the authoritative local
+storage medium remains readable and preserves completed durable writes**.
+Permanent loss/corruption of that machine/storage is outside this profile.
 
 ### ReplicatedDurable
 
-Before acknowledgement, `LocalDurable` is satisfied and the same committed range
-is synchronously durable on the configured replica quorum. A deployment may claim
-acknowledged RPO 0 for owner-node/storage loss only up to the explicitly documented
-replica-failure tolerance. #271/#280 must define quorum size, commit evidence, and
-failure tolerance before this profile is used as a production promise.
+In addition to LocalDurable, the committed transition is synchronously durable on
+a configured replica quorum before acknowledgement. It may claim **acknowledged
+RPO 0 for owner-node/storage loss only up to the explicitly documented replica
+failure tolerance**.
+
+#284 fixes that semantic requirement. #271 chooses journal/quorum evidence and #280
+chooses transport/channel mechanics. Production documentation must not claim the
+stronger failure domain until those issues define and test the quorum/failure model.
 
 An unacknowledged request may be absent or already durably committed. Retried
-operations that require exactly-once semantics use a stable idempotency/transition
-identity.
+operations that require exactly-once domain semantics use a stable idempotency/
+transition identity.
 
 ## 6. Crash-point matrix
 
-| Crash/failure point | Durable journal | Live/recovered state | Client/external observation | Required behavior |
+| Crash/failure point | Durable recovery data | Live/recovered state | Client/external observation | Required behavior |
 |---|---|---|---|---|
-| Before prepare | No new envelope | Previous committed state | No success | Operation may be retried. |
-| During prepare | No new envelope | Previous committed state | No success | Discard bounded prepared state. |
-| Before/during failed atomic append | No valid committed envelope | Previous committed state | No success/effect | Reject, truncate, or quarantine partial bytes according to #271 framing. |
-| After append commit, before live commit | Complete envelope exists | Recovery applies delta | Success may not have been observed | Retry detects committed transition identity. |
-| During live commit | Complete envelope exists | Recovery reapplies complete delta | No success until local apply completes | Fence immediately; do not continue from old or partial state. |
-| During SQLite projection apply | Complete envelope exists | Recovery reapplies Station delta idempotently | No acknowledgement | Fence; rebuild/catch up projection before resuming. |
-| After Warp commit, before auto-jump Raft proposal | Envelope plus auto-jump intent exists | Warp arrival remains committed | Proposal may be absent | Resume outbox and retry proposal by intent identity. |
-| After Raft proposal attempt, before outbox cursor advance | Envelope plus intent exists | Warp arrival remains committed | Proposal may have been accepted | Retry is allowed; Raft/Transit path deduplicates stable identity. |
-| After live commit, before public-event delivery | Envelope and event subrecord exist | New committed state | Event may not yet be observed | Resume from durable event cursor; never regenerate by simulation. |
-| After downstream delivery ack, before cursor fsync | Output remains retained | New committed state | Consumer may already have output | Retry may duplicate; idempotency prevents duplicate effect. |
-| After cursor fsync | Output may become retention-eligible | New committed state | Delivery acknowledged | Never redeliver before cursor; compaction still obeys all consumer/archive watermarks. |
-| After acknowledgement | Envelope exists under selected durability profile and required local projections applied | New committed state | Success observed | RPO 0 only within the selected profile's documented failure domain. |
+| Before prepare | No new transition | Previous committed state | No success | Operation may be retried. |
+| During prepare | No new transition | Previous committed state | No success | Discard bounded prepared state. |
+| Before/during failed atomic append | No valid committed transition | Previous committed state | No success/effect | #271 detects/rejects/truncates/quarantines partial framing according to its documented policy. |
+| After durable commit, before local live apply | Complete transition exists; ReplicatedDurable may already have staged quorum copies | Recovery applies delta | Success may not have been observed | Retry detects committed identity; staged replicas do not publish/apply implicitly. |
+| During local live apply | Complete transition exists | Recovery reapplies complete delta | No success until local apply completes | Fence immediately; do not continue from old/partial state. |
+| During required Station projection apply | Complete transition exists | Recovery reapplies Station delta idempotently | No acknowledgement | Fence; rebuild/catch up projection before serving authoritative Station work. |
+| After Warp commit, before handoff proposal | Durable auto-jump/Transit continuation obligation exists | Warp arrival remains committed | Proposal may be absent | Resume durable retry/Saga work using stable identity. |
+| After handoff proposal attempt, before durable delivery/retry progress | Durable obligation exists | Warp arrival remains committed | Proposal may have been accepted | Duplicate attempt is allowed only through idempotent #276 semantics. |
+| After local apply, before public-event delivery | Event subrecord exists | New committed state | Event may not yet be observed | Resume from durable delivery state; never regenerate by rerunning simulation. |
+| After downstream delivery ack, before cursor durability | Output remains retained | New committed state | Consumer may already have output | Retry may duplicate; idempotency prevents duplicate domain effect. |
+| After cursor durability | Output may become retention-eligible | New committed state | Delivery acknowledged | Compaction still obeys every required consumer/archive watermark. |
+| After acknowledgement | Transition exists under selected profile and required local apply/projections succeeded | New committed state | Success observed | RPO 0 only inside selected profile's documented failure domain. |
 | During checkpoint member write/validation | Journal remains authority | Previous checkpoint set plus tail | No recovery gap | Keep previous complete checkpoint manifest. |
-| After checkpoint manifest publication, before compaction | New checkpoint and old tails coexist | Either valid recovery path | None | Both cover the same committed position. |
-| During/after state-delta compaction | Checkpoint plus remaining authoritative tail | Exact covered state plus tail | None | Never retire a delta before the complete checkpoint set and manifest are durable. |
-| Before event/outbox retention watermark | Public facts/intents still retained | State checkpoint may already cover delta | Pending delivery remains possible | State compaction does not delete undelivered event/outbox subrecords. |
-| Replica receives partial/out-of-order range | Local authority unchanged | Replica stops at last contiguous commit | No promoted state | Detect gap, duplicate, version, fingerprint, or hash mismatch. |
-| Replica has state but lacks output segments/cursors | State may be current | Catch-up-only | Promotion forbidden | Synchronize retained outputs and cursors before promotion. |
-| Replica has state/outputs but stale SQLite watermark | State may be current | Catch-up-only | Station serving/promotion forbidden | Rebuild/apply Station projection through promotion position first. |
+| After checkpoint manifest publication, before state compaction | New checkpoint and old tails coexist | Either valid recovery path | None | Both cover same committed position. |
+| During/after state-delta compaction | Checkpoint plus remaining authoritative tail | Exact covered state plus tail | None | Never retire required delta before complete checkpoint publication. |
+| Before event/outbox retention watermark | Public facts/intents retained | State may already be checkpointed | Pending delivery remains possible | State coverage does not delete undelivered output. |
+| Replica receives partial/out-of-order range | Local applied authority unchanged | Stops at last contiguous applied position | No promoted state | Detect gap/duplicate/version/fingerprint/hash mismatch. |
+| Replica has staged durable bytes but has not applied them | Quorum durability may be satisfied | Applied state lags staged position | Promotion/publication forbidden through staged-only range | Apply shared reducer/projections first. |
+| Replica has state but lacks promotion-critical retained outputs | State may be current | Catch-up-only | Promotion forbidden | Synchronize required outputs/delivery state. |
+| Replica has applied state/outputs but Station projection watermark trails | State may be current | Catch-up-only for Station-authoritative service | Promotion/Station serving forbidden | Advance global projection watermark through promotion point first. |
 
 ## 7. Checkpoint compatibility
 
 A complete checkpoint manifest must reject incompatible or incomplete data before
-constructing live state. At minimum it carries:
+constructing live state. At minimum it carries or references:
 
 ```text
 magic
 checkpoint_manifest_version
-sector_id / node identity as required
+sector_id / identity metadata required by deployment
 catalog_fingerprint
-covered_journal_position
-ECS snapshot member identity, length, checksum, format version
-Station aggregate checkpoint identity, length, checksum, format version
-retained event/outbox segment locations or retention metadata
+covered_authoritative_journal_position
+ECS / Player / other authoritative snapshot members + versions/checksums
+Station aggregate checkpoint member when Station state is externalized
+recovery/output-retention metadata required to locate retained tails
 ```
 
-A field-list change is an explicit format-version change. Backward migration may
-be added deliberately, but postcard decode failure is not a versioning strategy.
+The exact physical manifest/file framing belongs to #271. The exact transport
+framing belongs to #280. #284 requires only that the checkpoint is explicit,
+versioned, mutually consistent at one authoritative position, and that incompatible
+or incomplete data fail clearly. Old snapshot compatibility is not required.
 
-The ECS snapshot and Station aggregate checkpoint form one recovery point. The
-manifest is publishable only after every required member is durable, validated,
-and mutually consistent at the same covered journal position.
+Reliable post-commit obligations are retained as durable retry state; snapshotting
+a transient runtime queue is not a substitute.
 
-Reliable post-commit obligations such as auto-jump proposals live in retained
-outbox records. Snapshotting a transient runtime queue is not a substitute for
-retaining those intents.
-
-Checkpoint coverage applies to the authoritative delta stream. Public-event and
-outbox retention use independent consumer watermarks; state coverage does not
-prove that outputs have been delivered or archived.
+Checkpoint coverage applies to authoritative recovery data. Public-event/reliable
+output retention uses independent delivery/archive conditions.
 
 ## 8. Independent retention and compaction
 
-The commit envelope provides atomic visibility while substreams retain independently:
+The logical transition has atomic visibility while physical retention may be
+independent:
 
 - authoritative state deltas may compact behind a complete validated checkpoint;
-- public events retain according to hot-log/archive policy;
-- outbox intents retain until every required consumer durably advances; and
-- compact commit-index metadata preserves range coverage and remaining subrecord
-  references.
+- public events retain according to audit/archive/delivery policy;
+- reliable retry/outbox records retain until their required delivery/Saga terminal
+  condition is durable; and
+- #271 must preserve enough committed-index metadata to make recovery ranges and
+  remaining output references unambiguous.
 
-Compaction is copy-and-publish:
+Compaction must preserve the parent's existing crash-safe publication property:
+write/validate/sync replacement material -> atomically publish the selecting
+manifest -> only then retire superseded recovery material. No state checkpoint may
+silently discard a still-required public fact or reliable obligation.
 
-1. write and validate replacement checkpoint/segment files;
-2. fsync files and replacement manifest;
-3. atomically publish the manifest;
-4. retire old state-delta segments only after publication; and
-5. retain enough old material for rollback to the previous valid manifest.
+FBD-001 continues to protect committed public `DomainEvent` history from in-place
+destructive mutation; recovery-delta checkpoint compaction is a distinct stream.
 
-No committed public event is rewritten in place. No outbox intent may be removed
-while a required consumer cursor still points at or before it.
+## 9. Durable delivery state
 
-## 9. Durable delivery cursor contract
+For each durable public-event/outbox consumer, delivery is at-least-once unless a
+stronger protocol is explicitly selected:
 
-Each durable public-event/outbox consumer has a cursor representing the last
-output durably acknowledged by that consumer (or equivalently the next output to
-attempt). Delivery is at-least-once:
+1. select the next committed output after durable delivery state;
+2. attempt delivery with stable transition/output identity;
+3. obtain downstream acknowledgement or equivalent durable idempotency proof;
+4. durably advance consumer delivery state only after step 3; and
+5. allow output retirement only after every required consumer/archive condition
+   is satisfied.
 
-1. select the next committed output after the durable cursor;
-2. send it with its transition/output idempotency identity;
-3. wait for downstream acknowledgement or equivalent durable idempotency proof;
-4. durably advance the consumer cursor; and
-5. only then permit retention/compaction policies to consider that output covered.
+A crash between steps 3 and 4 may redeliver; consumers must tolerate duplicates or
+provide stronger transactional idempotency. A local cursor alone is not exactly-once.
 
-The cursor must never advance before step 3. A crash between steps 3 and 4 can
-redeliver an already accepted output; downstream consumers/protocols must therefore
-be idempotent. A local cursor alone does not provide exactly-once external effects.
-
-Cursor state required after failover is replicated/transferred with retained output
-segments. A replica with a cursor ahead of available output bytes or output bytes
-behind the cursor proof is invalid and non-promotable.
+The concrete cursor/index representation belongs to #271/#276 as appropriate.
+#284 requires that failover cannot advance past an undelivered committed output.
 
 ## 10. Replica catch-up and promotion
 
-A snapshot-transfer/catch-up bundle includes:
+A snapshot/catch-up representation consumed by #280 must be sufficient to obtain:
 
-- the complete checkpoint set and its covered journal position;
-- every contiguous committed authoritative tail record after that position;
-- retained public-event and outbox segments that may still require delivery after
-  promotion;
-- durable event/outbox consumer cursors or equivalent replicated cursor state; and
-- Station checkpoint/delta data sufficient to advance the local SQLite projection
-  to the promotion position.
+- a complete compatible checkpoint and its authoritative covered position;
+- every contiguous authoritative recovery transition after that position;
+- every retained public/reliable output still required after promotion;
+- delivery/retry state sufficient to prevent skipping committed obligations; and
+- Station checkpoint/delta information sufficient to advance the local projection's
+  **global contiguous applied-through position**.
 
-Promotion eligibility requires all of the following:
+Promotion eligibility requires:
 
-1. compatible checkpoint members and fingerprints;
-2. no authoritative range gaps through the promoted position;
-3. all retained event/outbox bytes needed after promotion;
-4. cursor state that cannot skip an undelivered committed output;
-5. successful invariant validation after applying the shared reducer; and
-6. a Station SQLite applied watermark at or beyond the promoted authoritative
-   position, established before any Station read/write is served.
+1. compatible checkpoint members/fingerprints;
+2. no authoritative recovery gaps through the promotion position;
+3. successful application of the shared recovery reducer through that position;
+4. no missing promotion-critical retained public/reliable output;
+5. delivery/retry state that cannot skip an undelivered committed obligation;
+6. successful invariant validation; and
+7. `StationProjection.applied_through >= promotion_position` before Station
+   reads/writes are served. Non-Station transitions count as explicit no-op
+   progression for this watermark.
 
-A replica that satisfies ECS state equivalence but lacks required output data,
-cursor proof, or Station projection freshness remains non-promotable.
+A node with bytes durably staged for quorum but not yet applied is not promotable
+through those bytes. A node with ECS equivalence but stale retry/output/projection
+state is likewise not healthy for promotion.
 
 ## 11. Determinism boundary
 
 The engine should remain deterministic where practical, but exact recovery does not
-re-execute historical code. Process randomness, floating-point behavior, catalog
-evolution, iteration ordering, AI implementation, and pending-queue contents can
-change outcomes. The state-delta journal captures committed outcomes and keeps the
-recovery contract stable across those implementation changes.
+re-execute historical implementation code. Process randomness, floating-point
+behavior, catalog evolution, iteration ordering, AI implementation, and queue
+contents can alter rerun outcomes. The state-delta journal captures committed
+outcomes and keeps recovery independent of those implementation details.
 
-Diagnostic metadata such as accepted request identity, random seed/draws, or system
-version may be included, but it is supplementary. `DomainEvent`s are mandatory
-durable public outputs when produced, not inputs to the exact state reducer.
+Diagnostic accepted-input/RNG metadata may be included, but it is supplementary.
+`DomainEvent`s remain mandatory durable public outputs when produced, not the sole
+exact-state reducer.
 
 ## 12. RTO status
 
-RTO is intentionally **TBD**, not implied by the recovery procedure. #284 must
+RTO is intentionally **TBD**, not implied by having a recovery procedure. #284 must
 benchmark representative ship counts and eventless Ticks, then define:
 
 - maximum authoritative tail transitions and bytes;
 - maximum replay time on named reference hardware;
-- checkpoint cadence and trigger thresholds; and
-- the production recovery target derived from those limits.
+- checkpoint cadence/trigger thresholds; and
+- the production recovery target derived from those measurements.
 
-Until those measurements land, the checklist item for numeric RTO remains open.
+Until those measurements land, the numeric-RTO acceptance criterion remains open.
 
 ## 13. Required tests
 
-The implementation of #271/#272/#284 must eventually cover:
+Implementation across #271/#272/#276/#277/#280/#284 must eventually cover the
+relevant layer of each guarantee:
 
 - append failure before commit for a simple command;
 - append failure for an eventless Tick with movement/capacitor changes;
-- crash after append and before live commit;
+- crash after durable append and before local live apply;
 - live reducer error/panic/partial apply after append, proving fail-stop fencing;
-- SQLite projection failure after append and idempotent catch-up by transition id;
-- replica promotion blocked by a stale SQLite projection watermark;
+- ReplicatedDurable staged-quorum bytes cannot be published/promoted before local
+  reducer application;
+- Station projection failure after append and idempotent catch-up;
+- Station global applied-through watermark advances across non-Station no-op
+  transitions and blocks promotion when stale;
+- `SelectActiveShip`/`Disembark` recovery equivalence even when no public event is
+  emitted;
 - pending bot lock-command queue checkpoint-plus-tail equivalence;
-- crash after Warp commit and before auto-jump Raft proposal, proving outbox retry;
-- ambiguous crash after auto-jump Raft proposal, proving idempotent retry;
-- crash after live commit and before public-event publication, proving cursor-based
-  delivery resumes from the committed event subrecord;
-- crash after downstream delivery acknowledgement but before cursor durability,
-  proving duplicate delivery is safe and no output is skipped;
-- checkpoint plus tail equivalence for motion, capacitor, locks, module cycles,
-  docking, Station inventory, admission, combat randomness, and Transit;
-- duplicate, missing, out-of-order, corrupt, or incompatible envelopes;
-- incomplete checkpoint set, corrupt member, and incompatible format/fingerprint;
-- compaction crash before and after manifest publication;
-- state-delta compaction cannot remove undelivered public events/outbox intents;
-- snapshot-based replica catch-up cannot promote without retained outputs/cursors;
-- LocalDurable acknowledgement survives process/OS/power-loss injection with the
-  durable medium intact;
-- ReplicatedDurable acknowledgement is not emitted before configured quorum commit;
-- no public event or external effect before durable commit; and
-- idempotent recovery/retry of a transition already durably appended.
+- crash after Warp commit and before Transit continuation proposal, proving durable
+  retry survives;
+- ambiguous crash after proposal, proving #276 idempotency;
+- crash after local apply and before public-event publication;
+- crash after downstream delivery acknowledgement but before delivery-state
+  durability, proving duplicate-safe retry and no skip;
+- checkpoint-plus-tail equivalence for motion, capacitor, locks, module cycles,
+  docking, Player/active-ship state, Station inventory, admission, combat randomness,
+  and Transit;
+- duplicate, missing, out-of-order, corrupt, or incompatible recovery records;
+- incomplete checkpoint, corrupt member, and incompatible format/fingerprint;
+- interrupted checkpoint publication and compaction boundaries;
+- state compaction cannot remove still-required public/reliable outputs;
+- snapshot-based catch-up cannot promote with staged-but-unapplied ranges or stale
+  promotion-critical projections;
+- LocalDurable acknowledgement survives the documented local failure injections;
+- ReplicatedDurable acknowledgement is not emitted before configured quorum
+  durability and required owner-side apply/projection success;
+- no public event or reliable external effect before local live apply; and
+- idempotent recovery/retry of a transition already durably committed.
