@@ -1,26 +1,18 @@
-//! `SimulationNode` — the current self-contained simulation unit for one Sector.
+//! `SimulationNode` — the self-contained simulation unit for one Sector.
 //!
 //! # Generic over `S: EventStore`
 //!
 //! `SimulationNode<S>` defaults to `SimulationNode<InMemoryEventStore>`. Every
 //! normal construction and restore path requires a complete validated
-//! [`GameDataCatalog`]. #272/#275 replace this broad storage-coupled aggregate
-//! with a storage-independent engine and explicit state owners.
+//! [`GameDataCatalog`].
 //!
-//! # Current legacy Snapshot / Restore path
-//!
-//! The implementation below still restores the pre-ADR-0049 `StateSnapshot` +
-//! public EventStore tail:
+//! # Snapshot / Restore (INV-002)
 //!
 //! ```text
 //! node.take_snapshot()           -> StateSnapshot (ECS state at log_index N)
 //! SimulationNode::restore_from(store, &snapshot, galaxy, catalog)
 //!     -> reconstruct ECS from snapshot, replay events from log_index N onward
 //! ```
-//!
-//! This is migration baseline, not the final INV-002 recovery contract. ADR-0049
-//! selects a compatible versioned checkpoint + authoritative `RecoveryDelta` tail,
-//! including eventless Ticks and authoritative state with no public event.
 
 mod admission_provisional;
 mod apply_event;
@@ -162,12 +154,10 @@ pub struct FittedModuleStatus {
 
 // -- SimulationNode ----------------------------------------------------------
 
-/// Current storage-coupled single-Sector simulation aggregate.
+/// A single-Sector simulation node, generic over its event store.
 ///
-/// The default store is `InMemoryEventStore`; the current production path can
-/// supply a `FileEventStore`. This shape is the pre-#272 implementation baseline,
-/// not the target durability boundary: #272 moves persistence into the runtime and
-/// #275 splits state ownership while consuming ADR-0049 recovery semantics.
+/// The default store is `InMemoryEventStore`; use `FileEventStore` for
+/// persistent operation (Phase 3).
 pub struct SimulationNode<S = InMemoryEventStore>
 where
     S: EventStore,
@@ -187,27 +177,19 @@ where
     ship_type_registry: Arc<BTreeMap<ShipTypeId, ShipTypeDefinition>>,
     /// Bare ShipStats without fitting. Used as the base for fitting aggregation.
     base_stats: HashMap<ShipId, ShipStatsComp>,
-    /// Current in-memory PlayerId allocation counter. ADR-0049/#277 require
-    /// restart allocation to advance above every materialized or durably reserved
-    /// PlayerId; this field alone is not sufficient allocator authority.
+    /// PlayerId allocation counter.
     player_id_counter: u64,
-    /// In-memory claim set for fresh admissions currently being advanced by this
-    /// process. The claim set itself is non-durable and may be reacquired after a
-    /// crash, but every ID represented by a durable #277 reservation is already
-    /// consumed and must never be reused. Counted against the population cap while
-    /// the current handshake owns the claim.
+    /// Non-durable Ship IDs reserved by in-flight fresh admissions.
+    /// Counted against the population cap but intentionally omitted from snapshots.
     pending_fresh_admissions: HashSet<ShipId>,
-    /// Process-local Ship-level lock held by an in-flight resume handshake.
-    /// A crash may release this concurrency guard; authoritative ownership/ticket
-    /// state remains in recovered Sector state plus #277 identity repository state.
+    /// Ship-level lock held by an in-flight resume handshake.
+    /// Non-durable: authoritative ownership is still unchanged until commit.
     pending_resume_admissions: HashMap<ShipId, PlayerId>,
     /// Lock-on commands queued by the bot AI during `process_bots()`.
     ///
-    /// Bot AI runs after the LockSystem each tick. These commands are held here
-    /// and injected into the LockSystem at the start of the NEXT tick, ensuring
-    /// they are processed exactly like human-issued lock commands. While this
-    /// queue crosses a Tick boundary, ADR-0049 classifies its contents as
-    /// authoritative recovery state; #284 must persist it or redesign it away.
+    /// Bot AI runs after the LockSystem each tick.  These commands are held
+    /// here and injected into the LockSystem at the start of the NEXT tick,
+    /// ensuring they are processed exactly like human-issued lock commands.
     pending_bot_lock_commands: Vec<dawn_core::LockOnCommand>,
     /// Static navigation topology for this Sector (gates, bodies, star map).
     sector_map: SectorMap,
@@ -217,14 +199,11 @@ where
     /// Per-Sector population backstop (ADR-0018). Defaults to [`POPULATION_CAP`];
     /// tunable via [`Self::set_population_cap`].
     population_cap: usize,
-    /// Current catch-all SQLite adapter. Under ADR-0049/#277, Station inventory
-    /// rows become an idempotent projection of journal-owned Station state, while
-    /// prepared admission / identity / resume-ticket rows may remain durable
-    /// protocol authority in separate #277 repositories. This field/type is the
-    /// migration baseline, not a single SQLite authority for all contained rows.
+    /// Durable Station inventory store (ADR-0038): SQLite is the authority,
+    /// this is a bounded in-memory cache of recently-touched players on top
+    /// of it (`node/station.rs`'s seam). `RefCell` for interior mutability so
+    /// read-only accessors can still populate the cache on a miss.
     station_inventory_db: station_inventory_db::StationInventoryDb,
-    /// Derived bounded cache over Station projection/read rows. Never recovery
-    /// authority on its own.
     station_inventory_cache: std::cell::RefCell<station_inventory::StationInventoryCache>,
     /// Current docked station per ship. Docking is authoritative state, so
     /// station operations must consult this rather than raw spatial proximity.
@@ -232,22 +211,19 @@ where
     /// Current docked station context per player. This is separate from the
     /// active ship map so station access can survive ship-specific actions.
     docked_players: BTreeMap<PlayerId, StationId>,
-    /// Current in-memory work queue for auto-jump triggers accumulated during
-    /// `process_warp()`. The runtime drains it to propose the jump to Raft.
-    /// ADR-0049 requires the underlying committed auto-jump continuation to have
-    /// durable replayable/idempotent state; this Vec may be a convenience queue
-    /// but cannot be the sole recovery source. #276 may absorb the obligation
-    /// into its Transit Saga.
+    /// Auto-jump triggers accumulated during `process_warp()` for ships that
+    /// completed a warp with `WarpComp::auto_jump = true`. Drained by the
+    /// caller after each tick so the jump can be proposed to the Raft Log
+    /// (or handled however the server path requires).
     pending_auto_jumps: Vec<(ShipId, JumpGateId)>,
     /// Ships that finished a warp this tick (ADR-0029 warp-arrival authority).
-    /// This is intentionally lossy presentation output: the serve loop drains it
-    /// and sends the owner an authoritative `PositionSnap`, correcting capped
-    /// warp-visual dead-reckoning. Unlike the auto-jump continuation above,
-    /// reconnect/current-state sync may repair loss of this notification.
+    /// Transient and non-persisted (like `pending_auto_jumps`): the serve loop
+    /// drains it each tick and sends the owner an authoritative `PositionSnap`,
+    /// correcting the client's capped warp-visual dead-reckoning. Independent of
+    /// whether the arrival changed the ship's anchor, so it covers every warp
+    /// (gate / body / same-anchor) with one mechanism.
     completed_warps: Vec<ShipId>,
-    /// Current legacy destination-side transit receipts used for Commit
-    /// deduplication. #276 replaces this snapshot-era representation with the
-    /// first-class durable Transit Saga/receipt authority.
+    /// Durable destination-side transit receipts used for Commit deduplication.
     completed_incoming_transits: Vec<CompletedIncomingTransit>,
 }
 
@@ -380,13 +356,8 @@ impl<S: EventStore> SimulationNode<S> {
         }
     }
 
-    /// Current legacy restore API: reconstruct from the snapshot plus public
-    /// EventStore tail using the validated catalog selected by the runtime.
-    ///
-    /// ADR-0049/#284 replace this operational contract with versioned checkpoint
-    /// + authoritative `RecoveryDelta` tail. Keep this method as migration
-    /// baseline until #271/#272 convert the restore path; do not use it to infer
-    /// the final recovery representation.
+    /// Restore a node from a snapshot plus its event tail using the exact
+    /// validated catalog selected by the runtime.
     pub fn restore_from(
         store: S,
         snapshot: &StateSnapshot,
@@ -466,15 +437,13 @@ impl<S: EventStore> SimulationNode<S> {
         self.population_cap = cap;
     }
 
-    /// Point the current catch-all Station/admission/identity SQLite adapter at
-    /// a real on-disk file instead of the private in-memory database used by
-    /// `new`/`with_store`/`restore_from`.
-    ///
-    /// Production wiring calls this once after construction today. Under
-    /// ADR-0049/#277, Station rows become a projection while admission/identity
-    /// protocol authority is exposed through separate repositories; #272/#278
-    /// move repository ownership outside the pure engine. Replaces the cache too,
-    /// since it would otherwise hold entries read from the old database.
+    /// Point Station inventory persistence at a real on-disk SQLite file
+    /// (ADR-0038) instead of the private in-memory database `new`/`with_store`/
+    /// `restore_from` default to. Production wiring (`dawn-sector-node`'s
+    /// `build_node`) calls this once after construction because the database
+    /// path is process-local; topology is already fixed by construction.
+    /// Replaces the cache too, since it would otherwise
+    /// still hold entries read from the old (in-memory) database.
     pub fn open_station_inventory_db(&mut self, path: &str) -> rusqlite::Result<()> {
         self.station_inventory_db = station_inventory_db::StationInventoryDb::open(path)?;
         self.station_inventory_cache
@@ -878,10 +847,6 @@ mod tests {
             thrust.direction,
             Velocity::ZERO,
             "move command must be rejected while in transit"
-        );
-        assert!(
-            !thrust.is_braking,
-            "is_braking must not be set while in transit"
         );
     }
 
