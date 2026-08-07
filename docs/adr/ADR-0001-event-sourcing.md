@@ -3,19 +3,27 @@ id      : ADR-0001
 title   : Event Sourcing の採用
 status  : accepted
 date    : 2026-06-04
+updated : 2026-08-07
 deciders: [human, ai-agent]
 ---
 
 # ADR-0001 — Event Sourcing の採用
 
-> **ADR-0049 amendment (2026-08-07):** `DomainEvent` は引き続き append-only の
-> durable public/business fact と監査履歴だが、Sector の exact operational recovery
-> における唯一の state authority ではない。権威状態の復旧は versioned checkpoint +
-> committed authoritative state-delta tail で行う。DomainEvent と reliable outbox
-> intent は同じ durable transition envelope に原子的に commit される。以下の
-> 「Event を唯一の真実」「同じ Event だけで常に同じ State を完全復元」という旧記述は、
-> public fact / audit / projection の文脈に限定して読むこと。復旧・commit ordering は
-> ADR-0049 と `docs/architecture/recovery-contract.md` が normative である。
+> **ADR-0049 amendment (2026-08-07):** 下記本文は2026-06-04時点の原決定を履歴として
+> 保持する。`DomainEvent`をappend-only public/business fact、audit history、projection input
+> とするEvent Sourcing + CQRSの価値は維持する。一方、以下の「Eventを唯一の真実」
+> 「同じEventだけで世界状態を完全復元」という記述を **exact operational Sector recovery**
+> に適用する部分はADR-0049でsupersededされた。
+>
+> 現在のexact recovery authorityは **versioned checkpoint + committed authoritative
+> `RecoveryDelta` tail** である。eventless Tickや`active_ship` routing、capacitor/lock/module
+> counters等、public Eventを出さないauthoritative mutationもこのrecovery streamに記録される。
+> Public Event replayはsupported projection/audit/debug用途では引き続き有用だが、任意の
+> acknowledged Tickのexact stateを単独で再構築する保証ではない。
+>
+> したがって原本文中の「全ての権威あるState変更はEventとして記録」は現在は
+> 「全てのauthoritative mutationはADR-0049 RecoveryDeltaに表現し、public/business factが
+> 生じた場合はDomainEventも同じlogical transition boundaryでdurableにする」と読む。
 
 ## コンテキスト
 
@@ -45,22 +53,20 @@ deciders: [human, ai-agent]
 - バグ修正後に「過去の状態はどうだったか」を再現できない
 - ノード間で State が diverge した場合のマージ手段がない
 
-### B: Event Sourcing（Event を durable fact とする）
+### B: Event Sourcing（Event を唯一の真実とする）
 
-「何が起きたか」を append-only の `DomainEvent` として記録し、CQRS と組み合わせる。
-ADR-0049 以降、これらの event は exact ECS recovery reducer ではなく、public/business
-fact・監査・projection の authority である。exact operational state は同じ transition に
-commit された authoritative state delta から復旧する。
+State を保存するのではなく、「何が起きたか」を Append-only で記録する。  
+State は Event のリプレイによって導出する。CQRS と組み合わせて使用する。
 
 **メリット:**
-- public/business change に因果情報（Tick・NodeId）が付与される
-- バグ調査時に durable fact の履歴を追跡できる
-- public projection を既存 Event から再生成できる
-- exact recovery schema を public event catalog から分離できる（ADR-0049）
+- 全ての変更に因果情報（Tick・NodeId）が付与される
+- バグ修正後に Event をリプレイして世界を任意の時点に復元できる
+- ノード間の競合は「どの Event が先か」という問題に還元できる
+- AI が機能を追加する際、既存の Event から新しい Projection を生成できる
 
 **デメリット:**
 - Event スキーマの後方互換性管理が必要
-- exact state recovery には別の versioned state-delta/checkpoint 契約が必要
+- 起動時に全 Event をリプレイすると時間がかかる（Snapshot で対処）
 - 「現在状態」への点クエリが Read モデルを必要とする
 
 ### C: Operational Transformation (OT)
@@ -75,28 +81,23 @@ commit された authoritative state delta から復旧する。
 
 ## 決定
 
-**Event Sourcing + CQRS を public/business fact と audit/projection の基盤として採用する。**
-
-Sector exact recovery については ADR-0049 の **versioned authoritative state-delta journal +
-checkpoint** が追加の normative authority である。
+**Event Sourcing + CQRS を採用する（選択肢 B）**
 
 ---
 
 ## 根拠
 
-分散システムにおける重要な問題の一つは「何が起きたかの合意」である。State 同期だけでは
-現在値しか持たず、競合解決や監査に必要な因果情報が失われる。public/business fact を
-append-only に記録することで、その履歴を保持できる。
+分散システムにおける最大の問題は「何が起きたかの合意」である。  
+State 同期は「現在の状態」のみを持ち、競合解決に必要な因果情報が失われる。  
+Event を Append-only で記録することで、競合発生時に Tick + NodeId による全順序で判定できる。
 
-一方、位置・capacitor・lock countdown・module cycle・queue 等の高頻度 authoritative
-mutation は public event catalog では完全に表現されず、eventless Tick も存在する。
-ADR-0049 はこのギャップを exact state-delta journal で埋める。したがって
-`DomainEvent` replay は public projection/audit に有用だが、任意の committed Tick の
-bit/exact state を単独で再構築する契約ではない。
+デバッグにおける Event リプレイの価値は分散システムで特に高い。  
+バグ発見後に Event を最初から再生することで「バグが発生した瞬間の世界状態」を完全に復元できる。  
+EVE Online チームがこの技法を本番で活用していることは公開されている。
 
-AI エージェントが機能を拡張する際、新しい public Projection（Read モデル）を追加して
-既存 Event からビューを生成できる価値は維持される。同時に、recovery representation は
-public schema から独立して versioning できる。
+AI エージェントが機能を拡張する際、新しい Projection（Read モデル）を追加するだけで
+既存の Event からコードを変更せずに新しいビューを生成できる。  
+これは AI 継続開発における保守性の核心である。
 
 ---
 
@@ -104,37 +105,38 @@ public schema から独立して versioning できる。
 
 ### 採用によって得られるもの
 
-- public/business fact の append-only 監査履歴
-- event を用いた時間旅行的な因果調査と public projection 再生成
-- public event schema と exact state-recovery schema の分離
-- ADR-0049 の state delta と同一 atomic envelope に event を含めることで、commit 後に
-  public fact だけ失う crash window を排除
+- 世界の完全な再現性（同じ Event を再生すれば常に同じ State になる）
+- バグ発生時の時間旅行デバッグ
+- 将来のノード間同期が「State を合わせる」ではなく「Event を合わせる」問題になる
 
 ### 採用によって生じるトレードオフ
 
-- Event スキーマの後方互換性を管理する必要がある
-- exact recovery には checkpoint/state-delta format の versioning も必要
+- Event スキーマの後方互換性を永続的に管理する必要がある
+- Snapshot なしでは再起動のたびに全 Event をリプレイする
 - 「現在状態を読む」という単純な操作に Read モデルのオーバーヘッドが生じる
 
 ### この決定が強制する設計上の制約
 
-```text
-- committed DomainEvent を update / delete / in-place rewrite してはならない
-  （INV-001 / FBD-001）。
-- authoritative state mutation は ADR-0049 の RecoveryDelta で durable に表現する。
-  DomainEvent が存在しない Tick も durable transition を持つ。
-- operational recovery は compatible checkpoint + committed authoritative state-delta tail。
-  public-event-only replay や historical Tick 再実行は exact recovery authority ではない。
-- DomainEvent と reliable outbox intent は transition delta と同じ atomic commit boundary を持つ。
-- Event スキーマの後方互換性は event-catalog.md のルールで管理する。
 ```
+- EventStore に update / delete / truncate メソッドを追加してはならない（docs/architecture/forbidden-changes.md FBD-001）
+- 全ての**権威ある** State 変更は Event として記録する（INV-002）
+  ※ ADR-0017 で精緻化: 派生・transient 状態（位置・capacitor 等）はイベント化せず
+    スナップショットに永続化する。スナップショットが権威ある永続チェックポイントであり、
+    運用復旧はスナップショット + 末尾 catch-up で行う（genesis 完全 replay は経路外）。
+- Event スキーマの後方互換性は event-catalog.md のルールで管理する
+```
+
+> **Current interpretation after ADR-0049:** FBD-001はcommitted public `DomainEvent` historyを
+> 保護する。exact operational recoveryはversioned checkpoint + authoritative state-delta tailを
+> 使い、state-delta compactionはpublic Event historyのin-place rewriteとは別物である。
 
 ---
 
 ## 今後の再評価トリガー
 
-- Recovery/state-delta log の write volume や replay cost が checkpoint/compaction でも
-  管理できないほど増えた場合
-  → ADR-0049/#284 の recovery model と RTO budget を再評価する。
+- Event Log のサイズが Snapshot でも管理できないほど膨大になった場合
+  → **ADR-0017 で対応**（2層ログ: ホットログ圧縮 + コールドアーカイブ）
 - Event スキーマの後方互換性管理コストが開発速度を著しく下げた場合
-  → public fact / projection 契約自体を別 ADR で再評価する。
+
+> ADR-0049以降、recovery journalのwrite volume/replay cost/RTOが問題になった場合は#284の
+> state-delta/checkpoint modelを再評価し、public Event Sourcingの監査/projection価値とは別に扱う。
