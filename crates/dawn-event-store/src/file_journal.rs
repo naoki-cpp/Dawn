@@ -258,9 +258,9 @@ impl FileJournal {
         let archived_len =
             u32::try_from(boundary.0 - old_base.0).map_err(|_| JournalError::IndexOverflow)?;
         let archive_scan = ensure_archive(archive_path, self.base_index)?;
-        if archive_scan.next_index > boundary {
+        if archive_scan.base_index > self.base_index || archive_scan.next_index != self.base_index {
             return Err(JournalError::ArchiveMismatch {
-                expected: boundary,
+                expected: self.base_index,
                 actual: archive_scan.next_index,
             });
         }
@@ -338,8 +338,10 @@ impl FileJournal {
         }
         self.writer.flush()?;
         std::fs::rename(&tmp, &self.path)?;
+        let writer = FileWriter::open(&self.path)?;
         self.base_index = boundary;
-        self.writer = Box::new(FileWriter::open(&self.path)?);
+        self.writer = Box::new(writer);
+        sync_parent_directory(&self.path)?;
 
         Ok(CompactionReceipt {
             archived: JournalRange {
@@ -436,6 +438,19 @@ fn tmp_path_for(path: &Path) -> PathBuf {
     PathBuf::from(value)
 }
 
+fn sync_parent_directory(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        let parent = path.parent().unwrap_or_else(|| Path::new("."));
+        File::open(parent)?.sync_all()
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Ok(())
+    }
+}
+
 fn ensure_archive(path: &Path, base_index: JournalIndex) -> Result<JournalScan, JournalError> {
     if !path.exists() || std::fs::metadata(path)?.len() == 0 {
         let mut file = OpenOptions::new()
@@ -446,14 +461,9 @@ fn ensure_archive(path: &Path, base_index: JournalIndex) -> Result<JournalScan, 
         file.write_all(MAGIC)?;
         file.write_all(&base_index.0.to_le_bytes())?;
         file.sync_all()?;
+        sync_parent_directory(path)?;
     }
     let scan = scan_file(path, true, |_, _, _, _| {})?;
-    if scan.base_index != base_index {
-        return Err(JournalError::ArchiveMismatch {
-            expected: base_index,
-            actual: scan.base_index,
-        });
-    }
     Ok(scan)
 }
 
@@ -914,6 +924,35 @@ mod tests {
                 .payload,
             b"first"
         );
+    }
+
+    #[test]
+    fn repeated_compaction_appends_to_the_same_archive() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("journal.bin");
+        let archive = directory.path().join("journal.archive");
+        let mut journal = FileJournal::open(&path).unwrap();
+        journal.append_batch(batch(1, &[b"first"])).unwrap();
+        journal.append_batch(batch(2, &[b"second"])).unwrap();
+        journal.compact(JournalIndex(1), &archive).unwrap();
+
+        journal.append_batch(batch(3, &[b"third"])).unwrap();
+        let receipt = journal.compact(JournalIndex(2), &archive).unwrap();
+
+        assert_eq!(receipt.archived.first, JournalIndex(1));
+        assert_eq!(receipt.archived.len, 1);
+        assert_eq!(journal.base_index(), JournalIndex(2));
+        assert_eq!(journal.next_index().unwrap(), JournalIndex(3));
+
+        let archive = FileJournal::open(&archive).unwrap();
+        assert_eq!(archive.base_index(), JournalIndex::ZERO);
+        assert_eq!(archive.next_index().unwrap(), JournalIndex(2));
+        let records: Vec<_> = archive
+            .read_from(JournalIndex::ZERO)
+            .unwrap()
+            .map(|record| record.unwrap().payload)
+            .collect();
+        assert_eq!(records, vec![b"first".to_vec(), b"second".to_vec()]);
     }
 
     #[test]

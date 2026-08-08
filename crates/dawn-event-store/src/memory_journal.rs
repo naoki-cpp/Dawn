@@ -91,7 +91,7 @@ impl DurableJournal for InMemoryJournal {
                     payload: entry.payload,
                 }),
         );
-        debug_assert_eq!(self.records.len() as u64, last);
+        debug_assert_eq!(self.next_index().ok(), Some(JournalIndex(last)));
         Ok(receipt)
     }
 
@@ -335,5 +335,22 @@ mod tests {
             journal.read_from(JournalIndex(0)),
             Err(JournalError::CompactedRange { .. })
         ));
+
+        let receipt = journal
+            .append_batch(
+                JournalBatch::new(
+                    TransitionId(9),
+                    DurabilityContext {
+                        sector_id: SectorId(3),
+                        owner_epoch: 11,
+                    },
+                    vec![b"third".to_vec()],
+                    DurabilityMode::Synced,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(receipt.range.first, JournalIndex(2));
+        assert_eq!(journal.next_index().unwrap(), JournalIndex(3));
     }
 }

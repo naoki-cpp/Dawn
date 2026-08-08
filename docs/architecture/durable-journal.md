@@ -54,9 +54,17 @@ claims remote durability; #278 aggregates remote evidence separately.
 `FileJournal::compact(boundary, archive_path)` accepts only a complete batch
 boundary at or before the current next index. It first appends the immutable
 prefix to the archive and syncs it, then writes and syncs a new hot suffix and
-atomically replaces the hot file. A crash before replacement leaves the old
+atomically replaces the hot file. On Unix, the parent directory is synced after
+the replacement so the rename is durable across a power loss; platforms that
+do not support directory fsync retain atomic replacement but do not claim that
+stronger directory-entry guarantee. A crash before replacement leaves the old
 hot file; a crash after replacement leaves the archived prefix and the new
 suffix. The global journal indices and receipt ranges remain unchanged.
+
+The archive is append-only across repeated compactions. Each subsequent
+compaction requires the archive's `next_index` to equal the current hot
+`base_index`, then appends the next complete prefix without changing the
+global index space.
 
 After compaction, `read_from` serves the retained hot range and returns
 `CompactedRange` for an archived prefix. The archive is itself a versioned
