@@ -30,6 +30,8 @@ pub enum StopTransitionError {
     Preparation(#[from] TransitionError),
     #[error("durable transition append failed: {0}")]
     Durable(#[from] JournalError),
+    #[error("prepared Stop cannot be applied to the current state: {0}")]
+    Validation(#[from] TransitionApplyError),
 }
 
 impl<S: EventStore> SimulationNode<S> {
@@ -105,19 +107,14 @@ impl<S: EventStore> SimulationNode<S> {
         durability: DurabilityMode,
     ) -> Result<AppendReceipt, StopTransitionError> {
         let prepared = self.prepare_stop_transition(ship_id, transition_id, owner_epoch)?;
-        let SectorRecoveryDelta::Stop(delta) = prepared.recovery_delta;
+        let SectorRecoveryDelta::Stop(delta) = prepared.recovery_delta else {
+            unreachable!("prepare_stop_transition always produces a Stop delta");
+        };
         // Resolve the live entity before the durable append. Once the journal
         // accepts the transition, applying this already-validated entity is
         // infallible; a post-commit lookup failure must not masquerade as a
         // normal command rejection.
-        let entity = match self.stop_entity(delta.ship_id) {
-            Ok(entity) => entity,
-            Err(TransitionApplyError::UnknownShip(ship_id)) => {
-                return Err(StopTransitionError::Preparation(
-                    TransitionError::UnknownShip(ship_id),
-                ));
-            }
-        };
+        let entity = self.stop_entity(delta.ship_id)?;
         let receipt =
             crate::transition_journal::append_prepared_transition(journal, &prepared, durability)?;
         self.apply_stop_delta(entity);
@@ -185,7 +182,9 @@ impl<S: EventStore> SimulationNode<S> {
         let Ok(prepared) = self.prepare_stop_transition(ship_id, SectorTransitionId(0), 0) else {
             return;
         };
-        let SectorRecoveryDelta::Stop(delta) = prepared.recovery_delta;
+        let SectorRecoveryDelta::Stop(delta) = prepared.recovery_delta else {
+            unreachable!("prepare_stop_transition always produces a Stop delta");
+        };
         let _ = self.apply_stop_transition(delta);
     }
 

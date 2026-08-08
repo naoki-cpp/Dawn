@@ -17,6 +17,13 @@ related  : event-catalog.md, recovery-contract.md, ownership.md, ../adr/ADR-0049
 > the old mutate-then-append pipeline; those current call shapes are migration debt,
 > not a competing commit contract.
 
+The current #272 migration slice exposes `SectorEngine::prepare_tick` and
+`SimulationNode::commit_tick_transition` for the logical Tick counter only. It
+proves the durable counter boundary, including eventless append failure, but it
+does not replace `tick_with_lock_commands`: the ECS movement, capacitor, combat,
+and other system write sets remain the legacy path until they acquire bounded
+prepared mutations of their own.
+
 ## 1. Tick Definition
 
 ```
@@ -427,7 +434,8 @@ enters `transit::run_runtime_tick()` for the frame order;
 This is current implementation topology, not a permanent storage/API constraint:
 
 - #272 moves persistence ownership outside the pure Sector engine and introduces the
-  explicit prepared transition boundary;
+  explicit prepared transition boundary. Its current vertical slices cover AoI,
+  Stop, and the logical Tick counter; the full ECS Tick remains a later slice;
 - #275 splits heterogeneous `SimulationNode` state authority;
 - #276 replaces current Transit scan/retry state with a durable Saga;
 - #280 may replace replication/snapshot transport wiring while preserving the Tick/

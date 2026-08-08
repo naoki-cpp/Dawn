@@ -9,11 +9,30 @@ use dawn_ecs::{
     systems::{CapacitorSystem, CombatSystem, LockSystem, MovementSystem, RepairSystem},
     Entity,
 };
-use dawn_event_store::store::EventStore;
+use dawn_event_store::{
+    store::EventStore, AppendReceipt, DurabilityMode, DurableJournal, JournalError,
+};
+use thiserror::Error;
 
 use super::{SimulationNode, TickResult};
+use crate::transition::{
+    PreparedSectorTransition, SectorEngine, SectorRecoveryDelta, SectorTransitionId,
+    TickCommandState, TickRecoveryDelta, TransitionApplyError, TransitionContext, TransitionError,
+};
 
 const SCRAP_METAL_PER_SHIP_DESTROYED: u64 = 1;
+
+/// Failure returned by the logical Tick counter's prepare -> durable -> apply
+/// vertical slice. The full ECS system write set remains a later migration.
+#[derive(Debug, Error)]
+pub enum TickTransitionError {
+    #[error(transparent)]
+    Preparation(#[from] TransitionError),
+    #[error("durable transition append failed: {0}")]
+    Durable(#[from] JournalError),
+    #[error("prepared Tick cannot be applied to the current state: {0}")]
+    Validation(#[from] TransitionApplyError),
+}
 
 fn lock_event_touches_transit(event: &DomainEvent, transit_ids: &HashSet<ShipId>) -> bool {
     match event {
@@ -42,6 +61,86 @@ struct FrozenTransitComponents {
 }
 
 impl<S: EventStore> SimulationNode<S> {
+    /// Prepare the logical Tick counter without changing the live state.
+    pub fn prepare_tick_transition(
+        &self,
+        transition_id: SectorTransitionId,
+        owner_epoch: u64,
+    ) -> Result<PreparedSectorTransition, TransitionError> {
+        SectorEngine::prepare_tick(
+            TickCommandState {
+                current_tick: self.current_tick,
+            },
+            transition_id,
+            TransitionContext {
+                sector_id: self.sector_id,
+                owner_epoch,
+            },
+        )
+    }
+
+    /// Apply a committed logical Tick counter delta during recovery or catch-up.
+    pub fn apply_tick_transition(
+        &mut self,
+        delta: TickRecoveryDelta,
+    ) -> Result<(), TransitionApplyError> {
+        self.validate_tick_transition(delta)?;
+        self.apply_validated_tick(delta);
+        Ok(())
+    }
+
+    fn validate_tick_transition(
+        &self,
+        delta: TickRecoveryDelta,
+    ) -> Result<(), TransitionApplyError> {
+        let Some(expected_to) = delta.from.0.checked_add(1).map(dawn_core::Tick) else {
+            return Err(TransitionApplyError::InvalidTickStep {
+                from: delta.from,
+                to: delta.to,
+            });
+        };
+        if delta.to != expected_to {
+            return Err(TransitionApplyError::InvalidTickStep {
+                from: delta.from,
+                to: delta.to,
+            });
+        }
+        if self.current_tick != delta.from {
+            return Err(TransitionApplyError::TickMismatch {
+                expected: delta.from,
+                actual: self.current_tick,
+            });
+        }
+        Ok(())
+    }
+
+    fn apply_validated_tick(&mut self, delta: TickRecoveryDelta) {
+        self.current_tick = delta.to;
+    }
+
+    /// Commit the logical Tick counter through the ADR-0049 ordering.
+    ///
+    /// This intentionally commits only the counter. The existing ECS systems
+    /// still form the legacy Tick path until their bounded write sets are
+    /// migrated under the same transition.
+    pub fn commit_tick_transition<J: DurableJournal>(
+        &mut self,
+        journal: &mut J,
+        transition_id: SectorTransitionId,
+        owner_epoch: u64,
+        durability: DurabilityMode,
+    ) -> Result<AppendReceipt, TickTransitionError> {
+        let prepared = self.prepare_tick_transition(transition_id, owner_epoch)?;
+        let SectorRecoveryDelta::Tick(delta) = prepared.recovery_delta else {
+            unreachable!("prepare_tick_transition always produces a Tick delta");
+        };
+        self.validate_tick_transition(delta)?;
+        let receipt =
+            crate::transition_journal::append_prepared_transition(journal, &prepared, durability)?;
+        self.apply_validated_tick(delta);
+        Ok(receipt)
+    }
+
     /// Execute one simulation tick.
     pub fn tick(&mut self) -> TickResult {
         self.tick_with_lock_commands(&[])
@@ -294,6 +393,9 @@ mod tests {
         commands::TransitCommand, NodeId, Position, SectorBounds, SectorId, Tick, Velocity,
     };
     use dawn_ecs::components::{LockEntry, LockState};
+    use dawn_event_store::{
+        DurableJournal, InMemoryJournal, JournalBatch, JournalIndex, JournalRecord,
+    };
 
     fn mem_node() -> SimulationNode {
         SimulationNode::new_test(
@@ -312,6 +414,109 @@ mod tests {
         assert_eq!(node.current_tick(), Tick(1));
         node.tick();
         assert_eq!(node.current_tick(), Tick(2));
+    }
+
+    #[test]
+    fn tick_transition_appends_before_advancing_the_counter() {
+        let mut node = mem_node();
+        let mut journal = InMemoryJournal::new();
+
+        let receipt = node
+            .commit_tick_transition(
+                &mut journal,
+                SectorTransitionId(20),
+                4,
+                DurabilityMode::Synced,
+            )
+            .expect("durable Tick should apply");
+
+        assert_eq!(receipt.range.first, JournalIndex::ZERO);
+        assert_eq!(node.current_tick(), Tick(1));
+        assert_eq!(journal.records().len(), 1);
+        assert!(matches!(
+            journal.records()[0].stream,
+            dawn_event_store::JournalStream::RecoveryDelta
+        ));
+    }
+
+    #[test]
+    fn failed_tick_append_does_not_advance_the_counter() {
+        let mut node = mem_node();
+        let mut journal = FailingJournal;
+
+        assert!(node
+            .commit_tick_transition(
+                &mut journal,
+                SectorTransitionId(21),
+                4,
+                DurabilityMode::Synced,
+            )
+            .is_err());
+        assert_eq!(node.current_tick(), Tick::ZERO);
+    }
+
+    #[test]
+    fn stale_tick_delta_is_rejected_without_changing_the_counter() {
+        let mut node = mem_node();
+
+        let error = node
+            .apply_tick_transition(TickRecoveryDelta {
+                from: Tick(1),
+                to: Tick(2),
+            })
+            .expect_err("a delta from a future Tick must be rejected");
+
+        assert_eq!(
+            error,
+            TransitionApplyError::TickMismatch {
+                expected: Tick(1),
+                actual: Tick::ZERO,
+            }
+        );
+        assert_eq!(node.current_tick(), Tick::ZERO);
+    }
+
+    #[test]
+    fn invalid_tick_step_is_rejected_without_changing_the_counter() {
+        let mut node = mem_node();
+
+        let error = node
+            .apply_tick_transition(TickRecoveryDelta {
+                from: Tick::ZERO,
+                to: Tick(2),
+            })
+            .expect_err("a Tick delta must advance exactly one step");
+
+        assert_eq!(
+            error,
+            TransitionApplyError::InvalidTickStep {
+                from: Tick::ZERO,
+                to: Tick(2),
+            }
+        );
+        assert_eq!(node.current_tick(), Tick::ZERO);
+    }
+
+    struct FailingJournal;
+
+    impl DurableJournal for FailingJournal {
+        fn append_batch(&mut self, _batch: JournalBatch) -> Result<AppendReceipt, JournalError> {
+            Err(JournalError::Io(std::io::Error::other(
+                "injected append failure",
+            )))
+        }
+
+        fn read_from(
+            &self,
+            _index: JournalIndex,
+        ) -> Result<Box<dyn Iterator<Item = Result<JournalRecord, JournalError>> + '_>, JournalError>
+        {
+            Ok(Box::new(std::iter::empty()))
+        }
+
+        fn next_index(&self) -> Result<JournalIndex, JournalError> {
+            Ok(JournalIndex::ZERO)
+        }
     }
 
     #[test]
