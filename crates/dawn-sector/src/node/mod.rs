@@ -186,6 +186,11 @@ where
     /// runtime drain. The legacy EventStore remains a compatibility mirror
     /// until the durable transition adapter owns persistence completely.
     pending_events: Vec<DomainEvent>,
+    /// During a prepared Tick, direct command-side event producers append to
+    /// `pending_events` but must not touch the legacy EventStore. The prepared
+    /// transition collects those values as public output and restores the
+    /// buffer before returning to the runtime.
+    defer_event_persistence: bool,
     current_tick: Tick,
     id_counter: u64,
     /// Ship identity and ownership maps (entity index, type ids, player ownership).
@@ -387,6 +392,7 @@ impl<S: EventStore> SimulationNode<S> {
             world: SimWorld::new(sector_id),
             event_store: store,
             pending_events: Vec::new(),
+            defer_event_persistence: false,
             current_tick: Tick::ZERO,
             id_counter: 0,
             ships: ShipRegistry::new(),
@@ -569,7 +575,9 @@ impl<S: EventStore> SimulationNode<S> {
 
     fn emit_event(&mut self, event: DomainEvent) {
         self.pending_events.push(event.clone());
-        self.event_store.append(event);
+        if !self.defer_event_persistence {
+            self.event_store.append(event);
+        }
     }
 
     fn emit_events<I>(&mut self, events: I)

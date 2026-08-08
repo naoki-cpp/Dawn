@@ -92,7 +92,7 @@ pub(crate) fn inject_directory_sync_failure(destination: impl AsRef<Path>, call_
 /// requires the eventual versioned checkpoint + RecoveryDelta tail to preserve all
 /// authoritative values needed for exact recovery, whether or not a public Event
 /// represents them.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ShipSnapshot {
     pub ship_id: ShipId,
     pub ship_type_id: ShipTypeId,

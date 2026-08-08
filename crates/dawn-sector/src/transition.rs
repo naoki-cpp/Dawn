@@ -5,9 +5,14 @@
 //! the returned transition and only then ask the authoritative state owner to
 //! apply the same recovery delta.
 
-use dawn_core::{DomainEvent, SectorId, ShipId, Tick, Velocity};
+use dawn_core::{
+    ApproachTarget, DomainEvent, JumpGateId, LockOnCommand, SectorId, ShipId, Tick, Velocity,
+    WarpTarget,
+};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+use crate::persistence::ShipSnapshot;
 
 /// Version of the recovery-delta payload produced by this module.
 pub const RECOVERY_DELTA_VERSION: u16 = 1;
@@ -63,14 +68,139 @@ pub struct StopThrustState {
 }
 
 /// Exact authoritative logical-time change made by a successful Tick.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TickRecoveryDelta {
     pub from: Tick,
     pub to: Tick,
+    pub mode: TickRecoveryMode,
+    /// Changed ship state after the tick. Unchanged ships are omitted so the
+    /// durable record is a write set rather than a whole-world snapshot.
+    pub ship_states: Vec<TickShipState>,
+    /// Ships whose entities are removed by the committed tick.
+    pub removed_ships: Vec<ShipId>,
+    /// Cross-tick authoritative queues produced by the Bot and Warp systems.
+    pub pending_bot_lock_commands: Vec<LockOnCommand>,
+    pub pending_auto_jumps: Vec<(ShipId, JumpGateId)>,
+    /// Presentation corrections are carried with the transition output so a
+    /// runtime can publish them after the durable commit.
+    pub completed_warps: Vec<ShipId>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TickRecoveryMode {
+    Logical,
+    Full,
+}
+
+impl TickRecoveryDelta {
+    pub fn logical(from: Tick, to: Tick) -> Self {
+        Self {
+            from,
+            to,
+            mode: TickRecoveryMode::Logical,
+            ship_states: Vec::new(),
+            removed_ships: Vec::new(),
+            pending_bot_lock_commands: Vec::new(),
+            pending_auto_jumps: Vec::new(),
+            completed_warps: Vec::new(),
+        }
+    }
+}
+
+/// Authoritative state of one ship after a Tick. The snapshot contains the
+/// established persistent fields; the additional values cover Tick-mutated
+/// ECS components that the legacy snapshot deliberately omits.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TickShipState {
+    pub snapshot: ShipSnapshot,
+    pub fitting_present: bool,
+    pub inventory_present: bool,
+    pub movement: TickMovementState,
+    pub fitting: TickFittingState,
+    pub locks: Option<TickLockState>,
+    pub weapon_last_fired_tick: Option<Tick>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TickMovementState {
+    pub thrust: Option<StopThrustState>,
+    pub approach: Option<TickApproachState>,
+    pub orbit: Option<TickOrbitState>,
+    pub keep_at_range: Option<TickKeepAtRangeState>,
+    pub warp: Option<TickWarpState>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct TickApproachState {
+    pub target: ApproachTarget,
+    pub auto_jump_gate: Option<JumpGateId>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct TickOrbitState {
+    pub target: ApproachTarget,
+    pub radius: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct TickKeepAtRangeState {
+    pub target: ApproachTarget,
+    pub range: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct TickWarpState {
+    pub target: WarpTarget,
+    pub phase: TickWarpPhase,
+    pub auto_jump: bool,
+    pub warp_start_abs: dawn_core::AbsolutePosition,
+    pub warp_total: u32,
+    pub warp_elapsed: u32,
+    pub warp_arrival_abs: dawn_core::AbsolutePosition,
+    pub warp_start_vel: Velocity,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TickWarpPhase {
+    Aligning,
+    Warping,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TickFittingState {
+    pub high: Vec<TickSlotState>,
+    pub mid: Vec<TickSlotState>,
+    pub low: Vec<TickSlotState>,
+    pub rig: Vec<TickSlotState>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TickSlotState {
+    pub module_id: dawn_core::fitting::ModuleId,
+    pub is_active: bool,
+    pub cycle_remaining: u64,
+    pub target_ship_id: Option<ShipId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TickLockState {
+    pub entries: Vec<TickLockEntry>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TickLockEntry {
+    pub target_id: ShipId,
+    pub state: TickLockPhase,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TickLockPhase {
+    Locking { remaining_ticks: u64 },
+    Locked,
 }
 
 /// Versioned authoritative state delta carried by a durable transition.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SectorRecoveryDelta {
     Stop(StopRecoveryDelta),
     Tick(TickRecoveryDelta),
@@ -122,7 +252,7 @@ struct VersionedRecoveryDelta {
 pub fn encode_recovery_delta(delta: &SectorRecoveryDelta) -> Result<Vec<u8>, TransitionCodecError> {
     postcard::to_stdvec(&VersionedRecoveryDelta {
         version: RECOVERY_DELTA_VERSION,
-        delta: *delta,
+        delta: delta.clone(),
     })
     .map_err(|error| TransitionCodecError::Encode(error.to_string()))
 }
@@ -196,10 +326,10 @@ impl SectorEngine {
         Ok(PreparedSectorTransition {
             transition_id,
             context,
-            recovery_delta: SectorRecoveryDelta::Tick(TickRecoveryDelta {
-                from: state.current_tick,
-                to: next_tick,
-            }),
+            recovery_delta: SectorRecoveryDelta::Tick(TickRecoveryDelta::logical(
+                state.current_tick,
+                next_tick,
+            )),
             public_events: Vec::new(),
             reliable_effects: Vec::new(),
         })
@@ -211,6 +341,8 @@ impl SectorEngine {
 pub enum TransitionApplyError {
     #[error("prepared transition references unknown ship {0:?}")]
     UnknownShip(ShipId),
+    #[error("prepared Tick transition contains invalid state for ship {0:?}")]
+    InvalidTickShipState(ShipId),
     #[error("prepared Tick transition targets sector {actual:?}; expected {expected:?}")]
     SectorMismatch {
         expected: SectorId,
@@ -281,10 +413,7 @@ mod tests {
         assert_eq!(state.current_tick, Tick(41));
         assert_eq!(
             prepared.recovery_delta,
-            SectorRecoveryDelta::Tick(TickRecoveryDelta {
-                from: Tick(41),
-                to: Tick(42),
-            })
+            SectorRecoveryDelta::Tick(TickRecoveryDelta::logical(Tick(41), Tick(42)))
         );
     }
 
@@ -322,10 +451,7 @@ mod tests {
 
     #[test]
     fn tick_recovery_delta_round_trips_through_the_version_gate() {
-        let delta = SectorRecoveryDelta::Tick(TickRecoveryDelta {
-            from: Tick(41),
-            to: Tick(42),
-        });
+        let delta = SectorRecoveryDelta::Tick(TickRecoveryDelta::logical(Tick(41), Tick(42)));
         let payload = encode_recovery_delta(&delta).expect("delta should encode");
 
         assert_eq!(decode_recovery_delta(&payload), Ok(delta));

@@ -138,7 +138,7 @@ The Actor model lives in `dawn-actor` (ADR-0002).
 
 ### Current baseline
 
-Today `SimulationNode<S>` still combines ECS/domain authority with EventStore/repository access in places. `SectorSimulatorActor` and production adapters call into that broad object. The derived AoI consumers use the read-only `dawn_sector::view::SectorView` boundary, while Stop and the logical Tick counter expose #272 prepare -> durable -> live-apply vertical slices. The full ECS Tick and remaining state-owner decomposition belong to later #272/#275 slices and do not require making the legacy `SimulationNode` adapter storage-independent all at once.
+Today `SimulationNode<S>` still combines ECS/domain authority with EventStore/repository access in places. `SectorSimulatorActor` and production adapters call into that broad object. The derived AoI consumers use the read-only `dawn_sector::view::SectorView` boundary. Stop and the full Tick now expose #272 prepare -> durable -> live-apply APIs, including a bounded ship-level Tick write set; the default legacy frame and remaining state-owner decomposition still need migration. This does not require making the legacy `SimulationNode` adapter storage-independent all at once, but no new authority should be added to that adapter.
 
 ### Target boundary (#272 / #275)
 

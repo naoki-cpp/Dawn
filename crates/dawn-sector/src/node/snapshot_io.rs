@@ -33,6 +33,7 @@ impl<S: EventStore> SimulationNode<S> {
             event_store,
             // Pending public events are an in-memory output buffer, not state.
             pending_events: _,
+            defer_event_persistence: _,
             // ── captured per ship, below ───────────────────────────────────
             world,
             ships: ship_registry,
