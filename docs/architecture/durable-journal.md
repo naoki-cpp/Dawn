@@ -66,6 +66,9 @@ The retry verifies the archive records that overlap the retained hot range and
 resumes from the archive's current `next_index`; it never appends an unverified
 or duplicate prefix. Initial creation of both hot and archive files syncs the
 file and, on Unix, their parent directory before a durable receipt is exposed.
+After the hot rename itself succeeds, any failure reopening the writer or
+syncing the parent directory poisons the in-memory handle; callers must reopen
+the journal before appending again.
 
 The archive is append-only across repeated compactions. Each subsequent
 compaction requires the archive's `next_index` to equal the current hot

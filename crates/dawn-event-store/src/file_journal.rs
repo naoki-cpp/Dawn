@@ -240,6 +240,9 @@ impl FileJournal {
         boundary: JournalIndex,
         archive_path: impl AsRef<Path>,
     ) -> Result<CompactionReceipt, JournalError> {
+        if self.poisoned {
+            return Err(JournalError::Poisoned);
+        }
         if boundary < self.base_index || boundary > self.next_index {
             return Err(JournalError::InvalidCompactionBoundary { boundary });
         }
@@ -393,11 +396,7 @@ impl FileJournal {
             writer.get_ref().sync_all()?;
         }
         self.writer.flush()?;
-        std::fs::rename(&tmp, &self.path)?;
-        let writer = FileWriter::open(&self.path)?;
-        self.base_index = boundary;
-        self.writer = Box::new(writer);
-        sync_parent_directory(&self.path)?;
+        self.finalize_compaction_with(boundary, &tmp, FileWriter::open, sync_parent_directory)?;
 
         Ok(CompactionReceipt {
             archived: JournalRange {
@@ -407,6 +406,31 @@ impl FileJournal {
             retained_from: boundary,
             next_index: self.next_index,
         })
+    }
+
+    fn finalize_compaction_with<Open, Sync>(
+        &mut self,
+        boundary: JournalIndex,
+        tmp: &Path,
+        reopen: Open,
+        sync_parent: Sync,
+    ) -> Result<(), JournalError>
+    where
+        Open: FnOnce(&Path) -> io::Result<FileWriter>,
+        Sync: FnOnce(&Path) -> io::Result<()>,
+    {
+        std::fs::rename(tmp, &self.path)?;
+
+        // The pathname now points at the replacement. Until the new writer and
+        // directory entry are both ready, appending could acknowledge bytes
+        // that are not safely attached to the current journal state.
+        self.poisoned = true;
+        self.base_index = boundary;
+        let writer = reopen(&self.path)?;
+        self.writer = Box::new(writer);
+        sync_parent(&self.path)?;
+        self.poisoned = false;
+        Ok(())
     }
 }
 
@@ -1065,6 +1089,60 @@ mod tests {
         assert_eq!(journal.next_index().unwrap(), JournalIndex(2));
         let archive = FileJournal::open(&archive).unwrap();
         assert_eq!(archive.next_index().unwrap(), JournalIndex(1));
+    }
+
+    #[test]
+    fn post_rename_reopen_failure_poisoned_journal_cannot_append() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("journal.bin");
+        let mut journal = FileJournal::open(&path).unwrap();
+        journal.append_batch(batch(1, &[b"first"])).unwrap();
+
+        let tmp = tmp_path_for(&path);
+        let mut replacement = MAGIC.to_vec();
+        replacement.extend_from_slice(&1u64.to_le_bytes());
+        std::fs::write(&tmp, replacement).unwrap();
+        let result = journal.finalize_compaction_with(
+            JournalIndex(1),
+            &tmp,
+            |_path| Err(io::Error::other("injected reopen failure")),
+            sync_parent_directory,
+        );
+        assert!(result.is_err());
+        assert!(matches!(
+            journal.append_batch(batch(2, &[b"must not append"])),
+            Err(JournalError::Poisoned)
+        ));
+
+        let reopened = FileJournal::open(&path).unwrap();
+        assert_eq!(reopened.base_index(), JournalIndex(1));
+        assert_eq!(reopened.next_index().unwrap(), JournalIndex(1));
+    }
+
+    #[test]
+    fn post_rename_directory_sync_failure_poisoned_journal_cannot_append() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("journal.bin");
+        let mut journal = FileJournal::open(&path).unwrap();
+        journal.append_batch(batch(1, &[b"first"])).unwrap();
+
+        let tmp = tmp_path_for(&path);
+        let mut replacement = MAGIC.to_vec();
+        replacement.extend_from_slice(&1u64.to_le_bytes());
+        std::fs::write(&tmp, replacement).unwrap();
+        let result =
+            journal.finalize_compaction_with(JournalIndex(1), &tmp, FileWriter::open, |_path| {
+                Err(io::Error::other("injected directory sync failure"))
+            });
+        assert!(result.is_err());
+        assert!(matches!(
+            journal.append_batch(batch(2, &[b"must not append"])),
+            Err(JournalError::Poisoned)
+        ));
+
+        let reopened = FileJournal::open(&path).unwrap();
+        assert_eq!(reopened.base_index(), JournalIndex(1));
+        assert_eq!(reopened.next_index().unwrap(), JournalIndex(1));
     }
 
     #[test]
