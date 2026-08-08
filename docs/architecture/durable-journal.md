@@ -61,6 +61,12 @@ stronger directory-entry guarantee. A crash before replacement leaves the old
 hot file; a crash after replacement leaves the archived prefix and the new
 suffix. The global journal indices and receipt ranges remain unchanged.
 
+If archive append succeeds but hot replacement does not, a retry is allowed.
+The retry verifies the archive records that overlap the retained hot range and
+resumes from the archive's current `next_index`; it never appends an unverified
+or duplicate prefix. Initial creation of both hot and archive files syncs the
+file and, on Unix, their parent directory before a durable receipt is exposed.
+
 The archive is append-only across repeated compactions. Each subsequent
 compaction requires the archive's `next_index` to equal the current hot
 `base_index`, then appends the next complete prefix without changing the

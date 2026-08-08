@@ -24,7 +24,7 @@
 
 use std::fmt;
 use std::fs::{File, OpenOptions};
-use std::io::{self, BufReader, BufWriter, Read, Seek, Write};
+use std::io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use crate::journal::{
@@ -168,6 +168,7 @@ impl FileJournal {
             file.write_all(MAGIC)?;
             file.write_all(&0u64.to_le_bytes())?;
             file.sync_all()?;
+            sync_parent_directory(path)?;
         }
         Ok(())
     }
@@ -258,7 +259,10 @@ impl FileJournal {
         let archived_len =
             u32::try_from(boundary.0 - old_base.0).map_err(|_| JournalError::IndexOverflow)?;
         let archive_scan = ensure_archive(archive_path, self.base_index)?;
-        if archive_scan.base_index > self.base_index || archive_scan.next_index != self.base_index {
+        if archive_scan.base_index > self.base_index
+            || archive_scan.next_index < self.base_index
+            || archive_scan.next_index > boundary
+        {
             return Err(JournalError::ArchiveMismatch {
                 expected: self.base_index,
                 actual: archive_scan.next_index,
@@ -267,9 +271,14 @@ impl FileJournal {
 
         let mut archive_start = None;
         let mut archive_end = None;
+        let mut hot_base_start = None;
+        let mut hot_overlap_end = None;
         let mut boundary_offset = None;
         scan_file(&self.path, false, |first, start, end, batch| {
             let batch_end = JournalIndex(first.0 + batch.entries.len() as u64);
+            if first == self.base_index {
+                hot_base_start = Some(start);
+            }
             if first == boundary {
                 boundary_offset = Some(start);
             }
@@ -278,6 +287,9 @@ impl FileJournal {
             }
             if batch_end == boundary {
                 archive_end = Some(end);
+            }
+            if batch_end == archive_scan.next_index {
+                hot_overlap_end = Some(end);
             }
             if first < boundary && batch_end > boundary {
                 // The closure cannot return an error; the boundary is checked
@@ -300,6 +312,51 @@ impl FileJournal {
         };
         let archive_end =
             archive_end.ok_or(JournalError::InvalidCompactionBoundary { boundary })?;
+        let hot_bytes = std::fs::read(&self.path)?;
+        if archive_scan.next_index > self.base_index {
+            let mut archive_overlap_start = None;
+            let mut archive_overlap_end = None;
+            scan_file(archive_path, false, |first, start, end, batch| {
+                let batch_end = JournalIndex(first.0 + batch.entries.len() as u64);
+                if first == self.base_index {
+                    archive_overlap_start = Some(start);
+                }
+                if batch_end == archive_scan.next_index {
+                    archive_overlap_end = Some(end);
+                }
+            })?;
+            let hot_start = hot_base_start.ok_or(JournalError::ArchiveMismatch {
+                expected: self.base_index,
+                actual: archive_scan.next_index,
+            })?;
+            let hot_end = hot_overlap_end.ok_or(JournalError::ArchiveMismatch {
+                expected: self.base_index,
+                actual: archive_scan.next_index,
+            })?;
+            let archive_start = archive_overlap_start.ok_or(JournalError::ArchiveMismatch {
+                expected: self.base_index,
+                actual: archive_scan.next_index,
+            })?;
+            let archive_end = archive_overlap_end.ok_or(JournalError::ArchiveMismatch {
+                expected: self.base_index,
+                actual: archive_scan.next_index,
+            })?;
+            if hot_end - hot_start != archive_end - archive_start
+                || !archive_range_matches_hot(
+                    archive_path,
+                    archive_start,
+                    archive_end,
+                    &hot_bytes,
+                    hot_start,
+                    hot_end,
+                )?
+            {
+                return Err(JournalError::ArchiveMismatch {
+                    expected: self.base_index,
+                    actual: archive_scan.next_index,
+                });
+            }
+        }
         if archive_scan.next_index < boundary && archive_start.is_none() {
             return Err(JournalError::ArchiveMismatch {
                 expected: archive_scan.next_index,
@@ -307,7 +364,6 @@ impl FileJournal {
             });
         }
 
-        let hot_bytes = std::fs::read(&self.path)?;
         if archive_scan.next_index < boundary {
             let start = match archive_start {
                 Some(start) => start,
@@ -449,6 +505,39 @@ fn sync_parent_directory(path: &Path) -> io::Result<()> {
         let _ = path;
         Ok(())
     }
+}
+
+fn archive_range_matches_hot(
+    archive_path: &Path,
+    archive_start: u64,
+    archive_end: u64,
+    hot_bytes: &[u8],
+    hot_start: u64,
+    hot_end: u64,
+) -> Result<bool, JournalError> {
+    let hot_start = usize::try_from(hot_start).map_err(|_| JournalError::IndexOverflow)?;
+    let hot_end = usize::try_from(hot_end).map_err(|_| JournalError::IndexOverflow)?;
+    if archive_end < archive_start || hot_end > hot_bytes.len() || hot_end < hot_start {
+        return Ok(false);
+    }
+
+    let mut archive = File::open(archive_path)?;
+    archive.seek(SeekFrom::Start(archive_start))?;
+    let mut remaining = archive_end - archive_start;
+    let mut hot_offset = hot_start;
+    let mut buffer = [0u8; 8 * 1024];
+    while remaining > 0 {
+        let chunk_len = remaining.min(buffer.len() as u64) as usize;
+        archive.read_exact(&mut buffer[..chunk_len])?;
+        if hot_offset + chunk_len > hot_end
+            || buffer[..chunk_len] != hot_bytes[hot_offset..hot_offset + chunk_len]
+        {
+            return Ok(false);
+        }
+        hot_offset += chunk_len;
+        remaining -= chunk_len as u64;
+    }
+    Ok(true)
 }
 
 fn ensure_archive(path: &Path, base_index: JournalIndex) -> Result<JournalScan, JournalError> {
@@ -953,6 +1042,29 @@ mod tests {
             .map(|record| record.unwrap().payload)
             .collect();
         assert_eq!(records, vec![b"first".to_vec(), b"second".to_vec()]);
+    }
+
+    #[test]
+    fn compaction_can_retry_after_archive_append_before_hot_replacement() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("journal.bin");
+        let archive = directory.path().join("journal.archive");
+        let mut journal = FileJournal::open(&path).unwrap();
+        journal.append_batch(batch(1, &[b"first"])).unwrap();
+        journal.append_batch(batch(2, &[b"second"])).unwrap();
+
+        let tmp = tmp_path_for(&path);
+        std::fs::create_dir(&tmp).unwrap();
+        assert!(journal.compact(JournalIndex(1), &archive).is_err());
+        std::fs::remove_dir(&tmp).unwrap();
+
+        let receipt = journal.compact(JournalIndex(1), &archive).unwrap();
+        assert_eq!(receipt.archived.first, JournalIndex(0));
+        assert_eq!(receipt.archived.len, 1);
+        assert_eq!(journal.base_index(), JournalIndex(1));
+        assert_eq!(journal.next_index().unwrap(), JournalIndex(2));
+        let archive = FileJournal::open(&archive).unwrap();
+        assert_eq!(archive.next_index().unwrap(), JournalIndex(1));
     }
 
     #[test]
