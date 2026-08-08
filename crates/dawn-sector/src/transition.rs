@@ -5,7 +5,7 @@
 //! the returned transition and only then ask the authoritative state owner to
 //! apply the same recovery delta.
 
-use dawn_core::{DomainEvent, SectorId, ShipId, Tick};
+use dawn_core::{DomainEvent, SectorId, ShipId, Tick, Velocity};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -47,9 +47,19 @@ pub struct TickCommandState {
 }
 
 /// Exact authoritative change made by a successful Stop command.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct StopRecoveryDelta {
     pub ship_id: ShipId,
+    pub clear_warp: bool,
+    pub clear_steering: bool,
+    pub thrust: StopThrustState,
+}
+
+/// Final thrust write made by the Stop reducer.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct StopThrustState {
+    pub direction: Velocity,
+    pub is_braking: bool,
 }
 
 /// Exact authoritative logical-time change made by a successful Tick.
@@ -60,7 +70,7 @@ pub struct TickRecoveryDelta {
 }
 
 /// Versioned authoritative state delta carried by a durable transition.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum SectorRecoveryDelta {
     Stop(StopRecoveryDelta),
     Tick(TickRecoveryDelta),
@@ -159,6 +169,12 @@ impl SectorEngine {
             context,
             recovery_delta: SectorRecoveryDelta::Stop(StopRecoveryDelta {
                 ship_id: state.ship_id,
+                clear_warp: true,
+                clear_steering: true,
+                thrust: StopThrustState {
+                    direction: Velocity::ZERO,
+                    is_braking: true,
+                },
             }),
             public_events: Vec::new(),
             reliable_effects: Vec::new(),
@@ -241,7 +257,15 @@ mod tests {
         assert_eq!(prepared.public_events, Vec::new());
         assert_eq!(
             prepared.recovery_delta,
-            SectorRecoveryDelta::Stop(StopRecoveryDelta { ship_id: ship() })
+            SectorRecoveryDelta::Stop(StopRecoveryDelta {
+                ship_id: ship(),
+                clear_warp: true,
+                clear_steering: true,
+                thrust: StopThrustState {
+                    direction: Velocity::ZERO,
+                    is_braking: true,
+                },
+            })
         );
     }
 
@@ -282,7 +306,15 @@ mod tests {
 
     #[test]
     fn recovery_delta_round_trips_through_the_version_gate() {
-        let delta = SectorRecoveryDelta::Stop(StopRecoveryDelta { ship_id: ship() });
+        let delta = SectorRecoveryDelta::Stop(StopRecoveryDelta {
+            ship_id: ship(),
+            clear_warp: true,
+            clear_steering: true,
+            thrust: StopThrustState {
+                direction: Velocity::ZERO,
+                is_braking: true,
+            },
+        });
         let payload = encode_recovery_delta(&delta).expect("delta should encode");
 
         assert_eq!(decode_recovery_delta(&payload), Ok(delta));
@@ -303,7 +335,15 @@ mod tests {
     fn recovery_delta_rejects_an_unknown_version() {
         let payload = postcard::to_stdvec(&VersionedRecoveryDelta {
             version: RECOVERY_DELTA_VERSION + 1,
-            delta: SectorRecoveryDelta::Stop(StopRecoveryDelta { ship_id: ship() }),
+            delta: SectorRecoveryDelta::Stop(StopRecoveryDelta {
+                ship_id: ship(),
+                clear_warp: true,
+                clear_steering: true,
+                thrust: StopThrustState {
+                    direction: Velocity::ZERO,
+                    is_braking: true,
+                },
+            }),
         })
         .unwrap();
 

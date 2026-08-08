@@ -78,7 +78,7 @@ impl<S: EventStore> SimulationNode<S> {
         delta: StopRecoveryDelta,
     ) -> Result<(), TransitionApplyError> {
         let entity = self.stop_entity(delta.ship_id)?;
-        self.apply_stop_delta(entity);
+        self.apply_stop_delta(entity, delta);
         Ok(())
     }
 
@@ -90,10 +90,17 @@ impl<S: EventStore> SimulationNode<S> {
             .ok_or(TransitionApplyError::UnknownShip(ship_id))
     }
 
-    fn apply_stop_delta(&mut self, entity: Entity) {
-        let _ = self.world.remove_one::<WarpComp>(entity);
-        self.clear_steering_modes(entity);
-        self.brake_thrust(entity);
+    fn apply_stop_delta(&mut self, entity: Entity, delta: StopRecoveryDelta) {
+        if delta.clear_warp {
+            let _ = self.world.remove_one::<WarpComp>(entity);
+        }
+        if delta.clear_steering {
+            self.clear_steering_modes(entity);
+        }
+        if let Some(mut thrust) = self.world.get_mut::<ThrustComp>(entity) {
+            thrust.direction = delta.thrust.direction;
+            thrust.is_braking = delta.thrust.is_braking;
+        }
     }
 
     /// Execute Stop through the ADR-0049 ordering:
@@ -117,7 +124,7 @@ impl<S: EventStore> SimulationNode<S> {
         let entity = self.stop_entity(delta.ship_id)?;
         let receipt =
             crate::transition_journal::append_prepared_transition(journal, &prepared, durability)?;
-        self.apply_stop_delta(entity);
+        self.apply_stop_delta(entity, delta);
         Ok(receipt)
     }
 
@@ -255,7 +262,8 @@ impl<S: EventStore> SimulationNode<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dawn_core::{AnchorId, NodeId, SectorBounds, SectorId};
+    use dawn_core::{AbsolutePosition, AnchorId, ApproachTarget, NodeId, SectorBounds, SectorId};
+    use dawn_ecs::components::{ApproachComp, KeepAtRangeComp, OrbitComp, WarpPhase};
     use dawn_event_store::{
         InMemoryJournal, JournalBatch, JournalIndex, JournalRecord, JournalStream,
     };
@@ -332,10 +340,104 @@ mod tests {
     }
 
     #[test]
+    fn committed_stop_reduces_every_declared_movement_field() {
+        let mut node = mem_node();
+        let ship_id = node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        let target_id = node.spawn_ship(
+            dawn_core::ShipTypeId(1),
+            Position::new(10.0, 0.0, 0.0),
+            Velocity::ZERO,
+        );
+        let entity = *node.ships.index.get(&ship_id).unwrap();
+        let target = ApproachTarget::Ship(target_id);
+
+        node.world.insert_one(
+            entity,
+            ApproachComp {
+                target,
+                auto_jump_gate: None,
+            },
+        );
+        node.world.insert_one(
+            entity,
+            OrbitComp {
+                target,
+                radius: 10.0,
+            },
+        );
+        node.world.insert_one(
+            entity,
+            KeepAtRangeComp {
+                target,
+                range: 20.0,
+            },
+        );
+        node.world.insert_one(
+            entity,
+            WarpComp {
+                target: dawn_core::WarpTarget::Body(dawn_core::CelestialBodyId(0)),
+                phase: WarpPhase::Aligning,
+                auto_jump: false,
+                warp_start_abs: AbsolutePosition::ORIGIN,
+                warp_total: 0,
+                warp_elapsed: 0,
+                warp_arrival_abs: AbsolutePosition::ORIGIN,
+                warp_start_vel: Velocity::new(3.0, 0.0, 0.0),
+            },
+        );
+        node.world.get_mut::<ThrustComp>(entity).unwrap().direction = Velocity::new(3.0, 0.0, 0.0);
+
+        let mut journal = InMemoryJournal::new();
+        node.commit_stop_transition(
+            &mut journal,
+            ship_id,
+            SectorTransitionId(11),
+            4,
+            DurabilityMode::Synced,
+        )
+        .expect("durable Stop should apply");
+
+        assert!(node.world.get::<WarpComp>(entity).is_none());
+        assert!(node.world.get::<ApproachComp>(entity).is_none());
+        assert!(node.world.get::<OrbitComp>(entity).is_none());
+        assert!(node.world.get::<KeepAtRangeComp>(entity).is_none());
+        let thrust = node.world.get::<ThrustComp>(entity).unwrap();
+        assert_eq!(thrust.direction, Velocity::ZERO);
+        assert!(thrust.is_braking);
+    }
+
+    #[test]
     fn failed_stop_append_does_not_mutate_live_state() {
         let mut node = mem_node();
         let ship_id = node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        let target_id = node.spawn_ship(
+            dawn_core::ShipTypeId(1),
+            Position::new(10.0, 0.0, 0.0),
+            Velocity::ZERO,
+        );
         let entity = *node.ships.index.get(&ship_id).unwrap();
+        let target = ApproachTarget::Ship(target_id);
+        node.world.insert_one(
+            entity,
+            ApproachComp {
+                target,
+                auto_jump_gate: None,
+            },
+        );
+        node.world.insert_one(
+            entity,
+            OrbitComp {
+                target,
+                radius: 10.0,
+            },
+        );
+        node.world.insert_one(
+            entity,
+            KeepAtRangeComp {
+                target,
+                range: 20.0,
+            },
+        );
         node.world.get_mut::<ThrustComp>(entity).unwrap().direction = Velocity::new(1.0, 0.0, 0.0);
         let mut journal = FailingJournal;
 
@@ -351,6 +453,9 @@ mod tests {
         let thrust = node.world.get::<ThrustComp>(entity).unwrap();
         assert!(!thrust.is_braking);
         assert_eq!(thrust.direction, Velocity::new(1.0, 0.0, 0.0));
+        assert!(node.world.get::<ApproachComp>(entity).is_some());
+        assert!(node.world.get::<OrbitComp>(entity).is_some());
+        assert!(node.world.get::<KeepAtRangeComp>(entity).is_some());
     }
 
     struct FailingJournal;
