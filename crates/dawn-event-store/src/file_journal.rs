@@ -132,6 +132,7 @@ impl FileJournal {
         Self::ensure_header(&path)?;
         let scan = scan_file(&path, true, |_, _, _, _| {})?;
         let writer = Box::new(FileWriter::open(&path)?);
+        sync_parent_directory(&path)?;
         Ok(Self {
             path,
             writer,
@@ -258,6 +259,7 @@ impl FileJournal {
         }
 
         let archive_path = archive_path.as_ref();
+        reject_archive_alias(&self.path, archive_path)?;
         let old_base = self.base_index;
         let archived_len =
             u32::try_from(boundary.0 - old_base.0).map_err(|_| JournalError::IndexOverflow)?;
@@ -521,7 +523,10 @@ fn tmp_path_for(path: &Path) -> PathBuf {
 fn sync_parent_directory(path: &Path) -> io::Result<()> {
     #[cfg(unix)]
     {
-        let parent = path.parent().unwrap_or_else(|| Path::new("."));
+        let parent = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
         File::open(parent)?.sync_all()
     }
     #[cfg(not(unix))]
@@ -529,6 +534,23 @@ fn sync_parent_directory(path: &Path) -> io::Result<()> {
         let _ = path;
         Ok(())
     }
+}
+
+fn reject_archive_alias(hot_path: &Path, archive_path: &Path) -> Result<(), JournalError> {
+    let tmp_path = tmp_path_for(hot_path);
+    if archive_path == hot_path || archive_path == tmp_path {
+        return Err(JournalError::ArchivePathAlias);
+    }
+
+    if archive_path.exists()
+        && std::fs::canonicalize(archive_path)? == std::fs::canonicalize(hot_path)?
+    {
+        return Err(JournalError::ArchivePathAlias);
+    }
+    if tmp_path.exists() && std::fs::canonicalize(&tmp_path)? == std::fs::canonicalize(hot_path)? {
+        return Err(JournalError::ArchivePathAlias);
+    }
+    Ok(())
 }
 
 fn archive_range_matches_hot(
@@ -1143,6 +1165,36 @@ mod tests {
         let reopened = FileJournal::open(&path).unwrap();
         assert_eq!(reopened.base_index(), JournalIndex(1));
         assert_eq!(reopened.next_index().unwrap(), JournalIndex(1));
+    }
+
+    #[test]
+    fn compaction_rejects_archive_alias_before_mutating_the_hot_journal() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("journal.bin");
+        let mut journal = FileJournal::open(&path).unwrap();
+        journal.append_batch(batch(1, &[b"first"])).unwrap();
+
+        for archive in [path.clone(), tmp_path_for(&path)] {
+            assert!(matches!(
+                journal.compact(JournalIndex(1), archive),
+                Err(JournalError::ArchivePathAlias)
+            ));
+        }
+
+        let record = journal
+            .read_from(JournalIndex::ZERO)
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.payload, b"first");
+        assert_eq!(journal.base_index(), JournalIndex::ZERO);
+        assert_eq!(journal.next_index().unwrap(), JournalIndex(1));
+    }
+
+    #[test]
+    fn bare_relative_paths_sync_the_current_directory() {
+        assert!(sync_parent_directory(Path::new("journal.bin")).is_ok());
     }
 
     #[test]

@@ -301,6 +301,8 @@ pub enum JournalError {
         expected: JournalIndex,
         actual: JournalIndex,
     },
+    #[error("journal archive path aliases the hot journal")]
+    ArchivePathAlias,
     #[error("journal I/O failed: {0}")]
     Io(#[from] std::io::Error),
 }
