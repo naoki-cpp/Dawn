@@ -56,8 +56,9 @@ pub mod store;
 pub use file::FileEventStore;
 pub use file_journal::FileJournal;
 pub use journal::{
-    AppendReceipt, DurabilityContext, DurabilityMode, DurableJournal, JournalBatch, JournalError,
-    JournalIndex, JournalRange, JournalRecord, TransitionId,
+    encode_payload, AppendReceipt, CompactionReceipt, DurabilityContext, DurabilityEvidence,
+    DurabilityEvidenceSource, DurabilityMode, DurableJournal, JournalBatch, JournalEntry,
+    JournalError, JournalIndex, JournalRange, JournalRecord, JournalStream, TransitionId,
 };
 pub use memory::InMemoryEventStore;
 pub use memory_journal::InMemoryJournal;
