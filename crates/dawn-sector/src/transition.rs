@@ -40,9 +40,6 @@ pub struct StopCommandState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StopRecoveryDelta {
     pub ship_id: ShipId,
-    pub clear_warp: bool,
-    pub clear_steering: bool,
-    pub brake: bool,
 }
 
 /// Versioned authoritative state delta carried by a durable transition.
@@ -74,6 +71,45 @@ pub enum TransitionError {
     Warping(ShipId),
 }
 
+/// Error returned when a recovery-delta payload cannot be encoded or decoded.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum TransitionCodecError {
+    #[error("recovery delta encoding failed: {0}")]
+    Encode(String),
+    #[error("recovery delta decoding failed: {0}")]
+    Decode(String),
+    #[error("unsupported recovery delta version {actual}; expected {expected}")]
+    UnsupportedVersion { actual: u16, expected: u16 },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct VersionedRecoveryDelta {
+    version: u16,
+    delta: SectorRecoveryDelta,
+}
+
+/// Encode a versioned authoritative recovery delta for the journal adapter.
+pub fn encode_recovery_delta(delta: &SectorRecoveryDelta) -> Result<Vec<u8>, TransitionCodecError> {
+    postcard::to_stdvec(&VersionedRecoveryDelta {
+        version: RECOVERY_DELTA_VERSION,
+        delta: *delta,
+    })
+    .map_err(|error| TransitionCodecError::Encode(error.to_string()))
+}
+
+/// Decode a versioned recovery delta for restart or replica recovery.
+pub fn decode_recovery_delta(payload: &[u8]) -> Result<SectorRecoveryDelta, TransitionCodecError> {
+    let encoded: VersionedRecoveryDelta = postcard::from_bytes(payload)
+        .map_err(|error| TransitionCodecError::Decode(error.to_string()))?;
+    if encoded.version != RECOVERY_DELTA_VERSION {
+        return Err(TransitionCodecError::UnsupportedVersion {
+            actual: encoded.version,
+            expected: RECOVERY_DELTA_VERSION,
+        });
+    }
+    Ok(encoded.delta)
+}
+
 /// Pure Sector command policy and transition constructor.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SectorEngine;
@@ -103,9 +139,6 @@ impl SectorEngine {
             context,
             recovery_delta: SectorRecoveryDelta::Stop(StopRecoveryDelta {
                 ship_id: state.ship_id,
-                clear_warp: true,
-                clear_steering: true,
-                brake: true,
             }),
             public_events: Vec::new(),
             reliable_effects: Vec::new(),
@@ -155,11 +188,31 @@ mod tests {
         assert_eq!(prepared.public_events, Vec::new());
         assert_eq!(
             prepared.recovery_delta,
-            SectorRecoveryDelta::Stop(StopRecoveryDelta {
-                ship_id: ship(),
-                clear_warp: true,
-                clear_steering: true,
-                brake: true,
+            SectorRecoveryDelta::Stop(StopRecoveryDelta { ship_id: ship() })
+        );
+    }
+
+    #[test]
+    fn recovery_delta_round_trips_through_the_version_gate() {
+        let delta = SectorRecoveryDelta::Stop(StopRecoveryDelta { ship_id: ship() });
+        let payload = encode_recovery_delta(&delta).expect("delta should encode");
+
+        assert_eq!(decode_recovery_delta(&payload), Ok(delta));
+    }
+
+    #[test]
+    fn recovery_delta_rejects_an_unknown_version() {
+        let payload = postcard::to_stdvec(&VersionedRecoveryDelta {
+            version: RECOVERY_DELTA_VERSION + 1,
+            delta: SectorRecoveryDelta::Stop(StopRecoveryDelta { ship_id: ship() }),
+        })
+        .unwrap();
+
+        assert_eq!(
+            decode_recovery_delta(&payload),
+            Err(TransitionCodecError::UnsupportedVersion {
+                actual: RECOVERY_DELTA_VERSION + 1,
+                expected: RECOVERY_DELTA_VERSION,
             })
         );
     }

@@ -8,15 +8,8 @@ use dawn_event_store::{
     encode_payload, AppendReceipt, DurabilityContext, DurabilityMode, DurableJournal, JournalBatch,
     JournalEntry, JournalError, JournalStream, TransitionId,
 };
-use serde::{Deserialize, Serialize};
 
-use crate::transition::{PreparedSectorTransition, SectorRecoveryDelta, RECOVERY_DELTA_VERSION};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct VersionedRecoveryDelta {
-    version: u16,
-    delta: SectorRecoveryDelta,
-}
+use crate::transition::{encode_recovery_delta, PreparedSectorTransition};
 
 /// Append one prepared transition as one atomic journal batch.
 pub(crate) fn append_prepared_transition<J: DurableJournal>(
@@ -26,10 +19,8 @@ pub(crate) fn append_prepared_transition<J: DurableJournal>(
 ) -> Result<AppendReceipt, JournalError> {
     let mut entries = vec![JournalEntry::new(
         JournalStream::RecoveryDelta,
-        encode_payload(&VersionedRecoveryDelta {
-            version: RECOVERY_DELTA_VERSION,
-            delta: prepared.recovery_delta,
-        })?,
+        encode_recovery_delta(&prepared.recovery_delta)
+            .map_err(|error| JournalError::Encode(error.to_string()))?,
     )];
 
     entries.extend(
@@ -99,8 +90,9 @@ mod tests {
         assert_eq!(journal.records().len(), 1);
         let record = &journal.records()[0];
         assert_eq!(record.stream, JournalStream::RecoveryDelta);
-        let decoded: VersionedRecoveryDelta = postcard::from_bytes(&record.payload).unwrap();
-        assert_eq!(decoded.version, RECOVERY_DELTA_VERSION);
-        assert_eq!(decoded.delta, prepared.recovery_delta);
+        assert_eq!(
+            crate::transition::decode_recovery_delta(&record.payload).unwrap(),
+            prepared.recovery_delta
+        );
     }
 }

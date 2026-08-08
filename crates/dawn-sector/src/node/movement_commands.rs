@@ -30,8 +30,6 @@ pub enum StopTransitionError {
     Preparation(#[from] TransitionError),
     #[error("durable transition append failed: {0}")]
     Durable(#[from] JournalError),
-    #[error("live transition apply failed: {0}")]
-    Apply(#[from] TransitionApplyError),
 }
 
 impl<S: EventStore> SimulationNode<S> {
@@ -77,20 +75,23 @@ impl<S: EventStore> SimulationNode<S> {
         &mut self,
         delta: StopRecoveryDelta,
     ) -> Result<(), TransitionApplyError> {
-        let Some(&entity) = self.ships.index.get(&delta.ship_id) else {
-            return Err(TransitionApplyError::UnknownShip(delta.ship_id));
-        };
-
-        if delta.clear_warp {
-            let _ = self.world.remove_one::<WarpComp>(entity);
-        }
-        if delta.clear_steering {
-            self.clear_steering_modes(entity);
-        }
-        if delta.brake {
-            self.brake_thrust(entity);
-        }
+        let entity = self.stop_entity(delta.ship_id)?;
+        self.apply_stop_delta(entity);
         Ok(())
+    }
+
+    fn stop_entity(&self, ship_id: ShipId) -> Result<Entity, TransitionApplyError> {
+        self.ships
+            .index
+            .get(&ship_id)
+            .copied()
+            .ok_or(TransitionApplyError::UnknownShip(ship_id))
+    }
+
+    fn apply_stop_delta(&mut self, entity: Entity) {
+        let _ = self.world.remove_one::<WarpComp>(entity);
+        self.clear_steering_modes(entity);
+        self.brake_thrust(entity);
     }
 
     /// Execute Stop through the ADR-0049 ordering:
@@ -104,10 +105,22 @@ impl<S: EventStore> SimulationNode<S> {
         durability: DurabilityMode,
     ) -> Result<AppendReceipt, StopTransitionError> {
         let prepared = self.prepare_stop_transition(ship_id, transition_id, owner_epoch)?;
+        let SectorRecoveryDelta::Stop(delta) = prepared.recovery_delta;
+        // Resolve the live entity before the durable append. Once the journal
+        // accepts the transition, applying this already-validated entity is
+        // infallible; a post-commit lookup failure must not masquerade as a
+        // normal command rejection.
+        let entity = match self.stop_entity(delta.ship_id) {
+            Ok(entity) => entity,
+            Err(TransitionApplyError::UnknownShip(ship_id)) => {
+                return Err(StopTransitionError::Preparation(
+                    TransitionError::UnknownShip(ship_id),
+                ));
+            }
+        };
         let receipt =
             crate::transition_journal::append_prepared_transition(journal, &prepared, durability)?;
-        let SectorRecoveryDelta::Stop(delta) = prepared.recovery_delta;
-        self.apply_stop_transition(delta)?;
+        self.apply_stop_delta(entity);
         Ok(receipt)
     }
 
