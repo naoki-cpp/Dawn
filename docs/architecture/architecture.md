@@ -2,7 +2,7 @@
 scope    : Map of the whole system. A bird's-eye view of what exists and how it connects
 audience : AI Agent / Human Developer
 update   : When crate composition changes / when a phase advances / when a cross-cutting architecture contract changes
-related  : entity-model.md, event-catalog.md, ownership.md, tick-model.md, recovery-contract.md, database-strategy.md, ../process/roadmap.md, ../../CLAUDE.md
+related  : entity-model.md, event-catalog.md, ownership.md, tick-model.md, recovery-contract.md, durable-journal.md, database-strategy.md, ../process/roadmap.md, ../../CLAUDE.md
 ---
 
 # Dawn Architecture
@@ -29,6 +29,7 @@ This file is the project's **entry point**. For details, always follow the link 
 | `docs/architecture/ownership.md` | Who manages what (ownership, state transitions) |
 | `docs/architecture/tick-model.md` | When and in what order things are processed |
 | `docs/architecture/recovery-contract.md` | Which state is authoritative/recoverable, what commit/ack means, and crash/failover guarantees |
+| `docs/architecture/durable-journal.md` | #271's fallible journal framing, evidence, compaction, archive, and failure policy |
 | `docs/architecture/database-strategy.md` | Which storage products/repositories serve each role and when to migrate |
 | `docs/process/roadmap.md` | What to build, and in what order |
 | `docs/design/game-design.md` | Why a feature exists / lessons from EVE, future candidates |

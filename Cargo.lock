@@ -195,7 +195,9 @@ version = "0.1.0"
 dependencies = [
  "dawn-core",
  "postcard",
+ "serde",
  "tempfile",
+ "thiserror",
 ]
 
 [[package]]
