@@ -19,10 +19,9 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use dawn_core::{AbsolutePosition, DomainEvent, PlayerId, ShipId};
-use dawn_event_store::store::EventStore;
 use dawn_wire::{AbsPosWire, ServerMessage, VelWire};
 
-use crate::node::SimulationNode;
+use crate::view::SectorView;
 
 /// Integer 3-D cell coordinate.
 pub type Cell = (i32, i32, i32);
@@ -200,10 +199,10 @@ impl AoiDelivery {
     /// domain events that concern a currently-visible ship, then any
     /// warp-arrival `PositionSnap`s relevant to this observer. Returns
     /// `false` as soon as a send fails (caller should drop the session).
-    pub fn deliver_frame<S: EventStore>(
+    pub fn deliver_frame<V: SectorView>(
         &mut self,
         sink: &mut dyn AoiSink,
-        node: &SimulationNode<S>,
+        view: &V,
         observer: Observer,
         curr: Vec<ShipId>,
         new_events: &[DomainEvent],
@@ -235,7 +234,7 @@ impl AoiDelivery {
         self.seed_player(player_id, curr.clone());
 
         for &id in entered.iter().filter(|&&id| id != own_ship_id) {
-            if let Some(ship) = node.ship_state_json(id) {
+            if let Some(ship) = view.ship_state(id) {
                 if !sink.send_message(&ServerMessage::AoiEnter(ship)) {
                     return false;
                 }
@@ -282,12 +281,12 @@ impl AoiDelivery {
             }
             _ => None,
         });
-        if !node.ship_is_warping(own_ship_id)
+        if !view.ship_is_warping(own_ship_id)
             && !warp_arrivals.contains(&own_ship_id)
             && owner_motion.is_some()
         {
             if let (Some(position), Some((velocity, tick))) =
-                (node.ship_absolute(own_ship_id), owner_motion)
+                (view.ship_absolute_pos(own_ship_id), owner_motion)
             {
                 let msg = ServerMessage::MotionCorrection {
                     ship_id: own_ship_id.raw(),
@@ -311,7 +310,7 @@ impl AoiDelivery {
         for &sid in warp_arrivals {
             let relevant = sid == own_ship_id || curr.binary_search(&sid).is_ok();
             if relevant {
-                if let Some(abs) = node.ship_absolute(sid) {
+                if let Some(abs) = view.ship_absolute_pos(sid) {
                     let msg = ServerMessage::PositionSnap {
                         ship_id: sid.raw(),
                         position: AbsPosWire {
@@ -345,6 +344,7 @@ fn grid_cell(cell_size: f64, pos: [f64; 3]) -> Cell {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::node::SimulationNode;
     use dawn_core::NodeId;
     use dawn_wire::ShipStateWire;
 

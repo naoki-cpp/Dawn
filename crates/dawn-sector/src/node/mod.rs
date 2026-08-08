@@ -60,6 +60,7 @@ mod warp;
 pub use command_module::ModuleActivationRejection;
 pub use commands::{ClientCommandFollowup, ClientRequestAdmissionError};
 pub use jump::JumpOutcome;
+pub use movement_commands::StopTransitionError;
 pub use serialization::{HandoffPayload, MissingObserverShip};
 
 use coordinates::debug_assert_missing_anchor;
@@ -87,6 +88,7 @@ use dawn_ecs::components::{CapacitorComp, FittingComp, HullComp};
 
 use crate::game_data::GameDataCatalog;
 use crate::persistence::{CompletedIncomingTransit, StateSnapshot};
+use crate::view::SectorView;
 
 /// Per-Sector population backstop (ADR-0018 final resort). Set far above the
 /// TiDi budget so dynamic split / LoD / local TiDi all engage first; only
@@ -270,6 +272,24 @@ impl<S: EventStore> std::fmt::Debug for SimulationNode<S> {
             .field("pending_auto_jumps", &self.pending_auto_jumps)
             .field("completed_warps", &self.completed_warps)
             .finish_non_exhaustive()
+    }
+}
+
+impl<S: EventStore> SectorView for SimulationNode<S> {
+    fn ship_absolute_positions(&self) -> Vec<(ShipId, dawn_core::AbsolutePosition)> {
+        SimulationNode::ship_absolute_positions(self)
+    }
+
+    fn ship_absolute_pos(&self, ship_id: ShipId) -> Option<dawn_core::AbsolutePosition> {
+        SimulationNode::ship_absolute_pos(self, ship_id)
+    }
+
+    fn ship_state(&self, ship_id: ShipId) -> Option<dawn_wire::ShipStateWire> {
+        self.ship_state_json(ship_id)
+    }
+
+    fn ship_is_warping(&self, ship_id: ShipId) -> bool {
+        SimulationNode::ship_is_warping(self, ship_id)
     }
 }
 
