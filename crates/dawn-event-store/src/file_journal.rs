@@ -8,6 +8,7 @@
 //! magic[8] once per file
 //! batch:
 //!   record_count[u32]
+//!   first_index[u64]
 //!   transition_id[u128]
 //!   sector_id[u8]
 //!   owner_epoch[u64]
@@ -27,7 +28,7 @@ use std::path::{Path, PathBuf};
 use crate::journal::{
     content_hash, validate_batch, AppendReceipt, DurabilityContext, DurabilityMode, DurableJournal,
     JournalBatch, JournalError, JournalIndex, JournalRange, JournalRecord, TransitionId,
-    MAX_RECORDS_PER_BATCH,
+    MAX_BATCH_BYTES, MAX_RECORDS_PER_BATCH, MAX_RECORD_BYTES,
 };
 
 const MAGIC: &[u8; 8] = b"DAWNJNL1";
@@ -38,29 +39,21 @@ pub struct FileJournal {
     path: PathBuf,
     writer: BufWriter<File>,
     next_index: JournalIndex,
+    poisoned: bool,
 }
 
 impl FileJournal {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, JournalError> {
         let path = path.as_ref().to_path_buf();
         Self::ensure_header(&path)?;
-        let records = scan_file(&path, true)?;
-        let next_index = JournalIndex(
-            records
-                .len()
-                .try_into()
-                .map_err(|_| JournalError::IndexOverflow)?,
-        );
+        let next_index = scan_file(&path, true, |_| {})?;
         let file = OpenOptions::new().create(true).append(true).open(&path)?;
         Ok(Self {
             path,
             writer: BufWriter::new(file),
             next_index,
+            poisoned: false,
         })
-    }
-
-    pub fn path(&self) -> &Path {
-        &self.path
     }
 
     fn ensure_header(path: &Path) -> Result<(), JournalError> {
@@ -83,9 +76,24 @@ impl FileJournal {
         Ok(())
     }
 
-    fn write_batch(&mut self, batch: &JournalBatch) -> Result<(), JournalError> {
+    fn rollback_after_error(&mut self, start: u64, error: JournalError) -> JournalError {
+        match self.rollback(start) {
+            Ok(()) => error,
+            Err(rollback_error) => {
+                self.poisoned = true;
+                rollback_error
+            }
+        }
+    }
+
+    fn write_batch(
+        &mut self,
+        first: JournalIndex,
+        batch: &JournalBatch,
+    ) -> Result<(), JournalError> {
         self.writer
             .write_all(&(batch.records.len() as u32).to_le_bytes())?;
+        self.writer.write_all(&first.0.to_le_bytes())?;
         self.writer
             .write_all(&batch.transition_id.0.to_le_bytes())?;
         self.writer.write_all(&[batch.context.sector_id.0])?;
@@ -100,7 +108,8 @@ impl FileJournal {
                 .write_all(&(record.len() as u32).to_le_bytes())?;
             self.writer.write_all(record)?;
         }
-        self.writer.write_all(&content_hash(batch).to_le_bytes())?;
+        self.writer
+            .write_all(&content_hash(first, batch).to_le_bytes())?;
         self.writer.write_all(&COMMIT_MARKER.to_le_bytes())?;
         Ok(())
     }
@@ -108,6 +117,9 @@ impl FileJournal {
 
 impl DurableJournal for FileJournal {
     fn append_batch(&mut self, batch: JournalBatch) -> Result<AppendReceipt, JournalError> {
+        if self.poisoned {
+            return Err(JournalError::Poisoned);
+        }
         validate_batch(&batch)?;
         let len = u32::try_from(batch.records.len()).map_err(|_| JournalError::TooManyRecords {
             actual: batch.records.len(),
@@ -119,19 +131,16 @@ impl DurableJournal for FileJournal {
             .checked_add(u64::from(len))
             .ok_or(JournalError::IndexOverflow)?;
         let start = self.writer.get_ref().metadata()?.len();
-        if let Err(error) = self.write_batch(&batch) {
-            self.rollback(start)?;
-            return Err(error);
+        if let Err(error) = self.write_batch(self.next_index, &batch) {
+            return Err(self.rollback_after_error(start, error));
         }
 
         if let Err(error) = self.writer.flush() {
-            let _ = self.rollback(start);
-            return Err(error.into());
+            return Err(self.rollback_after_error(start, error.into()));
         }
         if batch.durability == DurabilityMode::Synced {
             if let Err(error) = self.writer.get_ref().sync_data() {
-                let _ = self.rollback(start);
-                return Err(error.into());
+                return Err(self.rollback_after_error(start, error.into()));
             }
         }
 
@@ -142,7 +151,7 @@ impl DurableJournal for FileJournal {
                 first: self.next_index,
                 len,
             },
-            content_hash: content_hash(&batch),
+            content_hash: content_hash(self.next_index, &batch),
             durability: batch.durability,
         };
         self.next_index = JournalIndex(last);
@@ -154,7 +163,12 @@ impl DurableJournal for FileJournal {
         index: JournalIndex,
     ) -> Result<Box<dyn Iterator<Item = Result<JournalRecord, JournalError>> + '_>, JournalError>
     {
-        let records = scan_file(&self.path, false)?;
+        let mut records = Vec::new();
+        scan_file(&self.path, false, |record| {
+            if record.index >= index {
+                records.push(record);
+            }
+        })?;
         Ok(Box::new(
             records
                 .into_iter()
@@ -168,7 +182,14 @@ impl DurableJournal for FileJournal {
     }
 }
 
-fn scan_file(path: &Path, repair_trailing_batch: bool) -> Result<Vec<JournalRecord>, JournalError> {
+fn scan_file<F>(
+    path: &Path,
+    repair_trailing_batch: bool,
+    mut on_record: F,
+) -> Result<JournalIndex, JournalError>
+where
+    F: FnMut(JournalRecord),
+{
     let file = OpenOptions::new()
         .read(true)
         .write(repair_trailing_batch)
@@ -180,7 +201,6 @@ fn scan_file(path: &Path, repair_trailing_batch: bool) -> Result<Vec<JournalReco
         return Err(JournalError::UnsupportedFormat);
     }
 
-    let mut records = Vec::new();
     let mut next_index = JournalIndex::ZERO;
     let mut truncate_at = None;
 
@@ -195,6 +215,17 @@ fn scan_file(path: &Path, repair_trailing_batch: bool) -> Result<Vec<JournalReco
             }
             Err(error) => return Err(error.into()),
         };
+        let Some(first_index) = read_u64_or_incomplete(&mut reader)? else {
+            truncate_at = Some(batch_start);
+            break;
+        };
+        let first_index = JournalIndex(first_index);
+        if first_index != next_index {
+            return Err(JournalError::NonContiguousBatch {
+                expected: next_index,
+                actual: first_index,
+            });
+        }
         let Some(transition_id) = read_u128_or_incomplete(&mut reader)? else {
             truncate_at = Some(batch_start);
             break;
@@ -232,6 +263,7 @@ fn scan_file(path: &Path, repair_trailing_batch: bool) -> Result<Vec<JournalReco
             owner_epoch,
         };
         let mut payloads = Vec::with_capacity(record_count);
+        let mut total_bytes = 0usize;
         let mut incomplete = false;
         for _ in 0..record_count {
             let Some(len) = read_u32_or_incomplete(&mut reader)? else {
@@ -239,10 +271,22 @@ fn scan_file(path: &Path, repair_trailing_batch: bool) -> Result<Vec<JournalReco
                 break;
             };
             let len = len as usize;
-            if len > crate::journal::MAX_RECORD_BYTES {
+            if len > MAX_RECORD_BYTES {
                 return Err(JournalError::RecordTooLarge {
                     actual: len,
-                    max: crate::journal::MAX_RECORD_BYTES,
+                    max: MAX_RECORD_BYTES,
+                });
+            }
+            total_bytes = total_bytes
+                .checked_add(len)
+                .ok_or(JournalError::BatchTooLarge {
+                    actual: usize::MAX,
+                    max: MAX_BATCH_BYTES,
+                })?;
+            if total_bytes > MAX_BATCH_BYTES {
+                return Err(JournalError::BatchTooLarge {
+                    actual: total_bytes,
+                    max: MAX_BATCH_BYTES,
                 });
             }
             let Some(payload) = read_bytes_or_incomplete(&mut reader, len)? else {
@@ -267,18 +311,13 @@ fn scan_file(path: &Path, repair_trailing_batch: bool) -> Result<Vec<JournalReco
             return Err(JournalError::InvalidCommitMarker);
         }
 
-        let batch = JournalBatch::new(
-            TransitionId(transition_id),
-            context,
-            payloads.clone(),
-            durability,
-        );
-        if content_hash(&batch) != expected_hash {
+        let batch = JournalBatch::new(TransitionId(transition_id), context, payloads, durability);
+        if content_hash(first_index, &batch) != expected_hash {
             return Err(JournalError::ContentHashMismatch);
         }
-        for (ordinal, payload) in payloads.into_iter().enumerate() {
-            records.push(JournalRecord {
-                index: JournalIndex(next_index.0 + ordinal as u64),
+        for (ordinal, payload) in batch.records.into_iter().enumerate() {
+            on_record(JournalRecord {
+                index: JournalIndex(first_index.0 + ordinal as u64),
                 transition_id: batch.transition_id,
                 context: batch.context,
                 ordinal: ordinal as u32,
@@ -300,7 +339,7 @@ fn scan_file(path: &Path, repair_trailing_batch: bool) -> Result<Vec<JournalReco
         file.set_len(offset)?;
         file.sync_all()?;
     }
-    Ok(records)
+    Ok(next_index)
 }
 
 fn read_u32_or_eof(reader: &mut BufReader<File>) -> Result<Option<u32>, io::Error> {
@@ -445,13 +484,39 @@ mod tests {
             journal.append_batch(batch(1, &[b"payload"])).unwrap();
         }
         let mut bytes = std::fs::read(&path).unwrap();
-        let payload_offset = 8 + 4 + 16 + 1 + 8 + 1 + 4;
+        let payload_offset = 8 + 4 + 8 + 16 + 1 + 8 + 1 + 4;
         bytes[payload_offset] ^= 0xff;
         std::fs::write(&path, bytes).unwrap();
 
         assert!(matches!(
             FileJournal::open(&path),
             Err(JournalError::ContentHashMismatch)
+        ));
+    }
+
+    #[test]
+    fn a_non_contiguous_batch_is_rejected_instead_of_reindexed() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("journal.bin");
+        {
+            let mut journal = FileJournal::open(&path).unwrap();
+            journal.append_batch(batch(1, &[b"first"])).unwrap();
+            journal.append_batch(batch(2, &[b"second"])).unwrap();
+        }
+
+        let first_batch_bytes = 4 + 8 + 16 + 1 + 8 + 1 + 4 + 5 + 8 + 8;
+        let second_first_index_offset = 8 + first_batch_bytes + 4;
+        let mut bytes = std::fs::read(&path).unwrap();
+        bytes[second_first_index_offset..second_first_index_offset + 8]
+            .copy_from_slice(&0u64.to_le_bytes());
+        std::fs::write(&path, bytes).unwrap();
+
+        assert!(matches!(
+            FileJournal::open(&path),
+            Err(JournalError::NonContiguousBatch {
+                expected: JournalIndex(1),
+                actual: JournalIndex(0),
+            })
         ));
     }
 }

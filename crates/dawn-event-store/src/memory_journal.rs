@@ -31,11 +31,15 @@ impl DurableJournal for InMemoryJournal {
                 .map_err(|_| JournalError::IndexOverflow)?,
         );
         let len = batch.records.len() as u32;
+        let last = first
+            .0
+            .checked_add(u64::from(len))
+            .ok_or(JournalError::IndexOverflow)?;
         let receipt = AppendReceipt {
             transition_id: batch.transition_id,
             context: batch.context,
             range: JournalRange { first, len },
-            content_hash: content_hash(&batch),
+            content_hash: content_hash(first, &batch),
             durability: batch.durability,
         };
 
@@ -54,6 +58,7 @@ impl DurableJournal for InMemoryJournal {
                     payload,
                 }),
         );
+        debug_assert_eq!(self.records.len() as u64, last);
         Ok(receipt)
     }
 
@@ -105,9 +110,17 @@ mod tests {
 
         assert_eq!(receipt.range.first, JournalIndex::ZERO);
         assert_eq!(receipt.range.len, 2);
-        assert_eq!(receipt.range.last_exclusive(), JournalIndex(2));
+        assert_eq!(
+            receipt.range.checked_last_exclusive(),
+            Some(JournalIndex(2))
+        );
+        assert!(receipt.range.contains(JournalIndex(0)));
+        assert!(!receipt.range.contains(JournalIndex(2)));
         assert_eq!(receipt.transition_id, TransitionId(7));
         assert_eq!(journal.next_index().unwrap(), JournalIndex(2));
+        let encoded = postcard::to_stdvec(&receipt).unwrap();
+        let decoded: AppendReceipt = postcard::from_bytes(&encoded).unwrap();
+        assert_eq!(decoded, receipt);
         assert!(receipt.matches(
             TransitionId(7),
             receipt.context,
@@ -120,6 +133,8 @@ mod tests {
             receipt.range,
             receipt.content_hash,
         ));
+        assert_eq!(JournalIndex(1).checked_next(), Some(JournalIndex(2)));
+        assert_eq!(JournalIndex(u64::MAX).checked_next(), None);
     }
 
     #[test]
@@ -164,5 +179,15 @@ mod tests {
             .map(|record| record.unwrap().payload)
             .collect();
         assert_eq!(payloads, vec![b"b".to_vec(), b"c".to_vec()]);
+    }
+
+    #[test]
+    fn invalid_ranges_do_not_wrap_their_exclusive_end() {
+        let range = JournalRange {
+            first: JournalIndex(u64::MAX),
+            len: 1,
+        };
+        assert_eq!(range.checked_last_exclusive(), None);
+        assert!(!range.contains(JournalIndex(u64::MAX)));
     }
 }

@@ -8,10 +8,11 @@
 use std::fmt;
 
 use dawn_core::SectorId;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Zero-based position of a record in the authoritative journal.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct JournalIndex(pub u64);
 
 impl JournalIndex {
@@ -32,18 +33,18 @@ impl fmt::Display for JournalIndex {
 }
 
 /// Stable identity of one logical transition, independent of its records.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TransitionId(pub u128);
 
 /// Immutable context bound to a durable write receipt.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DurabilityContext {
     pub sector_id: SectorId,
     pub owner_epoch: u64,
 }
 
 /// How strongly the journal acknowledges a locally completed append.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum DurabilityMode {
     /// The batch was flushed to the operating-system file buffer only.
     Buffered,
@@ -52,7 +53,7 @@ pub enum DurabilityMode {
 }
 
 /// One logical append operation. The batch must not be empty.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JournalBatch {
     pub transition_id: TransitionId,
     pub context: DurabilityContext,
@@ -77,24 +78,30 @@ impl JournalBatch {
 }
 
 /// Inclusive/exclusive range assigned to one batch.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct JournalRange {
     pub first: JournalIndex,
     pub len: u32,
 }
 
 impl JournalRange {
-    pub const fn last_exclusive(self) -> JournalIndex {
-        JournalIndex(self.first.0 + self.len as u64)
+    pub const fn checked_last_exclusive(self) -> Option<JournalIndex> {
+        match self.first.0.checked_add(self.len as u64) {
+            Some(value) => Some(JournalIndex(value)),
+            None => None,
+        }
     }
 
     pub const fn contains(self, index: JournalIndex) -> bool {
-        index.0 >= self.first.0 && index.0 < self.last_exclusive().0
+        match self.checked_last_exclusive() {
+            Some(last_exclusive) => index.0 >= self.first.0 && index.0 < last_exclusive.0,
+            None => false,
+        }
     }
 }
 
 /// Evidence returned after a batch becomes visible at the requested durability.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct AppendReceipt {
     pub transition_id: TransitionId,
     pub context: DurabilityContext,
@@ -106,10 +113,6 @@ pub struct AppendReceipt {
 }
 
 impl AppendReceipt {
-    pub fn matches_context(&self, context: DurabilityContext) -> bool {
-        self.context == context
-    }
-
     pub fn matches(
         &self,
         transition_id: TransitionId,
@@ -125,7 +128,7 @@ impl AppendReceipt {
 }
 
 /// A decoded journal record returned by the read side of the contract.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JournalRecord {
     pub index: JournalIndex,
     pub transition_id: TransitionId,
@@ -143,6 +146,8 @@ pub enum JournalError {
     TooManyRecords { actual: usize, max: usize },
     #[error("journal record is too large: {actual} bytes > {max}")]
     RecordTooLarge { actual: usize, max: usize },
+    #[error("journal batch payload is too large: {actual} bytes > {max}")]
+    BatchTooLarge { actual: usize, max: usize },
     #[error("journal index overflow")]
     IndexOverflow,
     #[error("journal format is invalid: {0}")]
@@ -155,6 +160,13 @@ pub enum JournalError {
     ContentHashMismatch,
     #[error("journal commit marker is invalid")]
     InvalidCommitMarker,
+    #[error("journal batch starts at {actual}, expected {expected}")]
+    NonContiguousBatch {
+        expected: JournalIndex,
+        actual: JournalIndex,
+    },
+    #[error("journal is unusable after a failed rollback; reopen it")]
+    Poisoned,
     #[error("journal I/O failed: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -163,6 +175,8 @@ pub enum JournalError {
 pub const MAX_RECORDS_PER_BATCH: usize = 4096;
 /// Maximum encoded record size accepted by the storage boundary.
 pub const MAX_RECORD_BYTES: usize = 16 * 1024 * 1024;
+/// Maximum combined encoded payload size accepted by one logical batch.
+pub const MAX_BATCH_BYTES: usize = 64 * 1024 * 1024;
 
 /// Journal abstraction with atomic logical batches and explicit durability.
 pub trait DurableJournal {
@@ -186,6 +200,7 @@ pub(crate) fn validate_batch(batch: &JournalBatch) -> Result<(), JournalError> {
             max: MAX_RECORDS_PER_BATCH,
         });
     }
+    let mut total_bytes = 0usize;
     for record in &batch.records {
         if record.len() > MAX_RECORD_BYTES {
             return Err(JournalError::RecordTooLarge {
@@ -193,12 +208,24 @@ pub(crate) fn validate_batch(batch: &JournalBatch) -> Result<(), JournalError> {
                 max: MAX_RECORD_BYTES,
             });
         }
+        total_bytes = total_bytes
+            .checked_add(record.len())
+            .ok_or(JournalError::BatchTooLarge {
+                actual: usize::MAX,
+                max: MAX_BATCH_BYTES,
+            })?;
+    }
+    if total_bytes > MAX_BATCH_BYTES {
+        return Err(JournalError::BatchTooLarge {
+            actual: total_bytes,
+            max: MAX_BATCH_BYTES,
+        });
     }
     Ok(())
 }
 
 /// Stable non-cryptographic digest used to bind receipt evidence to content.
-pub(crate) fn content_hash(batch: &JournalBatch) -> u64 {
+pub(crate) fn content_hash(first: JournalIndex, batch: &JournalBatch) -> u64 {
     let mut hash = 0xcbf29ce484222325u64;
     fn mix(hash: &mut u64, bytes: &[u8]) {
         for byte in bytes {
@@ -208,6 +235,7 @@ pub(crate) fn content_hash(batch: &JournalBatch) -> u64 {
     }
 
     mix(&mut hash, &batch.transition_id.0.to_le_bytes());
+    mix(&mut hash, &first.0.to_le_bytes());
     mix(&mut hash, &[batch.context.sector_id.0]);
     mix(&mut hash, &batch.context.owner_epoch.to_le_bytes());
     mix(
