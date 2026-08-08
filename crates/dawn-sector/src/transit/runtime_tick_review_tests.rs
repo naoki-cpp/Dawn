@@ -1,6 +1,7 @@
 use super::*;
 use dawn_consensus::RaftActorMessage;
 use dawn_core::{NodeId, SectorBounds};
+use dawn_event_store::{AppendReceipt, JournalBatch, JournalError, JournalIndex, JournalRecord};
 use dawn_event_store::{DurabilityMode, InMemoryJournal, JournalStream};
 
 fn mem_node() -> SimulationNode {
@@ -85,4 +86,59 @@ fn durable_runtime_tick_persists_before_publishing_the_frame() {
         raft_messages.try_recv(),
         Ok(RaftActorMessage::TickElapsed)
     ));
+}
+
+#[test]
+fn durable_runtime_tick_restores_pending_output_when_append_fails() {
+    let mut node = mem_node();
+    node.spawn_ship(
+        dawn_core::ShipTypeId(1),
+        dawn_core::Position::ORIGIN,
+        dawn_core::Velocity::ZERO,
+    );
+    let expected = node.pending_events().to_vec();
+    let (raft_tx, _raft_messages) = mpsc::unbounded_channel();
+    let raft = RaftActorHandle::new(raft_tx);
+    let (_committed_tx, mut committed_rx) = mpsc::unbounded_channel();
+    let mut journal = FailingJournal;
+
+    let result = run_durable_runtime_tick(
+        &mut node,
+        &mut journal,
+        &raft,
+        &mut committed_rx,
+        &[],
+        DurableRuntimeTickContext {
+            transition_id: crate::transition::SectorTransitionId(101),
+            owner_epoch: 7,
+            durability: DurabilityMode::Synced,
+        },
+        |_, _, _| panic!("failed append must not publish a frame"),
+    );
+
+    assert!(result.is_err());
+    assert_eq!(node.current_tick(), dawn_core::Tick::ZERO);
+    assert_eq!(node.pending_events(), expected.as_slice());
+}
+
+struct FailingJournal;
+
+impl dawn_event_store::DurableJournal for FailingJournal {
+    fn append_batch(&mut self, _batch: JournalBatch) -> Result<AppendReceipt, JournalError> {
+        Err(JournalError::Io(std::io::Error::other(
+            "injected append failure",
+        )))
+    }
+
+    fn read_from(
+        &self,
+        _index: JournalIndex,
+    ) -> Result<Box<dyn Iterator<Item = Result<JournalRecord, JournalError>> + '_>, JournalError>
+    {
+        Ok(Box::new(std::iter::empty()))
+    }
+
+    fn next_index(&self) -> Result<JournalIndex, JournalError> {
+        Ok(JournalIndex::ZERO)
+    }
 }

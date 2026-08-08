@@ -8,7 +8,6 @@
 use dawn_actor::ws_server;
 use dawn_consensus::RaftActorHandle;
 use dawn_core::{DomainEvent, PlayerId, SectorId, ShipId};
-use dawn_event_store::store::EventStore;
 use dawn_replication::{OutboundLogPublisher, TcpReplicationTransport};
 use dawn_sector::aoi::{AoiSink, Observer};
 use dawn_sector::aoi_frame::AoiFrame;
@@ -46,12 +45,12 @@ pub(crate) struct SectorNodeRuntime {
 }
 
 impl SectorNodeRuntime {
-    pub(crate) fn new<S: EventStore>(
+    pub(crate) fn new(
         sector_id: SectorId,
         aoi_cell_size: f64,
         peer_ws: HashMap<SectorId, SocketAddr>,
         repl_transport: TcpReplicationTransport,
-        event_store: &S,
+        event_store: &impl dawn_event_store::store::EventStore,
     ) -> Self {
         Self {
             sector_id,
@@ -65,9 +64,9 @@ impl SectorNodeRuntime {
         }
     }
 
-    pub(crate) fn promote_ready_session<S: EventStore>(
+    pub(crate) fn promote_ready_session(
         &mut self,
-        node: &SimulationNode<S>,
+        node: &SimulationNode,
         sess: ws_server::PlayerSession,
     ) {
         println!(
@@ -84,30 +83,31 @@ impl SectorNodeRuntime {
         self.sessions.push(sess);
     }
 
-    pub(crate) fn run_frame<S: EventStore>(
+    pub(crate) fn run_frame(
         &mut self,
-        node: &mut SimulationNode<S>,
+        node: &mut SimulationNode,
         raft: &RaftActorHandle,
         committed_rx: &mut mpsc::UnboundedReceiver<Vec<u8>>,
+        event_store: &mut impl dawn_event_store::store::EventStore,
     ) {
         let (lock_commands, pending_jumps) = self.collect_player_commands(node);
         self.propose_player_jumps(node, raft, pending_jumps);
 
         let sector_id = self.sector_id;
-        let outbound_replication = &mut self.outbound_replication;
         let output =
-            transit::run_runtime_tick(node, raft, committed_rx, &lock_commands, |_, _, events| {
-                outbound_replication.publish_events(sector_id, events);
-            });
+            transit::run_runtime_tick(node, raft, committed_rx, &lock_commands, |_, _, _| {});
+        event_store.append_batch(output.events.clone());
+        self.outbound_replication
+            .publish_events(sector_id, &output.events);
 
         self.log_auto_jumps(&output.pending_auto_jumps);
         let jumped_ships = self.jumped_ships(&output.events);
         self.deliver_frames(node, &output.events, &output.completed_warps, &jumped_ships);
     }
 
-    fn collect_player_commands<S: EventStore>(
+    fn collect_player_commands(
         &mut self,
-        node: &mut SimulationNode<S>,
+        node: &mut SimulationNode,
     ) -> (
         Vec<dawn_core::LockOnCommand>,
         Vec<(usize, ShipId, dawn_core::JumpCommand)>,
@@ -144,9 +144,9 @@ impl SectorNodeRuntime {
         (lock_commands, pending_jumps)
     }
 
-    fn propose_player_jumps<S: EventStore>(
+    fn propose_player_jumps(
         &self,
-        node: &mut SimulationNode<S>,
+        node: &mut SimulationNode,
         raft: &RaftActorHandle,
         pending_jumps: Vec<(usize, ShipId, dawn_core::JumpCommand)>,
     ) {
@@ -212,9 +212,9 @@ impl SectorNodeRuntime {
             .collect()
     }
 
-    fn deliver_frames<S: EventStore>(
+    fn deliver_frames(
         &mut self,
-        node: &SimulationNode<S>,
+        node: &SimulationNode,
         new_events: &[DomainEvent],
         warp_arrivals: &[ShipId],
         jumped_ships: &HashMap<ShipId, SectorId>,
@@ -236,18 +236,18 @@ trait RuntimeAoiSession {
     fn ship_id(&self) -> ShipId;
     fn send_redirect(&mut self, ws_addr: SocketAddr);
 
-    fn deliver<S: EventStore>(
+    fn deliver(
         &mut self,
         frame: &mut AoiFrame,
-        node: &SimulationNode<S>,
+        node: &SimulationNode,
         new_events: &[DomainEvent],
         warp_arrivals: &[ShipId],
     ) -> bool;
 }
 
-fn seed_runtime_session<S: EventStore, T: RuntimeAoiSession>(
+fn seed_runtime_session<T: RuntimeAoiSession>(
     frame: &mut AoiFrame,
-    node: &SimulationNode<S>,
+    node: &SimulationNode,
     session: &T,
 ) {
     frame.seed_observer(
@@ -259,9 +259,9 @@ fn seed_runtime_session<S: EventStore, T: RuntimeAoiSession>(
     );
 }
 
-fn deliver_runtime_sessions<S: EventStore, T: RuntimeAoiSession>(
+fn deliver_runtime_sessions<T: RuntimeAoiSession>(
     frame: &mut AoiFrame,
-    node: &SimulationNode<S>,
+    node: &SimulationNode,
     sessions: &mut Vec<T>,
     peer_ws: &HashMap<SectorId, SocketAddr>,
     new_events: &[DomainEvent],
@@ -303,10 +303,10 @@ impl RuntimeAoiSession for ws_server::PlayerSession {
         });
     }
 
-    fn deliver<S: EventStore>(
+    fn deliver(
         &mut self,
         frame: &mut AoiFrame,
-        node: &SimulationNode<S>,
+        node: &SimulationNode,
         new_events: &[DomainEvent],
         warp_arrivals: &[ShipId],
     ) -> bool {
@@ -391,10 +391,10 @@ mod tests {
             self.sent.push(Sent::Redirect);
         }
 
-        fn deliver<S: EventStore>(
+        fn deliver(
             &mut self,
             frame: &mut AoiFrame,
-            node: &SimulationNode<S>,
+            node: &SimulationNode,
             new_events: &[DomainEvent],
             warp_arrivals: &[ShipId],
         ) -> bool {

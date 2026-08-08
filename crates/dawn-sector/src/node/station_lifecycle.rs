@@ -2,7 +2,6 @@
 
 use dawn_core::{DockCommand, DomainEvent, PlayerId, ShipId, StationId};
 use dawn_ecs::components::{LockComp, ThrustComp, VelocityComp, WarpComp};
-use dawn_event_store::store::EventStore;
 
 use super::{
     station::{StationOperationOutcome, StationOperationRejection},
@@ -10,7 +9,7 @@ use super::{
     SimulationNode,
 };
 
-impl<S: EventStore> SimulationNode<S> {
+impl SimulationNode {
     /// True when `player_id`'s ship is currently docked at `station_id`.
     pub fn can_use_station(&self, player_id: PlayerId, station_id: StationId) -> bool {
         self.docked_players.get(&player_id).copied() == Some(station_id)
@@ -261,7 +260,7 @@ mod tests {
         matches!(outcome, StationOperationOutcome::Accepted { .. })
     }
 
-    fn node() -> SimulationNode<InMemoryEventStore> {
+    fn node() -> SimulationNode {
         SimulationNode::new_test(
             NodeId(0),
             SectorId(0),
@@ -270,10 +269,10 @@ mod tests {
         )
     }
 
-    fn copied_store(node: &SimulationNode<InMemoryEventStore>) -> InMemoryEventStore {
+    fn copied_store(node: &SimulationNode) -> InMemoryEventStore {
         let mut store = InMemoryEventStore::new();
-        for record in node.event_store.all_records() {
-            store.append(record.event.clone());
+        for event in node.pending_events() {
+            store.append(event.clone());
         }
         store
     }

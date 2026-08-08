@@ -6,7 +6,6 @@
 
 use dawn_actor::ws_server;
 use dawn_core::{Position, SectorId};
-use dawn_event_store::store::EventStore;
 use dawn_sector::client_admission::{
     ClientAdmissionAttempt, ClientAdmissionIntent, ClientAdmissionRefusal, CommittedClientAdmission,
 };
@@ -63,9 +62,9 @@ impl ClientAdmission {
         }
     }
 
-    pub(crate) fn advance_handshakes<S: EventStore>(
+    pub(crate) fn advance_handshakes(
         &mut self,
-        node: &mut SimulationNode<S>,
+        node: &mut SimulationNode,
         sector_id: SectorId,
         aoi_cell_size: f64,
     ) {
@@ -164,8 +163,8 @@ impl ClientAdmission {
     }
 }
 
-fn finish_admission<S: EventStore, T>(
-    node: &mut SimulationNode<S>,
+fn finish_admission<T>(
+    node: &mut SimulationNode,
     attempt: ClientAdmissionAttempt,
     result: Result<T, String>,
 ) -> Option<(T, CommittedClientAdmission)> {
@@ -243,7 +242,7 @@ mod tests {
             .expect("fresh attempt");
 
         assert_eq!(
-            finish_admission::<_, ()>(
+            finish_admission::<()>(
                 &mut node,
                 attempt,
                 Err("client disconnected while sending InitialState".to_string()),
@@ -337,7 +336,7 @@ mod tests {
             .expect("resume attempt");
 
         assert_eq!(
-            finish_admission::<_, ()>(&mut node, attempt, Err("client disconnected".to_string()),),
+            finish_admission::<()>(&mut node, attempt, Err("client disconnected".to_string()),),
             None
         );
         assert_eq!(node.ship_count(), 1);

@@ -7,7 +7,6 @@ use super::{
 };
 use crate::ws_server;
 use dawn_core::{DomainEvent, NodeId, Position, SectorBounds, SectorId, ShipId};
-use dawn_event_store::store::EventStore;
 use dawn_sector::client_admission::{
     ClientAdmissionAttempt, ClientAdmissionIntent, ClientAdmissionRefusal, CommittedClientAdmission,
 };
@@ -308,8 +307,8 @@ fn log_single_refusal(addr: std::net::SocketAddr, refusal: ClientAdmissionRefusa
     }
 }
 
-fn drain_single_admission_completions<S: EventStore>(
-    node: &mut SimulationNode<S>,
+fn drain_single_admission_completions(
+    node: &mut SimulationNode,
     completion_rx: &mut mpsc::UnboundedReceiver<HandshakeCompletion>,
 ) -> Vec<(ws_server::PlayerSession, CommittedClientAdmission)> {
     let mut ready = Vec::new();
@@ -321,8 +320,8 @@ fn drain_single_admission_completions<S: EventStore>(
     ready
 }
 
-fn finish_single_admission<S: EventStore, T>(
-    node: &mut SimulationNode<S>,
+fn finish_single_admission<T>(
+    node: &mut SimulationNode,
     attempt: ClientAdmissionAttempt,
     result: Result<T, String>,
 ) -> Option<(T, CommittedClientAdmission)> {
@@ -386,7 +385,7 @@ mod tests {
             .expect("fresh attempt");
 
         assert_eq!(
-            finish_single_admission::<_, ()>(
+            finish_single_admission::<()>(
                 &mut node,
                 attempt,
                 Err("client disconnected".to_string()),
@@ -443,7 +442,7 @@ mod tests {
             .expect("resume attempt");
 
         assert_eq!(
-            finish_single_admission::<_, ()>(
+            finish_single_admission::<()>(
                 &mut node,
                 attempt,
                 Err("client disconnected".to_string()),

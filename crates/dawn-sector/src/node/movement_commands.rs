@@ -12,9 +12,7 @@ use dawn_ecs::{
     components::{PositionComp, ThrustComp, WarpComp},
     Entity,
 };
-use dawn_event_store::{
-    store::EventStore, AppendReceipt, DurabilityMode, DurableJournal, JournalError,
-};
+use dawn_event_store::{AppendReceipt, DurabilityMode, DurableJournal, JournalError};
 use thiserror::Error;
 
 use super::SimulationNode;
@@ -34,7 +32,7 @@ pub enum StopTransitionError {
     Validation(#[from] TransitionApplyError),
 }
 
-impl<S: EventStore> SimulationNode<S> {
+impl SimulationNode {
     fn stop_command_state(&self, ship_id: ShipId) -> StopCommandState {
         let Some(&entity) = self.ships.index.get(&ship_id) else {
             return StopCommandState {

@@ -5,7 +5,6 @@
 
 use dawn_core::{ItemId, PlayerId, ShipId};
 use dawn_ecs::components::{FittingComp, InventoryComp};
-use dawn_event_store::store::EventStore;
 #[cfg(test)]
 use dawn_wire::ItemWire;
 use dawn_wire::{
@@ -14,7 +13,7 @@ use dawn_wire::{
 
 use super::SimulationNode;
 
-impl<S: EventStore> SimulationNode<S> {
+impl SimulationNode {
     /// The one seam every `ItemRowWire` (ship cargo, station inventory) goes
     /// through. The Item variant remains typed; only presentation metadata is
     /// added here. `None` if the registry backing `item_id` no longer has a

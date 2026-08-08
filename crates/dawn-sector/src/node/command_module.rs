@@ -9,7 +9,6 @@ use dawn_ecs::{
     components::{FittedSlot, FittingComp, LockComp, LockState},
     Entity,
 };
-use dawn_event_store::store::EventStore;
 
 use super::SimulationNode;
 
@@ -64,7 +63,7 @@ fn module_activation_rejection_from_flight(
     }
 }
 
-impl<S: EventStore> SimulationNode<S> {
+impl SimulationNode {
     // ── Module commands ───────────────────────────────────────────────────────
 
     pub fn activate_module(

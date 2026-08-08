@@ -60,9 +60,10 @@ Client comms     : WebSocket (Godot <-> WsServer, ADR-0007), postcard binary
                     InitialState/PlayerLoadout/AoI/PositionSnap (ADR-0042)
 Node             : a physical process (`sector-node config/node-N.toml`)
 Inter-node net   : TCP LAN plaintext (8D milestone; TLS is next phase)
-Persistence      : current implementation still uses FileEventStore + StateSnapshot/
-                    checkpoint paths. ADR-0049/#284 has selected the replacement
-                    recovery model; #271/#272 migrate storage/engine boundaries.
+Persistence      : FileEventStore remains the append-only public-fact mirror and
+                    StateSnapshot remains the compatibility checkpoint path.
+                    The Sector engine owns neither store; ADR-0049 RecoveryDelta
+                    transitions use the runtime-owned DurableJournal boundary.
 ```
 
 See [ADR-0003](../adr/ADR-0003-local-first-development.md), [ADR-0027](../adr/ADR-0027-dawn-replication-crate.md), and [ADR-0049](../adr/ADR-0049-sector-recovery-state-delta-wal.md).
@@ -71,7 +72,8 @@ See [ADR-0003](../adr/ADR-0003-local-first-development.md), [ADR-0027](../adr/AD
 
 - TLS / QUIC (8E+)
 - #271 fallible/versioned atomic recovery journal
-- #272 storage-independent Sector engine transition boundary
+- #272 storage-independent Sector engine transition boundary (Stop and full-Tick
+  prepare -> durable append -> live-apply slices are implemented)
 - #276 durable Transit Saga replacing EventStore scans
 - #280 unified peer transport carrying the #284 checkpoint/catch-up representation
 
@@ -90,7 +92,7 @@ See [ADR-0003](../adr/ADR-0003-local-first-development.md), [ADR-0027](../adr/AD
 | `dawn-client-gdext` | library (cdylib) | GDExtension binding exposing `dawn-client-core` to the Godot client. Thin type-conversion adapter only (ADR-0040, ADR-0046) |
 | `dawn-wire` | library | Client<->server wire schema (`ClientRequest`/`EventWire`, `ServerMessage`/`ClientMessage` binary envelope). `ClientRequest` is the single typed Sector request authority re-exported from `dawn-core`; depends only on `dawn-core` + serde + postcard -- no transport/runtime dependency (ADR-0041, ADR-0042) |
 | `dawn-ecs` | library | ECS World wrapper. Component / System definitions |
-| `dawn-event-store` | library | Current public EventLog/snapshot-era persistence substrate. #271 evolves/replaces its infallible EventStore contract with generic fallible atomic durable-journal mechanics capable of storing ADR-0049 recovery records; public-event archival remains logically distinct |
+| `dawn-event-store` | library | Public EventLog plus fallible atomic `DurableJournal` mechanics capable of storing ADR-0049 recovery records; public-event archival remains logically distinct |
 | `dawn-consensus` | library | Raft implementation (leader election, log replication, RaftActor; ADR-0014) |
 | `dawn-actor` | library | Client transport boundary (`ClientConnection` trait) |
 | `dawn-replication` | library | Current replication/catch-up transport and anti-entropy implementation. #280 consolidates transport infrastructure and must carry the ADR-0049/#284 recovery representation without redefining it |
@@ -126,7 +128,7 @@ dawn-core
                     └── dawn-sector-node
 ```
 
-Dependencies flow **bottom-to-top only**; any reverse or circular dependency is a design failure. #272 may change the exact persistence edge so the pure Sector engine no longer owns `dawn-event-store`; when it lands, update this DAG to the implemented composition.
+Dependencies flow **bottom-to-top only**; any reverse or circular dependency is a design failure. The pure Sector engine no longer owns `dawn-event-store`; runtime and application adapters own journal handles and persistence wiring.
 
 ### Rule for adding crate dependencies
 
@@ -188,7 +190,11 @@ Publish public events / replication / reliable effects
 Acknowledge after the selected durability + local-apply conditions
 ```
 
-The current `SimulationNode<S>` implementation still mutates live state and appends public events internally in places. That is **migration debt owned by #272**, not the normative data flow.
+The concrete `SimulationNode` no longer owns an `EventStore`. Legacy command paths
+still expose public events through an in-memory output buffer, while the Stop and
+full-Tick transition adapters use bounded prepare -> durable append -> live apply.
+Migrating the remaining command/state owners and the production durability profile
+belongs to the explicitly scoped follow-up issues, not to the node's domain API.
 
 Command and `DomainEvent` remain separate types (INV-006), and neither is an accidental substitute for `RecoveryDelta`. See [recovery-contract.md](./recovery-contract.md), [tick-model.md](./tick-model.md), and [event-catalog.md](./event-catalog.md).
 

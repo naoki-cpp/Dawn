@@ -9,11 +9,10 @@ use dawn_ecs::{
     components::{FittedSlot, FittingComp},
     Entity,
 };
-use dawn_event_store::store::EventStore;
 
 use super::SimulationNode;
 
-impl<S: EventStore> SimulationNode<S> {
+impl SimulationNode {
     /// Move one instance of `cmd.module_id` from the owning player's
     /// inventory into `cmd.slot` (ADR-0032). Unlike `fit_module` (the
     /// internal spawn-time path), this enforces the module's own slot kind,
@@ -258,7 +257,7 @@ mod tests {
             3
         );
 
-        let event = &node.event_store().all_records().last().unwrap().event;
+        let event = node.pending_events().last().unwrap();
         let dawn_core::DomainEvent::ShipFitted(event) = event else {
             panic!("market item removal must emit a ShipFitted snapshot");
         };
@@ -359,13 +358,7 @@ mod tests {
             item_id: dawn_core::ItemId::ScrapMetal,
             quantity: 4,
         }));
-        let event = node
-            .event_store()
-            .all_records()
-            .last()
-            .unwrap()
-            .event
-            .clone();
+        let event = node.pending_events().last().unwrap().clone();
 
         let entity = *node.ships.index.get(&ship_id).unwrap();
         node.world

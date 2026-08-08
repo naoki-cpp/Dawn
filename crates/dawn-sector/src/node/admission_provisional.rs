@@ -23,9 +23,9 @@
 //! - public admission events may remain useful facts, but are not the sole exact
 //!   recovery reducer or allocator authority.
 //!
-//! Until #271/#272/#277/#278 migrate this code, comments on individual methods
-//! explicitly describe current behavior without promoting it to the target
-//! persistence contract.
+//! Until #277/#278 migrate this code, comments on individual methods explicitly
+//! describe current behavior without promoting it to the target persistence
+//! contract.
 
 use dawn_core::{
     events::{ClientAdmissionCommitted, ClientAdmissionIdentityReserved},
@@ -33,7 +33,6 @@ use dawn_core::{
     DomainEvent, ItemId, PlayerId, Position, ResumeTicket, ShipId, SlotKind, StationId, Velocity,
 };
 use dawn_ecs::components::{FittedSlot, FittingComp, InventoryComp, IsNpcComp};
-use dawn_event_store::store::EventStore;
 use rand::RngCore;
 
 use super::{HandoffPayload, MissingObserverShip, SimulationNode};
@@ -44,13 +43,14 @@ fn generate_resume_ticket() -> ResumeTicket {
     ResumeTicket::from_bytes(bytes)
 }
 
-impl<S: EventStore> SimulationNode<S> {
+impl SimulationNode {
     /// Current implementation of a fresh identity reservation.
     ///
-    /// Today the allocation watermark is appended to the public EventStore first
-    /// and SQLite then records the exact prepared spawn input. Returning only
-    /// after both writes is the current mechanism that makes an exposed identity
-    /// retryable after restart.
+    /// Today the allocation watermark is emitted as a public output first and
+    /// SQLite then records the exact prepared spawn input. The runtime must
+    /// persist the output and the prepared row before exposing the identity;
+    /// returning only after both operations is what makes it retryable after
+    /// restart.
     ///
     /// Under ADR-0049/#277, the normative invariant is instead that the durable
     /// Admission/Identity repository reservation also durably consumes the
@@ -205,9 +205,9 @@ impl<S: EventStore> SimulationNode<S> {
 
     /// Current legacy commit path for a reserved fresh admission.
     ///
-    /// It materializes live state, appends `ClientAdmissionCommitted`, then
-    /// finalizes the SQLite grant/identity rows. Current replay/reconciliation
-    /// repairs several crash cases around that ordering.
+    /// It materializes live state, emits `ClientAdmissionCommitted`, then
+    /// finalizes the SQLite grant/identity rows. Current
+    /// replay/reconciliation repairs several crash cases around that ordering.
     ///
     /// ADR-0049/#272/#277 replaces this as the normative commit contract with a
     /// prepared Sector transition whose `RecoveryDelta` is durable before live
@@ -284,6 +284,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// ADR-0049 does not make this public-event replay the final exact recovery
     /// reducer; future world recovery uses `RecoveryDelta`, with #277 repository
     /// reconciliation for protocol authority.
+    #[cfg(test)]
     pub(super) fn replay_client_admission_commit(&mut self, event: &ClientAdmissionCommitted) {
         if !self.ships.index.contains_key(&event.ship_id) {
             self.insert_to_world(event.ship_id, Position::ORIGIN, Velocity::ZERO);
@@ -320,8 +321,8 @@ impl<S: EventStore> SimulationNode<S> {
 
     /// Release only the in-memory capacity/handshake claim.
     ///
-    /// In the current implementation, EventStore/SQLite data continues to make
-    /// the exposed reservation retryable. Under ADR-0049/#277 the stronger
+    /// In the current implementation, the pending public output and SQLite data
+    /// continue to make the exposed reservation retryable. Under ADR-0049/#277 the stronger
     /// invariant is explicit: terminating the prepared protocol record may
     /// release resources, but its durably consumed IDs are never reusable.
     pub(crate) fn abort_reserved_fresh_admission(&mut self, ship_id: ShipId) {

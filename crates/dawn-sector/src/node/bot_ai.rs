@@ -8,11 +8,10 @@ use dawn_core::{PlayerId, Position, ShipId};
 use dawn_ecs::components::{
     FittingComp, HullComp, IsBotComp, IsNpcComp, LockComp, PositionComp, ShipStatsComp, WarpComp,
 };
-use dawn_event_store::store::EventStore;
 
 use super::SimulationNode;
 
-impl<S: EventStore> SimulationNode<S> {
+impl SimulationNode {
     /// Run the Bot AI for all `IsBotComp` ships.
     ///
     /// Bots issue the exact same commands as a human player:

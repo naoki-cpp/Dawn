@@ -17,14 +17,13 @@ use dawn_ecs::{
     },
     Entity,
 };
-use dawn_event_store::store::EventStore;
 
 use super::{
     SimulationNode, BODY_WARP_ARRIVAL_FACTOR, WARP_ALIGN_FRACTION, WARP_ARRIVAL_FACTOR,
     WARP_MIN_TICKS, WARP_SPEED,
 };
 
-impl<S: EventStore> SimulationNode<S> {
+impl SimulationNode {
     /// Begin an intra-Sector warp toward a Jump Gate (short-range Fold, ADR-0022).
     ///
     /// Attaches a `WarpComp` in the `Aligning` phase if `can_propose_warp`

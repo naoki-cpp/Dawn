@@ -7,7 +7,6 @@ use super::{
 };
 use crate::{cluster, ws_server};
 use dawn_core::{DomainEvent, NodeId, PlayerId, Position, SectorBounds, SectorId, ShipId};
-use dawn_event_store::store::EventStore;
 use dawn_sector::client_admission::{
     ClientAdmissionAttempt, ClientAdmissionIntent, ClientAdmissionRefusal, CommittedClientAdmission,
 };
@@ -341,8 +340,8 @@ fn log_cluster_refusal(addr: std::net::SocketAddr, refusal: ClientAdmissionRefus
     }
 }
 
-fn find_resume_sector<S: EventStore>(
-    nodes: &[SimulationNode<S>],
+fn find_resume_sector(
+    nodes: &[SimulationNode],
     resume_ticket: dawn_core::ResumeTicket,
 ) -> Option<usize> {
     let mut sectors = nodes.iter().enumerate().filter_map(|(sector, node)| {
@@ -357,8 +356,8 @@ fn find_resume_sector<S: EventStore>(
     }
 }
 
-fn drain_cluster_admission_completions<S: EventStore>(
-    nodes: &mut [SimulationNode<S>],
+fn drain_cluster_admission_completions(
+    nodes: &mut [SimulationNode],
     player_sector: &mut HashMap<PlayerId, usize>,
     ship_player: &mut HashMap<ShipId, PlayerId>,
     completion_rx: &mut mpsc::UnboundedReceiver<HandshakeCompletion>,
@@ -377,8 +376,8 @@ fn drain_cluster_admission_completions<S: EventStore>(
     ready
 }
 
-fn finish_cluster_admission<S: EventStore, T>(
-    node: &mut SimulationNode<S>,
+fn finish_cluster_admission<T>(
+    node: &mut SimulationNode,
     sector: usize,
     player_sector: &mut HashMap<PlayerId, usize>,
     ship_player: &mut HashMap<ShipId, PlayerId>,
@@ -474,7 +473,7 @@ mod tests {
         let mut ship_player = HashMap::new();
 
         assert_eq!(
-            finish_cluster_admission::<_, ()>(
+            finish_cluster_admission::<()>(
                 &mut node,
                 0,
                 &mut player_sector,
@@ -581,7 +580,7 @@ mod tests {
         let ship_id = attempt.ship_id();
         let resume_ticket = attempt.resume_ticket();
         assert!(matches!(
-            resolve_client_admission::<_, (), _>(&mut nodes[1], attempt, Err(())),
+            resolve_client_admission::<(), _>(&mut nodes[1], attempt, Err(())),
             ClientAdmissionResolution::Aborted { .. }
         ));
         assert!(nodes[1].ship_absolute_pos(ship_id).is_none());
@@ -596,7 +595,7 @@ mod tests {
             .expect("exact prepared identity resumes in its Sector");
         assert!(!recovered.is_resumed());
         assert!(matches!(
-            resolve_client_admission::<_, (), _>(&mut nodes[sector], recovered, Err(())),
+            resolve_client_admission::<(), _>(&mut nodes[sector], recovered, Err(())),
             ClientAdmissionResolution::Aborted { .. }
         ));
     }
@@ -628,7 +627,7 @@ mod tests {
         let mut ship_player = HashMap::new();
 
         assert_eq!(
-            finish_cluster_admission::<_, ()>(
+            finish_cluster_admission::<()>(
                 &mut node,
                 0,
                 &mut player_sector,

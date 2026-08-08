@@ -1,11 +1,11 @@
 //! Sector Transit Raft adapter (ADR-0014).
 //!
 //! The authoritative handoff state machine lives in the internal `handoff`
-//! module. The pipeline reconstructs durable EventStore facts, while this
-//! module owns only the wire payload and translation to Raft proposals. The
-//! low-level ECS lifecycle operations remain crate-private behind that policy.
+//! module. The pipeline consumes the node's observed transit journal and
+//! translates explicit effects to Raft proposals. The low-level ECS lifecycle
+//! operations remain crate-private behind that policy.
 
-mod handoff;
+pub(crate) mod handoff;
 pub(crate) mod pipeline;
 
 use crate::node::SimulationNode;
@@ -13,7 +13,6 @@ use dawn_consensus::RaftActorHandle;
 use dawn_core::{
     AbsolutePosition, DomainEvent, JumpGateId, SectorId, ShipId, Tick, TransitHandoffState,
 };
-use dawn_event_store::store::EventStore;
 use dawn_event_store::{DurabilityMode, DurableJournal};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
@@ -77,8 +76,8 @@ fn propose_ack(raft: &RaftActorHandle, proposal: pipeline::AckProposal) {
     );
 }
 
-pub fn apply_committed_raft_entries<S: EventStore>(
-    node: &mut SimulationNode<S>,
+pub fn apply_committed_raft_entries(
+    node: &mut SimulationNode,
     raft: &RaftActorHandle,
     committed_rx: &mut mpsc::UnboundedReceiver<Vec<u8>>,
 ) {
@@ -155,20 +154,19 @@ pub struct DurableRuntimeTickContext {
 /// committed Raft entries -> simulation Tick -> Event collection ->
 /// replication hook -> Raft clock advancement -> auto-jump proposal ->
 /// transient warp-output drain.
-pub fn run_runtime_tick<S, F>(
-    node: &mut SimulationNode<S>,
+pub fn run_runtime_tick<F>(
+    node: &mut SimulationNode,
     raft: &RaftActorHandle,
     committed_rx: &mut mpsc::UnboundedReceiver<Vec<u8>>,
     lock_commands: &[dawn_core::LockOnCommand],
     after_events_collected: F,
 ) -> RuntimeTickOutput
 where
-    S: EventStore,
-    F: FnOnce(&SimulationNode<S>, &crate::node::TickResult, &[DomainEvent]),
+    F: FnOnce(&SimulationNode, &crate::node::TickResult, &[DomainEvent]),
 {
     // Consume the engine's explicit transition output instead of deriving the
-    // frame from a mutable EventStore cursor. The legacy log remains a mirror
-    // during migration, but runtime publication is now driven by this output.
+    // frame from a mutable public-event cursor. The legacy log remains a
+    // mirror during migration, but runtime publication is driven by output.
     let mut events = node.drain_pending_events();
     apply_committed_raft_entries(node, raft, committed_rx);
     let result = node.tick_with_lock_commands(lock_commands);
@@ -210,8 +208,8 @@ where
 /// delta, and only then publishes the public events and transient effects.
 /// The legacy frame remains available while callers migrate their journal
 /// wiring to this explicit runtime-owned path.
-pub fn run_durable_runtime_tick<S, J, F>(
-    node: &mut SimulationNode<S>,
+pub fn run_durable_runtime_tick<J, F>(
+    node: &mut SimulationNode,
     journal: &mut J,
     raft: &RaftActorHandle,
     committed_rx: &mut mpsc::UnboundedReceiver<Vec<u8>>,
@@ -220,27 +218,43 @@ pub fn run_durable_runtime_tick<S, J, F>(
     after_events_collected: F,
 ) -> Result<RuntimeTickOutput, crate::node::TickTransitionError>
 where
-    S: EventStore,
     J: DurableJournal,
-    F: FnOnce(&SimulationNode<S>, &crate::node::TickResult, &[DomainEvent]),
+    F: FnOnce(&SimulationNode, &crate::node::TickResult, &[DomainEvent]),
 {
-    let mut events = node.drain_pending_events();
     apply_committed_raft_entries(node, raft, committed_rx);
-    let (prepared, result) = node.prepare_tick_state_transition_with_result(
+    // Command-side and committed-transit public facts belong to this same
+    // runtime output boundary. Keep them outside the prepared Tick until the
+    // journal append has succeeded so a failed append can restore the buffer.
+    let prior_events = node.drain_pending_events();
+    let (prepared, result) = match node.prepare_tick_state_transition_with_result(
         lock_commands,
         context.transition_id,
         context.owner_epoch,
-    )?;
+    ) {
+        Ok(result) => result,
+        Err(error) => {
+            node.restore_pending_events(prior_events);
+            return Err(error);
+        }
+    };
     let delta = match &prepared.recovery_delta {
         crate::transition::SectorRecoveryDelta::Tick(delta) => delta.clone(),
         crate::transition::SectorRecoveryDelta::Stop(_) => {
             unreachable!("full runtime Tick preparation produces a Tick delta")
         }
     };
-    crate::transition_journal::append_prepared_transition(journal, &prepared, context.durability)
-        .map_err(crate::node::TickTransitionError::Durable)?;
+    if let Err(error) = crate::transition_journal::append_prepared_transition(
+        journal,
+        &prepared,
+        context.durability,
+    ) {
+        node.restore_pending_events(prior_events);
+        return Err(crate::node::TickTransitionError::Durable(error));
+    }
     node.apply_tick_transition(delta, prepared.context)
         .map_err(crate::node::TickTransitionError::Validation)?;
+    let mut events = prior_events;
+    events.extend(node.drain_pending_events());
     events.extend(prepared.public_events);
 
     after_events_collected(node, &result, &events);
@@ -263,8 +277,8 @@ where
     })
 }
 
-pub fn propose_jump<S: EventStore>(
-    node: &mut SimulationNode<S>,
+pub fn propose_jump(
+    node: &mut SimulationNode,
     raft: &RaftActorHandle,
     ship_id: ShipId,
     gate_id: JumpGateId,
@@ -276,8 +290,8 @@ pub fn propose_jump<S: EventStore>(
     outcome
 }
 
-pub fn propose_auto_jump<S: EventStore>(
-    node: &mut SimulationNode<S>,
+pub fn propose_auto_jump(
+    node: &mut SimulationNode,
     raft: &RaftActorHandle,
     ship_id: ShipId,
     gate_id: JumpGateId,

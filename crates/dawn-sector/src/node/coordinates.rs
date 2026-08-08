@@ -6,11 +6,10 @@
 
 use dawn_core::{AbsolutePosition, Position, ShipId};
 use dawn_ecs::{components::PositionComp, Entity};
-use dawn_event_store::store::EventStore;
 
 use super::SimulationNode;
 
-impl<S: EventStore> SimulationNode<S> {
+impl SimulationNode {
     /// Absolute position (Sector-frame) of a ship entity given its raw offset,
     /// composing its anchor (ADR-0029) without narrowing the result.
     pub(super) fn entity_absolute(&self, entity: Entity, offset: Position) -> Position {

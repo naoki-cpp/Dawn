@@ -4,7 +4,6 @@ use super::{AoiDelivery, AOI_CELL_SIZE};
 use crate::ws_server;
 use dawn_consensus::RaftActorHandle;
 use dawn_core::{DomainEvent, PlayerId, ShipId};
-use dawn_event_store::store::EventStore;
 use dawn_sector::node::SimulationNode;
 use dawn_sector::transit;
 use dawn_wire::{InitialStateWire, ServerMessage};
@@ -169,8 +168,8 @@ impl JumpHandoffSession for ws_server::PlayerSession {
     }
 }
 
-fn resend_jump_initial_state<S: EventStore, T: JumpHandoffSession>(
-    nodes: &[SimulationNode<S>],
+fn resend_jump_initial_state<T: JumpHandoffSession>(
+    nodes: &[SimulationNode],
     sessions: &mut Vec<T>,
     handoff: &JumpHandoff,
 ) -> Vec<PlayerId> {

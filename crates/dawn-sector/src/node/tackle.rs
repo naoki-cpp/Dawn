@@ -5,11 +5,10 @@ use dawn_core::fitting::ModuleKind;
 use dawn_core::{DomainEvent, ShipId, Tick};
 use dawn_ecs::components::{FittingComp, LockComp, ShipStatsComp, TackledComp};
 use dawn_ecs::Entity;
-use dawn_event_store::store::EventStore;
 
 use super::SimulationNode;
 
-impl<S: EventStore> SimulationNode<S> {
+impl SimulationNode {
     /// Tackle System — Step 4.5 (after Capacitor, before Lock). ADR-0024.
     ///
     /// Computes the desired tackle state from active Fold Disruptors + locked

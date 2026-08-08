@@ -13,7 +13,6 @@ use dawn_core::{
     ReorderFittedModuleCommand, SelectActiveShipCommand, ShipId, TransferToStationCommand,
     UnfitModuleCommand, WarpCommand,
 };
-use dawn_event_store::store::EventStore;
 
 use super::SimulationNode;
 
@@ -57,7 +56,7 @@ fn refresh_loadout(player_id: PlayerId) -> Option<ClientCommandFollowup> {
     Some(ClientCommandFollowup::RefreshPlayerLoadout { player_id })
 }
 
-impl<S: EventStore> SimulationNode<S> {
+impl SimulationNode {
     pub fn owns_ship(&self, player_id: PlayerId, ship_id: ShipId) -> bool {
         self.ships.owners.get(&ship_id) == Some(&player_id)
     }

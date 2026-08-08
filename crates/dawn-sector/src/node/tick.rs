@@ -10,9 +10,7 @@ use dawn_ecs::{
     systems::{CapacitorSystem, CombatSystem, LockSystem, MovementSystem, RepairSystem},
     Entity,
 };
-use dawn_event_store::{
-    store::EventStore, AppendReceipt, DurabilityMode, DurableJournal, JournalError,
-};
+use dawn_event_store::{AppendReceipt, DurabilityMode, DurableJournal, JournalError};
 use thiserror::Error;
 
 use super::{SimulationNode, TickResult};
@@ -65,7 +63,7 @@ struct FrozenTransitComponents {
     keep_at_range: Option<KeepAtRangeComp>,
 }
 
-impl<S: EventStore> SimulationNode<S> {
+impl SimulationNode {
     /// Prepare the logical Tick counter without changing the live state.
     pub fn prepare_tick_transition(
         &self,
@@ -210,9 +208,7 @@ impl<S: EventStore> SimulationNode<S> {
         let before_auto_jumps = self.pending_auto_jumps.clone();
         let before_completed_warps = self.completed_warps.clone();
 
-        self.defer_event_persistence = true;
         let result = self.tick_with_lock_commands_mode(lock_commands, false, false);
-        self.defer_event_persistence = false;
         let deferred_events = self.pending_events.split_off(before_pending_event_count);
         let mut result = result;
         result.events.extend(deferred_events);
@@ -316,7 +312,8 @@ impl<S: EventStore> SimulationNode<S> {
         self.tick_with_lock_commands(&[])
     }
 
-    // Mirrors the durable SectorTransitRequested payload at the EventStore boundary.
+    // Mirrors the durable SectorTransitRequested payload at the public-output
+    // adapter boundary.
     pub(crate) fn append_incoming_transit_marker(
         &mut self,
         ship_id: ShipId,
@@ -909,7 +906,7 @@ impl<S: EventStore> SimulationNode<S> {
         // 7. Bot System — bot commands pass through the same InTransit guards.
         self.process_bots();
 
-        // 8. Append to the EventStore
+        // 8. Collect public output for the runtime-owned journal/publisher.
         let all_events: Vec<DomainEvent> = warp_events
             .iter()
             .chain(move_events.iter())
@@ -1356,8 +1353,8 @@ mod tests {
         node.apply_move_command(ship_id, Position::new(10000.0, 0.0, 0.0));
         node.tick();
         node.tick();
-        let last = node.event_store().all_records().last().unwrap();
-        assert_eq!(last.event.tick(), Tick(2));
+        let last = node.pending_events().last().unwrap();
+        assert_eq!(last.tick(), Tick(2));
     }
 
     #[test]

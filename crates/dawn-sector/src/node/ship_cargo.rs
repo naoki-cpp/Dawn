@@ -11,11 +11,10 @@ use dawn_core::{
     TransferDirection, TransferToStationCommand,
 };
 use dawn_ecs::{components::InventoryComp, Entity};
-use dawn_event_store::store::EventStore;
 
 use super::SimulationNode;
 
-impl<S: EventStore> SimulationNode<S> {
+impl SimulationNode {
     /// Seed `entity` with one of every registered module.
     ///
     /// The live spawn path and `ShipSpawned` replay both call this deterministic
@@ -294,7 +293,7 @@ mod tests {
             quantity: 2,
         }));
 
-        let event = &node.event_store().all_records().last().unwrap().event;
+        let event = node.pending_events().last().unwrap();
         let dawn_core::DomainEvent::ShipFitted(event) = event else {
             panic!("cargo mutation must emit a ShipFitted snapshot");
         };
@@ -391,13 +390,7 @@ mod tests {
             item_id: ItemId::ScrapMetal,
             quantity: 4,
         }));
-        let event = node
-            .event_store()
-            .all_records()
-            .last()
-            .unwrap()
-            .event
-            .clone();
+        let event = node.pending_events().last().unwrap().clone();
 
         let entity = *node.ships.index.get(&ship_id).unwrap();
         node.world

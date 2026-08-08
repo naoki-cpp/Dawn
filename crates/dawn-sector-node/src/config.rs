@@ -30,9 +30,9 @@ pub struct NodeConfig {
     /// Every other node in the cluster.
     #[serde(default)]
     pub peers: Vec<PeerConfig>,
-    /// Path to this node's hot event log (ADR-0017 two-tier log). Created on
-    /// first run; reopened (and replayed past the snapshot, if any) on
-    /// restart.
+    /// Path to this node's hot public-event log (ADR-0017 two-tier log).
+    /// Created on first run and reopened as an append-only audit/projection
+    /// source. Exact world recovery uses the ADR-0049 journal boundary.
     #[serde(default = "default_event_log_path")]
     pub event_log_path: String,
     /// Path to the latest authoritative snapshot (ADR-0017 §5-C). Overwritten

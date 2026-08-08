@@ -6,8 +6,6 @@
 //! reserved attempt became stale before completion. Adapters never select
 //! cleanup behavior or advance `ResumeTicket` state themselves.
 
-use dawn_event_store::store::EventStore;
-
 use crate::{
     client_admission::{
         ClientAdmissionAttempt, ClientAdmissionCommitError, CommittedClientAdmission,
@@ -40,8 +38,8 @@ pub enum ClientAdmissionResolution<T, E> {
 /// They may publish the returned transport value only for
 /// [`ClientAdmissionResolution::Committed`]; all commit/abort and cleanup
 /// policy remains inside `dawn-sector`.
-pub fn resolve_client_admission<S: EventStore, T, E>(
-    node: &mut SimulationNode<S>,
+pub fn resolve_client_admission<T, E>(
+    node: &mut SimulationNode,
     attempt: ClientAdmissionAttempt,
     transport_result: Result<T, E>,
 ) -> ClientAdmissionResolution<T, E> {
@@ -109,7 +107,7 @@ mod tests {
         let attempt = fresh_attempt(&mut node);
 
         let resolution =
-            resolve_client_admission::<_, (), _>(&mut node, attempt, Err("client disconnected"));
+            resolve_client_admission::<(), _>(&mut node, attempt, Err("client disconnected"));
 
         assert_eq!(
             resolution,
@@ -154,7 +152,7 @@ mod tests {
             .expect("resume admission should begin");
         let staged_ticket = resume.resume_ticket();
         let resolution =
-            resolve_client_admission::<_, (), _>(&mut node, resume, Err("handoff failed"));
+            resolve_client_admission::<(), _>(&mut node, resume, Err("handoff failed"));
         assert!(matches!(
             resolution,
             ClientAdmissionResolution::Aborted {
@@ -175,7 +173,7 @@ mod tests {
         assert_eq!(staged_retry.ship_id(), committed.ship_id);
         let successor_ticket = staged_retry.resume_ticket();
         assert!(matches!(
-            resolve_client_admission::<_, (), _>(
+            resolve_client_admission::<(), _>(
                 &mut node,
                 staged_retry,
                 Err("second handoff failed"),
@@ -203,7 +201,7 @@ mod tests {
             .expect("the last client-visible ticket survives a repeated abort");
         assert_eq!(staged_again.resume_ticket(), successor_ticket);
         assert!(matches!(
-            resolve_client_admission::<_, (), _>(&mut node, staged_again, Err("cleanup")),
+            resolve_client_admission::<(), _>(&mut node, staged_again, Err("cleanup")),
             ClientAdmissionResolution::Aborted { .. }
         ));
     }
@@ -229,7 +227,7 @@ mod tests {
         let first_visible_ticket = first.resume_ticket();
         assert_ne!(first_visible_ticket, committed_ticket);
         assert!(matches!(
-            resolve_client_admission::<_, (), _>(&mut node, first, Err("first handoff failed"),),
+            resolve_client_admission::<(), _>(&mut node, first, Err("first handoff failed"),),
             ClientAdmissionResolution::Aborted { .. }
         ));
 
@@ -244,7 +242,7 @@ mod tests {
         let second_visible_ticket = second.resume_ticket();
         assert_ne!(second_visible_ticket, first_visible_ticket);
         assert!(matches!(
-            resolve_client_admission::<_, (), _>(&mut node, second, Err("second handoff failed"),),
+            resolve_client_admission::<(), _>(&mut node, second, Err("second handoff failed"),),
             ClientAdmissionResolution::Aborted { .. }
         ));
 
@@ -281,7 +279,7 @@ mod tests {
             )
             .expect("the committed successor remains usable");
         assert!(matches!(
-            resolve_client_admission::<_, (), _>(&mut node, next, Err("cleanup")),
+            resolve_client_admission::<(), _>(&mut node, next, Err("cleanup")),
             ClientAdmissionResolution::Aborted { .. }
         ));
     }

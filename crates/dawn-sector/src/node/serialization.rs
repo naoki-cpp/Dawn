@@ -6,7 +6,6 @@
 
 use dawn_core::{AbsolutePosition, ShipId};
 use dawn_ecs::components::{HullComp, ShipStatsComp, VelocityComp};
-use dawn_event_store::store::EventStore;
 use dawn_wire::{
     AbsPosWire, BuildableShipTypeWire, CelestialBodyWire, InitialStateWire, JumpGateWire,
     PlayerLoadoutWire, ShipStateWire, StationWire, SystemWire,
@@ -58,7 +57,7 @@ fn abs_pos_json(p: AbsolutePosition) -> AbsPosWire {
     }
 }
 
-impl<S: EventStore> SimulationNode<S> {
+impl SimulationNode {
     /// Build the observer-scoped `InitialState` + `PlayerLoadout` pair to
     /// hand a client once its identity (fresh or resumed) has been selected.
     pub fn build_handoff_payload(

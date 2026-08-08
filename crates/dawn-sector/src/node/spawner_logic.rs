@@ -6,7 +6,6 @@ use dawn_ecs::components::{
     CapacitorComp, HullComp, IsBotComp, IsNpcComp, PositionComp, ShipStatsComp,
 };
 use dawn_ecs::Entity;
-use dawn_event_store::store::EventStore;
 
 use crate::persistence::ShipSnapshot;
 use crate::spawner::{generate_ships, SpawnConfig};
@@ -14,7 +13,7 @@ use crate::{modules, ship_types};
 
 use super::SimulationNode;
 
-impl<S: EventStore> SimulationNode<S> {
+impl SimulationNode {
     // ── Spawn ─────────────────────────────────────────────────────────────────
 
     /// The base-stats/ECS-component portion of ship materialization: derives
@@ -75,7 +74,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// `ship_type_id`, for a `ship_id` the caller has already allocated (or is
     /// replaying from an event). Shared by `spawn_ship` (fresh ID, appends
     /// `ShipSpawned`) and `assemble_ship_owned`/its replay arm (appends
-    /// `ShipAssembled` instead) -- each call site appends its own event
+    /// `ShipAssembled` instead) -- each call site emits its own public event
     /// afterward since which event fits depends on why the ship came into
     /// being.
     pub(super) fn insert_ship_entity(
@@ -90,7 +89,7 @@ impl<S: EventStore> SimulationNode<S> {
         self.materialize_ship_stats(ship_id, ship_type_id, ShipStatsComp::NPC);
     }
 
-    /// Spawn a Ship, record it in the ECS, append a `ShipSpawned` event.
+    /// Spawn a Ship, record it in the ECS, and emit a `ShipSpawned` event.
     ///
     /// INV-004: the ID is generated from a monotonically increasing counter
     /// combined with `NodeId`.  IDs are never reused.
@@ -326,6 +325,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// "at body B" from a true-AU absolute coordinate: the anchor/offset split
     /// is performed directly in f64, the same way production code handles warp
     /// arrival and `AnchorTable` composition.
+    #[cfg(test)]
     pub(crate) fn set_spawn_anchor_abs<P: Into<[f64; 3]>>(&mut self, ship_id: ShipId, world: P) {
         let Some(&entity) = self.ships.index.get(&ship_id) else {
             return;
@@ -383,11 +383,17 @@ impl<S: EventStore> SimulationNode<S> {
             }
         }
 
-        let base = self
-            .ship_type_registry
-            .get(&ship.ship_type_id)
-            .map(|def| ShipStatsComp::from_base(&def.base_stats))
-            .unwrap_or(ShipStatsComp::NPC);
+        let base = if self.ships.owners.contains_key(&ship.ship_id) {
+            // Ownership is the persisted discriminator for the player profile.
+            // Rebuilding an owned ship with NPC base stats changes thrust,
+            // capacitor, and every subsequent tick after restart.
+            ShipStatsComp::PLAYER
+        } else {
+            self.ship_type_registry
+                .get(&ship.ship_type_id)
+                .map(|def| ShipStatsComp::from_base(&def.base_stats))
+                .unwrap_or(ShipStatsComp::NPC)
+        };
         self.base_stats.insert(ship.ship_id, base);
 
         if let Some(&entity) = self.ships.index.get(&ship.ship_id) {

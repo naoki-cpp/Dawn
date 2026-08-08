@@ -2,8 +2,8 @@
 //!
 //! This module owns the Request/Commit/Ack state machine, retry and recovery
 //! decisions, destination idempotency, invalid-state handling, and cleanup
-//! verification. The surrounding pipeline only reconstructs durable facts from
-//! the EventStore and translates the returned effects into Raft proposals.
+//! verification. The surrounding pipeline supplies the node-local transit
+//! journal and translates the returned effects into Raft proposals.
 
 use std::collections::HashMap;
 
@@ -11,7 +11,6 @@ use crate::node::SimulationNode;
 use dawn_core::{
     AbsolutePosition, DomainEvent, JumpGateId, SectorId, ShipId, Tick, TransitHandoffState,
 };
-use dawn_event_store::store::EventStore;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct TransferIdentity {
@@ -39,13 +38,13 @@ struct PendingTransit {
     entry_pos: AbsolutePosition,
 }
 
-/// Transit facts reconstructed by the EventStore adapter.
+/// Transit facts observed from committed node output.
 ///
 /// Event ordering and identity matching are interpreted here so callers cannot
 /// accidentally clear a newer request with an older completion or treat an
 /// unproven destination collision as an idempotent replay.
-#[derive(Debug)]
-pub(super) struct TransitJournal {
+#[derive(Debug, Clone)]
+pub(crate) struct TransitJournal {
     sector_id: SectorId,
     pending_outgoing: HashMap<ShipId, PendingTransit>,
     incoming_markers: Vec<TransferIdentity>,
@@ -53,7 +52,7 @@ pub(super) struct TransitJournal {
 }
 
 impl TransitJournal {
-    pub(super) fn new(sector_id: SectorId) -> Self {
+    pub(crate) fn new(sector_id: SectorId) -> Self {
         Self {
             sector_id,
             pending_outgoing: HashMap::new(),
@@ -62,7 +61,7 @@ impl TransitJournal {
         }
     }
 
-    pub(super) fn observe(&mut self, event: &DomainEvent) {
+    pub(crate) fn observe(&mut self, event: &DomainEvent) {
         match event {
             DomainEvent::SectorTransitRequested(event) => {
                 let identity =
@@ -166,14 +165,16 @@ pub(super) struct AckEffect {
     pub request_tick: Tick,
 }
 
-/// Transit-specific action for the generic EventStore replay adapter.
+/// Transit-specific action for the legacy public-event replay fixture.
 #[derive(Debug, Clone, Copy)]
+#[cfg(test)]
 pub(crate) enum ReplayDirective<'a> {
     Requested(&'a dawn_core::events::SectorTransitRequested),
     Completed(&'a dawn_core::events::SectorTransitCompleted),
     Aborted(&'a dawn_core::events::SectorTransitAborted),
 }
 
+#[cfg(test)]
 pub(super) fn replay_directive(event: &DomainEvent) -> Option<ReplayDirective<'_>> {
     match event {
         DomainEvent::SectorTransitRequested(event) => Some(ReplayDirective::Requested(event)),
@@ -190,8 +191,8 @@ pub(super) fn has_pending_outgoing_transit(journal: &TransitJournal) -> bool {
 /// Apply a committed Request and return the exact Commit effect needed by the
 /// consensus adapter. Validation, freezing, snapshotting, and retry scheduling
 /// are resolved before the effect escapes this boundary.
-pub(super) fn apply_request<S: EventStore>(
-    node: &mut SimulationNode<S>,
+pub(super) fn apply_request(
+    node: &mut SimulationNode,
     ship_id: ShipId,
     to: SectorId,
     gate_id: Option<JumpGateId>,
@@ -209,8 +210,8 @@ pub(super) fn apply_request<S: EventStore>(
     })
 }
 
-fn destination_completed_transfer<S: EventStore>(
-    node: &SimulationNode<S>,
+fn destination_completed_transfer(
+    node: &SimulationNode,
     journal: &TransitJournal,
     identity: TransferIdentity,
 ) -> bool {
@@ -224,10 +225,10 @@ fn destination_completed_transfer<S: EventStore>(
 
 /// Close a still-pending outgoing attempt before accepting the same Ship back
 /// into this Sector. Success means cleanup actually removed the frozen copy;
-/// an EventStore mismatch or incomplete handoff snapshot is an invalid state,
+/// an incomplete handoff snapshot or journal identity mismatch is an invalid state,
 /// not permission to acknowledge data that was never materialized.
-fn complete_superseded_outgoing_transit<S: EventStore>(
-    node: &mut SimulationNode<S>,
+fn complete_superseded_outgoing_transit(
+    node: &mut SimulationNode,
     journal: &TransitJournal,
     ship_id: ShipId,
 ) -> bool {
@@ -254,8 +255,8 @@ fn complete_superseded_outgoing_transit<S: EventStore>(
 /// or a failed superseded-outgoing cleanup returns no Ack, preventing the source
 /// from deleting its recovery copy.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn apply_commit<S: EventStore>(
-    node: &mut SimulationNode<S>,
+pub(super) fn apply_commit(
+    node: &mut SimulationNode,
     journal: &TransitJournal,
     handoff: &TransitHandoffState,
     from: SectorId,
@@ -298,8 +299,8 @@ pub(super) fn apply_commit<S: EventStore>(
 
 /// Validate a committed Ack against the durable request and confirm that source
 /// cleanup actually removed the frozen recovery copy.
-pub(super) fn apply_ack<S: EventStore>(
-    node: &mut SimulationNode<S>,
+pub(super) fn apply_ack(
+    node: &mut SimulationNode,
     journal: &TransitJournal,
     ship_id: ShipId,
     from: SectorId,
@@ -327,8 +328,8 @@ pub(super) fn apply_ack<S: EventStore>(
 /// Return only retry Commit effects whose bounded backoff deadline is due.
 /// Durable route facts come from the journal; canonical handoff state comes
 /// from the frozen source entity.
-pub(super) fn due_retries<S: EventStore>(
-    node: &mut SimulationNode<S>,
+pub(super) fn due_retries(
+    node: &mut SimulationNode,
     journal: &TransitJournal,
 ) -> Vec<CommitEffect> {
     let mut effects = Vec::new();
@@ -357,7 +358,7 @@ mod tests {
     use super::*;
     use dawn_core::events::{SectorTransitAborted, SectorTransitCompleted, SectorTransitRequested};
     use dawn_core::{NodeId, Position, SectorBounds, ShipTypeId, Velocity};
-    use dawn_event_store::InMemoryEventStore;
+    use dawn_event_store::{EventStore, InMemoryEventStore};
 
     fn node(sector: u8) -> SimulationNode {
         SimulationNode::new_test(
@@ -368,12 +369,8 @@ mod tests {
         )
     }
 
-    fn journal<S: EventStore>(node: &SimulationNode<S>) -> TransitJournal {
-        let mut journal = TransitJournal::new(node.sector_id());
-        for record in node.event_store().iter_from(0) {
-            journal.observe(&record.event);
-        }
-        journal
+    fn journal(node: &SimulationNode) -> TransitJournal {
+        node.transit_journal().clone()
     }
 
     #[test]

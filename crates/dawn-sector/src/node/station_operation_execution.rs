@@ -17,7 +17,6 @@ use dawn_core::{
     DomainEvent, ItemId, PlayerId, ShipId, ShipTypeId, StationId, Velocity,
 };
 use dawn_ecs::components::{InventoryComp, IsNpcComp};
-use dawn_event_store::store::EventStore;
 
 use super::{
     station::{StationOperationOutcome, StationOperationRejection},
@@ -61,8 +60,8 @@ pub(super) enum StationOperationPlan {
 /// Runtime-only Station state transition shared by live execution and replay.
 ///
 /// These directives deliberately contain no Station inventory mutation and no
-/// EventStore append. The live path performs durable SQLite work first and
-/// appends the event afterward; replay applies only this stage.
+/// Public-event output. The live path performs durable SQLite work first and
+/// emits the event afterward; replay applies only this stage.
 #[derive(Debug, Clone, Copy)]
 pub(super) enum StationRuntimeState {
     Dock {
@@ -90,7 +89,7 @@ pub(super) enum StationOperationExecution {
     Assembled(ShipId),
 }
 
-impl<S: EventStore> SimulationNode<S> {
+impl SimulationNode {
     /// Apply only the ECS/map/index portion of an accepted Station operation.
     ///
     /// This is the single owner of the runtime mutation shared by the live and
@@ -148,9 +147,9 @@ impl<S: EventStore> SimulationNode<S> {
     ///
     /// A fallible inventory debit happens before any other live mutation. Once
     /// that succeeds, each plan applies its complete runtime state change and
-    /// appends exactly one event as the final step. This preserves ADR-0038's
-    /// accepted SQLite/Event Store crash window while making the order a single
-    /// local invariant for all event-sourced Station operations.
+    /// emits exactly one public event as the final step. This preserves
+    /// ADR-0038's accepted SQLite/output crash window while making the order a
+    /// single local invariant for all Station operations.
     pub(super) fn execute_station_operation(
         &mut self,
         plan: StationOperationPlan,
@@ -292,12 +291,10 @@ impl<S: EventStore> SimulationNode<S> {
 
 #[cfg(test)]
 mod tests {
-    use dawn_core::{ItemId, NodeId, SectorBounds, SectorId, ShipTypeId, StationId};
-    use dawn_event_store::{store::EventStore, InMemoryEventStore};
-
     use super::*;
+    use dawn_core::{ItemId, NodeId, SectorBounds, SectorId, ShipTypeId, StationId};
 
-    fn node() -> SimulationNode<InMemoryEventStore> {
+    fn node() -> SimulationNode {
         SimulationNode::new_test(
             NodeId(0),
             SectorId(0),
@@ -306,12 +303,7 @@ mod tests {
         )
     }
 
-    fn paired_player_nodes() -> (
-        SimulationNode<InMemoryEventStore>,
-        SimulationNode<InMemoryEventStore>,
-        PlayerId,
-        ShipId,
-    ) {
+    fn paired_player_nodes() -> (SimulationNode, SimulationNode, PlayerId, ShipId) {
         let mut live = node();
         let mut replay = node();
         let player_id = live.next_player_id();
@@ -321,19 +313,14 @@ mod tests {
         (live, replay, player_id, ship_id)
     }
 
-    fn last_event(node: &SimulationNode<InMemoryEventStore>) -> DomainEvent {
-        node.event_store
-            .all_records()
+    fn last_event(node: &SimulationNode) -> DomainEvent {
+        node.pending_events()
             .last()
-            .expect("live operation appends an event")
-            .event
+            .expect("live operation emits an event")
             .clone()
     }
 
-    fn assert_same_runtime_state(
-        live: &SimulationNode<InMemoryEventStore>,
-        replay: &SimulationNode<InMemoryEventStore>,
-    ) {
+    fn assert_same_runtime_state(live: &SimulationNode, replay: &SimulationNode) {
         let mut live_snapshot = live.take_snapshot();
         let mut replay_snapshot = replay.take_snapshot();
         live_snapshot.log_index = 0;
@@ -350,7 +337,7 @@ mod tests {
     #[test]
     fn rejected_station_debit_does_not_append_an_event_or_create_output() {
         let mut node = node();
-        let before = node.event_store.len();
+        let before = node.pending_event_count();
 
         let result = node.execute_station_operation(StationOperationPlan::BuildPackagedShip {
             player_id: PlayerId(1),
@@ -364,7 +351,7 @@ mod tests {
             result,
             Err(StationOperationRejection::MissingStationItem)
         ));
-        assert_eq!(node.event_store.len(), before);
+        assert_eq!(node.pending_event_count(), before);
         assert_eq!(
             node.station_item_count(
                 PlayerId(1),
@@ -385,7 +372,7 @@ mod tests {
             ItemId::PackagedShip(ShipTypeId(1)),
             1,
         );
-        let before = node.event_store.len();
+        let before = node.pending_event_count();
 
         let result = node
             .execute_station_operation(StationOperationPlan::AssembleShip {
@@ -403,9 +390,9 @@ mod tests {
             0
         );
         assert_eq!(node.docked_station(ship_id), Some(StationId(0)));
-        assert_eq!(node.event_store.len(), before + 1);
+        assert_eq!(node.pending_event_count(), before + 1);
         assert!(matches!(
-            node.event_store.all_records().last().map(|record| &record.event),
+            node.pending_events().last(),
             Some(DomainEvent::ShipAssembled(event)) if event.ship_id == ship_id
         ));
     }

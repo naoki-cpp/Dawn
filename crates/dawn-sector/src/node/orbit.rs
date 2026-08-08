@@ -15,13 +15,12 @@ use dawn_ecs::{
     components::{KeepAtRangeComp, OrbitComp, PositionComp, ShipStatsComp},
     Entity,
 };
-use dawn_event_store::store::EventStore;
 
 use super::{
     SimulationNode, DEFAULT_MANEUVER_RADIUS, KEEP_AT_RANGE_DEADBAND_FRACTION, ORBIT_LEAD_FACTOR,
 };
 
-impl<S: EventStore> SimulationNode<S> {
+impl SimulationNode {
     /// Begin orbiting a Ship or a Jump Gate at `radius` (ADR-0031). Falls back
     /// to the ship's fitted weapon range, or `DEFAULT_MANEUVER_RADIUS` if
     /// unarmed, when `radius` is `None`.

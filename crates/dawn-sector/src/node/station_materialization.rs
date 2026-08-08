@@ -4,7 +4,6 @@ use dawn_core::{
     AssembleCommand, BuildPackagedShipCommand, DisassembleShipCommand, PlayerId, ShipId,
 };
 use dawn_ecs::components::{FittingComp, HullComp, ShipStatsComp};
-use dawn_event_store::store::EventStore;
 
 use super::{
     station::{StationOperationOutcome, StationOperationRejection},
@@ -12,7 +11,7 @@ use super::{
     SimulationNode,
 };
 
-impl<S: EventStore> SimulationNode<S> {
+impl SimulationNode {
     pub const SCRAP_METAL_COST_PER_PACKAGED_SHIP: u64 = 1;
 
     pub(super) fn build_packaged_ship_owned(
@@ -183,20 +182,18 @@ impl<S: EventStore> SimulationNode<S> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use dawn_core::{
         AssembleCommand, BuildPackagedShipCommand, DisassembleShipCommand, DockCommand,
         FitModuleCommand, ItemId, NodeId, SectorBounds, SectorId, ShipTypeId, SlotKind, StationId,
         UnfitModuleCommand,
     };
-    use dawn_event_store::InMemoryEventStore;
-
-    use super::*;
 
     fn accepted(outcome: StationOperationOutcome) -> bool {
         matches!(outcome, StationOperationOutcome::Accepted { .. })
     }
 
-    fn node() -> SimulationNode<InMemoryEventStore> {
+    fn node() -> SimulationNode {
         SimulationNode::new_test(
             NodeId(0),
             SectorId(0),

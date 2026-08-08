@@ -83,7 +83,7 @@ impl StationInventoryDb {
     }
 
     /// A private, non-persistent database -- the default for `SimulationNode::new`/
-    /// `with_store`/`restore_from` so tests and demos never touch disk unless
+    /// `restore_from` so tests and demos never touch disk unless
     /// a caller explicitly opts in via `open`.
     pub(super) fn open_in_memory() -> rusqlite::Result<Self> {
         let conn = Connection::open_in_memory()?;
