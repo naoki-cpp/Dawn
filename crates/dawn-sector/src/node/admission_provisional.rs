@@ -64,14 +64,13 @@ impl<S: EventStore> SimulationNode<S> {
         let ship_id = ShipId::new(self.node_id, self.id_counter);
         let resume_ticket = generate_resume_ticket();
         self.id_counter += 1;
-        self.event_store
-            .append(DomainEvent::ClientAdmissionIdentityReserved(
-                ClientAdmissionIdentityReserved {
-                    player_id,
-                    ship_id,
-                    tick: self.current_tick,
-                },
-            ));
+        self.emit_event(DomainEvent::ClientAdmissionIdentityReserved(
+            ClientAdmissionIdentityReserved {
+                player_id,
+                ship_id,
+                tick: self.current_tick,
+            },
+        ));
         self.station_inventory_db
             .reserve_client_admission(ship_id, player_id, spawn_position, resume_ticket)
             .expect("client admission preparation transaction");
@@ -272,8 +271,7 @@ impl<S: EventStore> SimulationNode<S> {
             tick: self.current_tick,
         };
 
-        self.event_store
-            .append(DomainEvent::ClientAdmissionCommitted(event.clone()));
+        self.emit_event(DomainEvent::ClientAdmissionCommitted(event.clone()));
         self.pending_fresh_admissions.remove(&ship_id);
         self.ensure_client_admission_grant(&event);
         true

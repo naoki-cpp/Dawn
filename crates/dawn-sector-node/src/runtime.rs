@@ -96,8 +96,8 @@ impl SectorNodeRuntime {
         let sector_id = self.sector_id;
         let outbound_replication = &mut self.outbound_replication;
         let output =
-            transit::run_runtime_tick(node, raft, committed_rx, &lock_commands, |node, _, _| {
-                outbound_replication.publish_new_events(sector_id, node.event_store());
+            transit::run_runtime_tick(node, raft, committed_rx, &lock_commands, |_, _, events| {
+                outbound_replication.publish_events(sector_id, events);
             });
 
         self.log_auto_jumps(&output.pending_auto_jumps);

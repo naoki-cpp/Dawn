@@ -164,7 +164,7 @@ impl<S: EventStore> SimulationNode<S> {
         gate_id: Option<dawn_core::JumpGateId>,
         entry_pos: dawn_core::AbsolutePosition,
     ) {
-        self.event_store.append(DomainEvent::SectorTransitRequested(
+        self.emit_event(DomainEvent::SectorTransitRequested(
             dawn_core::events::SectorTransitRequested {
                 ship_id,
                 from,
@@ -382,7 +382,7 @@ impl<S: EventStore> SimulationNode<S> {
             .collect();
 
         let count = all_events.len();
-        self.event_store.append_batch(all_events.iter().cloned());
+        self.emit_events(all_events.iter().cloned());
 
         TickResult {
             tick,

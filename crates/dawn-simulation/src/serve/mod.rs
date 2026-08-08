@@ -231,7 +231,6 @@ mod serve_pipeline_tests {
     use super::*;
     use dawn_actor::{ClientConnection, InProcessConnection};
     use dawn_core::{ClientRequest, DomainEvent, NodeId, Position, SectorBounds, SectorId};
-    use dawn_event_store::store::EventStore as _;
     use dawn_sector::node;
 
     fn build_test_node(
@@ -282,7 +281,7 @@ mod serve_pipeline_tests {
 
         let conn: &mut dyn ClientConnection = &mut server;
         let mut lock_commands = Vec::new();
-        let before = node.total_event_count() as u64;
+        let _ = node.drain_pending_events();
         while let Some(request) = conn.try_recv_request() {
             node.apply_client_request(player_id, request, &mut lock_commands)
                 .expect("request admitted");
@@ -290,11 +289,7 @@ mod serve_pipeline_tests {
 
         node.tick_with_lock_commands(&lock_commands);
 
-        let new_events: Vec<DomainEvent> = node
-            .event_store()
-            .iter_from(before)
-            .map(|r| r.event.clone())
-            .collect();
+        let new_events: Vec<DomainEvent> = node.drain_pending_events();
         conn.send_events(&new_events)
             .expect("client endpoint is alive");
 
@@ -336,7 +331,7 @@ mod serve_pipeline_tests {
 
         let conn: &mut dyn ClientConnection = &mut server;
         let mut lock_commands = Vec::new();
-        let before = node.total_event_count() as u64;
+        let _ = node.drain_pending_events();
         while let Some(request) = conn.try_recv_request() {
             assert!(matches!(
                 node.apply_client_request(player_id, request, &mut lock_commands),
@@ -345,11 +340,7 @@ mod serve_pipeline_tests {
         }
         node.tick_with_lock_commands(&lock_commands);
 
-        let new_events: Vec<DomainEvent> = node
-            .event_store()
-            .iter_from(before)
-            .map(|r| r.event.clone())
-            .collect();
+        let new_events: Vec<DomainEvent> = node.drain_pending_events();
         conn.send_events(&new_events)
             .expect("client endpoint is alive");
 

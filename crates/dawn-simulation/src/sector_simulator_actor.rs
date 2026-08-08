@@ -128,8 +128,9 @@ impl SectorSimulatorActor {
 
     /// Forward any un-replicated events from the node's local log.
     fn publish_new_events(&mut self) {
+        let events = self.node.drain_pending_events();
         self.replication
-            .publish_new_events(self.node.sector_id(), self.node.event_store());
+            .publish_events(self.node.sector_id(), &events);
     }
 
     async fn run(mut self) {
@@ -142,8 +143,8 @@ impl SectorSimulatorActor {
                         &self.raft,
                         &mut self.raft_committed_rx,
                         &[],
-                        |node, _, _| {
-                            replication.publish_new_events(node.sector_id(), node.event_store());
+                        |node, _, events| {
+                            replication.publish_events(node.sector_id(), events);
                         },
                     );
                     let summary = TickSummary {

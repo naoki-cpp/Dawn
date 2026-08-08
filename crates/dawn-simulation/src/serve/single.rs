@@ -185,7 +185,12 @@ pub(crate) async fn run_phase4_server(
             });
         }
 
-        let events_before: u64 = node.total_event_count() as u64;
+        // Events from the previous transition have already been delivered (or
+        // intentionally ignored by this single-sector adapter). Start this
+        // transition with an empty output buffer rather than deriving output
+        // from the legacy event-log cursor.
+        let _ = node.drain_pending_events();
+        let mut all_new_events = Vec::new();
 
         let mut lock_commands: Vec<dawn_core::LockOnCommand> = Vec::new();
         for sess in sessions.iter_mut() {
@@ -223,6 +228,7 @@ pub(crate) async fn run_phase4_server(
         }
 
         let tick_result = node.tick_with_lock_commands(&lock_commands);
+        all_new_events.extend(node.drain_pending_events());
 
         for sess in &sessions {
             let should_refresh = tick_result.events.iter().any(|event| {
@@ -253,13 +259,6 @@ pub(crate) async fn run_phase4_server(
             }
         }
 
-        let all_new_events: Vec<_> = {
-            use dawn_event_store::store::EventStore as _;
-            node.event_store()
-                .iter_from(events_before)
-                .map(|r| r.event.clone())
-                .collect()
-        };
         let warp_arrivals = node.drain_completed_warps();
         aoi_delivery.deliver_single_sector(&node, &mut sessions, &all_new_events, &warp_arrivals);
 

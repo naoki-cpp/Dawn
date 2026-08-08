@@ -31,6 +31,8 @@ impl<S: EventStore> SimulationNode<S> {
             completed_incoming_transits,
             // `log_index` is derived from the store rather than persisted.
             event_store,
+            // Pending public events are an in-memory output buffer, not state.
+            pending_events: _,
             // ── captured per ship, below ───────────────────────────────────
             world,
             ships: ship_registry,

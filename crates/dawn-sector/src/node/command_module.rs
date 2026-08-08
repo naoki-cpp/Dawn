@@ -226,7 +226,7 @@ impl<S: EventStore> SimulationNode<S> {
                 tick: self.current_tick,
             })
         };
-        self.event_store.append(event);
+        self.emit_event(event);
         Ok(())
     }
 

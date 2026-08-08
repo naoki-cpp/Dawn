@@ -53,12 +53,25 @@ impl<T: ReplicationTransport> OutboundLogPublisher<T> {
             .map(|record| record.event.clone())
             .collect();
 
+        self.publish_events(sector_id, &events)
+    }
+
+    /// Publish an explicit transition output from the authoritative engine.
+    ///
+    /// The caller owns the event collection and has already established the
+    /// durable ordering boundary. The publisher only assigns the contiguous
+    /// replication range and advances its cursor after broadcasting it.
+    pub fn publish_events(
+        &mut self,
+        sector_id: SectorId,
+        events: &[dawn_core::DomainEvent],
+    ) -> usize {
         if events.is_empty() {
             return 0;
         }
 
         let published = events.len();
-        let batch = LogBatch::new(sector_id, self.next_index, events);
+        let batch = LogBatch::new(sector_id, self.next_index, events.to_vec());
         self.next_index = batch.next_index();
         self.transport.broadcast(batch);
         published

@@ -612,8 +612,10 @@ fn runtime_tick_owns_replication_raft_and_transient_order() {
     let ship = node.spawn_player_ship_at_pub(player_id, Position::ORIGIN);
     node.set_spawn_anchor_abs(ship, near_gate_abs);
     node.queue_runtime_transients_for_test((ship, JumpGateId(0)), ship);
+    // The spawn belongs to setup, not to this runtime frame. Clear its
+    // explicit output just as the production runtime does between frames.
+    let _ = node.drain_pending_events();
 
-    let event_cursor = node.total_event_count() as u64;
     let (raft, mut raft_messages) = raft_handle();
     let (_committed_tx, mut committed_rx) = mpsc::unbounded_channel();
     let mut replication_hook_called = false;
@@ -623,17 +625,16 @@ fn runtime_tick_owns_replication_raft_and_transient_order() {
         &raft,
         &mut committed_rx,
         &[],
-        |node, _, events| {
+        |_, tick_result, events| {
             replication_hook_called = true;
             assert!(
                 raft_messages.try_recv().is_err(),
                 "replication hook must run before raft.tick()"
             );
-            let collected = node.event_store().iter_from(event_cursor).count();
             assert_eq!(
-                events.len(),
-                collected,
-                "hook receives the collected Event tail"
+                events,
+                tick_result.events.as_slice(),
+                "hook receives the explicit transition output"
             );
         },
     );

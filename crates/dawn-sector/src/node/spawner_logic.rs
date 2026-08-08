@@ -105,14 +105,13 @@ impl<S: EventStore> SimulationNode<S> {
 
         self.insert_ship_entity(ship_id, ship_type_id, position, velocity);
 
-        self.event_store
-            .append(DomainEvent::ShipSpawned(ShipSpawned {
-                ship_id,
-                sector_id: self.sector_id,
-                initial_position: position.into(),
-                ship_type_id,
-                tick: self.current_tick,
-            }));
+        self.emit_event(DomainEvent::ShipSpawned(ShipSpawned {
+            ship_id,
+            sector_id: self.sector_id,
+            initial_position: position.into(),
+            ship_type_id,
+            tick: self.current_tick,
+        }));
 
         ship_id
     }
@@ -202,14 +201,13 @@ impl<S: EventStore> SimulationNode<S> {
             module_id: crate::modules::MODULE_FOLD_DISRUPTOR,
         });
 
-        self.event_store
-            .append(DomainEvent::ShipSpawned(ShipSpawned {
-                ship_id,
-                sector_id: self.sector_id,
-                initial_position: pos.into(),
-                ship_type_id: SHIP_TYPE_MAGPIE,
-                tick: self.current_tick,
-            }));
+        self.emit_event(DomainEvent::ShipSpawned(ShipSpawned {
+            ship_id,
+            sector_id: self.sector_id,
+            initial_position: pos.into(),
+            ship_type_id: SHIP_TYPE_MAGPIE,
+            tick: self.current_tick,
+        }));
 
         ship_id
     }

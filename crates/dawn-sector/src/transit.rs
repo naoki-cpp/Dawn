@@ -158,18 +158,17 @@ where
     S: EventStore,
     F: FnOnce(&SimulationNode<S>, &crate::node::TickResult, &[DomainEvent]),
 {
-    let events_before = node.total_event_count() as u64;
+    // Consume the engine's explicit transition output instead of deriving the
+    // frame from a mutable EventStore cursor. The legacy log remains a mirror
+    // during migration, but runtime publication is now driven by this output.
+    let mut events = node.drain_pending_events();
     apply_committed_raft_entries(node, raft, committed_rx);
     let result = node.tick_with_lock_commands(lock_commands);
-    let events: Vec<_> = node
-        .event_store()
-        .iter_from(events_before)
-        .map(|record| record.event.clone())
-        .collect();
+    events.extend(node.drain_pending_events());
 
-    // Replication must observe the newly appended Event tail before the
+    // Replication must observe the newly produced transition output before the
     // consensus clock advances. The immutable node reference keeps this hook
-    // publication-only so the collected output cannot diverge from the log.
+    // publication-only so the collected output cannot diverge from the node.
     after_events_collected(node, &result, &events);
     raft.tick();
 

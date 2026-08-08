@@ -286,7 +286,7 @@ impl<S: EventStore> SimulationNode<S> {
     }
 
     fn append_station_event(&mut self, event: DomainEvent) {
-        self.event_store.append(event);
+        self.emit_event(event);
     }
 }
 

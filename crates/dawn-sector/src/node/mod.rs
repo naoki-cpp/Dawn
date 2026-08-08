@@ -182,6 +182,10 @@ where
     bounds: SectorBounds,
     world: SimWorld,
     event_store: S,
+    /// Public events produced by state-changing operations since the last
+    /// runtime drain. The legacy EventStore remains a compatibility mirror
+    /// until the durable transition adapter owns persistence completely.
+    pending_events: Vec<DomainEvent>,
     current_tick: Tick,
     id_counter: u64,
     /// Ship identity and ownership maps (entity index, type ids, player ownership).
@@ -382,6 +386,7 @@ impl<S: EventStore> SimulationNode<S> {
             bounds,
             world: SimWorld::new(sector_id),
             event_store: store,
+            pending_events: Vec::new(),
             current_tick: Tick::ZERO,
             id_counter: 0,
             ships: ShipRegistry::new(),
@@ -551,6 +556,31 @@ impl<S: EventStore> SimulationNode<S> {
         &self.event_store
     }
 
+    /// Drain public events produced by the authoritative engine since the
+    /// previous runtime boundary. This is the transition-output seam used by
+    /// application adapters; it does not expose the legacy event log.
+    pub fn drain_pending_events(&mut self) -> Vec<DomainEvent> {
+        std::mem::take(&mut self.pending_events)
+    }
+
+    pub fn pending_event_count(&self) -> usize {
+        self.pending_events.len()
+    }
+
+    fn emit_event(&mut self, event: DomainEvent) {
+        self.pending_events.push(event.clone());
+        self.event_store.append(event);
+    }
+
+    fn emit_events<I>(&mut self, events: I)
+    where
+        I: IntoIterator<Item = DomainEvent>,
+    {
+        for event in events {
+            self.emit_event(event);
+        }
+    }
+
     /// The Ship's current approach target, if any (ADR-0015).
     #[cfg(test)]
     pub fn approach_target(&self, ship_id: ShipId) -> Option<dawn_core::ApproachTarget> {
@@ -657,13 +687,12 @@ impl<S: EventStore> SimulationNode<S> {
                     .collect()
             })
             .unwrap_or_default();
-        self.event_store
-            .append(DomainEvent::ShipFitted(dawn_core::events::ShipFitted {
-                ship_id,
-                fitting,
-                inventory,
-                tick: self.current_tick,
-            }));
+        self.emit_event(DomainEvent::ShipFitted(dawn_core::events::ShipFitted {
+            ship_id,
+            fitting,
+            inventory,
+            tick: self.current_tick,
+        }));
     }
 
     /// Look up the current `ShipStatsComp` of a Ship by its ID. Test-only.

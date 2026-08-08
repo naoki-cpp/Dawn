@@ -142,7 +142,7 @@ impl<S: EventStore> SimulationNode<S> {
         entry_pos: dawn_core::AbsolutePosition,
     ) -> Result<Tick, DawnError> {
         let (request_tick, event) = self.begin_transit_with_route(cmd, gate_id, entry_pos)?;
-        self.event_store.append(event);
+        self.emit_event(event);
         Ok(request_tick)
     }
 
@@ -219,7 +219,7 @@ impl<S: EventStore> SimulationNode<S> {
             }
             return None;
         };
-        self.event_store.append(event);
+        self.emit_event(event);
         Some(TransitCommitData {
             handoff: Box::new(handoff),
             entry_pos,
@@ -246,7 +246,7 @@ impl<S: EventStore> SimulationNode<S> {
         entry_pos: dawn_core::AbsolutePosition,
     ) {
         for event in self.jump_events(ship_id, gate_id, from, to, entry_pos) {
-            self.event_store.append(event);
+            self.emit_event(event);
         }
     }
 
@@ -414,7 +414,7 @@ impl<S: EventStore> SimulationNode<S> {
         else {
             return;
         };
-        self.event_store.append(event);
+        self.emit_event(event);
     }
 
     fn complete_outgoing_state(
@@ -455,7 +455,7 @@ impl<S: EventStore> SimulationNode<S> {
             request_tick,
             self.current_tick,
         ) {
-            self.event_store.append(event);
+            self.emit_event(event);
         }
     }
 
