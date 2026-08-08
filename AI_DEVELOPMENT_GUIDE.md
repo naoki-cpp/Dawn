@@ -15,7 +15,8 @@ this repository. Keep it concise. Long-lived design detail belongs in
 ## Project North Star
 
 Dawn is building an EVE-like single-shard space game with a distributed,
-event-sourced simulation. The technical work exists to support:
+event-backed simulation with append-only public facts and a separate
+authoritative recovery journal. The technical work exists to support:
 
 - large real-time battles without EVE-style global TiDi
 - player-driven territory, structures, economy, and risk
@@ -85,34 +86,64 @@ Raspberry Pi cluster:
 
 Do not violate these. Details live in `docs/architecture/`.
 
-- INV-001: Event log is append-only. Do not update, delete, truncate, or
-  rewrite events.
-- INV-002: Events and authoritative snapshots are the source of truth. State is
-  derived, cached, or rebuilt from snapshot plus tail replay.
+- INV-001: Committed public `DomainEvent`s are append-only facts. Do not update,
+  delete, truncate, or rewrite them in place. ADR-0049's authoritative recovery
+  delta is a separate versioned stream with checkpoint-governed compaction.
+- INV-002: Exact Sector world state is recovered from the newest complete compatible
+  checkpoint set plus every committed authoritative `RecoveryDelta` after its
+  covered position. `DomainEvent`s are durable public/business facts, not the
+  complete exact-state reducer. Eventless Ticks still have recovery records.
 - INV-003: Cross-sector ownership transfer must go through the consensus path.
 - INV-004: Entity IDs are unique and must not be reused.
 - INV-005: Determinism uses logical ticks and IDs, not wall-clock time.
 - INV-006: Commands are requests and may be rejected. Events are facts and must
   not be rejected.
-- INV-MOVE: Movement is replayed from velocity changes and deterministic
-  integration, not per-tick position events.
+- INV-MOVE: Public movement facts use velocity/anchor events where specified;
+  exact recovery of position/velocity/flight state uses ADR-0049 RecoveryDelta,
+  not historical Tick re-execution.
 - INV-TiDi: TiDi is local bounded pacing only; logical ticks remain
   deterministic.
-- Tick processing order is part of the design. Check
-  `docs/architecture/tick-model.md` before changing it.
+- Tick processing order and its prepare -> durable commit -> live apply boundary
+  are part of the design. Check `docs/architecture/tick-model.md` and
+  `docs/architecture/recovery-contract.md` before changing them.
 - Actor boundaries communicate through messages/mailboxes, not direct calls into
   actor internals.
 - Ship ownership is sector-local. A ship must not be owned by two sectors at
   once.
 - Cross-sector transit uses the consensus path. Do not shortcut ownership moves.
-- Snapshot restore must preserve authoritative state and catch up from the hot
-  event log.
+- Player ownership **and active-ship command routing** are authoritative Sector
+  world state. A successful `SelectActiveShip`/`Disembark` routing change is
+  recoverable even when it emits no public `DomainEvent`.
+- Station inventory authority is the Sector recovery journal; SQLite/repository
+  Station state is an idempotent projection/read model (ADR-0038 amended by
+  ADR-0049).
+- Prepared admission and resume-ticket lifecycle state are different: they may be
+  authoritative protocol state in #277's durable admission/identity repositories
+  before a Ship is materialized. They require explicit reconciliation/catch-up,
+  not accidental treatment as Station projection rows.
+- Recovery must preserve authoritative state, retained reliable outputs/retry
+  state, and required projection/repository reconciliation state through failover.
+- A reliable post-commit action must have durable retry/idempotency state. A
+  generic outbox is one implementation; #276 may represent Transit continuation
+  through its durable Saga. Auto-jump cannot live only in an in-memory queue.
+- Generic `ClientRequest` currently has no stable request ID. Do not claim or
+  implement transparent exactly-once retry of arbitrary non-idempotent client
+  commands after an ambiguous disconnect. Refresh state and treat resubmission as
+  a new request unless the protocol has its own stable operation identity.
+- `ReplicatedDurable` may stage committed bytes on a durability quorum before the
+  owner applies them. Staged bytes are not applied/promotable state; publication
+  and promotion require successful recovery-reducer/projection/repository checks.
+- #278 owns runtime selection of durability profile/replica set, quorum threshold,
+  durability-receipt aggregation, owner-epoch/fencing validation, and final ack
+  gating. #271 owns durable journal evidence and #280 owns transport.
+- Ordinary WebSocket/AoI presentation clients are not durable consumers and must
+  not hold public-event retention/compaction watermarks after disconnect.
 - Coordinate math must respect anchors/floating origins. Never compare raw
   anchor-relative offsets with sector-absolute positions.
 
 Forbidden change IDs are stable because docs and ADRs refer to them:
 
-- FBD-001: No destructive event-log operations.
+- FBD-001: No destructive in-place public-event-log operations.
 - FBD-002: No external dependencies in `dawn-core`.
 - FBD-003: No wall-clock time for causal order.
 - FBD-004: No direct actor-to-actor method calls.
@@ -130,25 +161,62 @@ Reference docs:
 - `docs/architecture/event-schema-evolution.md`
 - `docs/architecture/ownership.md`
 - `docs/architecture/tick-model.md`
+- `docs/architecture/recovery-contract.md`
 
-## Event Workflow
+## Authoritative Transition Workflow
 
-Keep this flow intact unless an ADR changes it:
+ADR-0049 supersedes the old "mutate live state, then append events" workflow.
+Keep this ordering intact unless a later accepted ADR changes it:
 
-1. Receive a command from a client, script, simulation, or actor message.
-2. Validate the command. Rejected commands do not emit domain events.
-3. Apply domain logic to the authoritative in-memory model.
-4. Generate domain events that describe facts that happened.
-5. Append events to the event store. If append fails, do not treat the state
-   change as committed.
-6. Replicate or gossip the append-only log through the relevant runtime path.
-7. Update projections, read models, and client snapshots from committed facts.
+1. Receive and validate a command/Tick/committed input. A rejected command that
+   changes no authority creates no recovery transition.
+2. Prepare a bounded mutation without changing committed live authoritative
+   state. Produce `RecoveryDelta`, public `DomainEvent`s, and reliable/runtime
+   obligations together.
+3. Make the complete logical transition durable under the configured durability
+   profile. If this fails, discard the prepared mutation and expose no success or
+   reliable effect. #271 owns journal framing/local durable evidence; #278 owns
+   runtime durability-profile/quorum/ack policy and #280 transports remote
+   durability messages.
+4. Apply the prepared mutation through the same recovery-reducer semantics used
+   by restore/replica catch-up. Apply required local projections and repository
+   reconciliations idempotently.
+5. If post-durable live/projection/reconciliation application fails,
+   fence/fail-stop the Sector or affected authoritative service; do not continue
+   from old/partial state and do not acknowledge.
+6. Publish public events and execute reliable effects only after successful local
+   apply. Durable delivery/retry state advances only after downstream acknowledgement
+   or equivalent idempotency proof; delivery is at-least-once unless the downstream
+   protocol provides stronger semantics. Ephemeral WebSocket/AoI delivery does not
+   create a durable retention cursor.
+7. Acknowledge the authoritative operation only after the selected durability
+   profile and required local apply/projection/reconciliation conditions are
+   satisfied.
+
+`LocalDurable` RPO 0 covers process/OS/power-loss failure with the durable medium
+intact. Claiming RPO 0 for owner machine/storage loss requires the synchronous
+durability-quorum semantics of `ReplicatedDurable`; quorum-staged bytes are not by
+themselves applied/promotable replica state. Do not enable/advertise that stronger
+profile before #271/#278/#280 define and test one coherent quorum/fencing model.
+
+### Recovery work-package ownership
+
+Do not make one sibling refactor silently redefine another's contract:
+
+- #284 / ADR-0049: recovery authority, RPO/RTO semantics, checkpoint/delta content
+- #271: journal mechanics, durable evidence, corruption/compaction implementation
+- #272: storage-independent engine and prepare -> durable -> live-apply API
+- #275: state-owner decomposition; consumes the #284 authority inventory
+- #276: Transit Saga/attempt/receipt/retry persistence; consumes #284 semantics
+- #277: Station projection plus authoritative admission/identity repository APIs/schema
+- #278: runtime durability profile/quorum/fencing/reconciliation/ack orchestration
+- #280: peer/snapshot/durability transport; carries the #284/#277 representations
 
 Do not merge command and event types. Do not invent rejection events for facts
 that never happened.
 
 Use the `/add-event` skill when introducing a new event and `/remove-event`
-when deleting a deprecated one — they cover every pipeline touchpoint.
+when deleting a deprecated one — they cover every public-event pipeline touchpoint.
 
 ### Wire protocol (client<->server)
 
@@ -163,6 +231,11 @@ After changing either enum (or a type either references), regenerate with
 otherwise (`wire_schema_doc_is_up_to_date`). Never hand-edit the `.schema.json` files. `dawn-core` keeps `schemars`
 optional behind its `schema` feature; `dawn-wire` enables that feature only to
 generate the versioned Sector envelope schema containing the shared `ClientRequest` authority.
+
+The current `ClientRequest` envelope intentionally has no generic idempotency key.
+If a future feature adds transparent exactly-once retry, the request/wire schema and
+#278 runtime must add a stable `RequestId` (or equivalent) and durable dedup/result
+retention as one designed protocol change; never infer identity from payload equality.
 
 Since ADR-0042, the actual runtime transport for `Welcome`/`Redirect`/
 `Event`/`Hello`/`Command`/`InitialState`/`PlayerLoadout`/`AoiEnter`/
@@ -188,9 +261,15 @@ workspace DAG and relevant ADR first.
   `dawn-core` + serde + postcard -- no transport/runtime dependency, so
   `dawn-client-gdext` can depend on it directly (ADR-0041, ADR-0042).
 - `dawn-ecs`: components and systems. No event store or network ownership.
-- `dawn-event-store`: append-only persistence and snapshots.
-- `dawn-consensus`: Raft and consensus transport.
-- `dawn-replication`: sector-local replication and anti-entropy.
+- `dawn-event-store`: current public-event/recovery-storage substrate. #271 is
+  chartered to replace its infallible EventStore-era persistence contract with
+  the fallible/versioned atomic journal mechanics required by ADR-0049.
+- `dawn-consensus`: Raft and consensus transport/state. Sector ownership epochs/
+  fencing input consumed by #278 must ultimately come from the authoritative
+  consensus/runtime ownership path rather than ad-hoc local counters.
+- `dawn-replication`: current sector-local replication and anti-entropy; #280
+  may change physical peer/snapshot/durability transport while preserving #284
+  recovery semantics and #278 quorum policy.
 - `dawn-market`: Market order book (bid/ask) + `PlayerId` Currency ledger,
   its own SQLite authority independent of Sector tick determinism. The SQLite
   layer is an adapter; the private matching policy owns crossing, price-time
@@ -200,17 +279,20 @@ workspace DAG and relevant ADR first.
   §4/§5/§6). Only constructs
   `RemoveItemCommand`/`ReturnItemCommand`/`CreditItemCommand`; never applies
   them to a `SimulationNode` itself, so `dawn-sector` never depends on it.
-- `dawn-sector`: sector game logic, ownership, transit, warp, AoI, snapshots.
-  Depends on `dawn-wire` to build typed wire messages it hands to `dawn-actor`
-  (e.g. `PlayerLoadoutWire`) -- `dawn-wire` has no
-  transport/runtime dependency of its own, so this doesn't pull tokio/
-  tungstenite into `dawn-sector`.
+- `dawn-sector`: current Sector game logic and broad `SimulationNode` composition.
+  #272 removes persistence ownership from the pure engine; #275 splits state
+  owners. Depends on `dawn-wire` today to build typed wire messages it hands to
+  `dawn-actor` (e.g. `PlayerLoadoutWire`).
 - `dawn-actor`: client/server protocol and connection boundary.
-- `dawn-simulation`: runnable simulation wiring and demos. Depends on
-  `dawn-market` to route Market-domain requests and bridge commands before
-  they reach the owning `SimulationNode` (ADR-0034 §4, roadmap.md §12
+- `dawn-simulation`: current runnable simulation/runtime wiring and demos. #278
+  consolidates this with production runtime orchestration so durability profile,
+  repository reconciliation, ack, retry, and effect policy have one implementation.
+  Depends on `dawn-market` to route Market-domain requests and bridge commands
+  before they reach the owning `SimulationNode` (ADR-0034 §4, roadmap.md §12
   9D-4/5).
-- `dawn-sector-node`: real hardware node binary and TOML config loading.
+- `dawn-sector-node`: real hardware node binary and TOML config loading; #278
+  reduces it toward bootstrap/adapter composition rather than a second runtime
+  policy implementation.
 
 ## Change Workflow
 
@@ -260,11 +342,12 @@ For hard bugs, follow the `diagnosing-bugs` skill:
   `/coverage-audit` skill runs the procedure end to end), not gated per PR.
   Wiring/binary files at 0% are intentional (covered by manual/hardware
   verification); the gaps worth closing are logic whose failure mode is
-  invisible to manual play — event replay (`node/apply_event.rs`, INV-002)
-  and wire conversion (`dawn-actor/src/protocol.rs`) first. New match arms
-  in those two files need direct tests in the same PR. Deliberately
-  uncovered code is named in the PR description with the reason, never
-  silently skipped. See #112 for the audit pattern.
+  invisible to manual play — recovery reducer/checkpoint-tail equivalence,
+  public-event projection (`node/apply_event.rs`), and wire conversion
+  (`dawn-actor/src/protocol.rs`) first. New match arms in public replay/wire
+  conversion need direct tests in the same PR. Deliberately uncovered code is
+  named in the PR description with the reason, never silently skipped. See
+  #112 for the audit pattern.
 
 ## Encoding Rules
 
@@ -311,6 +394,8 @@ Use this guide as the router, then read the relevant long-form doc:
 - Domain context and vocabulary: `CONTEXT.md`
 - Game vision: `docs/adr/ADR-0016-game-vision.md`
 - Architecture overview: `docs/architecture/architecture.md`
+- Recovery contract: `docs/architecture/recovery-contract.md`
+- Recovery ADR: `docs/adr/ADR-0049-sector-recovery-state-delta-wal.md`
 - Forbidden changes: `docs/architecture/forbidden-changes.md`
 - Event catalog: `docs/architecture/event-catalog.md`
 - Wire protocol (postcard binary plus the remaining JSON frames at the
@@ -342,4 +427,4 @@ this guide.
 
 ---
 
-Last updated: 2026-08-02 / Covers ADR-0001 through ADR-0047
+Last updated: 2026-08-07 / Covers ADR-0001 through ADR-0049

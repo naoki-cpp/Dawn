@@ -9,20 +9,27 @@ The changes below must **never be made, for any reason**, even if a technical
 justification is offered. If a change like this is genuinely needed, propose
 an ADR revision and get human approval first.
 
-## FBD-001: Destructive operations on the Event Log
+## FBD-001: Destructive operations on committed public Event history
 
 ```rust
-// Do not add methods with these signatures to the EventStore trait:
+// Do not add arbitrary destructive mutation of committed DomainEvent history:
 fn update(&self, id: EventId, payload: Bytes) -> Result<()>;
 fn delete(&self, id: EventId) -> Result<()>;
 fn truncate(&self, from_index: u64) -> Result<()>;
 fn rewrite(&self, index: u64, event: Event) -> Result<()>;
 ```
 
-Protects INV-001 (event log is append-only). Per ADR-0017, log compaction is
-handled outside the trait as an operational process (move segments behind a
-verified snapshot to cold storage, then atomically swap the hot log via
-write-new-then-swap) — events within a segment are never rewritten.
+Protects INV-001: committed public `DomainEvent`s are append-only facts and must not
+be edited/replaced in place. ADR-0017's current hot/cold archival implementation
+moves/retains immutable event segments rather than rewriting their contents.
+
+ADR-0049 introduces a **separate authoritative recovery-delta/checkpoint stream**.
+Checkpoint-governed retirement/compaction of covered recovery deltas is not a
+violation of FBD-001, because those deltas are not the committed public Event history.
+#271 owns the crash-safe physical recovery-journal compaction mechanics. A future
+storage refactor must preserve this distinction rather than treating FBD-001 as a ban
+on all recovery compaction or, conversely, using recovery compaction as permission to
+rewrite public facts.
 
 ## FBD-002: External dependencies in `dawn-core`
 
@@ -97,7 +104,7 @@ impl IdPool {
 }
 ```
 
-Reused IDs break event-log identity guarantees and can resurrect stale references.
+Reused IDs break durable identity guarantees and can resurrect stale references.
 
 ## FBD-006: Sector Transit that bypasses consensus
 
@@ -115,6 +122,8 @@ async fn teleport_ship_between_sectors(
 ```
 
 Every cross-Node Ship transfer must go through consensus to keep World state consistent.
+ADR-0049/#276 may change the durable handoff repository, but they do not permit bypassing
+ADR-0014 consensus ownership transfer.
 
 ## FBD-007: Adding `pub fn` without tests
 

@@ -3,12 +3,31 @@ id      : ADR-0017
 title   : イベントログのスナップショット圧縮と2層ログ（INV-002 改訂）
 status  : accepted
 date    : 2026-06-14
+updated : 2026-08-07
 deciders: [human, ai-agent]
-related : ADR-0001（Event Sourcing）, ADR-0014（Raft / failover）, AI_DEVELOPMENT_GUIDE.md「Architecture Invariants」, docs/architecture/forbidden-changes.md, docs/reference/eve-reference.md §11.2
+related : ADR-0001（Event Sourcing）, ADR-0014（Raft / failover）, ADR-0049（Exact Sector recovery）, AI_DEVELOPMENT_GUIDE.md「Architecture Invariants」, docs/architecture/forbidden-changes.md, docs/reference/eve-reference.md §11.2
 ---
 
 # ADR-0017 — スナップショット圧縮と2層ログ
 
+> **ADR-0049 amendment (2026-08-07):** 下記本文は2026-06-14時点の原決定と、その後の
+> 実装履歴を保持する。ADR-0049はこの履歴を削除せず、次の recovery-specific clauses だけを
+> forward-amendする。
+>
+> - §1 の hot/cold Event log は **public `DomainEvent` history / audit / projection retention**
+>   として維持するが、hot Event tailをexact Sector recovery tailとは呼ばない。
+> - §2 / §2.1 / §4 の「snapshot + public-event tail / trailing Tick rerunでoperational exact
+>   recovery」という契約は superseded。現在のexact recoveryは **compatible versioned checkpoint
+>   + committed authoritative `RecoveryDelta` tail**（ADR-0049 / recovery-contract.md）。
+> - §3の既存`FileEventStore::compact`手順は現行実装履歴として残す。#271はauthoritative
+>   recovery journalのphysical framing/compactionを再設計できるが、write/validate/sync/
+>   atomic-publish-before-retireというcrash-safe性は弱めない。
+> - §6の「明示version headerは将来YAGNI」という結論はsuperseded。#284はcheckpoint/recovery
+>   formatを明示versioned/fingerprintedにし、incompatible dataを明確にrejectする。旧snapshot
+>   compatibility自体は要求しない。
+> - public Eventのappend-only/FBD-001、cold archiveの監査価値、単一Raft方針の歴史的判断は
+>   このamendmentでは撤回しない。
+>
 > **ステータス注記**: 本 ADR は CLAUDE.md（権威ある運用規約）の INV-002 改訂 / FBD-001 注記追加を伴う。
 > 人間の承認を得て CLAUDE.md §2・§10 に適用済み（2026-06-14）。
 > なお圧縮・コールドアーカイブの**コード実装は未着手**（下記チェックリスト参照）。
@@ -207,6 +226,10 @@ CLAUDE.md §10 には「圧縮はセグメント移送として ADR-0017 が規�
 - [x] failover が創世記 replay を要求しないことのテスト（ADR-0014 連携）— 圧縮後 reopen + restore で実証（2026-06-14）
 - [x] snapshot.rs のドキュメントコメントを改訂後 INV-002 に更新（2026-06-14）
 - [x] docs/architecture/event-catalog.md / docs/architecture/architecture.md に2層ログを反映（event-catalog §2 / architecture §5-C に ADR-0017 参照付きで記載済み）
+
+> 上記checkboxはADR-0017時点の実装履歴であり、ADR-0049の新しいexact recovery acceptanceを
+> 意味しない。versioned recovery journal/checkpointの実装・failure injection・RTO benchmarkは
+> #271/#272/#284で別途完了させる。
 
 ---
 

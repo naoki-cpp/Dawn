@@ -1,10 +1,16 @@
 //! Execution seam for accepted Station operations.
 //!
 //! The sibling Station modules validate commands and build a plan. This
-//! module owns the ordered live side effects: durable inventory writes first,
-//! shared runtime-state application next, and the corresponding DomainEvent
-//! last. SQLite remains the durable Station inventory authority (ADR-0038);
-//! replay calls only the runtime-state stage and never repeats SQLite effects.
+//! module owns the current implementation's ordered live side effects. The
+//! legacy path writes SQLite inventory first, applies shared runtime state next,
+//! and emits the corresponding `DomainEvent` last; replay skips the SQLite
+//! write to avoid applying it twice.
+//!
+//! ADR-0049 changes the target contract: the journal-owned Station aggregate is
+//! durable before live apply, then the required SQLite projection is applied
+//! idempotently before acknowledgement/publication. #277 owns the replacement
+//! repository seam, so this module must not be treated as the final authority
+//! ordering.
 
 use dawn_core::{
     events::{PackagedShipBuilt, ShipAssembled, ShipDisassembled, ShipDocked, ShipUndocked},

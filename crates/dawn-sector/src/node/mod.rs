@@ -1,4 +1,4 @@
-//! `SimulationNode` — the self-contained simulation unit for one Sector.
+//! `SimulationNode` — the current broad simulation/composition unit for one Sector.
 //!
 //! # Generic over `S: EventStore`
 //!
@@ -6,13 +6,24 @@
 //! normal construction and restore path requires a complete validated
 //! [`GameDataCatalog`].
 //!
-//! # Snapshot / Restore (INV-002)
+//! # Recovery contract status (ADR-0049 / #284)
 //!
-//! ```text
-//! node.take_snapshot()           -> StateSnapshot (ECS state at log_index N)
-//! SimulationNode::restore_from(store, &snapshot, galaxy, catalog)
-//!     -> reconstruct ECS from snapshot, replay events from log_index N onward
-//! ```
+//! This module still exposes the **pre-ADR-0049 implementation shape**: the node
+//! owns an `EventStore`, `take_snapshot()` produces the current `StateSnapshot`,
+//! and `restore_from()` restores that snapshot then replays the current public
+//! EventStore tail. That is migration baseline, not the target exact-recovery
+//! contract.
+//!
+//! The accepted target is a storage-independent engine (#272) whose committed
+//! Sector world state is recovered from a compatible versioned checkpoint plus
+//! every contiguous committed authoritative `RecoveryDelta`. Public
+//! `DomainEvent`s remain durable facts but are not the complete state reducer.
+//! #277 separately owns durable pre-materialization admission/identity protocol
+//! authority and reconciliation; #275 splits this broad aggregate into explicit
+//! state owners.
+//!
+//! Until those migrations land, comments below distinguish current in-memory or
+//! SQLite/EventStore mechanics from the authority selected by ADR-0049.
 
 mod admission_provisional;
 mod apply_event;
@@ -154,10 +165,11 @@ pub struct FittedModuleStatus {
 
 // -- SimulationNode ----------------------------------------------------------
 
-/// A single-Sector simulation node, generic over its event store.
+/// Current single-Sector simulation node, generic over its legacy EventStore.
 ///
-/// The default store is `InMemoryEventStore`; use `FileEventStore` for
-/// persistent operation (Phase 3).
+/// The default store is `InMemoryEventStore`; current production can supply a
+/// `FileEventStore`. #272 removes storage ownership from the final pure engine,
+/// so this generic is an implementation baseline rather than the target API.
 pub struct SimulationNode<S = InMemoryEventStore>
 where
     S: EventStore,
@@ -177,19 +189,28 @@ where
     ship_type_registry: Arc<BTreeMap<ShipTypeId, ShipTypeDefinition>>,
     /// Bare ShipStats without fitting. Used as the base for fitting aggregation.
     base_stats: HashMap<ShipId, ShipStatsComp>,
-    /// PlayerId allocation counter.
+    /// Current in-memory PlayerId allocation counter. ADR-0049/#277 requires
+    /// recovery to advance allocation beyond every materialized or durably
+    /// reserved identity; this field alone is not the final allocator authority.
     player_id_counter: u64,
-    /// Non-durable Ship IDs reserved by in-flight fresh admissions.
-    /// Counted against the population cap but intentionally omitted from snapshots.
+    /// In-memory claim set for fresh admissions currently being processed.
+    ///
+    /// The **claim set itself** is non-durable and intentionally omitted from
+    /// snapshots. The reserved `PlayerId` / `ShipId` is different: once exposed
+    /// by a durable #277 reservation it is permanently consumed and may not be
+    /// reused after crash, abort, or expiry.
     pending_fresh_admissions: HashSet<ShipId>,
     /// Ship-level lock held by an in-flight resume handshake.
-    /// Non-durable: authoritative ownership is still unchanged until commit.
+    /// Non-durable concurrency guard: losing this lock on crash does not change
+    /// durable ownership/ticket authority, which #277 must recover/reconcile.
     pending_resume_admissions: HashMap<ShipId, PlayerId>,
     /// Lock-on commands queued by the bot AI during `process_bots()`.
     ///
-    /// Bot AI runs after the LockSystem each tick.  These commands are held
-    /// here and injected into the LockSystem at the start of the NEXT tick,
-    /// ensuring they are processed exactly like human-issued lock commands.
+    /// Bot AI runs after the LockSystem each tick. These commands are held here
+    /// and injected into the LockSystem at the start of the NEXT tick. Because
+    /// they affect a later authoritative Tick, ADR-0049 classifies this queue as
+    /// recovery authority until same-Tick consumption or another redesign removes
+    /// the cross-Tick state. Current persistence is migration debt.
     pending_bot_lock_commands: Vec<dawn_core::LockOnCommand>,
     /// Static navigation topology for this Sector (gates, bodies, star map).
     sector_map: SectorMap,
@@ -199,11 +220,17 @@ where
     /// Per-Sector population backstop (ADR-0018). Defaults to [`POPULATION_CAP`];
     /// tunable via [`Self::set_population_cap`].
     population_cap: usize,
-    /// Durable Station inventory store (ADR-0038): SQLite is the authority,
-    /// this is a bounded in-memory cache of recently-touched players on top
-    /// of it (`node/station.rs`'s seam). `RefCell` for interior mutability so
-    /// read-only accessors can still populate the cache on a miss.
+    /// Current catch-all SQLite adapter inherited from ADR-0038.
+    ///
+    /// Under ADR-0049/#277, Station inventory rows become an idempotent
+    /// projection/read model of journal-owned Station world state, while
+    /// pre-materialization admission/identity rows may remain repository-owned
+    /// protocol authority with explicit reconciliation. The current object mixes
+    /// both domains and is scheduled to be split; SQLite as a whole is **not**
+    /// the Sector world-state authority.
     station_inventory_db: station_inventory_db::StationInventoryDb,
+    /// Bounded derived cache over current Station repository access. It is not
+    /// independent recovery authority.
     station_inventory_cache: std::cell::RefCell<station_inventory::StationInventoryCache>,
     /// Current docked station per ship. Docking is authoritative state, so
     /// station operations must consult this rather than raw spatial proximity.
@@ -211,19 +238,23 @@ where
     /// Current docked station context per player. This is separate from the
     /// active ship map so station access can survive ship-specific actions.
     docked_players: BTreeMap<PlayerId, StationId>,
-    /// Auto-jump triggers accumulated during `process_warp()` for ships that
-    /// completed a warp with `WarpComp::auto_jump = true`. Drained by the
-    /// caller after each tick so the jump can be proposed to the Raft Log
-    /// (or handled however the server path requires).
+    /// Current in-memory auto-jump work queue populated by `process_warp()` and
+    /// drained by the runtime to propose a Raft handoff.
+    ///
+    /// ADR-0049 explicitly forbids this queue from being the sole durable source
+    /// after an auto-jump Warp arrival commits. The committed transition must
+    /// also create durable replayable/idempotent continuation state; #276 may
+    /// represent that as a Transit Saga attempt.
     pending_auto_jumps: Vec<(ShipId, JumpGateId)>,
     /// Ships that finished a warp this tick (ADR-0029 warp-arrival authority).
-    /// Transient and non-persisted (like `pending_auto_jumps`): the serve loop
-    /// drains it each tick and sends the owner an authoritative `PositionSnap`,
-    /// correcting the client's capped warp-visual dead-reckoning. Independent of
-    /// whether the arrival changed the ship's anchor, so it covers every warp
-    /// (gate / body / same-anchor) with one mechanism.
+    /// This is deliberately lossy presentation output: the serve loop drains it
+    /// and sends an authoritative `PositionSnap`; reconnect/current-state sync can
+    /// repair a missed presentation correction. It is not the durable auto-jump
+    /// obligation described above.
     completed_warps: Vec<ShipId>,
-    /// Durable destination-side transit receipts used for Commit deduplication.
+    /// Current destination-side Transit receipt representation used for Commit
+    /// deduplication. #276 replaces this legacy snapshot-era shape with the final
+    /// durable Transit Saga/receipt authority under ADR-0049.
     completed_incoming_transits: Vec<CompletedIncomingTransit>,
 }
 
@@ -356,8 +387,12 @@ impl<S: EventStore> SimulationNode<S> {
         }
     }
 
-    /// Restore a node from a snapshot plus its event tail using the exact
-    /// validated catalog selected by the runtime.
+    /// Restore through the current legacy snapshot + public EventStore-tail path
+    /// using the exact validated catalog selected by the runtime.
+    ///
+    /// ADR-0049 replaces this operational contract with versioned checkpoint +
+    /// authoritative `RecoveryDelta` tail recovery; this method remains migration
+    /// baseline until #271/#272/#284 land the replacement path.
     pub fn restore_from(
         store: S,
         snapshot: &StateSnapshot,
@@ -437,13 +472,15 @@ impl<S: EventStore> SimulationNode<S> {
         self.population_cap = cap;
     }
 
-    /// Point Station inventory persistence at a real on-disk SQLite file
-    /// (ADR-0038) instead of the private in-memory database `new`/`with_store`/
-    /// `restore_from` default to. Production wiring (`dawn-sector-node`'s
-    /// `build_node`) calls this once after construction because the database
-    /// path is process-local; topology is already fixed by construction.
-    /// Replaces the cache too, since it would otherwise
-    /// still hold entries read from the old (in-memory) database.
+    /// Point the current catch-all Station/admission/identity SQLite adapter at
+    /// a real on-disk file instead of the private in-memory database used by
+    /// `new`/`with_store`/`restore_from`.
+    ///
+    /// This is current implementation wiring. Under ADR-0049/#277 the final
+    /// runtime owns separate repository APIs: Station rows are an idempotent
+    /// projection of journal authority, while admission/identity rows may be
+    /// durable protocol authority with explicit reconciliation. #272 removes the
+    /// repository object from the pure engine.
     pub fn open_station_inventory_db(&mut self, path: &str) -> rusqlite::Result<()> {
         self.station_inventory_db = station_inventory_db::StationInventoryDb::open(path)?;
         self.station_inventory_cache

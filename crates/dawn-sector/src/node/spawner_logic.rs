@@ -29,9 +29,10 @@ impl<S: EventStore> SimulationNode<S> {
     /// Before this was pulled out, `ShipSpawned` replay hand-rolled its own
     /// copy that omitted the `ships.type_ids` insertion and the
     /// `CapacitorComp` initialization -- both present on the live path -- so
-    /// a ship spawned after the last snapshot could come back from a
-    /// snapshot + tail-log restore missing state the live node had (issue
-    /// #197). Position/anchor setup is deliberately NOT part of this
+    /// a ship spawned after the last legacy snapshot could come back from the
+    /// current snapshot + tail-log restore missing state the live node had
+    /// (issue #197). ADR-0049's future RecoveryDelta reducer must preserve the
+    /// same invariant. Position/anchor setup is deliberately NOT part of this
     /// function: it differs legitimately per caller (a fresh `ShipSpawned`
     /// anchors at a real spawn position via `set_spawn_anchor`/
     /// `set_spawn_anchor_abs`; `ShipAssembled` starts at `Position::ORIGIN`

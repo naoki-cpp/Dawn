@@ -1227,8 +1227,11 @@ mod tests {
         assert_eq!(to_node.get_ship_position(ship_id), Some(entry_pos));
     }
 
-    /// INV-002: after a Sector Transit, the destination Sector's state can be
-    /// fully reproduced from a snapshot + Event Log replay (node restart).
+    /// Legacy recovery regression: after a Sector Transit, the destination
+    /// Sector's state can be reproduced by the current snapshot + Event Log
+    /// replay path. ADR-0049 replaces this operational mechanism with a
+    /// versioned checkpoint plus authoritative RecoveryDelta tail; the test
+    /// remains while that migration is implemented.
     #[test]
     fn destination_sector_state_after_transit_is_fully_restored_from_snapshot_and_replay() {
         let dir = tempfile::tempdir().unwrap();

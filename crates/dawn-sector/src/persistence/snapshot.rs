@@ -1,40 +1,50 @@
-//! `StateSnapshot` — point-in-time capture of a `SimulationNode`'s ECS state.
+//! `StateSnapshot` — current point-in-time snapshot implementation for a
+//! `SimulationNode`.
 //!
-//! # Recovery procedure (INV-002)
+//! # Recovery contract status (ADR-0049 / #284)
 //!
-//! 1. Load `StateSnapshot` from disk.
-//! 2. Open the `FileEventStore` for the same Sector.
-//! 3. Call `SimulationNode::restore_from_test(store, &snapshot, galaxy, &modules, &ship_types)`
-//!    with the same module / ship-type definitions the node was configured with.
-//!    - The snapshot reconstructs the ECS World up to `log_index`
-//!      (position, velocity, hull layers, capacitor, fitting).
-//!    - Events at `log_index` and beyond are replayed on top.
-//! 4. The restored node is equivalent to the node at shutdown.
+//! This file still implements the **pre-ADR-0049 snapshot/EventStore recovery
+//! path**. Its `log_index`, postcard layout, and restore call sites describe the
+//! current migration baseline; they are not the final exact-recovery contract.
 //!
-//! # Snapshot is the authoritative durable checkpoint (ADR-0017 / INV-002)
+//! ADR-0049 has selected the target operational model:
 //!
-//! The Event Log stays append-only (INV-001) and is the history / propagation /
-//! snapshot-source. But the snapshot — not genesis replay — is what operational
-//! recovery and failover (ADR-0014) rely on: load the latest snapshot, then
-//! catch up the tail of events.
+//! ```text
+//! newest complete compatible versioned checkpoint
+//!     + every contiguous committed authoritative RecoveryDelta after it
+//! ```
 //!
-//! Publication is write-new-then-replace: encode and validate the postcard
-//! payload, write it to a uniquely named sibling file, flush and sync that file,
-//! then replace the authoritative path. Before replacement, the persistence
-//! layer opens the parent directory and durably preserves a readable rollback
-//! copy of any existing snapshot. Unix uses same-directory `rename` plus parent-
-//! directory sync; Windows uses `ReplaceFileW` for metadata-preserving replacement.
-//! A handled failure at any publication stage restores the prior authoritative
-//! snapshot (or restores absence for a failed first publication).
+//! Eventless Ticks, `active_ship`, capacitor/lock/module counters, queued future
+//! intent, and other authoritative values are covered by that recovery stream even
+//! when no public `DomainEvent` exists. Public Event replay remains useful for its
+//! supported projection/audit/legacy purposes, but is not the complete exact-state
+//! reducer.
 //!
-//! Derived / transient state (position, capacitor, lock countdowns) is persisted
-//! in the snapshot. It is a per-tick pure function (position = velocity integral,
-//! cap = recharge) and is NOT event-sourced, so it cannot be rebuilt from events
-//! alone — it is restored from the snapshot and recomputed as the sim runs forward.
+//! # Current legacy restore procedure
 //!
-//! Genesis (index 0) reconstruction is off-path (audit / disaster only): apply
-//! events to rebuild authoritative state, then let transient state recompute. No
-//! operational path depends on it.
+//! Until #271/#272/#284 replace this path, the implementation below still:
+//!
+//! 1. loads `StateSnapshot` from disk;
+//! 2. opens the `FileEventStore` for the same Sector;
+//! 3. calls `SimulationNode::restore_from_test(store, &snapshot, galaxy, &modules, &ship_types)`;
+//! 4. restores the snapshot state and replays current EventStore tail behavior.
+//!
+//! Code that depends on this behavior must treat it as migration debt, not infer
+//! the future journal/checkpoint API from it.
+//!
+//! # Publication guarantee retained by ADR-0049
+//!
+//! The crash-safe publication mechanics in this file remain a required property:
+//! encode/validate replacement material, write it to a sibling file, flush+sync,
+//! atomically publish it, sync the directory, and preserve/restore a readable
+//! rollback copy on handled failure. #284 requires the future versioned checkpoint
+//! implementation to retain or strengthen this guarantee.
+//!
+//! The current struct includes values such as position, capacitor, and tackle state.
+//! Under ADR-0049 these are **authoritative recovery values**, not merely transient
+//! values that may be recomputed arbitrarily after restart. The final checkpoint
+//! schema and authoritative journal position are implemented by #271/#284; old
+//! pre-release snapshot compatibility is not required.
 
 use std::{
     collections::BTreeMap,
@@ -76,12 +86,12 @@ pub(crate) fn inject_directory_sync_failure(destination: impl AsRef<Path>, call_
 
 // ── Ship-level snapshot ───────────────────────────────────────────────────────
 
-/// State of a single Ship at the time of the snapshot.
+/// State of a single Ship in the current legacy snapshot format.
 ///
-/// Captures everything needed to reconstruct the Ship's ECS components
-/// (`PositionComp`, `VelocityComp`, `ShipStatsComp`, `HullComp`,
-/// `CapacitorComp`, `FittingComp`) without replaying events from the
-/// beginning of the log (INV-002).
+/// Captures the ECS values the current snapshot path restores directly. ADR-0049
+/// requires the eventual versioned checkpoint + RecoveryDelta tail to preserve all
+/// authoritative values needed for exact recovery, whether or not a public Event
+/// represents them.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShipSnapshot {
     pub ship_id: ShipId,
@@ -115,6 +125,7 @@ pub struct ShipSnapshot {
 ///
 /// Ship presence is not a valid deduplication marker because the imported Ship
 /// may be destroyed or transit onward before an old Commit retry arrives.
+/// #276 replaces this legacy receipt shape with the final durable Transit Saga.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompletedIncomingTransit {
     pub ship_id: ShipId,
@@ -125,25 +136,31 @@ pub struct CompletedIncomingTransit {
 
 // ── Node-level snapshot ───────────────────────────────────────────────────────
 
-/// Complete state of a `SimulationNode` at a specific `log_index`.
+/// Complete state of a `SimulationNode` in the current snapshot format at a
+/// specific legacy EventStore `log_index`.
 ///
-/// Stores enough information to reconstruct the ECS World without replaying
-/// events from the beginning of time.
+/// This struct is the current implementation baseline, not the final ADR-0049
+/// checkpoint manifest. #284/#271 replace the implicit binary-version contract
+/// with an explicit versioned/fingerprinted checkpoint whose coverage is an
+/// authoritative recovery-journal position rather than a public-event-only index.
 ///
-/// # Format compatibility (ADR-0017)
+/// # Current format compatibility (ADR-0017 legacy path)
 ///
 /// The on-disk format is **version-locked to the binary**: postcard is not
 /// self-describing, so fields are read positionally and a snapshot written by
 /// a different field list fails to load with `DeserializeUnexpectedEnd`.
 /// `#[serde(default)]` does **not** grant field-level back-compat here the way
 /// it would for a self-describing format like JSON — it is a no-op on this
-/// path, so do not add it to imply a compatibility guarantee that does not
-/// exist. Changing this struct means operators regenerate snapshots.
+/// path. ADR-0049 explicitly does not require old pre-release snapshot
+/// compatibility; the replacement format must instead reject incompatible data
+/// clearly using explicit version/fingerprint metadata.
 ///
-/// Which fields belong here is enforced from both sides:
+/// Which fields belong in this current struct is enforced from both sides:
 /// `SimulationNode::take_snapshot` destructures the node exhaustively, and
 /// `SimulationNode::apply_snapshot` destructures this struct exhaustively, so
-/// adding a field to either is a compile error until it is handled.
+/// adding a field to either is a compile error until it is handled. #284/#275
+/// replace this broad manual boundary with the final authority inventory/state
+/// owners.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateSnapshot {
     /// The node that produced this snapshot.
@@ -152,8 +169,10 @@ pub struct StateSnapshot {
     pub sector_id: SectorId,
     /// Spatial bounds of the Sector.
     pub bounds: SectorBounds,
-    /// All events with index < `log_index` are covered by this snapshot.
-    /// Events at `log_index` and beyond must be replayed.
+    /// Legacy EventStore coverage: events with index < `log_index` are covered
+    /// by this current snapshot and events at/after it are replayed by the
+    /// current restore path. ADR-0049 replaces this with an authoritative
+    /// recovery-journal covered position in the versioned checkpoint manifest.
     pub log_index: u64,
     /// Logical tick at the time of the snapshot.
     pub tick: Tick,
@@ -838,8 +857,8 @@ mod tests {
     /// postcard is not self-describing: struct fields are read positionally,
     /// so a buffer written from a different field list cannot be decoded and
     /// `#[serde(default)]` does not rescue it. This pins the behaviour the
-    /// format-compatibility note on `StateSnapshot` depends on — if it ever
-    /// stops holding, that note (and ADR-0017) needs revisiting.
+    /// current format-compatibility note on `StateSnapshot` depends on. The
+    /// ADR-0049 replacement instead requires an explicit version/fingerprint.
     #[test]
     fn a_snapshot_written_with_fewer_fields_fails_to_load() {
         #[derive(Serialize)]

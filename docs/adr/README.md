@@ -29,6 +29,7 @@ When adding a new ADR, register it here too (the `/new-adr` skill does both).
 | [ADR-0029](ADR-0029-true-scale-coordinates-implementation.md) | 真スケール座標の実装 — アンカー相対 f32（サーバ B）＋ 浮動原点（クライアント C2） | Accepted |
 | [ADR-0030](ADR-0030-steering-files-restructure.md) | ステアリング系ファイルの再構成（常時ロード文脈の軽量化 — Hook + ガイド分割） | Accepted |
 | [ADR-0044](ADR-0044-absolute-f64-coordinate-authority.md) | サーバー権威座標を絶対 f64 に統一する方針 | Accepted |
+| [ADR-0049](ADR-0049-sector-recovery-state-delta-wal.md) | Exact Sector recovery with a versioned state-delta journal | Accepted |
 
 ### Client / Communication
 
@@ -74,7 +75,7 @@ When adding a new ADR, register it here too (the `/new-adr` skill does both).
 |---|---|---|
 | [ADR-0034](ADR-0034-economy-foundations.md) | Economy Foundations — Item一般化 / Packaged Ship / Scrap Metal / Market・DBの境界 | Accepted |
 | [ADR-0037](ADR-0037-docked-ship-ownership.md) | Docked Ship Ownership — owned ship / active ship / docked station context を分離する | Accepted |
-| [ADR-0038](ADR-0038-station-inventory-sqlite.md) | Station Inventory — SQLite as the durable authority, lazy-loaded in memory | Accepted |
+| [ADR-0038](ADR-0038-station-inventory-sqlite.md) | Station Inventory — SQLite-backed lazy projection | Accepted |
 
 ### UI / Client Presentation
 

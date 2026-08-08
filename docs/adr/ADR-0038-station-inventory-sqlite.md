@@ -3,11 +3,33 @@ id      : ADR-0038
 title   : Station Inventory — SQLite as the durable authority, lazy-loaded in memory
 status  : accepted
 date    : 2026-07-08
+updated : 2026-08-07
 deciders: [human, ai-agent]
-related : ADR-0034（Economy Foundations §2 Market/データベースの境界 — このADRが宿題として残した storage seam を実装する）, ADR-0017（Event Store 2層ログ・snapshot+tail replay の元設計）, docs/process/roadmap.md §12（Phase 9B 補足「Station inventory の保存戦略」）
+related : ADR-0034（Economy Foundations）, ADR-0017（snapshot/public Event archive）, ADR-0049（Sector recovery authority）, docs/process/roadmap.md §12
 ---
 
 # ADR-0038 — Station Inventory SQLite Backing
+
+> **ADR-0049 amendment (2026-08-07):** 下記本文はADR-0038が2026-07-08に選んだ
+> SQLite-backed lazy storageの背景・実装判断を履歴として保持する。ただし次のauthority/
+> recovery clausesはADR-0049によりforward-amendされた。
+>
+> - 「Station inventoryのdurable authorityをSQLiteに置く」はsuperseded。現在のexact Sector
+>   authorityはADR-0049 recovery journal/checkpointのStation aggregate deltaである。
+> - SQLiteを先に同期更新し、その後のpublic Event appendとの間にnarrow inconsistency windowを
+>   許容する§帰結は撤回。authoritative transition durable -> local live apply -> required idempotent
+>   Station projectionの順で、projection failure後はfail-stop/catch-upする。
+> - SQLite/node-local DB + bounded lazy cacheという**製品・read-model選択は維持可能**。
+>   #277がcatch-all `StationInventoryDb`をnarrow repositoryへ再編するが、repository shapeは
+>   recovery authorityを変更しない。
+> - public `PackagedShipBuilt` / `ShipDisassembled` / `ShipAssembled` replayをStation exact reducerに
+>   戻さない。Station authorityはRecoveryDeltaであり、public Eventはfact/projection inputである。
+> - Station projectionはStation-changing transitionのdedupに加えてglobal contiguous
+>   `projection_applied_through`を持つ。非Station transitionもno-opとしてwatermarkを進め、
+>   replica promotion pointと同じauthoritative journal coordinateでfreshnessを証明する。
+>
+> 以下の旧本文中「SQLiteがauthority」「snapshot+event tail」「不整合windowを許容」は**歴史的な
+> 原決定の記録**であり、現在のnormative recovery behaviorではない。
 
 ## 背景
 
@@ -86,6 +108,11 @@ SQLite は**クラッシュ直前まで**の状態を既に持っている。こ
 イベント発行前に自分で `credit`/`try_debit` を呼んでいるため、ライブパスの
 挙動は変わらない——リプレイ側の**冗長になった**再構築だけを取り除く。
 
+> **Current interpretation after ADR-0049:** 上記の`apply_event` removal自体は維持するが、
+> 理由は「SQLiteが独立authorityだから」ではなく、public Event replayをStation exact reducerに
+> しないためである。live/recovery Station mutationはauthoritative RecoveryDeltaから行い、
+> SQLite/repository projectionはstable transition identityで冪等にcatch upする。
+
 ## 却下した案
 
 - **SQLiteを単なるlazy-loadキャッシュにし、真実の情報源はevent replayのまま**:
@@ -109,3 +136,7 @@ SQLite は**クラッシュ直前まで**の状態を既に持っている。こ
   （dawn-coreへの外部依存禁止）は`dawn-sector`には適用されない。
 - 実装は `docs/process/roadmap.md` §12 9B補足「Station inventory の保存戦略」
   を参照。
+
+> **Current consequence after ADR-0049:** 上記narrow inconsistency windowの許容は撤回済み。
+> #271/#272/#277のmigration後はjournal-first authoritative transition + idempotent projectionで
+> recoveryする。`rusqlite`/bounded lazy accessという製品判断は引き続き利用可能である。

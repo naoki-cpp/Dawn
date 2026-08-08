@@ -3,12 +3,34 @@ id      : ADR-0014
 title   : 分散コンセンサス — Raft による Sector Transit
 status  : accepted
 date    : 2026-06-12
-updated : 2026-08-05
+updated : 2026-08-07
 deciders: [human, ai-agent]
-related : ADR-0001, ADR-0002, ADR-0003, ADR-0009, ADR-0017, INV-002, INV-003, INV-006
+related : ADR-0001, ADR-0002, ADR-0003, ADR-0009, ADR-0017, ADR-0049, INV-002, INV-003, INV-006
 ---
 
 # ADR-0014 — Raft による Sector Transit
+
+> **ADR-0049 / #276 amendment (2026-08-07):** 下記本文は2026-08-05までに確立した
+> Transitの原決定・現行実装baselineを履歴として保持する。Request → Commit → Ack、source
+> freeze、destination durable completion後のsource cleanup、duplicateの冪等性、Raft consensusを
+> 迂回しないという**behavioral invariantsは維持する**。ただし次のpersistence/recovery clausesは
+> forward-amendされた。
+>
+> - 「各SectorのEventStoreが永続的な世界の真実」「snapshot + public Event tailだけでexact
+>   recovery」はsuperseded。exact operational recoveryはADR-0049のcompatible versioned
+>   checkpoint + committed authoritative `RecoveryDelta` tailで行う。
+> - §3の未解決`SectorTransitRequested` EventStore scanを最終durable outbox/retry repositoryとする
+>   方針は#276が置換するlegacy baseline。#276はfirst-class `TransitAttemptId`、outgoing attempt、
+>   incoming receipt、retry/terminal stateをdurable Sagaとしてdirect lookup可能にする。
+> - §4/§5のTransit public eventsは引き続きpublic/business fact・projection/audit用途を持てるが、
+>   exact owner/routing/state recoveryやretry receiptの唯一のauthorityではない。
+> - Request適用時の「live `InTransit` mutation → Event append」という現行順序は#272 migration
+>   debt。target orderingはprepare → ADR-0049 durable transition → live apply → effectsである。
+> - auto-jumpを含むreliable Raft proposal continuationはmemory-only queueに残してはならず、
+>   ADR-0049 durable retry stateまたは#276 Sagaの同等保証を持つ。
+>
+> 以下の旧本文中のEventStore/replay記述は**当時の設計と現行実装の記録**として読む。#276は
+> pre-release backward compatibilityを要求されず、より明示的なattempt identity/repositoryへ移行できる。
 
 ## 背景
 
@@ -168,6 +190,11 @@ Raft timerもwall clockではなくlogical Tickで駆動する。
 - 一時的なfrozen recovery copyを許容し、ゼロcopyと二重active ownerを防ぐ
 - EventStore scanとretry proposalの小さなコストを受け入れる
 
+> **Current consequences after ADR-0049 / #276 charter:** exact recoveryはpublic Event
+> tailではなくRecoveryDelta/checkpointで行う。Request/Commit/Ack behavioral invariantsは残すが、
+> EventStore scan/retry proposalは#276 Sagaへ移行するlegacy implementationであり、checkpoint
+> compactionやreplica promotionはpending Saga/retry authorityを失ってはならない。
+
 ## 検証
 
 PR #206とPR #210、およびTransit handoff深掘りPRは次を固定する。
@@ -180,3 +207,7 @@ PR #206とPR #210、およびTransit handoff深掘りPRは次を固定する。
 - 異なる古いrouteのAbortが現在のoutboxまたはreplay markerを解除しない
 - completed transitのsnapshot + tail replayでdestinationだけがactiveになる
 - InTransit中のposition・velocity・HP・capacitor・fitting・inventoryがtickで変化しない
+
+> #276/#284の最終migration testsでは、上記behavioral guaranteesに加えてEventStore scanなしの
+> direct attempt lookup、crash-safe retry/receipt/terminal state、auto-jump proposal前後の冪等retry、
+> checkpoint/compaction後のpending attempt保持、Saga/recovery authorityなしのpromotion禁止を固定する。

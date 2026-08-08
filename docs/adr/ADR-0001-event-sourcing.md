@@ -3,10 +3,27 @@ id      : ADR-0001
 title   : Event Sourcing の採用
 status  : accepted
 date    : 2026-06-04
+updated : 2026-08-07
 deciders: [human, ai-agent]
 ---
 
 # ADR-0001 — Event Sourcing の採用
+
+> **ADR-0049 amendment (2026-08-07):** 下記本文は2026-06-04時点の原決定を履歴として
+> 保持する。`DomainEvent`をappend-only public/business fact、audit history、projection input
+> とするEvent Sourcing + CQRSの価値は維持する。一方、以下の「Eventを唯一の真実」
+> 「同じEventだけで世界状態を完全復元」という記述を **exact operational Sector recovery**
+> に適用する部分はADR-0049でsupersededされた。
+>
+> 現在のexact recovery authorityは **versioned checkpoint + committed authoritative
+> `RecoveryDelta` tail** である。eventless Tickや`active_ship` routing、capacitor/lock/module
+> counters等、public Eventを出さないauthoritative mutationもこのrecovery streamに記録される。
+> Public Event replayはsupported projection/audit/debug用途では引き続き有用だが、任意の
+> acknowledged Tickのexact stateを単独で再構築する保証ではない。
+>
+> したがって原本文中の「全ての権威あるState変更はEventとして記録」は現在は
+> 「全てのauthoritative mutationはADR-0049 RecoveryDeltaに表現し、public/business factが
+> 生じた場合はDomainEventも同じlogical transition boundaryでdurableにする」と読む。
 
 ## コンテキスト
 
@@ -109,6 +126,10 @@ AI エージェントが機能を拡張する際、新しい Projection（Read �
 - Event スキーマの後方互換性は event-catalog.md のルールで管理する
 ```
 
+> **Current interpretation after ADR-0049:** FBD-001はcommitted public `DomainEvent` historyを
+> 保護する。exact operational recoveryはversioned checkpoint + authoritative state-delta tailを
+> 使い、state-delta compactionはpublic Event historyのin-place rewriteとは別物である。
+
 ---
 
 ## 今後の再評価トリガー
@@ -116,3 +137,6 @@ AI エージェントが機能を拡張する際、新しい Projection（Read �
 - Event Log のサイズが Snapshot でも管理できないほど膨大になった場合
   → **ADR-0017 で対応**（2層ログ: ホットログ圧縮 + コールドアーカイブ）
 - Event スキーマの後方互換性管理コストが開発速度を著しく下げた場合
+
+> ADR-0049以降、recovery journalのwrite volume/replay cost/RTOが問題になった場合は#284の
+> state-delta/checkpoint modelを再評価し、public Event Sourcingの監査/projection価値とは別に扱う。

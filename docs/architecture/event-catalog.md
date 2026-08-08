@@ -1,11 +1,22 @@
 ---
-scope    : Complete spec of every Event and Command that exists. The single source of truth for "what can happen"
+scope    : Complete spec of every public DomainEvent and Command that exists. The single source of truth for public/domain facts and requests
 audience : AI Agent / Human Developer
 update   : Must be updated whenever an Event or Command is added or changed
-related  : entity-model.md, tick-model.md, event-schema-evolution.md
+related  : entity-model.md, tick-model.md, recovery-contract.md, event-schema-evolution.md
 ---
 
 # Event Catalog
+
+> **ADR-0049 recovery note (2026-08-07):** This catalog remains the detailed
+> specification for public/business `DomainEvent`s and Commands. It is **not** the
+> complete exact-state recovery schema. Exact operational Sector recovery is a
+> compatible versioned checkpoint plus committed authoritative `RecoveryDelta`
+> tail. Eventless Ticks and commands such as active-ship routing changes may have a
+> durable recovery transition with no public event. `Replay` notes below describe
+> the event's supported public/projection/legacy replay behavior; they do not imply
+> that public-event history alone reconstructs every authoritative field. Transit
+> EventStore-scan retry descriptions are current/legacy behavior to be replaced by
+> #276's durable Saga under the same ADR-0049 recovery contract.
 
 ## 1. Using This Catalog
 
@@ -48,7 +59,7 @@ Post-release breaking changes must follow the [Upcaster procedure](#6-upcaster-c
 |---|---|---|
 | Meaning | a **request** for change | the **fact** that change occurred |
 | Rejectable | yes | no (already happened) |
-| Persisted | no | yes, append-only |
+| Persisted | no | yes, append-only public fact |
 | File | `commands.rs` | `events.rs` |
 
 Commands and Events must never share a type or enum (INV-006).
@@ -63,20 +74,27 @@ Every event has `tick: Tick`. An event omitting `tick` is rejected as an INV-005
 - Fields added later are always `Option<T>`
 - Never define a field as `Option` from the start (to avoid unintentional omission)
 
-### Persistence model (two-tier log, ADR-0017)
+### Persistence model (ADR-0017 amended by ADR-0049)
 
-Events in this catalog are persisted **append-only** (INV-001 / FBD-001). The physical log has two tiers, but this does not change event immutability or catalog semantics:
+Events in this catalog are persisted **append-only** public/business facts (INV-001 / FBD-001). Public history retains the ADR-0017 hot/cold archival model, but that archival tail is no longer the exact Sector recovery tail:
 
 ```
-Hot log      : latest segment, kept bounded by compacting behind verified snapshots
-Cold archive : segments moved out by compaction; retained forever, append-only (audit / DR)
+Public Event history:
+  Hot log      : recent immutable segments for publication/projection/audit catch-up
+  Cold archive : retained append-only history for audit / causal analysis
+
+Exact operational recovery:
+  newest complete compatible checkpoint
+    + committed authoritative RecoveryDelta tail
 ```
 
-- Compaction (`compact`) **relocates segments**; it never rewrites or deletes events. The EventStore trait stays append-only (no truncate / delete / rewrite).
-- **The snapshot is the authoritative persistent checkpoint** (INV-002). Normal recovery and failover use "snapshot + hot-log tail catch-up"; full replay from genesis is off the critical path.
-- Derived/transient state (position, capacitor, lock countdowns, thrust intent) is not recorded in events — it lives only in snapshots. Each event's **Replay** note describes reconstructing authoritative state from events; transient state is recomputed live each Tick.
+- Committed public events are never updated/re-written in place. FBD-001 protects this public history.
+- A public EventStore append **alone is not the complete authoritative commit boundary**. ADR-0049's logical durable transition includes the exact recovery outcome and its public facts/reliable obligations with one atomic visibility boundary; #271 owns physical framing.
+- Position, capacitor, lock countdowns, module cycles, flight/routing state, authoritative queues, and other exact final values are checkpoint/RecoveryDelta authority even when no event is emitted.
+- State-delta checkpoint compaction and public-event/outbox retention may use different watermarks. A state checkpoint does not prove a public output was delivered or archived.
+- Each event's **Replay** note remains useful for its supported public projection/audit/legacy replay behavior; it is not a universal exact-recovery guarantee.
 
-See [ADR-0017](../adr/ADR-0017-snapshot-compaction.md) / [AI_DEVELOPMENT_GUIDE.md "Architecture Invariants"](../../AI_DEVELOPMENT_GUIDE.md) (INV-002).
+See [ADR-0017](../adr/ADR-0017-snapshot-compaction.md), [ADR-0049](../adr/ADR-0049-sector-recovery-state-delta-wal.md), and [recovery-contract.md](./recovery-contract.md).
 
 ---
 
@@ -88,7 +106,7 @@ See [ADR-0017](../adr/ADR-0017-snapshot-compaction.md) / [AI_DEVELOPMENT_GUIDE.m
 |---|---|---|---|
 | `ShipSpawned` | Ship appeared in the world | `SimulationNode::spawn_ship()` | ✅ implemented |
 | `ClientAdmissionIdentityReserved` | Fresh admission durably consumed a `PlayerId`/`ShipId` pair without materializing a Ship; Replay advances allocation watermarks only | `SimulationNode::reserve_fresh_admission_identity()` | ✅ implemented |
-| `ClientAdmissionCommitted` | Atomic fresh-admission starter state: Ship, fitting/cargo snapshot, ownership identity, and idempotent Station grant description; Replay restores all of them from one event | `SimulationNode::commit_reserved_fresh_admission()` | ✅ implemented |
+| `ClientAdmissionCommitted` | Atomic fresh-admission starter public fact: Ship, fitting/cargo snapshot, ownership identity, and idempotent Station grant description | `SimulationNode::commit_reserved_fresh_admission()` | ✅ implemented |
 | `ShipDespawned` | Ship manually removed from the world | `SimulationNode` | type only (no emission site; Replay supported) |
 | `ShipDestroyed` | Ship destroyed in combat | `CombatSystem` | ✅ implemented |
 
@@ -125,20 +143,22 @@ See [ADR-0017](../adr/ADR-0017-snapshot-compaction.md) / [AI_DEVELOPMENT_GUIDE.m
 
 | Event | Description | Emitter | Status |
 |---|---|---|---|
-| `SectorTransitRequested` | Durable transfer request carrying source-local request identity plus the resolved Gate/non-Gate route; source retains a frozen recovery copy until Ack | source `propose_transit()`; destination also records an incoming marker using its own local `tick` | ✅ implemented |
-| `SectorTransitCompleted` | Destination completed the import, or source removed its recovery copy after Ack; carries the source-local `request_tick` for attempt-specific replay and deduplication | destination `handle_transit_commit()`; source `complete_outgoing_transit()` | ✅ implemented |
+| `SectorTransitRequested` | Durable public transfer-request fact carrying source-local request identity plus the resolved Gate/non-Gate route; current implementation also uses it while retaining a frozen source recovery copy until Ack | source `propose_transit()`; destination also records an incoming marker using its own local `tick` | ✅ implemented |
+| `SectorTransitCompleted` | Public completion fact for destination import or source cleanup after Ack; carries the current source-local `request_tick` attempt identity | destination `handle_transit_commit()`; source `complete_outgoing_transit()` | ✅ implemented |
 | `SectorTransitAborted` | Transit aborted (ownership stays with `from`) | destination failure path (not wired) | type + Replay |
 
 Validation-stage rejection is expressed via `CommandRejected`, not an event (INV-006); there is no `SectorTransitRejected` event. `propose_transit` returns `Err` without emitting an event if the Ship is absent or already in Transit.
 
-The corresponding command is `TransitCommand { ship_id, to }`. Raft carries `TransitOp::Request`, `Commit`, and `Ack`: Request freezes the source and persists `request_tick`, `gate_id`, and one authoritative `entry_pos: AbsolutePosition`; retries reconstruct the same absolute arrival from the EventStore. Commit materializes the destination by deriving its anchor and local offset from that absolute point through the same seam used by replay, then durably records completion using the source-local `request_tick` plus a destination-local event `tick`; Ack removes the source recovery copy. Unresolved source Requested events are retried from EventStore after restart with bounded exponential backoff, and checkpoint compaction is deferred while one is pending.
+The corresponding command is `TransitCommand { ship_id, to }`. Raft carries `TransitOp::Request`, `Commit`, and `Ack`: Request freezes the source and persists `request_tick`, `gate_id`, and one authoritative `entry_pos: AbsolutePosition`; current retries reconstruct the same absolute arrival from the EventStore. Commit materializes the destination by deriving its anchor and local offset from that absolute point through the same seam used by replay, then records completion using the source-local `request_tick` plus a destination-local event `tick`; Ack removes the source recovery copy. Current unresolved source Requested events are retried from EventStore after restart with bounded exponential backoff, and current checkpoint compaction is deferred while one is pending.
+
+> **ADR-0049 / #276 migration:** the preceding EventStore scan is a description of current behavior, not the long-term exact recovery repository. #276 replaces it with a durable `TransitAttemptId` Saga containing direct outgoing attempt, incoming receipt, retry, and terminal state. Public Transit events may remain facts, but Saga/recovery authority must satisfy ADR-0049 checkpoint/RPO/compaction/promotion rules.
 
 ### 3.7 Jump Gate Navigation (ADR-0009, complete)
 
 | Event | Description | Emitter | Status |
 |---|---|---|---|
-| `JumpGateUsed` | Ship moved to another Sector via a Jump Gate | `SimulationNode::append_jump_events` (Step 7.5, destination node) | ✅ implemented (Raft pipeline) |
-| `StarSystemChanged` | Ship moved to a different star system (concurrent with `JumpGateUsed`) | `SimulationNode::append_jump_events` (Step 7.5, destination node) | ✅ implemented (Raft pipeline) |
+| `JumpGateUsed` | Ship moved to another Sector via a Jump Gate | `SimulationNode::append_jump_events` (Step 7.5, destination node in the current pipeline) | ✅ implemented (Raft pipeline) |
+| `StarSystemChanged` | Ship moved to a different star system (concurrent with `JumpGateUsed`) | `SimulationNode::append_jump_events` (current destination path) | ✅ implemented (Raft pipeline) |
 
 Corresponding Command: `JumpCommand { gate_id }`, committed over the same Raft Log path as `TransitCommand` (ADR-0014). The server resolves the command against the caller's active ship (ADR-0037). `TransitOp::Request`/`Commit` carries `gate_id: Option<JumpGateId>`; after destination Commit, the destination appends `JumpGateUsed` alongside `SectorTransitCompleted`, appends `StarSystemChanged` if needed, and then proposes Ack.
 
@@ -151,7 +171,7 @@ Static topology (3 star systems, 4 jump gates) is defined in `dawn-sector/src/ga
 | `TackleApplied` | Fold Disruptor activated on a target (in range + locked) | `SimulationNode::process_tackle()` (Step 4.5) | ✅ implemented |
 | `TackleReleased` | Tackle effect ended (Module off / out of range / tackler destroyed) | `SimulationNode::process_tackle()` (Step 4.5) | ✅ implemented |
 
-While tackled, `can_propose_warp()` / `can_propose_jump()` return false, blocking Warp/Jump. `TackledComp` is persisted in the snapshot (INV-002).
+While tackled, `can_propose_warp()` / `can_propose_jump()` return false, blocking Warp/Jump. The current snapshot persists `TackledComp`; under ADR-0049 its exact value is also part of checkpoint/RecoveryDelta authority.
 
 `TackleReleased` is never emitted without a matching prior `TackleApplied` (strict 1:1 pairing). With multiple simultaneous tacklers, each tackler gets its own pair.
 
@@ -164,9 +184,11 @@ While tackled, `can_propose_warp()` / `can_propose_jump()` return false, blockin
 | `ShipUndocked` | Ship undocked from an NPC station (ADR-0034 9B docking foundation) | `SimulationNode::undock_owned` | ✅ implemented |
 | `PackagedShipBuilt` | Scrap Metal consumed in a docked station and converted into a packaged ship (ADR-0034 9B) | `SimulationNode::build_packaged_ship_owned` | ✅ implemented |
 | `ShipDisassembled` | Docked undamaged unfitted ship converted into a packaged ship in station inventory (ADR-0034 9B) | `SimulationNode::disassemble_ship_owned` | ✅ implemented |
-| `ShipAssembled` | A station-inventory `PackagedShip` item converted into a new live docked `Ship`, owned by the caller (ADR-0034 9B, ADR-0037). Fields: `ship_id` (freshly allocated), `player_id`, `station_id`, `ship_type_id`, `tick`. Replay: allocates the ECS entity with `e.ship_id` directly (no new ID counter increment beyond what's needed to keep it monotonic), unfitted, docked at `station_id`, owned by `player_id`; does **not** change `active_ship` (ADR-0037 -- a later `SelectActiveShipCommand` makes it active) | `SimulationNode::assemble_ship_owned` | ✅ implemented |
+| `ShipAssembled` | A station-inventory `PackagedShip` item converted into a new live docked `Ship`, owned by the caller (ADR-0034 9B, ADR-0037). Fields: `ship_id` (freshly allocated), `player_id`, `station_id`, `ship_type_id`, `tick`. Public/legacy Replay allocates the ECS entity with `e.ship_id` directly, unfitted and docked, without selecting it active | `SimulationNode::assemble_ship_owned` | ✅ implemented |
 
-This is an authoritative event: it stores `anchor` and the post-rebase `offset` so Replay reproduces the representation exactly. A rebase is a non-velocity-driven frame change, so it's recorded as its own fact; INV-MOVE (the invariant for velocity-driven motion) doesn't apply since absolute position is preserved.
+`AnchorRebased` is a durable public representation-change fact. It stores anchor/post-rebase offset so public replay/projections can reproduce the representation. Exact authoritative position/anchor state is additionally covered by ADR-0049 RecoveryDelta/checkpoints. A rebase is a non-velocity-driven frame change, so INV-MOVE's public movement-event rule does not prohibit this fact.
+
+Station inventory exact authority is likewise the ADR-0049 Station aggregate recovery delta, not public-event replay or SQLite alone (ADR-0038 as amended).
 
 ### 3.11 System (reserved for future use)
 
@@ -174,6 +196,8 @@ This is an authoritative event: it stores `anchor` and the post-rebase `offset` 
 |---|---|---|
 | `TickStarted` | Tick started | not implemented |
 | `TickCompleted` | Tick completed | not implemented |
+
+Neither public event is required for exact recovery: ADR-0049 gives every committed Tick an authoritative recovery record even when no public Tick event exists.
 
 ### 3.12 AoI (Area of Interest) Delivery Filter (ADR-0019)
 
@@ -184,7 +208,7 @@ AoI introduces **no new domain events**. It's implemented by filtering `DomainEv
 | `AoiEnter` | Ship entered an observer's AoI (WebSocket delivery message, not a domain event) | ✅ implemented (8C, ADR-0019) |
 | `AoiLeave` | Ship left an observer's AoI (same) | ✅ implemented (8C, ADR-0019) |
 
-`AoiEnter` / `AoiLeave` are not appended to the EventStore — they are delivery-control messages, not domain events. They don't affect Replay; AoI consistency comes from `InitialState` + `DomainEvent` filtering.
+`AoiEnter` / `AoiLeave` are not appended as `DomainEvent`s — they are delivery-control messages. They do not affect exact recovery; AoI consistency is rebuilt from current authoritative state plus client delivery/projection logic.
 
 ---
 
@@ -194,7 +218,7 @@ Commands are defined in `dawn-core/src/commands.rs`. Clients send them to the se
 
 | Command | Description | Resulting Event(s) | Status |
 |---|---|---|---|
-| `MoveCommand` | Specify thrust direction | — | ✅ implemented |
+| `MoveCommand` | Specify thrust direction | — (no public event required; successful authoritative change is RecoveryDelta) | ✅ implemented |
 | `LockOnCommand` | Request lock-on | `TargetLocked` | ✅ implemented |
 | `FitModuleCommand` | Fit an inventory Module into a slot; requires the ship to be docked (ADR-0032, docked requirement added 2026-07-08) | `ShipFitted` | ✅ implemented |
 | `UnfitModuleCommand` | Return a fitted Module to inventory; requires docked (ADR-0032) | `ShipFitted` | ✅ implemented |
@@ -204,21 +228,23 @@ Commands are defined in `dawn-core/src/commands.rs`. Clients send them to the se
 | `BuildPackagedShipCommand` | Consume Scrap Metal in the current docked station and create a `PackagedShip` item there (ADR-0034 9B) | `PackagedShipBuilt` | ✅ implemented |
 | `DisassembleShipCommand` | Convert the current docked ship into a station-side `PackagedShip` item after undamaged/unfitted validation (ADR-0034 9B) | `ShipDisassembled` | ✅ implemented |
 | `AssembleCommand` | Convert a station-inventory `PackagedShip` item into a new live docked `Ship` owned by the caller; does not change `active_ship` (ADR-0034 9B, ADR-0037) | `ShipAssembled` | ✅ implemented |
-| `DisembarkCommand` | Clear the caller's active ship while docked, without disassembling it or changing ownership; session-local, not event-sourced (ADR-0037) | — (no new event) | ✅ implemented |
-| `TransferCargo` | Move the entire stack of an item (`Module` or `ScrapMetal`) between a docked ship's own cargo and the caller's inventory at that station, in either direction (`direction: ToStation\|ToShip`); whole-stack only (ADR-0034 9B) | — (no new event; mirrors `BuildPackagedShipCommand`/`DisassembleShipCommand`'s silent station-inventory credit/debit) | ✅ implemented |
+| `DisembarkCommand` | Clear the caller's active ship while docked, without disassembling it or changing ownership; ADR-0049 classifies the routing change as authoritative even though it has no public event | — (RecoveryDelta routing transition, no `DomainEvent`) | ✅ implemented |
+| `TransferCargo` | Move the entire stack of an item (`Module` or `ScrapMetal`) between a docked ship's own cargo and the caller's inventory at that station, in either direction (`direction: ToStation\|ToShip`); whole-stack only (ADR-0034 9B) | — public event may be empty; authoritative cargo/Station delta is still durable | ✅ implemented |
 | `ActivateModuleCommand` | Turn on an Active Module | `ModuleActivated` | ✅ implemented |
 | `DeactivateModuleCommand` | Turn off an Active Module | `ModuleDeactivated` | ✅ implemented |
 | `AttackCommand` | Designate an attack target | `WeaponFired` | ⬜ type + WsServer JSON parser only; not wired into combat |
-| `StopCommand` | Decelerate to zero velocity using acceleration | — | ✅ implemented |
-| `ApproachCommand` | Semi-automatic approach to a target (Ship / Jump Gate); cancelled by Move/Stop (ADR-0015) | — (no new event) | ✅ implemented |
-| `TransitCommand` | Request a Sector Transit (via Raft, ADR-0014) | `SectorTransitRequested` / `Completed` | ✅ implemented |
+| `StopCommand` | Decelerate to zero velocity using acceleration | — (no public event required; RecoveryDelta records authority) | ✅ implemented |
+| `ApproachCommand` | Semi-automatic approach to a target (Ship / Jump Gate); cancelled by Move/Stop (ADR-0015) | — (no public event required) | ✅ implemented |
+| `TransitCommand` | Request a Sector Transit (via Raft, ADR-0014) | `SectorTransitRequested` / `Completed` | ✅ implemented; persistence model migrating under #276 |
 | `JumpCommand` | Move to another Sector via a Jump Gate (via Raft, ADR-0009). In range: proposed directly. Out of range: auto-warps toward the gate first (auto-warp-then-jump, ADR-0023). Too close to warp: auto-approaches instead. The 3-way decision is owned by `SimulationNode::apply_jump_with_fallback` (`dawn-sector::node::jump`), called identically from both `dawn-sector-node` and `dawn-simulation`'s cluster server | `JumpGateUsed` (+ `StarSystemChanged` if star system changes) | ✅ implemented |
-| `WarpCommand` | Warp within the same Sector to a Jump Gate or celestial body (star/planet) (`WarpTarget::Gate` / `Body`; align → warping, two phases; ADR-0022 / ADR-0025) | — (no new event; movement recorded via `VelocityChanged`) | ✅ implemented |
-| `OrbitCommand` | Orbit a target (Ship / Jump Gate) at a given radius (defaults to weapon range; cancelled by Move/Stop/other helm modes; ADR-0031) | — (no new event; movement via `VelocityChanged`) | ✅ implemented |
-| `KeepAtRangeCommand` | Maintain a minimum distance from a target (Ship / Jump Gate) (defaults to weapon range; cancelled by Move/Stop/other helm modes; ADR-0031) | — (no new event; movement via `VelocityChanged`) | ✅ implemented |
-| `SelectActiveShipCommand` | Switch the caller's active ship to another owned ship docked at the same station (station-local only; ADR-0037) | — (session-local routing state, not event-sourced; see ownership.md §7) | ✅ implemented |
+| `WarpCommand` | Warp within the same Sector to a Jump Gate or celestial body (star/planet) (`WarpTarget::Gate` / `Body`; align → warping, two phases; ADR-0022 / ADR-0025) | — / `VelocityChanged` as applicable; exact Warp state is RecoveryDelta | ✅ implemented |
+| `OrbitCommand` | Orbit a target (Ship / Jump Gate) at a given radius (defaults to weapon range; cancelled by Move/Stop/other helm modes; ADR-0031) | — (no public event required; movement facts may appear separately) | ✅ implemented |
+| `KeepAtRangeCommand` | Maintain a minimum distance from a target (Ship / Jump Gate) (defaults to weapon range; cancelled by Move/Stop/other helm modes; ADR-0031) | — (no public event required; movement facts may appear separately) | ✅ implemented |
+| `SelectActiveShipCommand` | Switch the caller's active ship to another owned ship docked at the same station. ADR-0049 reclassifies this as authoritative Player routing state because it changes the target of later commands | — (RecoveryDelta routing transition, no `DomainEvent`) | ✅ implemented |
 
 > **ADR-0037 (2026-07-07):** `MoveCommand`/`StopCommand`/`ApproachCommand`/`WarpCommand`/`OrbitCommand`/`KeepAtRangeCommand`/`JumpCommand`/`LockOnCommand`/`ActivateModuleCommand`/`DeactivateModuleCommand`/`UndockCommand` no longer carry a `ship_id` field — the server resolves them against the caller's active ship (`ShipRegistry.active_ship`), so there is no wire-representable way to name a ship the player isn't flying. `FitModuleCommand`/`UnfitModuleCommand`/`DockCommand`/`BuildPackagedShipCommand`/`DisassembleShipCommand` are unaffected (station inventory-management, any owned ship). See `docs/architecture/ownership.md` §7.
+>
+> **ADR-0049 amendment:** the absence of a public event does not make `active_ship` intentionally lossy. `SelectActiveShip`/`Disembark` successful routing changes belong to PlayerState checkpoint/RecoveryDelta recovery under #284/#275.
 
 ---
 
@@ -237,6 +263,7 @@ owns `ship_id`.
 These commands are deliberately one-sided. A trade between players in
 different Sectors does not require an Item transfer command that spans both
 owners, so it does not enter the Transit/Raft ownership path (ADR-0034 §4).
+The corresponding exact cargo mutation is still represented by the Sector recovery transition; the `ShipFitted` event remains its public fact/projection output.
 
 ## 5. Event Field Specs
 
@@ -252,7 +279,7 @@ Ship generated within a Sector.
 | `ship_type_id` | `ShipTypeId` | ✓ | ship type ID (resolved via the `ShipTypeDefinition` registry) |
 | `tick` | `Tick` | ✓ | spawn Tick |
 
-**Invariant:** `ship_id` is globally unique and never reused (INV-004). Including `ship_type_id` lets Replay restore exact base_stats (INV-002).
+**Invariant:** `ship_id` is globally unique and never reused (INV-004). Including `ship_type_id` lets public/legacy Replay rebuild the base-stats projection. Exact committed entity/type/state is RecoveryDelta authority.
 
 ---
 
@@ -268,9 +295,9 @@ Ship velocity changed. `MovementSystem` runs the physics and emits this only whe
 
 **Invariant:** only emitted when `velocity` differs from the previous Tick (no-change is not emitted).
 
-**Replay:** apply `VelocityChanged` in order, computing `position += velocity` each Tick. No physics simulation needed — `position += velocity` is pure arithmetic.
+**Public/legacy Replay:** supported motion projections may apply `VelocityChanged` in order and integrate `position += velocity` according to their contract. This remains useful for public motion history/client projection.
 
-**Rationale:** position is derived state and excluded from authoritative events; thrust input is a Command and likewise excluded (ADR-0008).
+**ADR-0049 exact recovery note:** position is not merely a throwaway derived value. Exact final position/velocity/anchor/flight state at each committed recovery position is covered by RecoveryDelta/checkpoint, including Ticks with no `VelocityChanged`. Historical Tick rerun or velocity-event integration is not the exact operational recovery authority.
 
 ---
 
@@ -296,7 +323,7 @@ Ship's fitting slots and/or cargo projection changed.
 | `inventory` | `Vec<ItemId>` | ✓ | snapshot of unfitted inventory after the change (ADR-0032, `#[serde(default)]`) |
 | `tick` | `Tick` | ✓ | Tick the fitting or cargo change was finalized |
 
-**Design note:** no `stats` field — Replay recomputes via `apply_fitting()` from `FittingSnapshot` (INV-002). Fit/Unfit always change both fitting and inventory together, so both are carried by this one event type rather than splitting into two (ADR-0032). Market item bridge commands reuse the same full snapshot event when only cargo changes, avoiding a second inventory source of truth and a new wire variant.
+**Design note:** no `stats` field — public Replay can recompute fitting-derived stats from `FittingSnapshot`. Fit/Unfit always change both fitting and inventory together, so both are carried by this one event type rather than splitting into two (ADR-0032). Market item bridge commands reuse the same full snapshot event when only cargo changes, avoiding another public cargo event shape. Exact fitting/cargo authority is also represented by RecoveryDelta.
 
 ---
 
@@ -310,7 +337,7 @@ Ship's fitting slots and/or cargo projection changed.
 | `target_id` | `ShipId` | ✓ | Ship that was locked |
 | `tick` | `Tick` | ✓ | Tick lock completed |
 
-**Replay:** update the matching `LockComp` entry to `Locked`.
+**Public Replay:** update the matching lock projection to `Locked`. Exact lock entries/countdowns are checkpoint/RecoveryDelta authority.
 
 ---
 
@@ -324,7 +351,7 @@ Lock lost, e.g. because the target was destroyed or moved out of range.
 | `target_id` | `ShipId` | ✓ | Ship that was the lock target |
 | `tick` | `Tick` | ✓ | Tick the lock was lost |
 
-**Replay:** remove the matching entry from `LockComp`.
+**Public Replay:** remove the matching lock projection entry. Exact lock state remains RecoveryDelta authority.
 
 ---
 
@@ -346,7 +373,7 @@ Weapon fired and hit. A miss (failed hit-chance check) does not emit this event.
 
 Hit chance = `0.5 ^ ((angular / (tracking × sig))² + (max(0, dist − optimal) / falloff)²)`
 
-**Replay:** does not mutate ECS state (fire log only). `damage` already holds the realized value, so Replay does not re-roll randomness.
+**Replay:** does not mutate the fire-result state beyond its supported log/projection semantics. `damage` already holds the realized value, so public Replay does not re-roll randomness. Exact combat outcome/Hull state is RecoveryDelta authority.
 
 ---
 
@@ -363,7 +390,7 @@ Ship took damage and HP changed. HP is consumed Shield → Armor → Hull.
 | `current_hull` | `f32` | ✓ | hull remaining after damage |
 | `tick` | `Tick` | ✓ | Tick of damage |
 
-**Design note:** carrying all three HP layers lets Replay reconstruct `HullComp` exactly (INV-002).
+**Design note:** carrying all three HP layers makes the public event/projection self-contained. Exact `HullComp` recovery is also recorded by RecoveryDelta, so event completeness is not the recovery invariant.
 
 ---
 
@@ -397,7 +424,7 @@ Active Module turned on.
 | `target_ship_id` | `Option<ShipId>` |  | target of a targeted module (Weapon/Tackle); `None` for self-only kinds (ADR-0035) |
 | `tick`      | `Tick`    | ✓ | Tick of activation |
 
-**Design note:** represents the fact "turned on", not the state `is_active: true`. Replay sets `FittedSlot.is_active = true` and re-runs `apply_fitting()`.
+**Design note:** represents the fact "turned on", not merely the implementation field `is_active: true`. Public Replay can set the fitting projection active and re-run fitting-derived calculations. Exact active/cycle/target state is RecoveryDelta authority.
 
 ---
 
@@ -413,7 +440,7 @@ Active Module turned off.
 | `forced_reason` | `Option<ModuleDeactivationReason>` |  | `None` for a player-issued OFF; `CapacitorExhausted` (CapacitorSystem) or `OutOfRange` (Range Gate System) for a system-forced OFF (ADR-0035) |
 | `tick`      | `Tick`    | ✓ | Tick of deactivation |
 
-**Design note:** counterpart of `ModuleActivated`. Replay sets `FittedSlot.is_active = false` and clears `target_ship_id`. The wire protocol maps `forced_reason` to `reason: "cap" | "range"` (omitted for `None`) so the client labels CAP!/RANGE! from the authoritative reason.
+**Design note:** counterpart of `ModuleActivated`. Public Replay can set the projection inactive and clear `target_ship_id`. The wire protocol maps `forced_reason` to `reason: "cap" | "range"` (omitted for `None`) so the client labels CAP!/RANGE! from the public authoritative reason. Exact fitting/cycle state is RecoveryDelta authority.
 
 ---
 
@@ -427,52 +454,52 @@ Ship reached zero HP in combat and was destroyed.
 | `killer_id` | `ShipId` | ✓ | Ship that landed the final blow |
 | `tick` | `Tick` | ✓ | Tick of destruction |
 
-**Replay:** remove the matching Entity from ECS and from `ship_index`.
+**Public Replay:** remove the matching Ship projection/entity where that projection supports it. Exact existence/index/ownership deletion is RecoveryDelta authority.
 
 **Current downstream effect:** the `SimulationNode` tick pipeline immediately
 credits the killer ship's inventory with `ItemId::ScrapMetal` (ADR-0034 MVP:
-currently a fixed `1` per kill, no Wreck entity).
+currently a fixed `1` per kill, no Wreck entity). That reward mutation must be present in the same authoritative RecoveryDelta even though it is not fully represented by `ShipDestroyed` alone.
 
 ---
 
 ### `SectorTransitRequested`
 
-A durable transfer request. On the source, ownership stays with `from`; the Ship remains as a frozen recovery copy until Ack. The freeze covers steering/warp/movement, capacitor and module cycles, lock admission, combat, and repair. On the destination, the same event shape is also used as an incoming transfer identity marker before materialization.
+A durable public transfer request. On the source, current behavior keeps ownership with `from` and retains a frozen recovery copy until Ack. The freeze covers steering/warp/movement, capacitor and module cycles, lock admission, combat, and repair. On the destination, the same event shape is also used by current code as an incoming transfer identity marker before materialization.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `ship_id` | `ShipId` | ✓ | Ship transiting |
 | `from` | `SectorId` | ✓ | source Sector |
 | `to` | `SectorId` | ✓ | destination Sector |
-| `tick` | `Tick` | ✓ | source request Tick; part of transfer identity |
+| `tick` | `Tick` | ✓ | source request Tick; part of the current attempt identity |
 
-**Replay:** if the Ship exists on this Sector, set `TransitComp` to `InTransit { to }`. An incoming destination marker may replay before the Ship exists and is intentionally a state no-op; it remains useful for duplicate-Commit detection.
+**Public/legacy Replay:** if the Ship exists on this Sector, set the transit projection to `InTransit { to }`. An incoming destination marker may replay before the Ship exists and intentionally be a state no-op useful for current duplicate-Commit handling.
+
+**Migration:** exact Transit recovery/retry authority is moving to ADR-0049 RecoveryDelta plus #276's durable Saga; this public event does not have to remain the durable attempt repository.
 
 ---
 
 ### `SectorTransitCompleted`
 
-Self-contained completion event. `handoff` is the same canonical
-`TransitHandoffState` carried by the Raft Commit, so destination replay does not
-depend on an in-memory Raft actor or on persistence `ShipSnapshot` surviving the
-protocol boundary.
+Self-contained public completion event. `handoff` is the same canonical
+`TransitHandoffState` carried by the current Raft Commit, so legacy/public replay
+does not depend on an in-memory Raft actor or persistence `ShipSnapshot` crossing
+the protocol boundary.
 
-The destination appends this event when Commit materialization succeeds, then proposes a minimal identity-only Ack. The source appends it only after Ack, when it removes the frozen recovery copy. Thus a crash can temporarily retain two ECS copies, but never zero durable copies; only the destination copy is active after Commit.
+The current destination appends this event when Commit materialization succeeds, then proposes a minimal identity-only Ack. The source appends it only after Ack, when it removes the frozen recovery copy. Thus current behavior can temporarily retain two ECS copies while only the destination copy is active after Commit.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `handoff` | `TransitHandoffState` | ✓ | Ship identity, durable owner identity when player-owned, type, velocity, HP, capacitor, fitting, and inventory |
 | `from` | `SectorId` | ✓ | previous active Sector |
 | `to` | `SectorId` | ✓ | new active Sector |
-| `request_tick` | `Tick` | ✓ | source-local attempt identity |
+| `request_tick` | `Tick` | ✓ | current source-local attempt identity |
 | `entry_pos` | `AbsolutePosition` | ✓ | authoritative entry coordinates in the destination Sector frame |
 | `tick` | `Tick` | ✓ | local completion Tick |
 
-**Replay:** on `from`, remove `handoff.ship_id`. On `to`, feed `handoff` through the same direct destination-ECS mapping used by live Commit import, then redo anchor rebase from `entry_pos`. No fake `ShipSnapshot`, placeholder source anchor, or source position is reconstructed. The live `AnchorRebased` event precedes Completed and may replay before the destination Ship exists.
-For a player-owned Ship, destination replay also restores the `ShipId` to
-`PlayerId` binding before client resume admission. The binding is captured in
-the destination snapshot so checkpoint compaction cannot turn an established
-owner into an unowned Ship.
+**Public/legacy Replay:** on `from`, remove `handoff.ship_id`; on `to`, feed `handoff` through the current destination materialization seam and derive anchor/offset from `entry_pos`. The current live `AnchorRebased` fact precedes Completed where emitted. For player-owned Ships, current replay can also restore the Ship-to-Player public/domain projection.
+
+**ADR-0049/#276:** exact owner/routing/state recovery and attempt/receipt retry semantics are RecoveryDelta/Saga authority. #276 may change `request_tick` to an opaque `TransitAttemptId` without preserving this pre-release persistence shape.
 
 ---
 
@@ -487,7 +514,7 @@ A committed Transit was aborted; ownership stays with `from`. Validation-stage r
 | `to` | `SectorId` | ✓ | aborted destination Sector |
 | `tick` | `Tick` | ✓ | Tick the abort was finalized |
 
-**Replay:** clears the `InTransit` marker `SectorTransitRequested` Replay set (`SimulationNode::replay_sector_transit_aborted`).
+**Public/legacy Replay:** clears the matching `InTransit` projection marker where supported (`SimulationNode::replay_sector_transit_aborted` in current code).
 
 **Status:** type + Replay implemented; nothing appends this event yet.
 
@@ -495,7 +522,7 @@ A committed Transit was aborted; ownership stays with `from`. Validation-stage r
 
 ### `JumpGateUsed`
 
-Ship passed through a Jump Gate to another Sector (ADR-0009). Does not replace `SectorTransitCompleted` — it's an additional record of *how* the move happened, appended in the same Tick.
+Ship passed through a Jump Gate to another Sector (ADR-0009). Does not replace `SectorTransitCompleted` — it's an additional public record of *how* the move happened, appended in the same Tick by current code.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -506,7 +533,7 @@ Ship passed through a Jump Gate to another Sector (ADR-0009). Does not replace `
 | `entry_pos` | `AbsolutePosition` | ✓ | authoritative spawn coordinates in the destination Sector frame |
 | `tick` | `Tick` | ✓ | Tick the gate transit was finalized |
 
-**Status:** ✅ implemented (Step 7.5 `append_jump_events`).
+**Status:** ✅ implemented (current `append_jump_events` path).
 
 ---
 
@@ -521,7 +548,7 @@ Ship moved to a different star system (ADR-0009). Emitted in the same Tick as `J
 | `to_system` | `StarSystemId` | ✓ | destination star system |
 | `tick` | `Tick` | ✓ | Tick the move was finalized |
 
-**Status:** ✅ implemented (Step 7.5 `append_jump_events`).
+**Status:** ✅ implemented (current `append_jump_events` path).
 
 ---
 
@@ -535,7 +562,7 @@ A Fold Disruptor Module was activated on a target Ship (in range + locked). The 
 | `by` | `ShipId` | ✓ | tackling Ship (tackler) |
 | `tick` | `Tick` | ✓ | Tick tackle was activated |
 
-**Replay:** add `by` to `ship_id`'s `TackledComp.tacklers`.
+**Public Replay:** add `by` to the tackle projection. Exact `TackledComp` membership is RecoveryDelta authority.
 
 ---
 
@@ -549,7 +576,7 @@ Counterpart to `TackleApplied`. The tackle effect ended (Module off / out of ran
 | `by` | `ShipId` | ✓ | Ship whose tackle ended |
 | `tick` | `Tick` | ✓ | Tick of release |
 
-**Replay:** remove `by` from `ship_id`'s `TackledComp.tacklers`; remove `TackledComp` entirely if it becomes empty.
+**Public Replay:** remove `by` from the tackle projection; remove the projection entry entirely if it becomes empty. Exact tackle state is RecoveryDelta authority.
 
 ---
 
@@ -565,7 +592,7 @@ Breaking changes to date: **none**
 1. Mark the old event as Deprecated (do not delete it)
 2. Define the new event under a new name (V2)
 3. Implement impl Upcaster for OldEvent { fn upcast(self) -> NewEvent }
-4. Route Replay through the Upcaster
+4. Route public-event Replay through the Upcaster
 5. Record the change in this catalog
 6. Create a new ADR
 ```
