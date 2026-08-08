@@ -196,6 +196,7 @@ dependencies = [
  "dawn-core",
  "postcard",
  "tempfile",
+ "thiserror",
 ]
 
 [[package]]

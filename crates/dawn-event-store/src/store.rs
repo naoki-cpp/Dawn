@@ -1,8 +1,8 @@
 //! `EventStore` trait — the contract for all Event Log implementations.
 //!
-//! Any type that implements this trait can serve as the backing store for a
-//! Sector Node.  The MVP uses `InMemoryEventStore`; future implementations may
-//! use a file-based append log (ADR-0010).
+//! This is the legacy public-event contract. It remains available while Sector
+//! runtime call sites migrate to [`crate::DurableJournal`], which is the
+//! storage contract for authoritative recovery batches selected by ADR-0049.
 //!
 //! # Invariant
 //!
