@@ -5,7 +5,7 @@
 //! the returned transition and only then ask the authoritative state owner to
 //! apply the same recovery delta.
 
-use dawn_core::{DomainEvent, SectorId, ShipId};
+use dawn_core::{DomainEvent, SectorId, ShipId, Tick};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -36,16 +36,34 @@ pub struct StopCommandState {
     pub is_warping: bool,
 }
 
+/// Read-only facts required to prepare the logical Tick transition.
+///
+/// The first Tick vertical slice owns the counter boundary. System write sets
+/// are migrated independently so this contract does not pretend that the
+/// legacy ECS Tick is already storage-independent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TickCommandState {
+    pub current_tick: Tick,
+}
+
 /// Exact authoritative change made by a successful Stop command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StopRecoveryDelta {
     pub ship_id: ShipId,
 }
 
+/// Exact authoritative logical-time change made by a successful Tick.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TickRecoveryDelta {
+    pub from: Tick,
+    pub to: Tick,
+}
+
 /// Versioned authoritative state delta carried by a durable transition.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SectorRecoveryDelta {
     Stop(StopRecoveryDelta),
+    Tick(TickRecoveryDelta),
 }
 
 /// A complete transition prepared before any live authoritative mutation.
@@ -69,6 +87,8 @@ pub enum TransitionError {
     InTransit(ShipId),
     #[error("ship {0:?} is in committed warp")]
     Warping(ShipId),
+    #[error("logical Tick overflow at {current}")]
+    TickOverflow { current: Tick },
 }
 
 /// Error returned when a recovery-delta payload cannot be encoded or decoded.
@@ -144,6 +164,30 @@ impl SectorEngine {
             reliable_effects: Vec::new(),
         })
     }
+
+    /// Prepare the logical Tick counter transition without changing state.
+    pub fn prepare_tick(
+        state: TickCommandState,
+        transition_id: SectorTransitionId,
+        context: TransitionContext,
+    ) -> Result<PreparedSectorTransition, TransitionError> {
+        let Some(next_tick) = state.current_tick.0.checked_add(1).map(Tick) else {
+            return Err(TransitionError::TickOverflow {
+                current: state.current_tick,
+            });
+        };
+
+        Ok(PreparedSectorTransition {
+            transition_id,
+            context,
+            recovery_delta: SectorRecoveryDelta::Tick(TickRecoveryDelta {
+                from: state.current_tick,
+                to: next_tick,
+            }),
+            public_events: Vec::new(),
+            reliable_effects: Vec::new(),
+        })
+    }
 }
 
 /// Error raised while applying a prepared delta to the live Sector state.
@@ -151,6 +195,15 @@ impl SectorEngine {
 pub enum TransitionApplyError {
     #[error("prepared transition references unknown ship {0:?}")]
     UnknownShip(ShipId),
+    #[error("prepared Tick transition targets sector {actual:?}; expected {expected:?}")]
+    SectorMismatch {
+        expected: SectorId,
+        actual: SectorId,
+    },
+    #[error("prepared Tick transition expected current {expected}, found {actual}")]
+    TickMismatch { expected: Tick, actual: Tick },
+    #[error("prepared Tick transition must advance exactly one step: {from} -> {to}")]
+    InvalidTickStep { from: Tick, to: Tick },
 }
 
 #[cfg(test)]
@@ -193,8 +246,54 @@ mod tests {
     }
 
     #[test]
+    fn tick_preparation_is_pure_and_contains_the_counter_delta() {
+        let state = TickCommandState {
+            current_tick: Tick(41),
+        };
+
+        let prepared = SectorEngine::prepare_tick(state, SectorTransitionId(12), context())
+            .expect("valid Tick transition");
+
+        assert_eq!(state.current_tick, Tick(41));
+        assert_eq!(
+            prepared.recovery_delta,
+            SectorRecoveryDelta::Tick(TickRecoveryDelta {
+                from: Tick(41),
+                to: Tick(42),
+            })
+        );
+    }
+
+    #[test]
+    fn tick_preparation_rejects_counter_overflow() {
+        assert_eq!(
+            SectorEngine::prepare_tick(
+                TickCommandState {
+                    current_tick: Tick(u64::MAX),
+                },
+                SectorTransitionId(13),
+                context()
+            ),
+            Err(TransitionError::TickOverflow {
+                current: Tick(u64::MAX),
+            })
+        );
+    }
+
+    #[test]
     fn recovery_delta_round_trips_through_the_version_gate() {
         let delta = SectorRecoveryDelta::Stop(StopRecoveryDelta { ship_id: ship() });
+        let payload = encode_recovery_delta(&delta).expect("delta should encode");
+
+        assert_eq!(decode_recovery_delta(&payload), Ok(delta));
+    }
+
+    #[test]
+    fn tick_recovery_delta_round_trips_through_the_version_gate() {
+        let delta = SectorRecoveryDelta::Tick(TickRecoveryDelta {
+            from: Tick(41),
+            to: Tick(42),
+        });
         let payload = encode_recovery_delta(&delta).expect("delta should encode");
 
         assert_eq!(decode_recovery_delta(&payload), Ok(delta));

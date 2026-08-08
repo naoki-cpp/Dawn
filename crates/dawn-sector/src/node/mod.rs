@@ -62,6 +62,7 @@ pub use commands::{ClientCommandFollowup, ClientRequestAdmissionError};
 pub use jump::JumpOutcome;
 pub use movement_commands::StopTransitionError;
 pub use serialization::{HandoffPayload, MissingObserverShip};
+pub use tick::TickTransitionError;
 
 use coordinates::debug_assert_missing_anchor;
 

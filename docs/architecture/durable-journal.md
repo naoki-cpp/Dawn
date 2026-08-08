@@ -95,6 +95,7 @@ verify that no partial batch is visible after reopen.
 The legacy `EventStore` remains only for the current public-event migration
 path. It is not an authoritative recovery source and must not be used to
 replace the `DurableJournal` transition contract. #272 establishes that
-boundary with the storage-independent `SectorEngine::prepare_stop` policy and
-the `SimulationNode::commit_stop_transition` adapter; #275 owns the remaining
-state-owner migrations.
+boundary with the storage-independent `SectorEngine::prepare_stop` policy, the
+logical Tick counter transition, and their `SimulationNode` adapters. The full
+ECS Tick write set and remaining state-owner migrations are still owned by the
+next #272/#275 slices.
