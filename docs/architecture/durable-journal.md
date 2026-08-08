@@ -96,6 +96,7 @@ The legacy `EventStore` remains only for the current public-event migration
 path. It is not an authoritative recovery source and must not be used to
 replace the `DurableJournal` transition contract. #272 establishes that
 boundary with the storage-independent `SectorEngine::prepare_stop` policy, the
-bounded full-Tick write set, and their `SimulationNode` adapters. Remaining
+bounded full-Tick write set, and runtime-owned Stop/Tick adapters around
+`SimulationNode`. Remaining
 command/state-owner migrations and the configured production durability profile
 are separate follow-up work under the ADR-0049 package.

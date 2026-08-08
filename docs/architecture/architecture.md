@@ -191,8 +191,8 @@ Acknowledge after the selected durability + local-apply conditions
 ```
 
 The concrete `SimulationNode` no longer owns an `EventStore`. Legacy command paths
-still expose public events through an in-memory output buffer, while the Stop and
-full-Tick transition adapters use bounded prepare -> durable append -> live apply.
+still expose public events through an in-memory output buffer, while runtime-owned
+Stop and full-Tick adapters use bounded prepare -> durable append -> live apply.
 Migrating the remaining command/state owners and the production durability profile
 belongs to the explicitly scoped follow-up issues, not to the node's domain API.
 

@@ -512,8 +512,7 @@ impl SimulationNode {
                         player_id,
                         resume_ticket,
                         handoff.pending_resume_ticket,
-                    )
-                    .expect("transit owner binding transaction");
+                    );
             }
             debug_assert!(self.adopt_player_ship(handoff.ship_id, player_id));
         }

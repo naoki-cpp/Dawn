@@ -1,9 +1,11 @@
-//! Sector Transit Raft adapter (ADR-0014).
+//! Sector runtime adapters (ADR-0014 / ADR-0049).
 //!
 //! The authoritative handoff state machine lives in the internal `handoff`
 //! module. The pipeline consumes the node's observed transit journal and
 //! translates explicit effects to Raft proposals. The low-level ECS lifecycle
-//! operations remain crate-private behind that policy.
+//! operations remain crate-private behind that policy. This module also owns
+//! the runtime-side durable Stop/Tick transition functions so the
+//! storage-independent `SimulationNode` only prepares and applies state.
 
 pub(crate) mod handoff;
 pub(crate) mod pipeline;
@@ -13,9 +15,102 @@ use dawn_consensus::RaftActorHandle;
 use dawn_core::{
     AbsolutePosition, DomainEvent, JumpGateId, SectorId, ShipId, Tick, TransitHandoffState,
 };
-use dawn_event_store::{DurabilityMode, DurableJournal};
+use dawn_event_store::{AppendReceipt, DurabilityMode, DurableJournal, JournalError};
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 use tokio::sync::mpsc;
+
+/// Failure returned by the Stop prepare -> durable -> live-apply boundary.
+#[derive(Debug, Error)]
+pub enum StopTransitionError {
+    #[error(transparent)]
+    Preparation(#[from] crate::transition::TransitionError),
+    #[error("durable transition append failed: {0}")]
+    Durable(#[from] JournalError),
+    #[error("prepared Stop cannot be applied to the current state: {0}")]
+    Validation(#[from] crate::transition::TransitionApplyError),
+}
+
+/// Failure returned by the Tick prepare -> durable -> live-apply boundary.
+#[derive(Debug, Error)]
+pub enum TickTransitionError {
+    #[error(transparent)]
+    Preparation(#[from] crate::node::TickPreparationError),
+    #[error("durable transition append failed: {0}")]
+    Durable(#[from] JournalError),
+    #[error("prepared Tick cannot be applied to the current state: {0}")]
+    Validation(#[from] crate::transition::TransitionApplyError),
+}
+
+/// Commit a prepared Stop transition through the runtime-owned journal.
+pub fn commit_stop_transition<J: DurableJournal>(
+    node: &mut SimulationNode,
+    journal: &mut J,
+    ship_id: ShipId,
+    transition_id: crate::transition::SectorTransitionId,
+    owner_epoch: u64,
+    durability: DurabilityMode,
+) -> Result<AppendReceipt, StopTransitionError> {
+    let prepared = node.prepare_stop_transition(ship_id, transition_id, owner_epoch)?;
+    let delta = match &prepared.recovery_delta {
+        crate::transition::SectorRecoveryDelta::Stop(delta) => *delta,
+        crate::transition::SectorRecoveryDelta::Tick(_) => {
+            unreachable!("prepare_stop_transition always produces a Stop delta")
+        }
+    };
+    // Resolve the live entity before the durable append. Once the journal
+    // accepts the transition, applying this already-validated entity is
+    // infallible; a post-commit lookup failure must not masquerade as a
+    // normal command rejection.
+    let entity = node.stop_entity(delta.ship_id)?;
+    let receipt =
+        crate::transition_journal::append_prepared_transition(journal, &prepared, durability)?;
+    node.apply_stop_delta(entity, delta);
+    Ok(receipt)
+}
+
+/// Commit the complete bounded ECS Tick write set through the runtime journal.
+pub fn commit_tick_state_transition<J: DurableJournal>(
+    node: &mut SimulationNode,
+    journal: &mut J,
+    lock_commands: &[dawn_core::LockOnCommand],
+    transition_id: crate::transition::SectorTransitionId,
+    owner_epoch: u64,
+    durability: DurabilityMode,
+) -> Result<AppendReceipt, TickTransitionError> {
+    let (prepared, _) =
+        node.prepare_tick_state_transition_with_result(lock_commands, transition_id, owner_epoch)?;
+    let crate::transition::SectorRecoveryDelta::Tick(ref delta) = prepared.recovery_delta else {
+        unreachable!("prepare_tick_state_transition always produces a Tick delta")
+    };
+    node.validate_tick_transition(delta, prepared.context)?;
+    let receipt =
+        crate::transition_journal::append_prepared_transition(journal, &prepared, durability)?;
+    node.apply_validated_full_tick(delta.clone())?;
+    node.observe_committed_events(&prepared.public_events);
+    Ok(receipt)
+}
+
+/// Commit the logical Tick counter through the runtime journal.
+pub fn commit_tick_transition<J: DurableJournal>(
+    node: &mut SimulationNode,
+    journal: &mut J,
+    transition_id: crate::transition::SectorTransitionId,
+    owner_epoch: u64,
+    durability: DurabilityMode,
+) -> Result<AppendReceipt, TickTransitionError> {
+    let prepared = node
+        .prepare_tick_transition(transition_id, owner_epoch)
+        .map_err(crate::node::TickPreparationError::from)?;
+    let crate::transition::SectorRecoveryDelta::Tick(ref delta) = prepared.recovery_delta else {
+        unreachable!("prepare_tick_transition always produces a Tick delta")
+    };
+    node.validate_tick_transition(delta, prepared.context)?;
+    let receipt =
+        crate::transition_journal::append_prepared_transition(journal, &prepared, durability)?;
+    node.apply_validated_logical_tick(delta.clone());
+    Ok(receipt)
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TransitOp {
@@ -216,7 +311,7 @@ pub fn run_durable_runtime_tick<J, F>(
     lock_commands: &[dawn_core::LockOnCommand],
     context: DurableRuntimeTickContext,
     after_events_collected: F,
-) -> Result<RuntimeTickOutput, crate::node::TickTransitionError>
+) -> Result<RuntimeTickOutput, TickTransitionError>
 where
     J: DurableJournal,
     F: FnOnce(&SimulationNode, &crate::node::TickResult, &[DomainEvent]),
@@ -234,7 +329,7 @@ where
         Ok(result) => result,
         Err(error) => {
             node.restore_pending_events(prior_events);
-            return Err(error);
+            return Err(TickTransitionError::Preparation(error));
         }
     };
     let delta = match &prepared.recovery_delta {
@@ -249,10 +344,11 @@ where
         context.durability,
     ) {
         node.restore_pending_events(prior_events);
-        return Err(crate::node::TickTransitionError::Durable(error));
+        return Err(TickTransitionError::Durable(error));
     }
     node.apply_tick_transition(delta, prepared.context)
-        .map_err(crate::node::TickTransitionError::Validation)?;
+        .map_err(TickTransitionError::Validation)?;
+    node.observe_committed_events(&prepared.public_events);
     let mut events = prior_events;
     events.extend(node.drain_pending_events());
     events.extend(prepared.public_events);

@@ -71,9 +71,12 @@ impl SimulationNode {
                 tick: self.current_tick,
             },
         ));
-        self.station_inventory_db
-            .reserve_client_admission(ship_id, player_id, spawn_position, resume_ticket)
-            .expect("client admission preparation transaction");
+        self.station_inventory_db.reserve_client_admission(
+            ship_id,
+            player_id,
+            spawn_position,
+            resume_ticket,
+        );
         let inserted = self.pending_fresh_admissions.insert(ship_id);
         debug_assert!(
             inserted,
@@ -88,7 +91,6 @@ impl SimulationNode {
     ) -> Option<(PlayerId, ShipId, Position)> {
         self.station_inventory_db
             .prepared_client_admission_by_ticket(resume_ticket)
-            .expect("client admission prepared query")
             .map(|prepared| {
                 (
                     prepared.player_id,
@@ -104,12 +106,10 @@ impl SimulationNode {
     pub fn hosts_client_resume_ticket(&self, resume_ticket: ResumeTicket) -> bool {
         self.station_inventory_db
             .prepared_client_admission_by_ticket(resume_ticket)
-            .expect("prepared client admission query")
             .is_some()
             || self
                 .station_inventory_db
                 .client_ownership_by_ticket(resume_ticket)
-                .expect("client ownership query")
                 .is_some_and(|(_, ship_id)| {
                     self.ship_absolute_pos(ship_id).is_some() && !self.is_ship_in_transit(ship_id)
                 })
@@ -121,7 +121,6 @@ impl SimulationNode {
     ) -> Option<(PlayerId, ShipId)> {
         self.station_inventory_db
             .client_ownership_by_ticket(resume_ticket)
-            .expect("client ownership query")
     }
 
     pub(crate) fn issue_resume_ticket(&self) -> ResumeTicket {
@@ -129,14 +128,13 @@ impl SimulationNode {
     }
 
     pub(crate) fn record_client_resume_ownership(
-        &self,
+        &mut self,
         ship_id: ShipId,
         player_id: PlayerId,
         resume_ticket: ResumeTicket,
     ) {
         self.station_inventory_db
-            .record_client_ownership(ship_id, player_id, resume_ticket)
-            .expect("client ownership upsert");
+            .record_client_ownership(ship_id, player_id, resume_ticket);
     }
 
     pub(crate) fn stage_client_resume_ticket(
@@ -146,16 +144,18 @@ impl SimulationNode {
         presented_ticket: ResumeTicket,
         proposed_next_ticket: ResumeTicket,
     ) -> Option<ResumeTicket> {
-        self.station_inventory_db
-            .stage_client_resume_ticket(ship_id, player_id, presented_ticket, proposed_next_ticket)
-            .expect("client ownership ticket staging")
+        self.station_inventory_db.stage_client_resume_ticket(
+            ship_id,
+            player_id,
+            presented_ticket,
+            proposed_next_ticket,
+        )
     }
 
     #[cfg(test)]
     pub(crate) fn client_resume_ticket(&self, ship_id: ShipId) -> Option<ResumeTicket> {
         self.station_inventory_db
             .client_resume_tickets(ship_id)
-            .expect("client ownership ticket query")
             .map(|(current, _pending)| current)
     }
 
@@ -163,9 +163,7 @@ impl SimulationNode {
         &self,
         ship_id: ShipId,
     ) -> Option<(ResumeTicket, Option<ResumeTicket>)> {
-        self.station_inventory_db
-            .client_resume_tickets(ship_id)
-            .expect("client ownership tickets query")
+        self.station_inventory_db.client_resume_tickets(ship_id)
     }
 
     pub(crate) fn claim_prepared_fresh_admission(
@@ -178,7 +176,6 @@ impl SimulationNode {
             || self
                 .station_inventory_db
                 .prepared_client_admission(ship_id)
-                .expect("prepared client admission query")
                 .is_none_or(|prepared| {
                     prepared.player_id != player_id || prepared.resume_ticket != resume_ticket
                 })
@@ -226,7 +223,6 @@ impl SimulationNode {
             || self
                 .station_inventory_db
                 .prepared_client_admission(ship_id)
-                .expect("prepared client admission query")
                 .is_none_or(|prepared| {
                     prepared.player_id != player_id
                         || prepared.spawn_position != spawn_position
@@ -347,7 +343,6 @@ impl SimulationNode {
     ) -> bool {
         self.station_inventory_db
             .client_owner(ship_id)
-            .expect("client ownership query")
             .is_some_and(|owner| owner != player_id)
             || self
                 .ships
@@ -410,15 +405,13 @@ impl SimulationNode {
         if self
             .station_inventory_db
             .client_ownership_by_ticket(presented_ticket)
-            .expect("client ownership query")
             != Some((player_id, ship_id))
         {
             self.release_resume_admission(player_id, ship_id);
             return false;
         }
         self.station_inventory_db
-            .record_client_ownership(ship_id, player_id, next_ticket)
-            .expect("client ownership upsert");
+            .record_client_ownership(ship_id, player_id, next_ticket);
         let committed = self.resume_player_ship(ship_id, player_id);
         self.release_resume_admission(player_id, ship_id);
         committed

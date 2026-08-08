@@ -159,16 +159,14 @@ impl SimulationNode {
     }
 
     pub(super) fn ensure_client_admission_grant(&mut self, event: &ClientAdmissionCommitted) {
-        self.station_inventory_db
-            .ensure_client_admission_grant(
-                event.ship_id,
-                event.player_id,
-                event.resume_ticket,
-                event.starter_station_id,
-                event.starter_item_id,
-                event.starter_item_count,
-            )
-            .expect("client admission Station grant transaction");
+        self.station_inventory_db.ensure_client_admission_grant(
+            event.ship_id,
+            event.player_id,
+            event.resume_ticket,
+            event.starter_station_id,
+            event.starter_item_id,
+            event.starter_item_count,
+        );
         let inventory = self
             .station_inventory_db
             .get_all(event.player_id, event.starter_station_id);
@@ -179,7 +177,7 @@ impl SimulationNode {
         );
     }
 
-    pub(super) fn reconcile_client_admission_grants(&mut self) -> rusqlite::Result<()> {
+    pub(super) fn reconcile_client_admission_grants(&mut self) -> Result<(), String> {
         // Admission reconciliation is a runtime/repository concern. The
         // storage-independent engine cannot reconstruct it from an event log;
         // callers must feed committed admission records through the explicit

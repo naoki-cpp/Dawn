@@ -7,30 +7,16 @@
 //! at Range reuse the thrust helpers here without becoming part of this
 //! command module's interface.
 
-use dawn_core::{PlayerId, Position, ShipId, Velocity};
-use dawn_ecs::{
-    components::{PositionComp, ThrustComp, WarpComp},
-    Entity,
-};
-use dawn_event_store::{AppendReceipt, DurabilityMode, DurableJournal, JournalError};
-use thiserror::Error;
-
 use super::SimulationNode;
 use crate::transition::{
     PreparedSectorTransition, SectorEngine, SectorRecoveryDelta, SectorTransitionId,
     StopCommandState, StopRecoveryDelta, TransitionApplyError, TransitionContext, TransitionError,
 };
-
-/// Failure returned by the Stop prepare -> durable -> live-apply path.
-#[derive(Debug, Error)]
-pub enum StopTransitionError {
-    #[error(transparent)]
-    Preparation(#[from] TransitionError),
-    #[error("durable transition append failed: {0}")]
-    Durable(#[from] JournalError),
-    #[error("prepared Stop cannot be applied to the current state: {0}")]
-    Validation(#[from] TransitionApplyError),
-}
+use dawn_core::{PlayerId, Position, ShipId, Velocity};
+use dawn_ecs::{
+    components::{PositionComp, ThrustComp, WarpComp},
+    Entity,
+};
 
 impl SimulationNode {
     fn stop_command_state(&self, ship_id: ShipId) -> StopCommandState {
@@ -80,7 +66,7 @@ impl SimulationNode {
         Ok(())
     }
 
-    fn stop_entity(&self, ship_id: ShipId) -> Result<Entity, TransitionApplyError> {
+    pub(crate) fn stop_entity(&self, ship_id: ShipId) -> Result<Entity, TransitionApplyError> {
         self.ships
             .index
             .get(&ship_id)
@@ -88,7 +74,7 @@ impl SimulationNode {
             .ok_or(TransitionApplyError::UnknownShip(ship_id))
     }
 
-    fn apply_stop_delta(&mut self, entity: Entity, delta: StopRecoveryDelta) {
+    pub(crate) fn apply_stop_delta(&mut self, entity: Entity, delta: StopRecoveryDelta) {
         if delta.clear_warp {
             let _ = self.world.remove_one::<WarpComp>(entity);
         }
@@ -99,31 +85,6 @@ impl SimulationNode {
             thrust.direction = delta.thrust.direction;
             thrust.is_braking = delta.thrust.is_braking;
         }
-    }
-
-    /// Execute Stop through the ADR-0049 ordering:
-    /// prepare -> durable journal append -> live apply.
-    pub fn commit_stop_transition<J: DurableJournal>(
-        &mut self,
-        journal: &mut J,
-        ship_id: ShipId,
-        transition_id: SectorTransitionId,
-        owner_epoch: u64,
-        durability: DurabilityMode,
-    ) -> Result<AppendReceipt, StopTransitionError> {
-        let prepared = self.prepare_stop_transition(ship_id, transition_id, owner_epoch)?;
-        let SectorRecoveryDelta::Stop(delta) = prepared.recovery_delta else {
-            unreachable!("prepare_stop_transition always produces a Stop delta");
-        };
-        // Resolve the live entity before the durable append. Once the journal
-        // accepts the transition, applying this already-validated entity is
-        // infallible; a post-commit lookup failure must not masquerade as a
-        // normal command rejection.
-        let entity = self.stop_entity(delta.ship_id)?;
-        let receipt =
-            crate::transition_journal::append_prepared_transition(journal, &prepared, durability)?;
-        self.apply_stop_delta(entity, delta);
-        Ok(receipt)
     }
 
     /// Steer `ship_id` toward `target`. Cancels any active warp/approach.
@@ -263,7 +224,8 @@ mod tests {
     use dawn_core::{AbsolutePosition, AnchorId, ApproachTarget, NodeId, SectorBounds, SectorId};
     use dawn_ecs::components::{ApproachComp, KeepAtRangeComp, OrbitComp, WarpPhase};
     use dawn_event_store::{
-        InMemoryJournal, JournalBatch, JournalIndex, JournalRecord, JournalStream,
+        AppendReceipt, DurabilityMode, DurableJournal, InMemoryJournal, JournalBatch, JournalError,
+        JournalIndex, JournalRecord, JournalStream,
     };
 
     fn mem_node() -> SimulationNode {
@@ -320,15 +282,15 @@ mod tests {
         assert!(!node.world.get::<ThrustComp>(entity).unwrap().is_braking);
 
         let mut journal = InMemoryJournal::new();
-        let receipt = node
-            .commit_stop_transition(
-                &mut journal,
-                ship_id,
-                prepared.transition_id,
-                prepared.context.owner_epoch,
-                DurabilityMode::Synced,
-            )
-            .expect("durable Stop should apply");
+        let receipt = crate::transit::commit_stop_transition(
+            &mut node,
+            &mut journal,
+            ship_id,
+            prepared.transition_id,
+            prepared.context.owner_epoch,
+            DurabilityMode::Synced,
+        )
+        .expect("durable Stop should apply");
 
         assert_eq!(receipt.range.first, JournalIndex::ZERO);
         assert_eq!(journal.records()[0].stream, JournalStream::RecoveryDelta);
@@ -386,7 +348,8 @@ mod tests {
         node.world.get_mut::<ThrustComp>(entity).unwrap().direction = Velocity::new(3.0, 0.0, 0.0);
 
         let mut journal = InMemoryJournal::new();
-        node.commit_stop_transition(
+        crate::transit::commit_stop_transition(
+            &mut node,
             &mut journal,
             ship_id,
             SectorTransitionId(11),
@@ -439,15 +402,15 @@ mod tests {
         node.world.get_mut::<ThrustComp>(entity).unwrap().direction = Velocity::new(1.0, 0.0, 0.0);
         let mut journal = FailingJournal;
 
-        assert!(node
-            .commit_stop_transition(
-                &mut journal,
-                ship_id,
-                SectorTransitionId(10),
-                4,
-                DurabilityMode::Synced,
-            )
-            .is_err());
+        assert!(crate::transit::commit_stop_transition(
+            &mut node,
+            &mut journal,
+            ship_id,
+            SectorTransitionId(10),
+            4,
+            DurabilityMode::Synced,
+        )
+        .is_err());
         let thrust = node.world.get::<ThrustComp>(entity).unwrap();
         assert!(!thrust.is_braking);
         assert_eq!(thrust.direction, Velocity::new(1.0, 0.0, 0.0));

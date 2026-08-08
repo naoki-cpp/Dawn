@@ -1,5 +1,14 @@
 use std::collections::{BTreeMap, HashSet};
 
+use super::{SimulationNode, TickResult};
+use crate::persistence::ShipSnapshot;
+use crate::transition::{
+    PreparedSectorTransition, SectorEngine, SectorRecoveryDelta, SectorTransitionId,
+    TickApproachState, TickCommandState, TickFittingState, TickKeepAtRangeState, TickLockEntry,
+    TickLockPhase, TickLockState, TickMovementState, TickOrbitState, TickRecoveryDelta,
+    TickRecoveryMode, TickShipState, TickSlotState, TickWarpPhase, TickWarpState,
+    TransitionApplyError, TransitionContext, TransitionError,
+};
 use dawn_core::{DomainEvent, ItemId, ShipId};
 use dawn_ecs::{
     components::{
@@ -10,31 +19,17 @@ use dawn_ecs::{
     systems::{CapacitorSystem, CombatSystem, LockSystem, MovementSystem, RepairSystem},
     Entity,
 };
-use dawn_event_store::{AppendReceipt, DurabilityMode, DurableJournal, JournalError};
 use thiserror::Error;
-
-use super::{SimulationNode, TickResult};
-use crate::persistence::ShipSnapshot;
-use crate::transition::{
-    PreparedSectorTransition, SectorEngine, SectorRecoveryDelta, SectorTransitionId,
-    TickApproachState, TickCommandState, TickFittingState, TickKeepAtRangeState, TickLockEntry,
-    TickLockPhase, TickLockState, TickMovementState, TickOrbitState, TickRecoveryDelta,
-    TickRecoveryMode, TickShipState, TickSlotState, TickWarpPhase, TickWarpState,
-    TransitionApplyError, TransitionContext, TransitionError,
-};
 
 const SCRAP_METAL_PER_SHIP_DESTROYED: u64 = 1;
 
-/// Failure returned by the logical Tick counter's prepare -> durable -> apply
-/// vertical slice. The full ECS system write set remains a later migration.
+/// Failure while building the bounded, storage-independent Tick write set.
 #[derive(Debug, Error)]
-pub enum TickTransitionError {
+pub enum TickPreparationError {
     #[error(transparent)]
-    Preparation(#[from] TransitionError),
-    #[error("durable transition append failed: {0}")]
-    Durable(#[from] JournalError),
-    #[error("prepared Tick cannot be applied to the current state: {0}")]
-    Validation(#[from] TransitionApplyError),
+    Transition(#[from] TransitionError),
+    #[error("prepared Tick could not restore the live state: {0}")]
+    Restoration(#[from] TransitionApplyError),
 }
 
 fn lock_event_touches_transit(event: &DomainEvent, transit_ids: &HashSet<ShipId>) -> bool {
@@ -93,7 +88,7 @@ impl SimulationNode {
         Ok(())
     }
 
-    fn validate_tick_transition(
+    pub(crate) fn validate_tick_transition(
         &self,
         delta: &TickRecoveryDelta,
         context: TransitionContext,
@@ -151,11 +146,11 @@ impl SimulationNode {
         Ok(())
     }
 
-    fn apply_validated_logical_tick(&mut self, delta: TickRecoveryDelta) {
+    pub(crate) fn apply_validated_logical_tick(&mut self, delta: TickRecoveryDelta) {
         self.current_tick = delta.to;
     }
 
-    fn apply_validated_full_tick(
+    pub(crate) fn apply_validated_full_tick(
         &mut self,
         delta: TickRecoveryDelta,
     ) -> Result<(), TransitionApplyError> {
@@ -185,7 +180,7 @@ impl SimulationNode {
         lock_commands: &[dawn_core::LockOnCommand],
         transition_id: SectorTransitionId,
         owner_epoch: u64,
-    ) -> Result<PreparedSectorTransition, TickTransitionError> {
+    ) -> Result<PreparedSectorTransition, TickPreparationError> {
         self.prepare_tick_state_transition_with_result(lock_commands, transition_id, owner_epoch)
             .map(|(prepared, _)| prepared)
     }
@@ -195,7 +190,7 @@ impl SimulationNode {
         lock_commands: &[dawn_core::LockOnCommand],
         transition_id: SectorTransitionId,
         owner_epoch: u64,
-    ) -> Result<(PreparedSectorTransition, TickResult), TickTransitionError> {
+    ) -> Result<(PreparedSectorTransition, TickResult), TickPreparationError> {
         let logical = self.prepare_tick_transition(transition_id, owner_epoch)?;
         let TransitionContext {
             sector_id,
@@ -207,6 +202,7 @@ impl SimulationNode {
         let before_bot_commands = self.pending_bot_lock_commands.clone();
         let before_auto_jumps = self.pending_auto_jumps.clone();
         let before_completed_warps = self.completed_warps.clone();
+        let before_transit_journal = self.transit_journal.clone();
 
         let result = self.tick_with_lock_commands_mode(lock_commands, false, false);
         let deferred_events = self.pending_events.split_off(before_pending_event_count);
@@ -241,7 +237,12 @@ impl SimulationNode {
         };
 
         self.current_tick = before_tick;
-        self.restore_tick_write_set(&before_states)?;
+        let restore_result = self.restore_tick_write_set(&before_states);
+        // The legacy systems may emit public facts while preparing. Their
+        // node-local projections are speculative until the enclosing journal
+        // batch commits, just like the ECS write set.
+        self.transit_journal = before_transit_journal;
+        restore_result?;
         self.pending_bot_lock_commands = before_bot_commands;
         self.pending_auto_jumps = before_auto_jumps;
         self.completed_warps = before_completed_warps;
@@ -258,53 +259,6 @@ impl SimulationNode {
             reliable_effects: Vec::new(),
         };
         Ok((prepared, result))
-    }
-
-    /// Commit a complete ECS Tick through durable append before live apply.
-    pub fn commit_tick_state_transition<J: DurableJournal>(
-        &mut self,
-        journal: &mut J,
-        lock_commands: &[dawn_core::LockOnCommand],
-        transition_id: SectorTransitionId,
-        owner_epoch: u64,
-        durability: DurabilityMode,
-    ) -> Result<AppendReceipt, TickTransitionError> {
-        let (prepared, _) = self.prepare_tick_state_transition_with_result(
-            lock_commands,
-            transition_id,
-            owner_epoch,
-        )?;
-        let SectorRecoveryDelta::Tick(ref delta) = prepared.recovery_delta else {
-            unreachable!("prepare_tick_state_transition always produces a Tick delta");
-        };
-        self.validate_tick_transition(delta, prepared.context)?;
-        let receipt =
-            crate::transition_journal::append_prepared_transition(journal, &prepared, durability)?;
-        self.apply_validated_full_tick(delta.clone())?;
-        Ok(receipt)
-    }
-
-    /// Commit the logical Tick counter through the ADR-0049 ordering.
-    ///
-    /// This intentionally commits only the counter. The existing ECS systems
-    /// still form the legacy Tick path until their bounded write sets are
-    /// migrated under the same transition.
-    pub fn commit_tick_transition<J: DurableJournal>(
-        &mut self,
-        journal: &mut J,
-        transition_id: SectorTransitionId,
-        owner_epoch: u64,
-        durability: DurabilityMode,
-    ) -> Result<AppendReceipt, TickTransitionError> {
-        let prepared = self.prepare_tick_transition(transition_id, owner_epoch)?;
-        let SectorRecoveryDelta::Tick(ref delta) = prepared.recovery_delta else {
-            unreachable!("prepare_tick_transition always produces a Tick delta");
-        };
-        self.validate_tick_transition(delta, prepared.context)?;
-        let receipt =
-            crate::transition_journal::append_prepared_transition(journal, &prepared, durability)?;
-        self.apply_validated_logical_tick(delta.clone());
-        Ok(receipt)
     }
 
     /// Execute one simulation tick.
@@ -943,7 +897,8 @@ mod tests {
     };
     use dawn_ecs::components::{LockEntry, LockState};
     use dawn_event_store::{
-        DurableJournal, InMemoryJournal, JournalBatch, JournalIndex, JournalRecord,
+        AppendReceipt, DurabilityMode, DurableJournal, InMemoryJournal, JournalBatch, JournalError,
+        JournalIndex, JournalRecord,
     };
 
     fn mem_node() -> SimulationNode {
@@ -970,14 +925,14 @@ mod tests {
         let mut node = mem_node();
         let mut journal = InMemoryJournal::new();
 
-        let receipt = node
-            .commit_tick_transition(
-                &mut journal,
-                SectorTransitionId(20),
-                4,
-                DurabilityMode::Synced,
-            )
-            .expect("durable Tick should apply");
+        let receipt = crate::transit::commit_tick_transition(
+            &mut node,
+            &mut journal,
+            SectorTransitionId(20),
+            4,
+            DurabilityMode::Synced,
+        )
+        .expect("durable Tick should apply");
 
         assert_eq!(receipt.range.first, JournalIndex::ZERO);
         assert_eq!(node.current_tick(), Tick(1));
@@ -1015,7 +970,8 @@ mod tests {
         ));
 
         let mut journal = InMemoryJournal::new();
-        node.commit_tick_state_transition(
+        crate::transit::commit_tick_state_transition(
+            &mut node,
             &mut journal,
             &[],
             SectorTransitionId(24),
@@ -1063,15 +1019,15 @@ mod tests {
         let before = node.capture_tick_write_set();
         let mut journal = FailingJournal;
 
-        assert!(node
-            .commit_tick_state_transition(
-                &mut journal,
-                &[],
-                SectorTransitionId(25),
-                4,
-                DurabilityMode::Synced,
-            )
-            .is_err());
+        assert!(crate::transit::commit_tick_state_transition(
+            &mut node,
+            &mut journal,
+            &[],
+            SectorTransitionId(25),
+            4,
+            DurabilityMode::Synced,
+        )
+        .is_err());
         assert_eq!(node.current_tick(), Tick::ZERO);
         assert_eq!(node.capture_tick_write_set(), before);
     }
@@ -1081,7 +1037,8 @@ mod tests {
         let mut node = mem_node();
         let mut journal = InMemoryJournal::new();
 
-        node.commit_tick_transition(
+        crate::transit::commit_tick_transition(
+            &mut node,
             &mut journal,
             SectorTransitionId(22),
             4,
@@ -1115,14 +1072,14 @@ mod tests {
         let mut node = mem_node();
         let mut journal = FailingJournal;
 
-        assert!(node
-            .commit_tick_transition(
-                &mut journal,
-                SectorTransitionId(21),
-                4,
-                DurabilityMode::Synced,
-            )
-            .is_err());
+        assert!(crate::transit::commit_tick_transition(
+            &mut node,
+            &mut journal,
+            SectorTransitionId(21),
+            4,
+            DurabilityMode::Synced,
+        )
+        .is_err());
         assert_eq!(node.current_tick(), Tick::ZERO);
     }
 

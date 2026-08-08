@@ -55,12 +55,13 @@ mod tick;
 mod transit;
 mod warp;
 
+pub use crate::transit::StopTransitionError;
+pub use crate::transit::TickTransitionError;
 pub use command_module::ModuleActivationRejection;
 pub use commands::{ClientCommandFollowup, ClientRequestAdmissionError};
 pub use jump::JumpOutcome;
-pub use movement_commands::StopTransitionError;
 pub use serialization::{HandoffPayload, MissingObserverShip};
-pub use tick::TickTransitionError;
+pub use tick::TickPreparationError;
 
 use coordinates::debug_assert_missing_anchor;
 
@@ -222,12 +223,11 @@ pub struct SimulationNode {
     /// Current catch-all SQLite adapter inherited from ADR-0038.
     ///
     /// Under ADR-0049/#277, Station inventory rows become an idempotent
-    /// projection/read model of journal-owned Station world state, while
-    /// pre-materialization admission/identity rows may remain repository-owned
-    /// protocol authority with explicit reconciliation. The current object mixes
-    /// both domains and is scheduled to be split; SQLite as a whole is **not**
-    /// the Sector world-state authority.
-    station_inventory_db: station_inventory_db::StationInventoryDb,
+    /// Runtime-owned admission/Station persistence port. The engine sees only
+    /// repository behavior; the current catch-all SQLite adapter is selected at
+    /// the composition boundary until #277 replaces it with explicit
+    /// repositories. Its rows are not Sector recovery authority.
+    station_inventory_db: Box<dyn station_inventory_db::StationRepository>,
     /// Bounded derived cache over current Station repository access. It is not
     /// independent recovery authority.
     station_inventory_cache: std::cell::RefCell<station_inventory::StationInventoryCache>,
@@ -390,8 +390,8 @@ impl SimulationNode {
             sector_map,
             anchor_table,
             population_cap: POPULATION_CAP,
-            station_inventory_db: station_inventory_db::StationInventoryDb::open_in_memory()
-                .expect("in-memory sqlite connection never fails to open"),
+            station_inventory_db: station_inventory_db::open_in_memory_repository()
+                .expect("in-memory repository never fails to open"),
             station_inventory_cache: std::cell::RefCell::new(
                 station_inventory::StationInventoryCache::new(),
             ),
@@ -455,17 +455,17 @@ impl SimulationNode {
         self.population_cap = cap;
     }
 
-    /// Point the current catch-all Station/admission/identity SQLite adapter at
-    /// a real on-disk file instead of the private in-memory database used by
-    /// `new`/`restore_from`.
+    /// Point the current repository port at a real on-disk adapter instead of
+    /// the private in-memory implementation used by `new`/`restore_from`.
     ///
     /// This is current implementation wiring. Under ADR-0049/#277 the final
     /// runtime owns separate repository APIs: Station rows are an idempotent
     /// projection of journal authority, while admission/identity rows may be
     /// durable protocol authority with explicit reconciliation. #272 removes the
     /// repository object from the pure engine.
-    pub fn open_station_inventory_db(&mut self, path: &str) -> rusqlite::Result<()> {
-        self.station_inventory_db = station_inventory_db::StationInventoryDb::open(path)?;
+    pub fn open_station_inventory_db(&mut self, path: &str) -> Result<(), String> {
+        self.station_inventory_db =
+            station_inventory_db::open_repository(path).map_err(|error| error.to_string())?;
         self.station_inventory_cache
             .replace(station_inventory::StationInventoryCache::new());
         self.reconcile_client_admission_grants()?;
@@ -535,6 +535,14 @@ impl SimulationNode {
 
     pub(crate) fn transit_journal(&self) -> &TransitJournal {
         &self.transit_journal
+    }
+
+    /// Apply public facts to the node-local Transit projection after their
+    /// enclosing durable transition has committed.
+    pub(crate) fn observe_committed_events(&mut self, events: &[DomainEvent]) {
+        for event in events {
+            self.transit_journal.observe(event);
+        }
     }
 
     fn emit_event(&mut self, event: DomainEvent) {
