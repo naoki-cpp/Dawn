@@ -22,7 +22,10 @@ The current #272 migration slice exposes `SectorEngine::prepare_tick` and
 proves the durable counter boundary, including eventless append failure, but it
 does not replace `tick_with_lock_commands`: the ECS movement, capacitor, combat,
 and other system write sets remain the legacy path until they acquire bounded
-prepared mutations of their own.
+prepared mutations of their own. Recovery applies the persisted delta together
+with its journal `TransitionContext`; the node validates the Sector identity,
+while owner-epoch fencing remains the runtime orchestration responsibility of
+#278.
 
 ## 1. Tick Definition
 

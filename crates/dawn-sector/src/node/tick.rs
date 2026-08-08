@@ -83,8 +83,9 @@ impl<S: EventStore> SimulationNode<S> {
     pub fn apply_tick_transition(
         &mut self,
         delta: TickRecoveryDelta,
+        context: TransitionContext,
     ) -> Result<(), TransitionApplyError> {
-        self.validate_tick_transition(delta)?;
+        self.validate_tick_transition(delta, context)?;
         self.apply_validated_tick(delta);
         Ok(())
     }
@@ -92,7 +93,14 @@ impl<S: EventStore> SimulationNode<S> {
     fn validate_tick_transition(
         &self,
         delta: TickRecoveryDelta,
+        context: TransitionContext,
     ) -> Result<(), TransitionApplyError> {
+        if context.sector_id != self.sector_id {
+            return Err(TransitionApplyError::SectorMismatch {
+                expected: self.sector_id,
+                actual: context.sector_id,
+            });
+        }
         let Some(expected_to) = delta.from.0.checked_add(1).map(dawn_core::Tick) else {
             return Err(TransitionApplyError::InvalidTickStep {
                 from: delta.from,
@@ -134,7 +142,7 @@ impl<S: EventStore> SimulationNode<S> {
         let SectorRecoveryDelta::Tick(delta) = prepared.recovery_delta else {
             unreachable!("prepare_tick_transition always produces a Tick delta");
         };
-        self.validate_tick_transition(delta)?;
+        self.validate_tick_transition(delta, prepared.context)?;
         let receipt =
             crate::transition_journal::append_prepared_transition(journal, &prepared, durability)?;
         self.apply_validated_tick(delta);
@@ -440,6 +448,40 @@ mod tests {
     }
 
     #[test]
+    fn committed_tick_delta_can_be_applied_from_its_journal_record() {
+        let mut node = mem_node();
+        let mut journal = InMemoryJournal::new();
+
+        node.commit_tick_transition(
+            &mut journal,
+            SectorTransitionId(22),
+            4,
+            DurabilityMode::Synced,
+        )
+        .expect("durable Tick should apply");
+
+        let record = journal.records()[0].clone();
+        let delta = crate::transition::decode_recovery_delta(&record.payload)
+            .expect("journal payload should contain a Tick delta");
+        let SectorRecoveryDelta::Tick(delta) = delta else {
+            panic!("logical Tick transition must persist a Tick delta");
+        };
+
+        let mut recovered = mem_node();
+        recovered
+            .apply_tick_transition(
+                delta,
+                TransitionContext {
+                    sector_id: record.context.sector_id,
+                    owner_epoch: record.context.owner_epoch,
+                },
+            )
+            .expect("the journal record should recover on the matching Sector");
+
+        assert_eq!(recovered.current_tick(), Tick(1));
+    }
+
+    #[test]
     fn failed_tick_append_does_not_advance_the_counter() {
         let mut node = mem_node();
         let mut journal = FailingJournal;
@@ -460,10 +502,16 @@ mod tests {
         let mut node = mem_node();
 
         let error = node
-            .apply_tick_transition(TickRecoveryDelta {
-                from: Tick(1),
-                to: Tick(2),
-            })
+            .apply_tick_transition(
+                TickRecoveryDelta {
+                    from: Tick(1),
+                    to: Tick(2),
+                },
+                TransitionContext {
+                    sector_id: SectorId(0),
+                    owner_epoch: 4,
+                },
+            )
             .expect_err("a delta from a future Tick must be rejected");
 
         assert_eq!(
@@ -481,10 +529,16 @@ mod tests {
         let mut node = mem_node();
 
         let error = node
-            .apply_tick_transition(TickRecoveryDelta {
-                from: Tick::ZERO,
-                to: Tick(2),
-            })
+            .apply_tick_transition(
+                TickRecoveryDelta {
+                    from: Tick::ZERO,
+                    to: Tick(2),
+                },
+                TransitionContext {
+                    sector_id: SectorId(0),
+                    owner_epoch: 4,
+                },
+            )
             .expect_err("a Tick delta must advance exactly one step");
 
         assert_eq!(
@@ -492,6 +546,33 @@ mod tests {
             TransitionApplyError::InvalidTickStep {
                 from: Tick::ZERO,
                 to: Tick(2),
+            }
+        );
+        assert_eq!(node.current_tick(), Tick::ZERO);
+    }
+
+    #[test]
+    fn tick_recovery_rejects_a_delta_from_another_sector() {
+        let mut node = mem_node();
+
+        let error = node
+            .apply_tick_transition(
+                TickRecoveryDelta {
+                    from: Tick::ZERO,
+                    to: Tick(1),
+                },
+                TransitionContext {
+                    sector_id: SectorId(99),
+                    owner_epoch: 4,
+                },
+            )
+            .expect_err("a delta for another Sector must be rejected");
+
+        assert_eq!(
+            error,
+            TransitionApplyError::SectorMismatch {
+                expected: SectorId(0),
+                actual: SectorId(99),
             }
         );
         assert_eq!(node.current_tick(), Tick::ZERO);

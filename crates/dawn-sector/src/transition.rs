@@ -195,6 +195,11 @@ impl SectorEngine {
 pub enum TransitionApplyError {
     #[error("prepared transition references unknown ship {0:?}")]
     UnknownShip(ShipId),
+    #[error("prepared Tick transition targets sector {actual:?}; expected {expected:?}")]
+    SectorMismatch {
+        expected: SectorId,
+        actual: SectorId,
+    },
     #[error("prepared Tick transition expected current {expected}, found {actual}")]
     TickMismatch { expected: Tick, actual: Tick },
     #[error("prepared Tick transition must advance exactly one step: {from} -> {to}")]
