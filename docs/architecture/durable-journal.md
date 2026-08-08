@@ -33,15 +33,16 @@ content.
 
 ## File format and recovery
 
-`FileJournal` uses the versioned `DAWNJNL2` format. The file header contains the
-format magic and the global `base_index`. Each batch contains its record count,
+`FileJournal` uses the versioned `DAWNJNL3` format. The file header contains the
+format magic, the global `base_index`, and a checksum covering both header
+fields. Each batch contains its record count,
 first index, transition metadata, per-entry stream tag and length-prefixed
 payload, content hash, and commit marker.
 
 On open:
 
-- an unsupported header, invalid committed batch, bad hash, bad marker, or
-  non-contiguous first index is rejected;
+- an unsupported header, header checksum mismatch, invalid committed batch, bad
+  hash, bad marker, or non-contiguous first index is rejected;
 - a torn trailing batch is truncated to the last committed boundary and synced;
 - a complete batch is never silently reindexed or skipped.
 

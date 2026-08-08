@@ -5,8 +5,9 @@
 //! `DomainEvent` bytes are the complete recovery payload.
 //!
 //! ```text
-//! magic[8] once per file (`DAWNJNL2`)
+//! magic[8] once per file (`DAWNJNL3`)
 //! base_index[u64] once per file
+//! header_checksum[u64] once per file
 //! batch:
 //!   record_count[u32]
 //!   first_index[u64]
@@ -34,10 +35,19 @@ use crate::journal::{
     MAX_RECORDS_PER_BATCH, MAX_RECORD_BYTES,
 };
 
-const MAGIC: &[u8; 8] = b"DAWNJNL2";
+const MAGIC: &[u8; 8] = b"DAWNJNL3";
 const COMMIT_MARKER: u64 = 0x4441_574e_434f_4d4d;
 #[cfg(test)]
-const HEADER_LEN: u64 = 16;
+const HEADER_LEN: u64 = 24;
+
+fn header_checksum(base_index: JournalIndex) -> u64 {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in MAGIC.iter().chain(base_index.0.to_le_bytes().iter()) {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
+}
 
 trait JournalWriter: Send {
     fn len(&self) -> io::Result<u64>;
@@ -168,6 +178,7 @@ impl FileJournal {
                 .open(path)?;
             file.write_all(MAGIC)?;
             file.write_all(&0u64.to_le_bytes())?;
+            file.write_all(&header_checksum(JournalIndex::ZERO).to_le_bytes())?;
             file.sync_all()?;
             sync_parent_directory(path)?;
         }
@@ -393,6 +404,7 @@ impl FileJournal {
             let mut writer = BufWriter::new(file);
             writer.write_all(MAGIC)?;
             writer.write_all(&boundary.0.to_le_bytes())?;
+            writer.write_all(&header_checksum(boundary).to_le_bytes())?;
             writer.write_all(&hot_bytes[boundary_offset as usize..])?;
             writer.flush()?;
             writer.get_ref().sync_all()?;
@@ -538,19 +550,32 @@ fn sync_parent_directory(path: &Path) -> io::Result<()> {
 
 fn reject_archive_alias(hot_path: &Path, archive_path: &Path) -> Result<(), JournalError> {
     let tmp_path = tmp_path_for(hot_path);
-    if archive_path == hot_path || archive_path == tmp_path {
-        return Err(JournalError::ArchivePathAlias);
-    }
-
-    if archive_path.exists()
-        && std::fs::canonicalize(archive_path)? == std::fs::canonicalize(hot_path)?
+    if paths_alias(archive_path, hot_path)?
+        || paths_alias(archive_path, &tmp_path)?
+        || paths_alias(&tmp_path, hot_path)?
     {
         return Err(JournalError::ArchivePathAlias);
     }
-    if tmp_path.exists() && std::fs::canonicalize(&tmp_path)? == std::fs::canonicalize(hot_path)? {
-        return Err(JournalError::ArchivePathAlias);
-    }
     Ok(())
+}
+
+fn paths_alias(left: &Path, right: &Path) -> io::Result<bool> {
+    if left == right || !left.exists() || !right.exists() {
+        return Ok(left == right);
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+
+        let left = std::fs::metadata(left)?;
+        let right = std::fs::metadata(right)?;
+        Ok(left.dev() == right.dev() && left.ino() == right.ino())
+    }
+    #[cfg(not(unix))]
+    {
+        Ok(std::fs::canonicalize(left)? == std::fs::canonicalize(right)?)
+    }
 }
 
 fn archive_range_matches_hot(
@@ -595,10 +620,11 @@ fn ensure_archive(path: &Path, base_index: JournalIndex) -> Result<JournalScan, 
             .open(path)?;
         file.write_all(MAGIC)?;
         file.write_all(&base_index.0.to_le_bytes())?;
+        file.write_all(&header_checksum(base_index).to_le_bytes())?;
         file.sync_all()?;
-        sync_parent_directory(path)?;
     }
     let scan = scan_file(path, true, |_, _, _, _| {})?;
+    sync_parent_directory(path)?;
     Ok(scan)
 }
 
@@ -639,6 +665,11 @@ where
     let mut base_bytes = [0u8; 8];
     reader.read_exact(&mut base_bytes)?;
     let base_index = JournalIndex(u64::from_le_bytes(base_bytes));
+    let mut checksum_bytes = [0u8; 8];
+    reader.read_exact(&mut checksum_bytes)?;
+    if u64::from_le_bytes(checksum_bytes) != header_checksum(base_index) {
+        return Err(JournalError::HeaderChecksumMismatch);
+    }
     let mut next_index = base_index;
     let mut truncate_at = None;
 
@@ -1122,7 +1153,9 @@ mod tests {
 
         let tmp = tmp_path_for(&path);
         let mut replacement = MAGIC.to_vec();
-        replacement.extend_from_slice(&1u64.to_le_bytes());
+        let base_index = JournalIndex(1);
+        replacement.extend_from_slice(&base_index.0.to_le_bytes());
+        replacement.extend_from_slice(&header_checksum(base_index).to_le_bytes());
         std::fs::write(&tmp, replacement).unwrap();
         let result = journal.finalize_compaction_with(
             JournalIndex(1),
@@ -1150,7 +1183,9 @@ mod tests {
 
         let tmp = tmp_path_for(&path);
         let mut replacement = MAGIC.to_vec();
-        replacement.extend_from_slice(&1u64.to_le_bytes());
+        let base_index = JournalIndex(1);
+        replacement.extend_from_slice(&base_index.0.to_le_bytes());
+        replacement.extend_from_slice(&header_checksum(base_index).to_le_bytes());
         std::fs::write(&tmp, replacement).unwrap();
         let result =
             journal.finalize_compaction_with(JournalIndex(1), &tmp, FileWriter::open, |_path| {
@@ -1279,6 +1314,27 @@ mod tests {
         assert!(matches!(
             FileJournal::open(&path),
             Err(JournalError::ContentHashMismatch)
+        ));
+    }
+
+    #[test]
+    fn a_corrupted_header_is_rejected_even_for_an_empty_hot_suffix() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("journal.bin");
+        let archive = directory.path().join("journal.archive");
+        {
+            let mut journal = FileJournal::open(&path).unwrap();
+            journal.append_batch(batch(1, &[b"first"])).unwrap();
+            journal.compact(JournalIndex(1), &archive).unwrap();
+        }
+
+        let mut bytes = std::fs::read(&path).unwrap();
+        bytes[8] ^= 0xff;
+        std::fs::write(&path, bytes).unwrap();
+
+        assert!(matches!(
+            FileJournal::open(&path),
+            Err(JournalError::HeaderChecksumMismatch)
         ));
     }
 

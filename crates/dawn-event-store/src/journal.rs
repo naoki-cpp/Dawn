@@ -272,6 +272,8 @@ pub enum JournalError {
     InvalidFormat(String),
     #[error("journal format version is unsupported")]
     UnsupportedFormat,
+    #[error("journal header checksum mismatch")]
+    HeaderChecksumMismatch,
     #[error("journal trailing batch is incomplete")]
     IncompleteBatch,
     #[error("journal content digest mismatch")]
