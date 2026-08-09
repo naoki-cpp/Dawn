@@ -70,4 +70,4 @@ pub use resume::ResumeTicket;
 pub use sector::{SectorBounds, SectorId};
 pub use ship_type::{ShipBaseStats, ShipClass, ShipTypeDefinition, ShipTypeId, SlotLayout};
 pub use tick::Tick;
-pub use transit::TransitHandoffState;
+pub use transit::{TransitAttemptId, TransitHandoffState};

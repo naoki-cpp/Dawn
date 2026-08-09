@@ -12,13 +12,16 @@
 //! Callers use Transit lifecycle operations and do not reach into individual
 //! component mutations.
 
-use crate::persistence::CompletedIncomingTransit;
+use crate::persistence::{
+    IncomingTransitReceipt, OutgoingTransitAttempt, TransitAttemptState, TransitSagaDiagnostics,
+    TransitSagaSnapshot,
+};
 use dawn_core::{
     commands::TransitCommand,
     events::{JumpGateUsed, SectorTransitCompleted, SectorTransitRequested, StarSystemChanged},
     fitting::FittingSnapshot,
     DawnError, DomainEvent, JumpGateId, Position, SectorId, ShipId, ShipTypeId, Tick,
-    TransitHandoffState,
+    TransitAttemptId, TransitHandoffState,
 };
 use dawn_ecs::{
     components::{
@@ -34,57 +37,70 @@ use super::SimulationNode;
 /// `TransitOp::Commit`, produced by [`SimulationNode::prepare_transit_commit`].
 #[derive(Debug)]
 pub(crate) struct TransitCommitData {
+    pub(crate) attempt_id: TransitAttemptId,
     pub(crate) handoff: Box<TransitHandoffState>,
     pub(crate) entry_pos: dawn_core::AbsolutePosition,
     pub(crate) request_tick: Tick,
 }
 
-const TRANSIT_RETRY_INITIAL_TICKS: u64 = 10;
-const TRANSIT_RETRY_MAX_TICKS: u64 = 160;
-
-/// Process-local retry scheduling. The durable request and route live at the
-/// runtime journal boundary; this component only prevents an unresolved
-/// request from being proposed every Tick. It intentionally is not snapshotted,
-/// so restart causes one immediate retry and then resumes bounded exponential
-/// backoff.
-#[derive(Debug, Clone, Copy)]
-struct TransitRetryComp {
-    request_tick: Tick,
-    next_retry_tick: Tick,
-    backoff_ticks: u64,
-}
-
 impl SimulationNode {
-    pub(crate) fn has_completed_incoming_transit(
-        &self,
-        ship_id: ShipId,
-        from: SectorId,
-        to: SectorId,
-        request_tick: Tick,
-    ) -> bool {
-        self.completed_incoming_transits
-            .contains(&CompletedIncomingTransit {
-                ship_id,
-                from,
-                to,
-                request_tick,
-            })
+    pub(crate) fn transit_saga_snapshot(&self) -> TransitSagaSnapshot {
+        self.transit_journal.snapshot()
     }
 
-    fn record_completed_incoming_transit(
+    /// Return derived counts for active, retrying, terminal, and incoming
+    /// Transit Saga records. The counters are diagnostic output, not recovery
+    /// state separate from the Saga snapshot.
+    pub fn transit_saga_diagnostics(&self) -> TransitSagaDiagnostics {
+        self.transit_journal.diagnostics()
+    }
+
+    pub(crate) fn restore_transit_saga(
         &mut self,
-        ship_id: ShipId,
-        from: SectorId,
-        to: SectorId,
-        request_tick: Tick,
-    ) {
-        self.completed_incoming_transits
-            .push(CompletedIncomingTransit {
-                ship_id,
-                from,
-                to,
-                request_tick,
-            });
+        snapshot: TransitSagaSnapshot,
+    ) -> Result<(), String> {
+        self.transit_journal =
+            crate::transit::handoff::TransitJournal::from_snapshot(self.sector_id, snapshot)?;
+        let pending: Vec<_> = self.transit_journal.pending_outgoing().cloned().collect();
+        for attempt in pending {
+            let Some(&entity) = self.ships.index.get(&attempt.ship_id) else {
+                self.transit_journal.quarantine(
+                    attempt.attempt_id,
+                    "outgoing Saga references a missing source Ship".to_owned(),
+                );
+                continue;
+            };
+            self.world
+                .set_transit_state(entity, dawn_ecs::TransitState::InTransit { to: attempt.to });
+        }
+        Ok(())
+    }
+
+    pub(crate) fn register_incoming_transit_receipt(
+        &mut self,
+        receipt: IncomingTransitReceipt,
+    ) -> bool {
+        self.transit_journal.register_incoming(receipt)
+    }
+
+    pub(crate) fn transit_attempt_acknowledged(&self, attempt_id: TransitAttemptId) -> bool {
+        self.transit_journal
+            .outgoing(attempt_id)
+            .is_some_and(|attempt| matches!(attempt.state, TransitAttemptState::Acknowledged))
+    }
+
+    fn allocate_transit_attempt(&mut self, ship_id: ShipId) -> Result<TransitAttemptId, DawnError> {
+        let sequence = self.transit_attempt_counter;
+        let next_sequence = sequence
+            .checked_add(1)
+            .ok_or(DawnError::TransitAttemptCounterOverflow(self.sector_id))?;
+        self.transit_attempt_counter = next_sequence;
+        Ok(TransitAttemptId::new(self.sector_id, ship_id, sequence))
+    }
+
+    pub(crate) fn note_transit_commit_proposed(&mut self, attempt_id: TransitAttemptId) -> bool {
+        self.transit_journal
+            .mark_commit_proposed(attempt_id, self.current_tick)
     }
 
     /// Validate and begin a Sector Transit (CLAUDE.md §4 Step 2).
@@ -141,7 +157,38 @@ impl SimulationNode {
         gate_id: Option<JumpGateId>,
         entry_pos: dawn_core::AbsolutePosition,
     ) -> Result<Tick, DawnError> {
+        let ship_id = cmd.ship_id;
         let (request_tick, event) = self.begin_transit_with_route(cmd, gate_id, entry_pos)?;
+        let Some(handoff) = self.handoff_for_transit(ship_id) else {
+            if let Some(&entity) = self.ships.index.get(&ship_id) {
+                self.world.set_transit_state(entity, TransitState::None);
+            }
+            return Err(DawnError::ShipNotFound(ship_id));
+        };
+        let attempt_id = match self.allocate_transit_attempt(ship_id) {
+            Ok(attempt_id) => attempt_id,
+            Err(error) => {
+                if let Some(&entity) = self.ships.index.get(&ship_id) {
+                    self.world.set_transit_state(entity, TransitState::None);
+                }
+                return Err(error);
+            }
+        };
+        self.transit_journal
+            .register_outgoing(OutgoingTransitAttempt {
+                attempt_id,
+                ship_id,
+                from: self.sector_id,
+                to: match &event {
+                    DomainEvent::SectorTransitRequested(event) => event.to,
+                    _ => unreachable!(),
+                },
+                handoff,
+                gate_id,
+                entry_pos,
+                request_tick,
+                state: TransitAttemptState::Prepared,
+            });
         self.emit_event(event);
         Ok(request_tick)
     }
@@ -219,8 +266,27 @@ impl SimulationNode {
             }
             return None;
         };
+        let Ok(attempt_id) = self.allocate_transit_attempt(ship_id) else {
+            if let Some(&entity) = self.ships.index.get(&ship_id) {
+                self.world.set_transit_state(entity, TransitState::None);
+            }
+            return None;
+        };
+        self.transit_journal
+            .register_outgoing(OutgoingTransitAttempt {
+                attempt_id,
+                ship_id,
+                from: self.sector_id,
+                to,
+                handoff: handoff.clone(),
+                gate_id,
+                entry_pos,
+                request_tick,
+                state: TransitAttemptState::Prepared,
+            });
         self.emit_event(event);
         Some(TransitCommitData {
+            attempt_id,
             handoff: Box::new(handoff),
             entry_pos,
             request_tick,
@@ -343,46 +409,6 @@ impl SimulationNode {
         })
     }
 
-    pub(crate) fn transit_commit_retry_due(&self, ship_id: ShipId, request_tick: Tick) -> bool {
-        let Some(&entity) = self.ships.index.get(&ship_id) else {
-            return false;
-        };
-        self.world
-            .get::<TransitRetryComp>(entity)
-            .map(|state| {
-                state.request_tick != request_tick || self.current_tick >= state.next_retry_tick
-            })
-            .unwrap_or(true)
-    }
-
-    pub(crate) fn note_transit_commit_proposed(&mut self, ship_id: ShipId, request_tick: Tick) {
-        let Some(&entity) = self.ships.index.get(&ship_id) else {
-            return;
-        };
-        let existing = self
-            .world
-            .get::<TransitRetryComp>(entity)
-            .map(|state| *state);
-        let delay = existing
-            .filter(|state| state.request_tick == request_tick)
-            .map(|state| {
-                state
-                    .backoff_ticks
-                    .saturating_mul(2)
-                    .min(TRANSIT_RETRY_MAX_TICKS)
-            })
-            .unwrap_or(TRANSIT_RETRY_INITIAL_TICKS);
-        let _ = self.world.remove_one::<TransitRetryComp>(entity);
-        let _ = self.world.insert_one(
-            entity,
-            TransitRetryComp {
-                request_tick,
-                next_retry_tick: Tick(self.current_tick.value().saturating_add(delay)),
-                backoff_ticks: delay,
-            },
-        );
-    }
-
     /// Finalize the source half of a Sector Transit by removing the frozen
     /// recovery copy and appending `SectorTransitCompleted` to the source log.
     /// Normal completion calls this only after a committed Ack matches the
@@ -392,14 +418,14 @@ impl SimulationNode {
     /// `InTransit`, so a crash cannot leave both logs without a recoverable copy.
     ///
     /// Ack carries only the transfer identity. The source re-reads the
-    /// canonical handoff state from its frozen recovery copy before removal;
-    /// `TransitComp` guards guarantee that state has not changed since Request.
-    /// The resulting `SectorTransitCompleted.handoff` therefore matches the
-    /// state previously proposed to the destination without coupling Ack to a
-    /// second copy of the Ship payload.
+    /// canonical handoff state from the durable Saga before removal; the
+    /// resulting `SectorTransitCompleted.handoff` therefore matches the state
+    /// previously proposed to the destination without reconstructing it from
+    /// the ECS or coupling Ack to a second payload copy.
     ///
     /// Idempotent: a no-op if the Ship is already gone (e.g. this Commit
     /// entry were ever observed twice).
+    #[cfg(test)]
     pub(crate) fn complete_outgoing_transit(
         &mut self,
         ship_id: ShipId,
@@ -407,7 +433,28 @@ impl SimulationNode {
         entry_pos: dawn_core::AbsolutePosition,
         request_tick: Tick,
     ) {
-        let Some(handoff) = self.handoff_for_transit(ship_id) else {
+        let Some(attempt_id) = self
+            .transit_journal
+            .outgoing_for_ship(ship_id)
+            .map(|attempt| attempt.attempt_id)
+        else {
+            return;
+        };
+        self.complete_outgoing_transit_for_attempt(attempt_id, to, entry_pos, request_tick);
+    }
+
+    pub(crate) fn complete_outgoing_transit_for_attempt(
+        &mut self,
+        attempt_id: TransitAttemptId,
+        to: SectorId,
+        entry_pos: dawn_core::AbsolutePosition,
+        request_tick: Tick,
+    ) {
+        let Some(handoff) = self
+            .transit_journal
+            .outgoing(attempt_id)
+            .map(|attempt| attempt.handoff.clone())
+        else {
             return;
         };
         let Some(event) = self.complete_outgoing_state(&handoff, to, entry_pos, request_tick)
@@ -415,6 +462,7 @@ impl SimulationNode {
             return;
         };
         self.emit_event(event);
+        let _ = self.transit_journal.mark_acknowledged(attempt_id);
     }
 
     fn complete_outgoing_state(
@@ -564,7 +612,6 @@ impl SimulationNode {
         request_tick: Tick,
     ) {
         let ship_id = handoff.ship_id;
-        self.record_completed_incoming_transit(ship_id, from, self.sector_id, request_tick);
         self.import_transit(handoff, from, entry_pos, request_tick);
         if let Some(gate_id) = gate_id {
             let to = self.sector_id();
@@ -628,7 +675,6 @@ impl SimulationNode {
         if self.sector_id == e.from {
             self.remove_ship(e.handoff.ship_id);
         } else if self.sector_id == e.to {
-            self.record_completed_incoming_transit(e.handoff.ship_id, e.from, e.to, e.request_tick);
             if self.ships.index.contains_key(&e.handoff.ship_id) {
                 if e.tick > self.current_tick {
                     self.current_tick = e.tick;
@@ -714,6 +760,22 @@ mod tests {
     }
 
     #[test]
+    fn transit_attempt_counter_exhaustion_does_not_freeze_the_ship() {
+        let mut node = mem_node();
+        let ship_id = node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        let entity = *node.ships.index.get(&ship_id).unwrap();
+        node.transit_attempt_counter = u64::MAX;
+        let event_count = node.total_event_count();
+
+        assert!(node
+            .prepare_transit_commit(ship_id, SectorId(1), None)
+            .is_none());
+        assert_eq!(node.world.transit_state(entity), TransitState::None);
+        assert_eq!(node.total_event_count(), event_count);
+        assert!(node.can_propose_transit(ship_id));
+    }
+
+    #[test]
     fn propose_transit_is_rejected_when_ship_is_already_in_transit() {
         let mut node = mem_node();
         let ship_id = node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
@@ -796,6 +858,11 @@ mod tests {
         })
         .unwrap();
         let snapshot = node.export_transit(ship_id).unwrap();
+        let entity = *node.ships.index.get(&ship_id).unwrap();
+        node.world
+            .get_mut::<VelocityComp>(entity)
+            .expect("transit ship must retain its velocity component")
+            .0 = Velocity::new(99.0, 0.0, 0.0);
 
         let entry_pos = dawn_core::AbsolutePosition::new(500.0, 0.0, 0.0);
         node.complete_outgoing_transit(snapshot.ship_id, SectorId(1), entry_pos, Tick::ZERO);
@@ -810,6 +877,7 @@ mod tests {
         match last {
             DomainEvent::SectorTransitCompleted(e) => {
                 assert_eq!(e.handoff.ship_id, ship_id);
+                assert_eq!(e.handoff, snapshot, "Ack cleanup must use Saga handoff");
                 assert_eq!(e.from, node.sector_id());
                 assert_eq!(e.to, SectorId(1));
                 assert_eq!(e.entry_pos, entry_pos);

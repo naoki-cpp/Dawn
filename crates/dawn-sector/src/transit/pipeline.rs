@@ -8,10 +8,13 @@ use super::handoff;
 use crate::node::SimulationNode;
 #[cfg(test)]
 use dawn_core::DomainEvent;
-use dawn_core::{AbsolutePosition, JumpGateId, SectorId, ShipId, Tick, TransitHandoffState};
+use dawn_core::{
+    AbsolutePosition, JumpGateId, SectorId, ShipId, Tick, TransitAttemptId, TransitHandoffState,
+};
 
 #[derive(Debug)]
 pub(crate) struct CommitProposal {
+    pub attempt_id: TransitAttemptId,
     pub handoff: TransitHandoffState,
     pub from: SectorId,
     pub to: SectorId,
@@ -23,6 +26,7 @@ pub(crate) struct CommitProposal {
 impl From<handoff::CommitEffect> for CommitProposal {
     fn from(effect: handoff::CommitEffect) -> Self {
         Self {
+            attempt_id: effect.attempt_id,
             handoff: effect.handoff,
             from: effect.from,
             to: effect.to,
@@ -35,6 +39,7 @@ impl From<handoff::CommitEffect> for CommitProposal {
 
 #[derive(Debug)]
 pub(crate) struct AckProposal {
+    pub attempt_id: TransitAttemptId,
     pub ship_id: ShipId,
     pub from: SectorId,
     pub to: SectorId,
@@ -44,6 +49,7 @@ pub(crate) struct AckProposal {
 impl From<handoff::AckEffect> for AckProposal {
     fn from(effect: handoff::AckEffect) -> Self {
         Self {
+            attempt_id: effect.attempt_id,
             ship_id: effect.ship_id,
             from: effect.from,
             to: effect.to,
@@ -64,12 +70,6 @@ fn journal(node: &SimulationNode) -> handoff::TransitJournal {
     node.transit_journal().clone()
 }
 
-/// Whether checkpoint compaction must be deferred to preserve the durable
-/// outgoing request used for restart retry.
-pub(crate) fn has_pending_outgoing_transit(node: &SimulationNode) -> bool {
-    handoff::has_pending_outgoing_transit(&journal(node))
-}
-
 pub(crate) fn apply_request(
     node: &mut SimulationNode,
     ship_id: ShipId,
@@ -88,9 +88,10 @@ pub(crate) fn apply_commit(
     entry_pos: AbsolutePosition,
     gate_id: Option<JumpGateId>,
     request_tick: Tick,
+    attempt_id: TransitAttemptId,
 ) -> Option<AckProposal> {
     let journal = journal(node);
-    handoff::apply_commit(
+    handoff::apply_commit_with_attempt(
         node,
         &journal,
         handoff_state,
@@ -99,6 +100,7 @@ pub(crate) fn apply_commit(
         entry_pos,
         gate_id,
         request_tick,
+        attempt_id,
     )
     .map(Into::into)
 }
@@ -109,9 +111,10 @@ pub(crate) fn apply_ack(
     from: SectorId,
     to: SectorId,
     request_tick: Tick,
+    attempt_id: TransitAttemptId,
 ) -> bool {
     let journal = journal(node);
-    handoff::apply_ack(node, &journal, ship_id, from, to, request_tick)
+    handoff::apply_ack_with_attempt(node, &journal, ship_id, from, to, request_tick, attempt_id)
 }
 
 pub(crate) fn due_retries(node: &mut SimulationNode) -> Vec<CommitProposal> {

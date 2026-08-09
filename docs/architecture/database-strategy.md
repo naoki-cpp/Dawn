@@ -127,6 +127,13 @@ identityについて#277 repositoryがcaught-upまたはdeterministically reconc
 
 ### 2.5 Transit persistence
 
+> **#276 implementation status (2026-08-09):** the historical EventStore scan
+> described below is no longer the recovery authority. `TransitSagaSnapshot` is
+> stored in `StateSnapshot` and `TickRecoveryDelta`; `TransitAttemptId` provides
+> direct lookup, while `OutgoingTransitAttempt` and `IncomingTransitReceipt` own
+> retry, terminal, and destination deduplication state. The public EventStore
+> remains an audit/projection stream only.
+
 現行Transitはpublic EventStore scanとsnapshot receiptへretry/dedup authorityが分散している。
 これは#276が置換するlegacy implementationである。
 

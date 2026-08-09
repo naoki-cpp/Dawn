@@ -24,8 +24,10 @@ Work-package ownership is:
   apply -> post-commit effect ordering;
 - **#275:** in-memory state-owner decomposition. It consumes this table rather
   than redefining which fields are durable;
-- **#276:** durable Transit Saga/attempt repository and retry lifecycle. It must
-  satisfy this recovery contract but owns the concrete Saga representation;
+- **#276:** durable Transit Saga/attempt repository and retry lifecycle. The
+  current implementation stores `TransitSagaSnapshot` in both `StateSnapshot`
+  and `TickRecoveryDelta`; it owns the concrete attempt/receipt representation
+  and must satisfy this recovery contract;
 - **#277:** admission/identity/Station repository schema and transaction APIs.
   Admission/identity protocol state and pre-materialization identity consumption
   may be repository-owned authority as specified below; Station world-state
@@ -145,7 +147,7 @@ recovery.
 | Admission grant / resume-ticket current and staged binding | Yes, repository-owned identity state | admission commit/resume/rotation | #277 durable IdentityRepository transaction + explicit reconciliation with committed Sector transitions | Ticket rotation and ownership lookup must be crash-safe. Once a Ship is materialized, its world ownership/active routing are also RecoveryDelta authority. |
 | `pending_fresh_admissions` in-memory claim set | Derived concurrency guard | Current admission runtime | Rebuild/reacquire from #277 prepared reservation + live handshake ownership | It must not be the authority for whether an ID is consumed. Crash may release the lock, but not the durable reservation. |
 | `pending_resume_admissions` in-memory claim map | Runtime concurrency guard | Current resume handshake | None; reacquire from durable identity/world state on retry | A crash may release the in-flight lock. It cannot change durable ownership/ticket authority. |
-| Transit ownership/freeze state and current handoff lifecycle state | Yes | Raft-committed Transit apply | Recovery delta/checkpoint plus the durable attempt/receipt authority selected by #276 | Legacy event scans are not the final recovery authority. #276 owns concrete Saga representation and reconciliation. |
+| Transit ownership/freeze state and current handoff lifecycle state | Yes | Raft-committed Transit apply | `TransitSagaSnapshot` in the checkpoint and `TickRecoveryDelta`, keyed by `TransitAttemptId` | `OutgoingTransitAttempt` owns the canonical handoff, retry deadline/count, and terminal state; `IncomingTransitReceipt` makes destination Commit idempotent. Public event scans replay/project facts only and never rebuild Saga state. |
 | Bot persistent behavior state | Yes when it affects future decisions | Bot components/state | Component delta and checkpoint | Purely recomputable selection may be derived only when specified. |
 | Pending human command queue | No, until admitted into a transition | Runtime connection | Runtime input queue | Disconnect/crash may require client resubmission. The current generic `ClientRequest` protocol has no request ID, so resubmission is a new request unless an operation-specific idempotency identity exists. |
 | Generic client-command dedup state | Not provided today | `ClientRequest` envelope | None | Transparent exactly-once retry is not promised. A future generic retry feature must add a stable `RequestId`/equivalent at the #278/wire admission boundary and durable dedup state. |

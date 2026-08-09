@@ -30,9 +30,10 @@ impl SimulationNode {
             id_counter,
             player_id_counter,
             catalog_fingerprint,
+            transit_attempt_counter,
+            transit_journal,
             docked_ships,
             docked_players,
-            completed_incoming_transits,
             pending_bot_lock_commands,
             pending_auto_jumps,
             // Pending public events are an in-memory output buffer, not state.
@@ -64,7 +65,6 @@ impl SimulationNode {
             // they affect a future Tick and therefore belong to recovery
             // authority under ADR-0049.
             completed_warps: _,
-            transit_journal: _,
         } = self;
 
         let mut ships: Vec<ShipSnapshot> = ship_registry
@@ -127,6 +127,7 @@ impl SimulationNode {
             id_counter: *id_counter,
             player_id_counter: *player_id_counter,
             catalog_fingerprint: *catalog_fingerprint,
+            transit_attempt_counter: *transit_attempt_counter,
             ships,
             owners: ship_registry
                 .owners
@@ -135,7 +136,7 @@ impl SimulationNode {
                 .collect(),
             docked_ships: docked_ships.clone(),
             docked_players: docked_players.clone(),
-            completed_incoming_transits: completed_incoming_transits.clone(),
+            transit_saga: transit_journal.snapshot(),
             active_ships: ship_registry
                 .active_ship
                 .iter()
@@ -166,10 +167,11 @@ impl SimulationNode {
             id_counter,
             player_id_counter,
             catalog_fingerprint: _,
+            transit_attempt_counter,
+            transit_saga,
             docked_ships,
             docked_players,
             owners,
-            completed_incoming_transits,
             active_ships,
             pending_bot_lock_commands,
             pending_auto_jumps,
@@ -186,6 +188,7 @@ impl SimulationNode {
         self.current_tick = *tick;
         self.id_counter = *id_counter;
         self.player_id_counter = *player_id_counter;
+        self.transit_attempt_counter = *transit_attempt_counter;
         self.docked_ships = docked_ships.clone();
         self.docked_players = docked_players.clone();
         self.ships.owners = owners
@@ -196,7 +199,11 @@ impl SimulationNode {
             .iter()
             .map(|(&player, &ship)| (player, ship))
             .collect();
-        self.completed_incoming_transits = completed_incoming_transits.clone();
+        self.transit_journal = crate::transit::handoff::TransitJournal::from_snapshot(
+            *sector_id,
+            transit_saga.clone(),
+        )
+        .expect("checkpoint contains an invalid Transit Saga for this Sector");
         self.pending_bot_lock_commands = pending_bot_lock_commands.clone();
         self.pending_auto_jumps = pending_auto_jumps.clone();
     }
@@ -325,6 +332,7 @@ mod tests {
             id_counter: 5,
             player_id_counter: 3,
             catalog_fingerprint: crate::game_data::test_catalog().fingerprint(),
+            transit_attempt_counter: 0,
             ships: vec![ShipSnapshot {
                 ship_id: ShipId::new(NodeId(0), 0),
                 ship_type_id: dawn_core::ShipTypeId(1),
@@ -342,7 +350,7 @@ mod tests {
                 inventory: std::collections::BTreeMap::from([(dawn_core::ItemId::ScrapMetal, 4)]),
             }],
             owners: std::collections::BTreeMap::new(),
-            completed_incoming_transits: Vec::new(),
+            transit_saga: crate::persistence::TransitSagaSnapshot::default(),
             docked_ships: std::collections::BTreeMap::from([(
                 ShipId::new(NodeId(0), 0),
                 dawn_core::StationId(0),

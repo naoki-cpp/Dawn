@@ -50,6 +50,7 @@ fn sample_handoff() -> TransitHandoffState {
 
 fn commit_with(handoff: TransitHandoffState) -> TransitOp {
     TransitOp::Commit {
+        attempt_id: TransitAttemptId::new(SectorId(0), handoff.ship_id, 12),
         handoff: Box::new(handoff),
         from: SectorId(0),
         to: SectorId(1),

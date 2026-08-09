@@ -10,4 +10,7 @@ pub mod recovery;
 pub mod snapshot;
 
 pub use checkpoint::{CheckpointConfig, CheckpointScheduler};
-pub use snapshot::{CompletedIncomingTransit, ShipSnapshot, StateSnapshot};
+pub use snapshot::{
+    IncomingTransitReceipt, OutgoingTransitAttempt, ShipSnapshot, StateSnapshot,
+    TransitAttemptState, TransitSagaDiagnostics, TransitSagaSnapshot,
+};

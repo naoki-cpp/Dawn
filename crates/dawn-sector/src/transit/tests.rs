@@ -116,6 +116,7 @@ fn request_op_round_trips() {
 #[test]
 fn commit_and_ack_round_trip() {
     let commit = TransitOp::Commit {
+        attempt_id: TransitAttemptId::new(SectorId(0), sample_handoff().ship_id, 12),
         handoff: Box::new(sample_handoff()),
         from: SectorId(0),
         to: SectorId(1),
@@ -132,6 +133,7 @@ fn commit_and_ack_round_trip() {
     ));
 
     let ack = TransitOp::Ack {
+        attempt_id: TransitAttemptId::new(SectorId(0), sample_handoff().ship_id, 12),
         ship_id: sample_handoff().ship_id,
         from: SectorId(0),
         to: SectorId(1),
@@ -160,6 +162,7 @@ fn destination_commit_then_source_ack_moves_ownership_without_a_zero_owner_windo
         .unwrap();
     let request_tick = source.current_tick();
     let commit = TransitOp::Commit {
+        attempt_id: data.attempt_id,
         handoff: data.handoff,
         from: SectorId(0),
         to: SectorId(1),
@@ -204,6 +207,7 @@ fn transit_carries_owner_binding_to_destination_and_snapshot_restore() {
     commit_tx
         .send(
             (TransitOp::Commit {
+                attempt_id: data.attempt_id,
                 handoff: data.handoff,
                 from: SectorId(0),
                 to: SectorId(1),
@@ -288,6 +292,7 @@ fn transit_preserves_a_pending_resume_ticket_for_the_destination() {
     commit_tx
         .send(
             (TransitOp::Commit {
+                attempt_id: data.attempt_id,
                 handoff: data.handoff,
                 from: SectorId(0),
                 to: SectorId(1),
@@ -325,6 +330,7 @@ fn duplicate_destination_commit_is_idempotent_and_reissues_ack() {
         .prepare_transit_commit(ship_id, SectorId(1), None)
         .unwrap();
     let commit = TransitOp::Commit {
+        attempt_id: data.attempt_id,
         handoff: data.handoff,
         from: SectorId(0),
         to: SectorId(1),
@@ -362,18 +368,23 @@ fn duplicate_destination_commit_is_idempotent_and_reissues_ack() {
 fn restored_requested_transit_reproposes_commit_with_the_durable_route() {
     let mut source = node(0, 0);
     let ship_id = source.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
-    let snapshot_before = source.take_snapshot();
     source
         .prepare_transit_commit(ship_id, SectorId(1), None)
         .unwrap();
+    let snapshot = source.take_snapshot();
+    let attempt_id = snapshot
+        .transit_saga
+        .outgoing
+        .first()
+        .expect("request must create a durable Saga attempt")
+        .attempt_id;
 
-    let mut store = InMemoryEventStore::new();
-    for event in source.pending_events() {
-        store.append(event.clone());
-    }
+    // Recovery must use the checkpointed Saga even when the public event log
+    // has already been compacted away. The event store is deliberately empty.
+    let store = InMemoryEventStore::new();
     let mut restored = SimulationNode::restore_from_test(
         store,
-        &snapshot_before,
+        &snapshot,
         std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
         &[],
         &[],
@@ -388,12 +399,14 @@ fn restored_requested_transit_reproposes_commit_with_the_durable_route() {
             gate_id,
             entry_pos,
             request_tick,
+            attempt_id: proposed_attempt_id,
             ..
         } => {
             assert_eq!(handoff.ship_id, ship_id);
             assert_eq!(gate_id, None);
             assert_eq!(entry_pos, AbsolutePosition::ORIGIN);
             assert_eq!(request_tick, Tick::ZERO);
+            assert_eq!(proposed_attempt_id, attempt_id);
         }
         other => panic!("expected Commit, got {other:?}"),
     }
@@ -452,6 +465,7 @@ fn destination_marker_keeps_destination_local_tick() {
     let (tx, mut committed_rx) = mpsc::unbounded_channel();
     tx.send(
         TransitOp::Commit {
+            attempt_id: TransitAttemptId::new(SectorId(0), sample_handoff().ship_id, 99),
             handoff: Box::new(sample_handoff()),
             from: SectorId(0),
             to: SectorId(1),
@@ -508,6 +522,7 @@ fn duplicate_commit_after_destination_checkpoint_does_not_append_a_pending_marke
         .prepare_transit_commit(ship_id, SectorId(1), None)
         .unwrap();
     let commit = TransitOp::Commit {
+        attempt_id: data.attempt_id,
         handoff: data.handoff,
         from: SectorId(0),
         to: SectorId(1),
@@ -554,6 +569,7 @@ fn duplicate_commit_after_checkpoint_does_not_resurrect_removed_ship() {
         .prepare_transit_commit(ship_id, SectorId(1), None)
         .unwrap();
     let commit = TransitOp::Commit {
+        attempt_id: data.attempt_id,
         handoff: data.handoff,
         from: SectorId(0),
         to: SectorId(1),

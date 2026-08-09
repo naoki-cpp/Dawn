@@ -14,7 +14,6 @@ impl SimulationNode {
     /// Used only by the test-only legacy public-event replay fixture.
     #[cfg(test)]
     pub(crate) fn apply_event(&mut self, event: &DomainEvent) {
-        self.transit_journal.observe(event);
         // Transit replay policy belongs to the same deep module as the live
         // Request/Commit/Ack and retry policy. This test-only public-event
         // adapter only executes the directive using node-private ECS mechanisms.

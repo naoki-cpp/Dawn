@@ -17,6 +17,9 @@ pub enum DawnError {
     #[error("entity id counter overflow on node {0}")]
     IdCounterOverflow(crate::NodeId),
 
+    #[error("transit attempt counter overflow in sector {0}")]
+    TransitAttemptCounterOverflow(crate::SectorId),
+
     #[error("player {0:?} does not own ship {1}")]
     NotOwner(crate::PlayerId, crate::ShipId),
 }

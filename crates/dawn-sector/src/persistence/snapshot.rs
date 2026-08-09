@@ -73,7 +73,8 @@ use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 
 use dawn_core::{
     fitting::FittingSnapshot, AbsolutePosition, JumpGateId, LockOnCommand, NodeId, PlayerId,
-    Position, SectorBounds, SectorId, ShipId, ShipTypeId, Tick, Velocity,
+    Position, SectorBounds, SectorId, ShipId, ShipTypeId, Tick, TransitAttemptId,
+    TransitHandoffState, Velocity,
 };
 use serde::{Deserialize, Serialize};
 
@@ -133,17 +134,93 @@ pub struct ShipSnapshot {
     pub inventory: std::collections::BTreeMap<dawn_core::ItemId, u64>,
 }
 
-/// Durable destination-side receipt for an imported Sector Transit.
+/// Durable lifecycle state for one outgoing Transit Saga attempt.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TransitAttemptState {
+    /// Request was durably prepared but no Commit proposal has been emitted.
+    Prepared,
+    /// Commit was proposed and may be retried after the stored deadline.
+    CommitPending {
+        attempts: u32,
+        next_retry_tick: Tick,
+    },
+    /// A matching Ack removed the source recovery copy.
+    Acknowledged,
+    /// The handoff was intentionally ended without retrying.
+    Aborted { reason: String },
+    /// Recovery cannot safely continue without operator or reconciliation work.
+    Quarantined { reason: String },
+}
+
+/// Structured runtime diagnostics for the Transit Saga.
 ///
-/// Ship presence is not a valid deduplication marker because the imported Ship
-/// may be destroyed or transit onward before an old Commit retry arrives.
-/// #276 replaces this legacy receipt shape with the final durable Transit Saga.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CompletedIncomingTransit {
+/// These counters are derived from the durable Saga state; they are metrics,
+/// not another recovery authority.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TransitSagaDiagnostics {
+    /// Attempts that are prepared or waiting for a retry.
+    pub active_attempts: u64,
+    /// Active attempts whose next Commit proposal is governed by backoff.
+    pub retrying_attempts: u64,
+    /// Attempts whose source cleanup completed after a keyed Ack.
+    pub acknowledged_attempts: u64,
+    /// Attempts explicitly ended without completing the handoff.
+    pub aborted_attempts: u64,
+    /// Attempts requiring operator/recovery reconciliation instead of looping.
+    pub quarantined_attempts: u64,
+    /// Destination-side receipts retained for duplicate Commit handling.
+    pub incoming_receipts: u64,
+}
+
+/// Canonical source-side state for one Transit attempt.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OutgoingTransitAttempt {
+    /// Stable identity carried by every Request/Commit/Ack delivery.
+    pub attempt_id: TransitAttemptId,
+    /// Source-owned Ship retained until the keyed Ack is applied.
     pub ship_id: ShipId,
+    /// Sector that owns the frozen recovery copy.
     pub from: SectorId,
+    /// Destination Sector for the handoff.
     pub to: SectorId,
+    /// Canonical handoff retained until the keyed Ack completes source cleanup.
+    /// Retries always reuse this value; they never reconstruct it from events or
+    /// live ECS state.
+    pub handoff: TransitHandoffState,
+    /// Gate route used to derive the destination-side navigation fact.
+    pub gate_id: Option<JumpGateId>,
+    /// Absolute destination entry point captured at Request time.
+    pub entry_pos: AbsolutePosition,
+    /// Source-local logical time retained for public fact correlation.
     pub request_tick: Tick,
+    /// Durable lifecycle and retry state.
+    pub state: TransitAttemptState,
+}
+
+/// Durable destination inbox receipt for one Transit attempt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IncomingTransitReceipt {
+    /// Attempt ID used to answer duplicate Commit deliveries.
+    pub attempt_id: TransitAttemptId,
+    /// Ship materialized by the first accepted Commit.
+    pub ship_id: ShipId,
+    /// Source Sector recorded for diagnostics and reconciliation.
+    pub from: SectorId,
+    /// Destination Sector that owns this inbox receipt.
+    pub to: SectorId,
+    /// Source-local logical time used to validate duplicate Commit payloads.
+    pub request_tick: Tick,
+    /// Destination logical time at first materialization.
+    pub materialized_at: Tick,
+}
+
+/// Checkpoint/RecoveryDelta member owned by the Transit Saga.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TransitSagaSnapshot {
+    /// Source-side attempts owned by this Sector.
+    pub outgoing: Vec<OutgoingTransitAttempt>,
+    /// Destination-side Commit receipts owned by this Sector.
+    pub incoming: Vec<IncomingTransitReceipt>,
 }
 
 // ── Node-level snapshot ───────────────────────────────────────────────────────
@@ -215,14 +292,16 @@ pub struct StateSnapshot {
     /// Content fingerprint of the validated module/ship catalog used to
     /// materialize this checkpoint.
     pub catalog_fingerprint: u64,
+    /// Next source-local sequence for opaque Transit attempt identities.
+    pub transit_attempt_counter: u64,
     /// State of every Ship in the Sector at the snapshot instant.
     pub ships: Vec<ShipSnapshot>,
     /// Authoritative Ship -> Player ownership bindings, including Ships that
     /// arrived through Transit after their original Sector log was compacted.
     pub owners: BTreeMap<dawn_core::ShipId, dawn_core::PlayerId>,
-    /// Destination-side receipts that survive checkpoint compaction.
-    #[serde(default)]
-    pub completed_incoming_transits: Vec<CompletedIncomingTransit>,
+    /// Durable Transit attempt/receipt state. Event history is a public fact
+    /// stream and is not used as the recovery index for this member.
+    pub transit_saga: TransitSagaSnapshot,
     /// Current docked station per ship.
     pub docked_ships: BTreeMap<dawn_core::ShipId, dawn_core::StationId>,
     /// Current docked station context per player.
@@ -902,6 +981,7 @@ mod tests {
             id_counter: 5,
             player_id_counter: 3,
             catalog_fingerprint: 0x1234,
+            transit_attempt_counter: 0,
             ships: vec![ShipSnapshot {
                 ship_id: ShipId::new(NodeId(0), 0),
                 ship_type_id: ShipTypeId(1),
@@ -922,7 +1002,7 @@ mod tests {
                 )]),
             }],
             owners: BTreeMap::new(),
-            completed_incoming_transits: Vec::new(),
+            transit_saga: TransitSagaSnapshot::default(),
             docked_ships: BTreeMap::from([(ShipId::new(NodeId(0), 0), dawn_core::StationId(0))]),
             docked_players: BTreeMap::from([(dawn_core::PlayerId(9), dawn_core::StationId(0))]),
             active_ships: BTreeMap::from([(dawn_core::PlayerId(9), ShipId::new(NodeId(0), 0))]),

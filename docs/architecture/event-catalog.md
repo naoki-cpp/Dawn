@@ -149,9 +149,14 @@ See [ADR-0017](../adr/ADR-0017-snapshot-compaction.md), [ADR-0049](../adr/ADR-00
 
 Validation-stage rejection is expressed via `CommandRejected`, not an event (INV-006); there is no `SectorTransitRejected` event. `propose_transit` returns `Err` without emitting an event if the Ship is absent or already in Transit.
 
-The corresponding command is `TransitCommand { ship_id, to }`. Raft carries `TransitOp::Request`, `Commit`, and `Ack`: Request freezes the source and persists `request_tick`, `gate_id`, and one authoritative `entry_pos: AbsolutePosition`; current retries reconstruct the same absolute arrival from the EventStore. Commit materializes the destination by deriving its anchor and local offset from that absolute point through the same seam used by replay, then records completion using the source-local `request_tick` plus a destination-local event `tick`; Ack removes the source recovery copy. Current unresolved source Requested events are retried from EventStore after restart with bounded exponential backoff, and current checkpoint compaction is deferred while one is pending.
+The corresponding command is `TransitCommand { ship_id, to }`. Raft carries `TransitOp::Request`, `Commit`, and `Ack`: Request freezes the source, allocates a `TransitAttemptId`, and persists the canonical `OutgoingTransitAttempt` with `gate_id`, `entry_pos: AbsolutePosition`, and the complete handoff. Commit and Ack carry that same attempt ID. Commit materializes the destination by deriving its anchor and local offset from the absolute entry point through the same seam used by replay, then records an `IncomingTransitReceipt`; duplicate Commit is answered from that receipt without rematerializing. Ack removes the source recovery copy only when the keyed outgoing Saga attempt is still in transit. Retries read the checkpointed Saga directly with bounded exponential backoff, so public-event retention and checkpoint compaction are independent of Transit retry state.
 
-> **ADR-0049 / #276 migration:** the preceding EventStore scan is a description of current behavior, not the long-term exact recovery repository. #276 replaces it with a durable `TransitAttemptId` Saga containing direct outgoing attempt, incoming receipt, retry, and terminal state. Public Transit events may remain facts, but Saga/recovery authority must satisfy ADR-0049 checkpoint/RPO/compaction/promotion rules.
+> **ADR-0049 / #276:** the `TransitAttemptId` Saga is the exact recovery authority. It is checkpointed in `TransitSagaSnapshot` and carried by recovery deltas; public Transit events remain business facts and test/projection inputs, but are not scanned to reconstruct outgoing retries or incoming receipts.
+>
+> Retry proposals use bounded exponential backoff and quarantine an attempt after
+> the configured retry limit. `SimulationNode::transit_saga_diagnostics()` exposes
+> structured counts for active, retrying, terminal, quarantined, and incoming
+> receipt records without creating a second source of truth.
 
 ### 3.7 Jump Gate Navigation (ADR-0009, complete)
 

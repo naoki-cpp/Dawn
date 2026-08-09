@@ -197,8 +197,9 @@ Tick consumption, it belongs in checkpoint/delta recovery data.
 `pending_auto_jumps` is not allowed to be the sole representation of an already-
 committed Warp continuation. When an `auto_jump` Warp arrival commits, durable
 retry/idempotency state for continuing Transit must exist in the same recovery
-boundary. #276 may ultimately represent that as a `TransitAttemptId` Saga rather
-than a generic outbox intent.
+boundary. The current implementation keeps that queued continuation in the
+checkpointed recovery delta; a future extraction may represent it as a
+`TransitAttemptId` Saga rather than a generic outbox intent.
 
 ### 5. Player routing state
 
@@ -296,16 +297,20 @@ legacy persistence details are amended:
 - the public `SectorTransitRequested`/`Completed` events remain public facts where
   still useful;
 - scanning those events from genesis/hot log is not the final recovery repository;
-- pending retry/receipt/terminal state must be represented by the durable handoff
-  Saga designed in #276;
+- pending retry/receipt/terminal state is represented by the durable handoff Saga
+  in #276: `TransitSagaSnapshot` is part of the checkpoint and
+  `TickRecoveryDelta`, `TransitAttemptId` keys the direct lookup, and
+  `OutgoingTransitAttempt` / `IncomingTransitReceipt` carry the canonical
+  handoff and destination idempotency state;
 - that Saga must participate in this issue's checkpoint, RPO, compaction, crash,
   and replica-catch-up semantics;
 - reliable Raft proposals cannot be crash-lossy memory-only work.
 
-#276 owns the exact transaction/reconciliation model between Saga repository state
-and the general #271 recovery journal. It may choose to store Saga state directly in
-the general recovery transition or in a repository with explicit reconciliation,
-provided it does not weaken #284's acknowledgement/RPO guarantees.
+#276's current implementation stores Saga state directly in the recovery
+`StateSnapshot`/`TickRecoveryDelta` boundary. The general #271 recovery journal
+stores those authoritative records; public-event retention and event-log scans
+are not part of the Saga recovery path. Any future extraction to a repository
+must preserve the same checkpoint, compaction, crash, and promotion guarantees.
 
 ### 8. Checkpoints and compatibility
 
@@ -567,7 +572,8 @@ retry use explicit operation IDs.
   after successful durable append.
 - #275 must classify/split state owners according to `recovery-contract.md`,
   including Player active-ship routing as durable PlayerState.
-- #276 must replace legacy Transit event scans with durable attempt/receipt/retry
+- #276 replaces legacy Transit event scans with the durable
+  `TransitAttemptId`/`TransitSagaSnapshot` attempt, receipt, retry, and terminal
   authority satisfying this contract.
 - #277 must preserve Sector-journal authority for Station world state while making
   admission/identity repository authority, durable consumed-ID/allocator semantics,

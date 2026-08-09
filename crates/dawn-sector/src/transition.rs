@@ -85,6 +85,8 @@ pub struct TickRecoveryDelta {
     /// Presentation corrections are carried with the transition output so a
     /// runtime can publish them after the durable commit.
     pub completed_warps: Vec<ShipId>,
+    /// Source-local Transit attempt allocator watermark.
+    pub transit_attempt_counter: u64,
     /// Node-level authority captured after the tick. These fields make the
     /// delta include command mutations that happened before the tick runner
     /// prepared its write set, so a successful tick is a complete recovery
@@ -95,7 +97,7 @@ pub struct TickRecoveryDelta {
     pub owners: BTreeMap<ShipId, PlayerId>,
     pub docked_ships: BTreeMap<ShipId, StationId>,
     pub docked_players: BTreeMap<PlayerId, StationId>,
-    pub completed_incoming_transits: Vec<crate::persistence::CompletedIncomingTransit>,
+    pub transit_saga: crate::persistence::TransitSagaSnapshot,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -115,13 +117,14 @@ impl TickRecoveryDelta {
             pending_bot_lock_commands: Vec::new(),
             pending_auto_jumps: Vec::new(),
             completed_warps: Vec::new(),
+            transit_attempt_counter: 0,
             id_counter: 0,
             player_id_counter: 0,
             active_ships: BTreeMap::new(),
             owners: BTreeMap::new(),
             docked_ships: BTreeMap::new(),
             docked_players: BTreeMap::new(),
-            completed_incoming_transits: Vec::new(),
+            transit_saga: crate::persistence::TransitSagaSnapshot::default(),
         }
     }
 }
@@ -356,7 +359,7 @@ impl SectorEngine {
 }
 
 /// Error raised while applying a prepared delta to the live Sector state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum TransitionApplyError {
     #[error("prepared transition references unknown ship {0:?}")]
     UnknownShip(ShipId),
@@ -371,6 +374,8 @@ pub enum TransitionApplyError {
     TickMismatch { expected: Tick, actual: Tick },
     #[error("prepared Tick transition must advance exactly one step: {from} -> {to}")]
     InvalidTickStep { from: Tick, to: Tick },
+    #[error("prepared Tick contains invalid Transit Saga state: {0}")]
+    InvalidTransitSaga(String),
 }
 
 #[cfg(test)]
