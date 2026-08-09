@@ -7,17 +7,19 @@
 
 use dawn_actor::ws_server;
 use dawn_consensus::RaftActorHandle;
-use dawn_core::{DomainEvent, PlayerId, SectorId, ShipId};
+use dawn_core::{DomainEvent, SectorId, ShipId};
 use dawn_event_store::DurableJournal;
 use dawn_replication::{OutboundLogPublisher, TcpReplicationTransport};
 use dawn_sector::aoi::{AoiMessage, AoiSink, Observer};
-use dawn_sector::aoi_frame::AoiFrame;
+use dawn_sector::aoi_frame::{deliver_sector_sessions, AoiFrame, AoiSessionCallbacks};
 use dawn_sector::node::{
-    ClientCommandFollowup, ClientRequestAdmissionError, JumpOutcome, SimulationNode,
+    collect_runtime_commands, ClientRequestAdmissionError, JumpOutcome, RuntimeCommandDispatch,
+    SimulationNode,
 };
 use dawn_sector::transit;
+use dawn_sector::transit::RuntimeHealth;
 use dawn_wire::ServerMessage;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use tokio::sync::mpsc;
 
@@ -43,6 +45,7 @@ pub(crate) struct SectorNodeRuntime {
     sessions: Vec<ws_server::PlayerSession>,
     aoi_frame: AoiFrame,
     outbound_replication: OutboundLogPublisher<TcpReplicationTransport>,
+    runtime_health: RuntimeHealth,
 }
 
 impl SectorNodeRuntime {
@@ -62,6 +65,7 @@ impl SectorNodeRuntime {
                 repl_transport,
                 event_store,
             ),
+            runtime_health: RuntimeHealth::new(),
         }
     }
 
@@ -80,7 +84,13 @@ impl SectorNodeRuntime {
         });
         self.aoi_frame
             .retain_players(|player_id| player_id != sess.player_id);
-        seed_runtime_session(&mut self.aoi_frame, node, &sess);
+        self.aoi_frame.seed_observer(
+            node,
+            Observer {
+                player_id: sess.player_id,
+                ship_id: sess.ship_id,
+            },
+        );
         self.sessions.push(sess);
     }
 
@@ -91,25 +101,24 @@ impl SectorNodeRuntime {
         committed_rx: &mut mpsc::UnboundedReceiver<Vec<u8>>,
         event_store: &mut impl dawn_event_store::store::EventStore,
         recovery_journal: &mut impl DurableJournal,
-        node_id: dawn_core::NodeId,
     ) -> anyhow::Result<()> {
         let (lock_commands, pending_jumps) = self.collect_player_commands(node);
         self.propose_player_jumps(node, raft, pending_jumps);
 
         let sector_id = self.sector_id;
-        let transition_id = dawn_sector::transition::SectorTransitionId(
-            (u128::from(node.current_tick().value()) << 8) | u128::from(node_id.0),
-        );
-        let output = transit::run_durable_runtime_tick(
+        let transition_id = transit::runtime_transition_id(node);
+        let mut consensus = transit::RaftRuntimeConsensus::new(raft, committed_rx);
+        let output = transit::run_durable_runtime_tick_with_consensus_and_health(
             node,
             recovery_journal,
-            raft,
-            committed_rx,
+            &mut consensus,
+            &mut self.runtime_health,
             &lock_commands,
             transit::DurableRuntimeTickContext {
                 transition_id,
                 owner_epoch: 0,
                 durability: dawn_event_store::DurabilityMode::Synced,
+                profile: transit::RuntimeDurabilityProfile::LocalDurable,
             },
             |_, _, _| {},
         )
@@ -134,25 +143,35 @@ impl SectorNodeRuntime {
         let mut lock_commands = Vec::new();
         let mut pending_jumps = Vec::new();
 
-        for (i, sess) in self.sessions.iter_mut().enumerate() {
-            while let Some(request) = sess.try_recv_request() {
-                match node.apply_client_request(sess.player_id, request, &mut lock_commands) {
-                    Ok(Some(ClientCommandFollowup::Jump { ship_id, command })) => {
-                        pending_jumps.push((i, ship_id, command));
-                        break;
-                    }
-                    Ok(Some(followup @ ClientCommandFollowup::RefreshPlayerLoadout { .. })) => {
-                        if let Some(player_id) = followup.loadout_player_id() {
-                            if let Some(loadout) =
-                                node.build_player_loadout_json_for_player(player_id)
-                            {
-                                sess.send_message(&ServerMessage::PlayerLoadout(loadout));
-                            }
+        for dispatch in collect_runtime_commands(
+            node,
+            &mut self.sessions,
+            &mut lock_commands,
+            |session| session.player_id,
+            ws_server::PlayerSession::try_recv_request,
+        ) {
+            match dispatch {
+                RuntimeCommandDispatch::Jump {
+                    session_index,
+                    ship_id,
+                    command,
+                } => pending_jumps.push((session_index, ship_id, command)),
+                RuntimeCommandDispatch::RefreshPlayerLoadout {
+                    session_index,
+                    player_id,
+                } => {
+                    if let Some(loadout) = node.build_player_loadout_json_for_player(player_id) {
+                        if let Some(session) = self.sessions.get_mut(session_index) {
+                            session.send_message(&ServerMessage::PlayerLoadout(loadout));
                         }
                     }
-                    Ok(None) => {}
-                    Err(error) => {
-                        sess.send_message(&ServerMessage::ClientRequestRejected(
+                }
+                RuntimeCommandDispatch::Rejected {
+                    session_index,
+                    error,
+                } => {
+                    if let Some(session) = self.sessions.get_mut(session_index) {
+                        session.send_message(&ServerMessage::ClientRequestRejected(
                             client_request_rejection(error),
                         ));
                     }
@@ -238,104 +257,44 @@ impl SectorNodeRuntime {
         warp_arrivals: &[ShipId],
         jumped_ships: &HashMap<ShipId, SectorId>,
     ) {
-        deliver_runtime_sessions(
+        deliver_sector_sessions(
             &mut self.aoi_frame,
             node,
             &mut self.sessions,
-            &self.peer_ws,
             new_events,
             warp_arrivals,
             jumped_ships,
+            AoiSessionCallbacks {
+                player_id: |session: &ws_server::PlayerSession| session.player_id,
+                ship_id: |session: &ws_server::PlayerSession| session.ship_id,
+                deliver: |session: &mut ws_server::PlayerSession,
+                          frame: &mut AoiFrame,
+                          node: &SimulationNode,
+                          new_events: &[DomainEvent],
+                          warp_arrivals: &[ShipId]| {
+                    let observer = Observer {
+                        player_id: session.player_id,
+                        ship_id: session.ship_id,
+                    };
+                    let mut sink = SessionSink(session);
+                    frame.deliver_observer(&mut sink, node, observer, new_events, warp_arrivals)
+                },
+                on_redirect: |session: &mut ws_server::PlayerSession, destination| {
+                    if let Some(&ws_addr) = self.peer_ws.get(&destination) {
+                        send_redirect(session, ws_addr);
+                        println!("[Node] Redirect {:?} -> {ws_addr}", session.player_id);
+                    }
+                },
+            },
         );
     }
 }
 
-trait RuntimeAoiSession {
-    fn player_id(&self) -> PlayerId;
-    fn ship_id(&self) -> ShipId;
-    fn send_redirect(&mut self, ws_addr: SocketAddr);
-
-    fn deliver(
-        &mut self,
-        frame: &mut AoiFrame,
-        node: &SimulationNode,
-        new_events: &[DomainEvent],
-        warp_arrivals: &[ShipId],
-    ) -> bool;
-}
-
-fn seed_runtime_session<T: RuntimeAoiSession>(
-    frame: &mut AoiFrame,
-    node: &SimulationNode,
-    session: &T,
-) {
-    frame.seed_observer(
-        node,
-        Observer {
-            player_id: session.player_id(),
-            ship_id: session.ship_id(),
-        },
-    );
-}
-
-fn deliver_runtime_sessions<T: RuntimeAoiSession>(
-    frame: &mut AoiFrame,
-    node: &SimulationNode,
-    sessions: &mut Vec<T>,
-    peer_ws: &HashMap<SectorId, SocketAddr>,
-    new_events: &[DomainEvent],
-    warp_arrivals: &[ShipId],
-    jumped_ships: &HashMap<ShipId, SectorId>,
-) {
-    frame.rebuild(node);
-
-    sessions.retain_mut(|session| {
-        if let Some(&dest) = jumped_ships.get(&session.ship_id()) {
-            if let Some(&ws_addr) = peer_ws.get(&dest) {
-                session.send_redirect(ws_addr);
-                println!("[Node] Redirect {:?} -> {ws_addr}", session.player_id());
-            }
-            frame.retain_players(|player_id| player_id != session.player_id());
-            return false;
-        }
-
-        session.deliver(frame, node, new_events, warp_arrivals)
+fn send_redirect(session: &mut ws_server::PlayerSession, ws_addr: SocketAddr) {
+    session.conn.send_message(&ServerMessage::Redirect {
+        ws_addr: ws_addr.to_string(),
+        resume_ticket: session.resume_ticket,
     });
-
-    let live: HashSet<PlayerId> = sessions.iter().map(RuntimeAoiSession::player_id).collect();
-    frame.retain_players(|player_id| live.contains(&player_id));
-}
-
-impl RuntimeAoiSession for ws_server::PlayerSession {
-    fn player_id(&self) -> PlayerId {
-        self.player_id
-    }
-
-    fn ship_id(&self) -> ShipId {
-        self.ship_id
-    }
-
-    fn send_redirect(&mut self, ws_addr: SocketAddr) {
-        self.conn.send_message(&ServerMessage::Redirect {
-            ws_addr: ws_addr.to_string(),
-            resume_ticket: self.resume_ticket,
-        });
-    }
-
-    fn deliver(
-        &mut self,
-        frame: &mut AoiFrame,
-        node: &SimulationNode,
-        new_events: &[DomainEvent],
-        warp_arrivals: &[ShipId],
-    ) -> bool {
-        let observer = Observer {
-            player_id: self.player_id,
-            ship_id: self.ship_id,
-        };
-        let mut sink = SessionSink(self);
-        frame.deliver_observer(&mut sink, node, observer, new_events, warp_arrivals)
-    }
 }
 
 /// Adapts a `ws_server::PlayerSession` to `AoiSink` (orphan-rule workaround:
@@ -353,7 +312,7 @@ impl AoiSink for SessionSink<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dawn_core::{NodeId, Position, SectorBounds, Velocity};
+    use dawn_core::{NodeId, PlayerId, Position, SectorBounds, Velocity};
     use dawn_sector::ship_types::SHIP_TYPE_NPC_FRIGATE;
 
     const CELL_SIZE: f64 = 100.0;
@@ -394,34 +353,6 @@ mod tests {
         }
     }
 
-    impl RuntimeAoiSession for FakeSession {
-        fn player_id(&self) -> PlayerId {
-            self.player_id
-        }
-
-        fn ship_id(&self) -> ShipId {
-            self.ship_id
-        }
-
-        fn send_redirect(&mut self, _ws_addr: SocketAddr) {
-            self.sent.push(Sent::Redirect);
-        }
-
-        fn deliver(
-            &mut self,
-            frame: &mut AoiFrame,
-            node: &SimulationNode,
-            new_events: &[DomainEvent],
-            warp_arrivals: &[ShipId],
-        ) -> bool {
-            let observer = Observer {
-                player_id: self.player_id,
-                ship_id: self.ship_id,
-            };
-            frame.deliver_observer(self, node, observer, new_events, warp_arrivals)
-        }
-    }
-
     impl AoiSink for FakeSession {
         fn send_aoi_message(&mut self, message: &AoiMessage) -> bool {
             match message {
@@ -432,6 +363,20 @@ mod tests {
             }
             true
         }
+    }
+
+    fn deliver_fake_session<V: dawn_sector::view::SectorView>(
+        session: &mut FakeSession,
+        frame: &mut AoiFrame,
+        node: &V,
+        new_events: &[DomainEvent],
+        warp_arrivals: &[ShipId],
+    ) -> bool {
+        let observer = Observer {
+            player_id: session.player_id,
+            ship_id: session.ship_id,
+        };
+        frame.deliver_observer(session, node, observer, new_events, warp_arrivals)
     }
 
     fn initial_node() -> (SimulationNode, ShipId, ShipId) {
@@ -482,28 +427,44 @@ mod tests {
 
         let mut frame = AoiFrame::new(CELL_SIZE);
         let mut sessions = vec![FakeSession::new(own)];
-        seed_runtime_session(&mut frame, &initial, &sessions[0]);
+        frame.seed_observer(
+            &initial,
+            Observer {
+                player_id: sessions[0].player_id,
+                ship_id: sessions[0].ship_id,
+            },
+        );
 
-        deliver_runtime_sessions(
+        deliver_sector_sessions(
             &mut frame,
             &initial,
             &mut sessions,
-            &HashMap::new(),
             &[],
             &[],
             &HashMap::new(),
+            AoiSessionCallbacks {
+                player_id: |session: &FakeSession| session.player_id,
+                ship_id: |session: &FakeSession| session.ship_id,
+                deliver: deliver_fake_session,
+                on_redirect: |session: &mut FakeSession, _| session.sent.push(Sent::Redirect),
+            },
         );
         assert!(sessions[0].sent.is_empty());
         sessions[0].sent.clear();
 
-        deliver_runtime_sessions(
+        deliver_sector_sessions(
             &mut frame,
             &next,
             &mut sessions,
-            &HashMap::new(),
             &[],
             &[],
             &HashMap::new(),
+            AoiSessionCallbacks {
+                player_id: |session: &FakeSession| session.player_id,
+                ship_id: |session: &FakeSession| session.ship_id,
+                deliver: deliver_fake_session,
+                on_redirect: |session: &mut FakeSession, _| session.sent.push(Sent::Redirect),
+            },
         );
         assert_eq!(
             sessions[0].sent,

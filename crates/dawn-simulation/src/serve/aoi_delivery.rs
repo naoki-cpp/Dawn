@@ -9,7 +9,7 @@
 use crate::ws_server;
 use dawn_core::{DomainEvent, PlayerId, ShipId};
 use dawn_sector::aoi::{AoiMessage, AoiSink, Observer};
-use dawn_sector::aoi_frame::AoiFrame;
+use dawn_sector::aoi_frame::{deliver_sector_sessions, AoiFrame, AoiSessionCallbacks};
 use dawn_sector::node::SimulationNode;
 use std::collections::{HashMap, HashSet};
 
@@ -109,12 +109,33 @@ fn deliver_single_sessions<T: RuntimeAoiSession>(
     new_events: &[DomainEvent],
     warp_arrivals: &[ShipId],
 ) {
-    frame.rebuild(node);
-    sessions.retain_mut(|session| session.deliver(frame, node, new_events, warp_arrivals));
-
-    let live: HashSet<PlayerId> = sessions.iter().map(RuntimeAoiSession::player_id).collect();
-    frame.retain_players(|player_id| live.contains(&player_id));
+    deliver_sector_sessions(
+        frame,
+        node,
+        sessions,
+        new_events,
+        warp_arrivals,
+        &HashMap::new(),
+        AoiSessionCallbacks {
+            player_id: RuntimeAoiSession::player_id,
+            ship_id: RuntimeAoiSession::ship_id,
+            deliver: deliver_runtime_session::<T>,
+            on_redirect: ignore_runtime_redirect::<T>,
+        },
+    );
 }
+
+fn deliver_runtime_session<T: RuntimeAoiSession>(
+    session: &mut T,
+    frame: &mut AoiFrame,
+    node: &SimulationNode,
+    new_events: &[DomainEvent],
+    warp_arrivals: &[ShipId],
+) -> bool {
+    session.deliver(frame, node, new_events, warp_arrivals)
+}
+
+fn ignore_runtime_redirect<T>(_session: &mut T, _destination: dawn_core::SectorId) {}
 
 fn deliver_cluster_sessions<T: RuntimeAoiSession>(
     frames: &mut [AoiFrame],

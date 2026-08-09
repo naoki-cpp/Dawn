@@ -7,6 +7,7 @@ use super::{
 };
 use crate::ws_server;
 use dawn_core::{DomainEvent, NodeId, Position, SectorBounds, SectorId, ShipId};
+use dawn_event_store::{DurabilityMode, InMemoryJournal};
 use dawn_sector::client_admission::{
     ClientAdmissionAttempt, ClientAdmissionIntent, ClientAdmissionRefusal, CommittedClientAdmission,
 };
@@ -14,7 +15,11 @@ use dawn_sector::client_admission_resolution::{
     resolve_client_admission, ClientAdmissionResolution,
 };
 use dawn_sector::dilation;
-use dawn_sector::node::{ClientCommandFollowup, SimulationNode};
+use dawn_sector::node::{collect_runtime_commands, RuntimeCommandDispatch, SimulationNode};
+use dawn_sector::transit::{
+    run_durable_runtime_tick_with_consensus_and_health, runtime_transition_id,
+    DurableRuntimeTickContext, LocalRuntimeConsensus, RuntimeDurabilityProfile, RuntimeHealth,
+};
 use dawn_wire::ServerMessage;
 use tokio::sync::mpsc;
 
@@ -54,6 +59,8 @@ pub(crate) async fn run_phase4_server(
     let bounds = SectorBounds::centered(SectorBounds::DEFAULT_HALF);
     let (galaxy, catalog) = load_serve_dependencies();
     let mut node = build_serve_node(NodeId(0), SectorId(0), bounds, pop_cap, galaxy, catalog);
+    let mut recovery_journal = InMemoryJournal::new();
+    let mut runtime_health = RuntimeHealth::new();
     let mut market = MarketRuntime::open("data/market.sqlite")
         .expect("failed to open Market database at data/market.sqlite");
 
@@ -197,28 +204,41 @@ pub(crate) async fn run_phase4_server(
                 let snapshot = market.handle_single(sess.player_id, market_command, &mut node);
                 sess.send_message(&ServerMessage::MarketSnapshot(snapshot));
             }
-            while let Some(request) = sess.try_recv_request() {
-                match node.apply_client_request(sess.player_id, request, &mut lock_commands) {
-                    Ok(Some(ClientCommandFollowup::Jump { ship_id, command })) => {
-                        eprintln!(
-                            "[Server] JumpCommand ignored (ship #{} gate #{}): \
-                             --serve runs a single-sector node without Raft",
-                            ship_id.raw(),
-                            command.gate_id.0
-                        );
-                    }
-                    Ok(Some(followup @ ClientCommandFollowup::RefreshPlayerLoadout { .. })) => {
-                        if let Some(player_id) = followup.loadout_player_id() {
-                            if let Some(loadout) =
-                                node.build_player_loadout_json_for_player(player_id)
-                            {
-                                sess.send_message(&ServerMessage::PlayerLoadout(loadout));
-                            }
+        }
+        for dispatch in collect_runtime_commands(
+            &mut node,
+            &mut sessions,
+            &mut lock_commands,
+            |session| session.player_id,
+            ws_server::PlayerSession::try_recv_request,
+        ) {
+            match dispatch {
+                RuntimeCommandDispatch::Jump {
+                    ship_id, command, ..
+                } => {
+                    eprintln!(
+                        "[Server] JumpCommand ignored (ship #{} gate #{}): \
+                         --serve runs a single-sector node without Raft",
+                        ship_id.raw(),
+                        command.gate_id.0
+                    );
+                }
+                RuntimeCommandDispatch::RefreshPlayerLoadout {
+                    session_index,
+                    player_id,
+                } => {
+                    if let Some(loadout) = node.build_player_loadout_json_for_player(player_id) {
+                        if let Some(session) = sessions.get_mut(session_index) {
+                            session.send_message(&ServerMessage::PlayerLoadout(loadout));
                         }
                     }
-                    Ok(None) => {}
-                    Err(error) => {
-                        sess.send_message(&ServerMessage::ClientRequestRejected(
+                }
+                RuntimeCommandDispatch::Rejected {
+                    session_index,
+                    error,
+                } => {
+                    if let Some(session) = sessions.get_mut(session_index) {
+                        session.send_message(&ServerMessage::ClientRequestRejected(
                             client_request_rejection(error),
                         ));
                     }
@@ -226,8 +246,25 @@ pub(crate) async fn run_phase4_server(
             }
         }
 
-        let tick_result = node.tick_with_lock_commands(&lock_commands);
-        all_new_events.extend(node.drain_pending_events());
+        let transition_id = runtime_transition_id(&node);
+        let mut consensus = LocalRuntimeConsensus;
+        let output = run_durable_runtime_tick_with_consensus_and_health(
+            &mut node,
+            &mut recovery_journal,
+            &mut consensus,
+            &mut runtime_health,
+            &lock_commands,
+            DurableRuntimeTickContext {
+                transition_id,
+                owner_epoch: 0,
+                durability: DurabilityMode::Synced,
+                profile: RuntimeDurabilityProfile::LocalDurable,
+            },
+            |_, _, _| {},
+        )
+        .expect("in-memory single-sector runtime must accept durable Tick");
+        let tick_result = output.tick_result;
+        all_new_events.extend(output.events);
 
         for sess in &sessions {
             let should_refresh = tick_result.events.iter().any(|event| {
@@ -258,7 +295,7 @@ pub(crate) async fn run_phase4_server(
             }
         }
 
-        let warp_arrivals = node.drain_completed_warps();
+        let warp_arrivals = output.completed_warps;
         aoi_delivery.deliver_single_sector(&node, &mut sessions, &all_new_events, &warp_arrivals);
 
         let was_dilated = tidi.is_dilated();

@@ -13,11 +13,6 @@ date     : 2026-08-02
 
 ## Medium
 
-### M-3（保留）: `SectorSimulatorActor`と`SimulationNode`の密結合
-
-本番パス外のin-process test/bench adapterで、handlerもmessage → node method → replyの薄い変換である。
-**再評価:** production runtimeとのdriftが不具合化するか、in-process clusterを本番構成へ近づける場合。
-
 ### M-9（保留）: `EventStore::append`のinfallible contract
 
 `FileEventStore`はwrite/flush失敗時にpanicするが、1 Sector = 1 processのcrash-only recoveryと整合する。
@@ -48,6 +43,6 @@ module間のdriftが実害になる場合。行数だけでは発火させない
 |---|---|
 | R-2 | 保留・trigger付き |
 | R-3 | commands slice 完了、transit / warp 継続監視 |
-| M-3 / M-9 | 保留・trigger付き |
+| M-9 | 保留・trigger付き |
 
 採らない方針: CRDT/LWW、protobuf、薄いadapterのための共有runtime crate、行数削減目的の網羅match・domain型の破壊、初回LAN検証でのTLS/認証。

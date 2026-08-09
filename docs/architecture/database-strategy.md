@@ -273,8 +273,8 @@ row・allocator watermarkをcommitしてからWelcomeを返す。abortはlive cl
 
 Station projectionはjournal transitionをglobal index順に受け、同じtransition identityの同じ
 indexを重複適用せず、gapを拒否する。非Station transitionは`mutation = None`でcursorだけを進める。
-#278がこのAPIをdurable RecoveryDeltaの後段へ接続し、projection failure時のfail-stop/catch-upを
-runtime policyとして実装する。
+#278の共有runtime frameがこのAPIの後段にreconciliation hookとfail-stop health gateを
+提供する。#277が具体的なprojection/repository transactionを、#280がcatch-up transportを所有する。
 
 現在の`MarketDb` public interfaceが`rusqlite::Result`を返す点は、2つ目のadapterを導入する時点で
 Market固有errorへ変換する。将来可能性だけを理由に今すぐ抽象traitを増やさない。
@@ -290,7 +290,7 @@ Current implementation:
   explicit viewを通す。Station inventoryのin-memory cacheはない
 - fresh identity reservation、allocator watermark再構築、ownership conflict検証、admission grantの
   atomic finalization/idempotency、Station projectionのdedup/global cursor schemaは実装済み
-- #278のruntime projection hookとfail-stop/reconciliation orchestrationは別責務として残る
+- #278のruntime projection hookとfail-stop/reconciliation orchestrationは共有frameに実装済み
 - Marketはsingle `MarketRuntime` + SQLite
 
 Accepted target / work package:

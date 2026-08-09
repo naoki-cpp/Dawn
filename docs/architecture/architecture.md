@@ -71,10 +71,9 @@ See [ADR-0003](../adr/ADR-0003-local-first-development.md), [ADR-0027](../adr/AD
 ### Future scope (direction only, not implemented)
 
 - TLS / QUIC (8E+)
-- #271 fallible/versioned atomic recovery journal
-- #272 storage-independent Sector engine transition boundary (Stop and full-Tick
-  prepare -> durable append -> live-apply slices are implemented)
+- #275 remaining state-owner extraction from `SimulationNode`
 - #280 unified peer transport carrying the #284 checkpoint/catch-up representation
+- deployment-specific recovery benchmark and RTO selection after #280
 
 **Do not implement code ahead of the current phase or redefine a contract owned by another refactor issue.**
 
@@ -96,9 +95,9 @@ See [ADR-0003](../adr/ADR-0003-local-first-development.md), [ADR-0027](../adr/AD
 | `dawn-actor` | library | Client transport boundary (`ClientConnection` trait) |
 | `dawn-replication` | library | Current replication/catch-up transport and anti-entropy implementation. #280 consolidates transport infrastructure and must carry the ADR-0049/#284 recovery representation without redefining it |
 | `dawn-market` | library | Player-to-player Market: bid/ask order book + `PlayerId` Currency ledger, its own SQLite authority independent of Sector tick determinism. The SQLite layer is an adapter around a private matching policy that owns crossing, price-time priority, partial fills, maker-price settlement, and Bid price-improvement refunds. Depends only on `dawn-core` + serde + rusqlite -- no transport/runtime dependency, same DAG position as `dawn-wire` (ADR-0034 §4/§5/§6). Constructs `RemoveItemCommand`/`ReturnItemCommand`/`CreditItemCommand` but never applies them; the caller (`dawn-simulation`) routes each to the Sector that owns the affected ship |
-| `dawn-sector` | library | Per-Sector game logic (currently `SimulationNode`, Tick, Transit, Warp, Bot AI, AoI, Snapshot). AoI consumers read through the storage-free `SectorView` boundary, and the Stop command has a `SectorEngine` prepare -> `DurableJournal` append -> live-apply vertical slice; #275 continues migrating the remaining state owners while preserving ADR-0049 recovery semantics |
-| `dawn-simulation` | binary | Wiring/bootstrap only. WsServer (Godot), Raft cluster wiring, load generation, TOML loader. Owns the `dawn-market` runtime bridge and routes Market-side commands to the Sector owner |
-| `dawn-sector-node` | binary | Production binary (8D-4). Wires TCP consensus/replication and persistence/runtime composition from static TOML config. 3 processes = 3-Sector cluster today |
+| `dawn-sector` | library | Per-Sector game logic plus the shared durable runtime frame. `SimulationNode` owns Tick/Transit/Warp/Bot AI/AoI/Snapshot state preparation; `run_durable_runtime_tick_with_consensus` owns the prepare -> durable append -> live-apply -> reconciliation -> output boundary with injected consensus and durability-policy adapters. `aoi_frame::deliver_sector_sessions` owns the common rebuild -> session delivery -> stale-player cleanup loop; adapters inject only transport callbacks. AoI consumers read through the storage-free `SectorView` boundary; #275 continues migrating the remaining state owners while preserving ADR-0049 recovery semantics |
+| `dawn-simulation` | binary | Bootstrap and adapter wiring for local/single/cluster runs. WsServer, Raft cluster wiring, load generation, TOML loader, and the `dawn-market` bridge are deployment adapters around the shared Sector runtime frame; it must not define a second Tick ordering |
+| `dawn-sector-node` | binary | Production bootstrap and adapter wiring (8D-4). It supplies TCP consensus/replication, FileJournal, SQLite repositories, and static TOML config to the shared Sector runtime frame. 3 processes = 3-Sector cluster today |
 
 ### Dependency DAG
 
@@ -189,11 +188,11 @@ Publish public events / replication / reliable effects
 Acknowledge after the selected durability + local-apply conditions
 ```
 
-The concrete `SimulationNode` no longer owns an `EventStore`. Legacy command paths
-still expose public events through an in-memory output buffer, while runtime-owned
-Stop and full-Tick adapters use bounded prepare -> durable append -> live apply.
-Migrating the remaining command/state owners and the production durability profile
-belongs to the explicitly scoped follow-up issues, not to the node's domain API.
+The concrete `SimulationNode` no longer owns an `EventStore`. The shared runtime
+frame owns bounded prepare -> durable append -> live apply -> reconciliation ->
+output ordering; local and production adapters select their consensus, journal,
+durability policy, and repository ports. Remaining state-owner extraction belongs
+to #275, while remote replicated durability and catch-up transport belong to #280.
 
 Command and `DomainEvent` remain separate types (INV-006), and neither is an accidental substitute for `RecoveryDelta`. See [recovery-contract.md](./recovery-contract.md), [tick-model.md](./tick-model.md), and [event-catalog.md](./event-catalog.md).
 

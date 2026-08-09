@@ -1,4 +1,4 @@
-//! `SectorSimulatorActor` — async Actor wrapper around `SimulationNode`.
+//! `SectorRuntimeDriver` — async driver for the shared Sector runtime.
 //!
 //! Provides an async, message-passing interface to the synchronous
 //! `SimulationNode`.  After each state-changing operation, new events are
@@ -20,10 +20,14 @@
 
 use dawn_consensus::{RaftActorHandle, Role, Term};
 use dawn_core::{NodeId, Position, SectorBounds, SectorId, ShipId, Tick, Velocity};
+use dawn_event_store::{DurabilityMode, InMemoryJournal};
 use dawn_replication::{InMemoryReplicationBus, OutboundLogPublisher};
 use dawn_sector::game_data::GameDataCatalog;
 use dawn_sector::node::SimulationNode;
-use dawn_sector::transit::TransitOp;
+use dawn_sector::transit::{
+    run_durable_runtime_tick_with_consensus_and_health, DurableRuntimeTickContext,
+    RaftRuntimeConsensus, RuntimeDurabilityProfile, RuntimeHealth, TransitOp,
+};
 use tokio::sync::{mpsc, oneshot};
 
 // ── Public result/stats types ─────────────────────────────────────────────────
@@ -53,7 +57,7 @@ pub struct NodeStats {
 
 // ── Messages ──────────────────────────────────────────────────────────────────
 
-enum SectorSimulatorMessage {
+enum SectorRuntimeMessage {
     Tick {
         reply: oneshot::Sender<TickSummary>,
     },
@@ -85,7 +89,7 @@ enum SectorSimulatorMessage {
     /// through the direct `SimulationNode` path in `main.rs`, not this
     /// actor. Validated locally (Ship in range of the gate, not already in
     /// transit), then proposed to the Raft Log via the same `TransitOp`
-    /// pipeline as [`SectorSimulatorMessage::Transit`]. `reply` is `false`
+    /// pipeline as [`SectorRuntimeMessage::Transit`]. `reply` is `false`
     /// if the command was rejected up front.
     #[cfg(test)]
     Jump {
@@ -98,8 +102,8 @@ enum SectorSimulatorMessage {
 
 // ── Actor ─────────────────────────────────────────────────────────────────────
 
-struct SectorSimulatorActor {
-    rx: mpsc::Receiver<SectorSimulatorMessage>,
+struct SectorRuntimeDriver {
+    rx: mpsc::Receiver<SectorRuntimeMessage>,
     node: SimulationNode,
     replication: OutboundLogPublisher<InMemoryReplicationBus>,
     /// Handle to this node's RaftActor (ADR-0014).
@@ -107,11 +111,13 @@ struct SectorSimulatorActor {
     /// Committed Raft Log payloads from this node's RaftActor, applied at
     /// Step 7.5 each Tick (ADR-0014 §7).
     raft_committed_rx: mpsc::UnboundedReceiver<Vec<u8>>,
+    recovery_journal: InMemoryJournal,
+    runtime_health: RuntimeHealth,
 }
 
-impl SectorSimulatorActor {
+impl SectorRuntimeDriver {
     fn new(
-        rx: mpsc::Receiver<SectorSimulatorMessage>,
+        rx: mpsc::Receiver<SectorRuntimeMessage>,
         node: SimulationNode,
         replication: OutboundLogPublisher<InMemoryReplicationBus>,
         raft: RaftActorHandle,
@@ -123,6 +129,8 @@ impl SectorSimulatorActor {
             replication,
             raft,
             raft_committed_rx,
+            recovery_journal: InMemoryJournal::new(),
+            runtime_health: RuntimeHealth::new(),
         }
     }
 
@@ -136,17 +144,28 @@ impl SectorSimulatorActor {
     async fn run(mut self) {
         while let Some(msg) = self.rx.recv().await {
             match msg {
-                SectorSimulatorMessage::Tick { reply } => {
+                SectorRuntimeMessage::Tick { reply } => {
                     let replication = &mut self.replication;
-                    let output = dawn_sector::transit::run_runtime_tick(
+                    let mut consensus =
+                        RaftRuntimeConsensus::new(&self.raft, &mut self.raft_committed_rx);
+                    let transition_id = dawn_sector::transit::runtime_transition_id(&self.node);
+                    let output = run_durable_runtime_tick_with_consensus_and_health(
                         &mut self.node,
-                        &self.raft,
-                        &mut self.raft_committed_rx,
+                        &mut self.recovery_journal,
+                        &mut consensus,
+                        &mut self.runtime_health,
                         &[],
+                        DurableRuntimeTickContext {
+                            transition_id,
+                            owner_epoch: 0,
+                            durability: DurabilityMode::Synced,
+                            profile: RuntimeDurabilityProfile::LocalDurable,
+                        },
                         |node, _, events| {
                             replication.publish_events(node.sector_id(), events);
                         },
-                    );
+                    )
+                    .expect("in-memory simulation runtime must accept durable Tick");
                     let summary = TickSummary {
                         tick: output.tick_result.tick,
                         events_emitted: output.tick_result.events_emitted,
@@ -155,7 +174,7 @@ impl SectorSimulatorActor {
                     let _ = reply.send(summary);
                 }
 
-                SectorSimulatorMessage::SpawnShip {
+                SectorRuntimeMessage::SpawnShip {
                     position,
                     velocity,
                     reply,
@@ -170,7 +189,7 @@ impl SectorSimulatorActor {
                     let _ = reply.send(ship_id);
                 }
 
-                SectorSimulatorMessage::GetStats { reply } => {
+                SectorRuntimeMessage::GetStats { reply } => {
                     let _ = reply.send(NodeStats {
                         node_id: self.node.node_id(),
                         sector_id: self.node.sector_id(),
@@ -180,12 +199,12 @@ impl SectorSimulatorActor {
                     });
                 }
 
-                SectorSimulatorMessage::GetRaftRole { reply } => {
+                SectorRuntimeMessage::GetRaftRole { reply } => {
                     let (role, term) = self.raft.role().await;
                     let _ = reply.send((role, term));
                 }
 
-                SectorSimulatorMessage::Transit { ship_id, to, reply } => {
+                SectorRuntimeMessage::Transit { ship_id, to, reply } => {
                     // Up-front validation only (INV-006: rejection produces
                     // no event). The ECS is untouched until the proposal
                     // commits and is applied at Step 7.5.
@@ -204,7 +223,7 @@ impl SectorSimulatorActor {
                 }
 
                 #[cfg(test)]
-                SectorSimulatorMessage::Jump {
+                SectorRuntimeMessage::Jump {
                     ship_id,
                     gate_id,
                     reply,
@@ -231,7 +250,7 @@ impl SectorSimulatorActor {
                     let _ = reply.send(accepted);
                 }
 
-                SectorSimulatorMessage::Shutdown => break,
+                SectorRuntimeMessage::Shutdown => break,
             }
         }
     }
@@ -241,7 +260,7 @@ impl SectorSimulatorActor {
 
 /// Static dependencies required to construct one Sector simulation actor.
 #[derive(Debug, Clone)]
-pub struct SectorSimulatorConfig {
+pub struct SectorRuntimeConfig {
     pub(crate) node_id: NodeId,
     pub(crate) sector_id: SectorId,
     pub(crate) bounds: SectorBounds,
@@ -249,25 +268,25 @@ pub struct SectorSimulatorConfig {
     pub(crate) catalog: std::sync::Arc<GameDataCatalog>,
 }
 
-/// Cloneable handle to a running `SectorSimulatorActor`.
+/// Cloneable handle to a running [`SectorRuntimeDriver`].
 #[derive(Clone)]
-pub struct SectorSimulatorHandle {
-    tx: mpsc::Sender<SectorSimulatorMessage>,
+pub struct SectorRuntimeHandle {
+    tx: mpsc::Sender<SectorRuntimeMessage>,
 }
 
-impl std::fmt::Debug for SectorSimulatorHandle {
-    /// `SectorSimulatorMessage` carries `oneshot::Sender`s, which are not
+impl std::fmt::Debug for SectorRuntimeHandle {
+    /// `SectorRuntimeMessage` carries `oneshot::Sender`s, which are not
     /// `Debug`, so this can't derive -- print the handle's identity instead
     /// (C-DEBUG: still gives callers something in `{:?}` contexts like
     /// `assert_eq!` failures, without the channel's internal state).
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SectorSimulatorHandle")
+        f.debug_struct("SectorRuntimeHandle")
             .finish_non_exhaustive()
     }
 }
 
-impl SectorSimulatorHandle {
-    /// Spawn a `SectorSimulatorActor` and return a handle.
+impl SectorRuntimeHandle {
+    /// Spawn a [`SectorRuntimeDriver`] and return its adapter handle.
     ///
     /// `galaxy` is the authoritative topology used to build this node.
     /// `replication` publishes this node's append-log suffix after mutations.
@@ -275,7 +294,7 @@ impl SectorSimulatorHandle {
     /// its peers via `RaftTransport`. `raft_committed_rx` is the matching
     /// committed-entries channel from the same `RaftActor`.
     pub fn spawn(
-        config: SectorSimulatorConfig,
+        config: SectorRuntimeConfig,
         replication: OutboundLogPublisher<InMemoryReplicationBus>,
         raft: RaftActorHandle,
         raft_committed_rx: mpsc::UnboundedReceiver<Vec<u8>>,
@@ -289,7 +308,7 @@ impl SectorSimulatorHandle {
             config.catalog,
         );
         tokio::spawn(
-            SectorSimulatorActor::new(rx, node, replication, raft, raft_committed_rx).run(),
+            SectorRuntimeDriver::new(rx, node, replication, raft, raft_committed_rx).run(),
         );
         Self { tx }
     }
@@ -297,32 +316,32 @@ impl SectorSimulatorHandle {
     pub async fn tick(&self) -> TickSummary {
         let (tx, rx) = oneshot::channel();
         self.tx
-            .send(SectorSimulatorMessage::Tick { reply: tx })
+            .send(SectorRuntimeMessage::Tick { reply: tx })
             .await
-            .expect("SectorSimulatorActor is no longer running");
-        rx.await.expect("SectorSimulatorActor dropped reply sender")
+            .expect("SectorRuntimeDriver is no longer running");
+        rx.await.expect("SectorRuntimeDriver dropped reply sender")
     }
 
     pub async fn spawn_ship(&self, position: Position, velocity: Velocity) -> ShipId {
         let (tx, rx) = oneshot::channel();
         self.tx
-            .send(SectorSimulatorMessage::SpawnShip {
+            .send(SectorRuntimeMessage::SpawnShip {
                 position,
                 velocity,
                 reply: tx,
             })
             .await
-            .expect("SectorSimulatorActor is no longer running");
-        rx.await.expect("SectorSimulatorActor dropped reply sender")
+            .expect("SectorRuntimeDriver is no longer running");
+        rx.await.expect("SectorRuntimeDriver dropped reply sender")
     }
 
     pub async fn get_stats(&self) -> NodeStats {
         let (tx, rx) = oneshot::channel();
         self.tx
-            .send(SectorSimulatorMessage::GetStats { reply: tx })
+            .send(SectorRuntimeMessage::GetStats { reply: tx })
             .await
-            .expect("SectorSimulatorActor is no longer running");
-        rx.await.expect("SectorSimulatorActor dropped reply sender")
+            .expect("SectorRuntimeDriver is no longer running");
+        rx.await.expect("SectorRuntimeDriver dropped reply sender")
     }
 
     /// Request a Sector Transit (ADR-0014). Returns `false` if rejected up
@@ -331,18 +350,18 @@ impl SectorSimulatorHandle {
     pub async fn transit(&self, ship_id: ShipId, to: SectorId) -> bool {
         let (tx, rx) = oneshot::channel();
         self.tx
-            .send(SectorSimulatorMessage::Transit {
+            .send(SectorRuntimeMessage::Transit {
                 ship_id,
                 to,
                 reply: tx,
             })
             .await
-            .expect("SectorSimulatorActor is no longer running");
-        rx.await.expect("SectorSimulatorActor dropped reply sender")
+            .expect("SectorRuntimeDriver is no longer running");
+        rx.await.expect("SectorRuntimeDriver dropped reply sender")
     }
 
     /// Request a Jump-Gate Transit (ADR-0009). Test-only (see
-    /// [`SectorSimulatorMessage::Jump`]). Returns `false` if rejected up
+    /// [`SectorRuntimeMessage::Jump`]). Returns `false` if rejected up
     /// front (unknown Ship, already in transit, unknown gate, or Ship out of
     /// range). Acceptance only means the proposal was submitted to Raft; the
     /// move happens once it commits.
@@ -350,28 +369,28 @@ impl SectorSimulatorHandle {
     pub async fn jump(&self, ship_id: ShipId, gate_id: dawn_core::JumpGateId) -> bool {
         let (tx, rx) = oneshot::channel();
         self.tx
-            .send(SectorSimulatorMessage::Jump {
+            .send(SectorRuntimeMessage::Jump {
                 ship_id,
                 gate_id,
                 reply: tx,
             })
             .await
-            .expect("SectorSimulatorActor is no longer running");
-        rx.await.expect("SectorSimulatorActor dropped reply sender")
+            .expect("SectorRuntimeDriver is no longer running");
+        rx.await.expect("SectorRuntimeDriver dropped reply sender")
     }
 
     /// Current Raft role/term of this node (ADR-0014).
     pub async fn raft_role(&self) -> (Role, Term) {
         let (tx, rx) = oneshot::channel();
         self.tx
-            .send(SectorSimulatorMessage::GetRaftRole { reply: tx })
+            .send(SectorRuntimeMessage::GetRaftRole { reply: tx })
             .await
-            .expect("SectorSimulatorActor is no longer running");
-        rx.await.expect("SectorSimulatorActor dropped reply sender")
+            .expect("SectorRuntimeDriver is no longer running");
+        rx.await.expect("SectorRuntimeDriver dropped reply sender")
     }
 
     pub async fn shutdown(&self) {
-        let _ = self.tx.send(SectorSimulatorMessage::Shutdown).await;
+        let _ = self.tx.send(SectorRuntimeMessage::Shutdown).await;
     }
 }
 
@@ -383,7 +402,7 @@ mod tests {
     use dawn_core::{SectorBounds, Velocity};
     use dawn_replication::InMemoryReplicationBus;
 
-    fn spawn_actor() -> (SectorSimulatorHandle, InMemoryReplicationBus) {
+    fn spawn_runtime() -> (SectorRuntimeHandle, InMemoryReplicationBus) {
         let bus = InMemoryReplicationBus::spawn();
 
         // Single-node Raft cluster: no peers, transport delivers nowhere.
@@ -398,8 +417,8 @@ mod tests {
         );
         let raft = RaftActorHandle::new(raft_tx);
 
-        let handle = SectorSimulatorHandle::spawn(
-            SectorSimulatorConfig {
+        let handle = SectorRuntimeHandle::spawn(
+            SectorRuntimeConfig {
                 node_id: NodeId(0),
                 sector_id: SectorId(0),
                 bounds: SectorBounds::centered(SectorBounds::DEFAULT_HALF),
@@ -415,7 +434,7 @@ mod tests {
 
     #[tokio::test]
     async fn actor_starts_with_tick_zero() {
-        let (actor, bus) = spawn_actor();
+        let (actor, bus) = spawn_runtime();
         let stats = actor.get_stats().await;
         assert_eq!(stats.current_tick, Tick::ZERO);
         actor.shutdown().await;
@@ -424,7 +443,7 @@ mod tests {
 
     #[tokio::test]
     async fn spawning_a_ship_is_reflected_in_stats() {
-        let (actor, bus) = spawn_actor();
+        let (actor, bus) = spawn_runtime();
         actor
             .spawn_ship(
                 Position::new(100.0, 100.0, 100.0),
@@ -439,7 +458,7 @@ mod tests {
 
     #[tokio::test]
     async fn ticking_advances_the_logical_tick() {
-        let (actor, bus) = spawn_actor();
+        let (actor, bus) = spawn_runtime();
         actor
             .spawn_ship(
                 Position::new(100.0, 100.0, 100.0),
@@ -457,7 +476,7 @@ mod tests {
         // NPC ships at constant velocity emit no VelocityChanged (ADR-0008).
         // We test that the bus correctly receives spawn events, and that
         // ticking a stationary NPC produces no extra events.
-        let (actor, bus) = spawn_actor();
+        let (actor, bus) = spawn_runtime();
         actor.spawn_ship(Position::ORIGIN, Velocity::ZERO).await;
 
         // Spawn event is in bus. Tick a stationary NPC → no VelocityChanged.
@@ -473,7 +492,7 @@ mod tests {
 
     #[tokio::test]
     async fn spawn_events_are_replicated_before_reply_is_sent() {
-        let (actor, bus) = spawn_actor();
+        let (actor, bus) = spawn_runtime();
 
         for i in 0..5 {
             actor

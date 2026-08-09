@@ -7,10 +7,11 @@
 //! Runtime crates provide only session sinks and Sector routing; they do not
 //! construct grids or visible sets themselves.
 
-use dawn_core::{DomainEvent, PlayerId, ShipId};
+use dawn_core::{DomainEvent, PlayerId, SectorId, ShipId};
 
 use crate::aoi::{AoiDelivery, AoiSink, CellGrid, Observer};
 use crate::view::SectorView;
+use std::collections::{HashMap, HashSet};
 
 /// One Sector's complete AoI delivery frame state.
 ///
@@ -84,6 +85,72 @@ impl AoiFrame {
             .map(|position| self.index.neighbors_of(position))
             .unwrap_or_default()
     }
+}
+
+/// Transport-specific operations injected into [`deliver_sector_sessions`].
+///
+/// The callbacks keep `dawn-sector` independent from WebSocket and in-process
+/// session types while the frame lifecycle remains shared by every runtime.
+pub struct AoiSessionCallbacks<P, H, D, F> {
+    /// Extract the player identity represented by a session.
+    pub player_id: P,
+    /// Extract the observed ship identity represented by a session.
+    pub ship_id: H,
+    /// Deliver the ordered frame and return whether the session remains live.
+    pub deliver: D,
+    /// Handle a committed jump before the session is removed from this Sector.
+    pub on_redirect: F,
+}
+
+impl<P, H, D, F> std::fmt::Debug for AoiSessionCallbacks<P, H, D, F> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("AoiSessionCallbacks")
+            .finish_non_exhaustive()
+    }
+}
+
+/// Rebuild and deliver one Sector's AoI frame for all live sessions.
+///
+/// `jumped_ships` contains the ownership changes committed by the current
+/// frame. Those sessions are removed before ordinary AoI delivery and handed
+/// to the adapter through `on_redirect`. Passing an empty map gives the local
+/// single-Sector runtime the same path without introducing transport logic.
+pub fn deliver_sector_sessions<S, V, P, H, D, F>(
+    frame: &mut AoiFrame,
+    view: &V,
+    sessions: &mut Vec<S>,
+    new_events: &[DomainEvent],
+    warp_arrivals: &[ShipId],
+    jumped_ships: &HashMap<ShipId, SectorId>,
+    callbacks: AoiSessionCallbacks<P, H, D, F>,
+) where
+    V: SectorView,
+    P: FnMut(&S) -> PlayerId,
+    H: FnMut(&S) -> ShipId,
+    D: FnMut(&mut S, &mut AoiFrame, &V, &[DomainEvent], &[ShipId]) -> bool,
+    F: FnMut(&mut S, SectorId),
+{
+    let AoiSessionCallbacks {
+        mut player_id,
+        mut ship_id,
+        mut deliver,
+        mut on_redirect,
+    } = callbacks;
+    frame.rebuild(view);
+    sessions.retain_mut(|session| {
+        if let Some(&destination) = jumped_ships.get(&ship_id(session)) {
+            on_redirect(session, destination);
+            let session_player_id = player_id(session);
+            frame.retain_players(|candidate| candidate != session_player_id);
+            return false;
+        }
+
+        deliver(session, frame, view, new_events, warp_arrivals)
+    });
+
+    let live: HashSet<PlayerId> = sessions.iter().map(&mut player_id).collect();
+    frame.retain_players(|player_id| live.contains(&player_id));
 }
 
 #[cfg(test)]

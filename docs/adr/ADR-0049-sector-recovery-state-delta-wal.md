@@ -630,7 +630,7 @@ retry use explicit operation IDs.
   after #280 selects the reference topology.
 - [x] Implement generic fallible atomic journal in #271; #284 consumes its
   versioned recovery records, contiguous ranges, and corruption/failure fence.
-- [x] Implement prepare -> durable -> live apply in #272 for Stop and the bounded full Tick write set; the default legacy runtime wiring and remaining state-owner migrations continue under #275/#278.
+- [x] Implement prepare -> durable -> live apply in #272 for Stop and the bounded full Tick write set; #278 now owns the shared runtime wiring and #275 continues the remaining state-owner migrations.
 - [x] Implement versioned checkpoint/tail and eventless-Tick persistence through the runtime-owned `FileJournal`.
 - [x] Recover from a pre-checkpoint crash by reconstructing configured genesis
   state and replaying the RecoveryDelta journal from index 0; public-event
@@ -638,9 +638,15 @@ retry use explicit operation IDs.
 - [x] Add the `DAWNCKP1` checkpoint envelope, payload checksum, catalog fingerprint, explicit covered recovery position, and rejection of incompatible/corrupt checkpoints.
 - [x] Persist Player routing, allocator state, docking context, and pending bot/auto-jump authoritative state.
 - [x] Implement Station projection API plus admission/identity repository,
-  allocator, and local identity-watermark reconciliation under #277; runtime
-  RecoveryDelta catch-up/orchestration remains with #278/#280.
+  allocator, and local identity-watermark reconciliation under #277; #278
+  supplies the runtime reconciliation boundary and #280 owns remote catch-up.
+- [x] Establish one durable runtime Tick frame with injected consensus,
+  durability-policy, and reconciliation ports; production, single-sector serve,
+  clustered serve, and the in-memory `SectorRuntimeDriver` use the same
+  prepare -> durable -> live-apply -> reconcile -> output ordering under #278.
 - [ ] Implement Transit durable Saga under #276.
-- [ ] Implement unified runtime durability/quorum/reconciliation policy under #278.
+- [x] Implement the unified runtime durability-profile/quorum/fencing and
+  reconciliation policy boundary under #278. #280 still owns remote receipt and
+  catch-up transport, so production remains explicitly `LocalDurable`.
 - [ ] Implement final snapshot/catch-up/durability transport under #280.
 - [x] Add checkpoint-plus-tail equivalence and malformed/missing-boundary rejection tests for the local recovery path; replica/Transit/admission crash matrices remain with #276/#277/#280.

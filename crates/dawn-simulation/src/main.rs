@@ -13,7 +13,7 @@
 
 mod bench;
 mod cluster;
-mod sector_simulator_actor;
+mod sector_runtime_driver;
 mod serve;
 
 // Client transport (WsServer) is shared via dawn-actor; bring the module into

@@ -7,14 +7,20 @@ use super::{
 };
 use crate::{cluster, ws_server};
 use dawn_core::{DomainEvent, NodeId, PlayerId, Position, SectorBounds, SectorId, ShipId};
+use dawn_event_store::{DurabilityMode, InMemoryJournal};
 use dawn_sector::client_admission::{
     ClientAdmissionAttempt, ClientAdmissionIntent, ClientAdmissionRefusal, CommittedClientAdmission,
 };
 use dawn_sector::client_admission_resolution::{
     resolve_client_admission, ClientAdmissionResolution,
 };
-use dawn_sector::node::{ClientCommandFollowup, JumpOutcome, SimulationNode};
-use dawn_sector::transit;
+use dawn_sector::node::{
+    collect_runtime_commands, JumpOutcome, RuntimeCommandDispatch, SimulationNode,
+};
+use dawn_sector::transit::{
+    self, run_durable_runtime_tick_with_consensus_and_health, DurableRuntimeTickContext,
+    RaftRuntimeConsensus, RuntimeDurabilityProfile,
+};
 use dawn_wire::ServerMessage;
 use std::collections::HashMap;
 use tokio::sync::mpsc;
@@ -81,15 +87,29 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
         .expect("failed to open Market database at data/market.sqlite");
 
     nodes[0].spawn_npc_frigates(ship_count);
+    let mut recovery_journals: Vec<InMemoryJournal> =
+        (0..SECTORS).map(|_| InMemoryJournal::new()).collect();
+    let mut runtime_health: Vec<transit::RuntimeHealth> = (0..SECTORS)
+        .map(|_| transit::RuntimeHealth::new())
+        .collect();
 
     // Warm up: tick until a Raft leader is elected (election timeout ≤ 20 ticks).
     for _ in 0..30 {
         for i in 0..SECTORS {
-            let _ = transit::run_runtime_tick(
+            let mut consensus = RaftRuntimeConsensus::new(&rafts[i], &mut committed_rxs[i]);
+            let transition_id = transit::runtime_transition_id(&nodes[i]);
+            let _ = run_durable_runtime_tick_with_consensus_and_health(
                 &mut nodes[i],
-                &rafts[i],
-                &mut committed_rxs[i],
+                &mut recovery_journals[i],
+                &mut consensus,
+                &mut runtime_health[i],
                 &[],
+                DurableRuntimeTickContext {
+                    transition_id,
+                    owner_epoch: 0,
+                    durability: DurabilityMode::Synced,
+                    profile: RuntimeDurabilityProfile::LocalDurable,
+                },
                 |_, _, _| {},
             );
         }
@@ -210,74 +230,76 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                     market.handle_cluster(sess.player_id, market_command, sector, &mut nodes);
                 sess.send_message(&ServerMessage::MarketSnapshot(snapshot));
             }
-            while let Some(request) = sess.try_recv_request() {
-                let followup = nodes[sector].apply_client_request(
-                    sess.player_id,
-                    request,
-                    &mut lock_commands[sector],
-                );
-                let (ship_id, j) = match followup {
-                    Ok(Some(ClientCommandFollowup::Jump { ship_id, command })) => {
-                        (ship_id, command)
-                    }
-                    Ok(Some(followup @ ClientCommandFollowup::RefreshPlayerLoadout { .. })) => {
-                        if let Some(player_id) = followup.loadout_player_id() {
-                            if let Some(loadout) =
-                                nodes[sector].build_player_loadout_json_for_player(player_id)
-                            {
-                                sess.send_message(&ServerMessage::PlayerLoadout(loadout));
+            let dispatches = collect_runtime_commands(
+                &mut nodes[sector],
+                std::slice::from_mut(sess),
+                &mut lock_commands[sector],
+                |session| session.player_id,
+                ws_server::PlayerSession::try_recv_request,
+            );
+            for dispatch in dispatches {
+                match dispatch {
+                    RuntimeCommandDispatch::Jump {
+                        ship_id, command, ..
+                    } => {
+                        if ship_id != sess.ship_id {
+                            continue;
+                        }
+                        match transit::propose_jump(
+                            &mut nodes[sector],
+                            &rafts[sector],
+                            ship_id,
+                            command.gate_id,
+                        ) {
+                            JumpOutcome::NeedsTransitProposal { to } => {
+                                println!(
+                                    "  [Server] Jump proposed: ship #{} gate #{} (S{} → S{})",
+                                    ship_id.raw(),
+                                    command.gate_id.0,
+                                    sector,
+                                    to.0
+                                );
+                            }
+                            JumpOutcome::WarpFallbackStarted => {
+                                println!(
+                            "  [Server] Jump: ship #{} out of range — auto-warp to gate #{} started",
+                            ship_id.raw(),
+                            command.gate_id.0
+                        );
+                            }
+                            JumpOutcome::ApproachFallbackStarted => {
+                                // Too close to warp (< MIN_WARP_DISTANCE) but still outside
+                                // activation_radius -- without this, a ship in that band
+                                // could never jump: in_range fails, and apply_warp_command
+                                // also fails its own can_propose_warp distance check, so
+                                // the command was silently dropped every tick the ship sat
+                                // there. Approach closes the rest of the gap sublight.
+                                println!(
+                            "  [Server] Jump: ship #{} too close to warp — approaching gate #{} instead",
+                            ship_id.raw(),
+                            command.gate_id.0
+                        );
+                            }
+                            JumpOutcome::Rejected => {
+                                eprintln!(
+                                    "[Server] JumpCommand rejected (ship #{} gate #{})",
+                                    ship_id.raw(),
+                                    command.gate_id.0
+                                );
                             }
                         }
-                        continue;
                     }
-                    Ok(None) => continue,
-                    Err(error) => {
+                    RuntimeCommandDispatch::RefreshPlayerLoadout { player_id, .. } => {
+                        if let Some(loadout) =
+                            nodes[sector].build_player_loadout_json_for_player(player_id)
+                        {
+                            sess.send_message(&ServerMessage::PlayerLoadout(loadout));
+                        }
+                    }
+                    RuntimeCommandDispatch::Rejected { error, .. } => {
                         sess.send_message(&ServerMessage::ClientRequestRejected(
                             client_request_rejection(error),
                         ));
-                        continue;
-                    }
-                };
-                if ship_id != sess.ship_id {
-                    continue;
-                }
-                match transit::propose_jump(&mut nodes[sector], &rafts[sector], ship_id, j.gate_id)
-                {
-                    JumpOutcome::NeedsTransitProposal { to } => {
-                        println!(
-                            "  [Server] Jump proposed: ship #{} gate #{} (S{} → S{})",
-                            ship_id.raw(),
-                            j.gate_id.0,
-                            sector,
-                            to.0
-                        );
-                    }
-                    JumpOutcome::WarpFallbackStarted => {
-                        println!(
-                            "  [Server] Jump: ship #{} out of range — auto-warp to gate #{} started",
-                            ship_id.raw(),
-                            j.gate_id.0
-                        );
-                    }
-                    JumpOutcome::ApproachFallbackStarted => {
-                        // Too close to warp (< MIN_WARP_DISTANCE) but still outside
-                        // activation_radius -- without this, a ship in that band
-                        // could never jump: in_range fails, and apply_warp_command
-                        // also fails its own can_propose_warp distance check, so
-                        // the command was silently dropped every tick the ship sat
-                        // there. Approach closes the rest of the gap sublight.
-                        println!(
-                            "  [Server] Jump: ship #{} too close to warp — approaching gate #{} instead",
-                            ship_id.raw(),
-                            j.gate_id.0
-                        );
-                    }
-                    JumpOutcome::Rejected => {
-                        eprintln!(
-                            "[Server] JumpCommand rejected (ship #{} gate #{})",
-                            ship_id.raw(),
-                            j.gate_id.0
-                        );
                     }
                 }
             }
@@ -288,6 +310,8 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                 nodes: &mut nodes,
                 rafts: &rafts,
                 committed_rxs: &mut committed_rxs,
+                recovery_journals: &mut recovery_journals,
+                runtime_health: &mut runtime_health,
                 sessions: &mut sessions,
                 player_sector: &mut player_sector,
                 ship_player: &ship_player,

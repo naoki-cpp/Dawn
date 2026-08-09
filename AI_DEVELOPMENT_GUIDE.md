@@ -284,15 +284,15 @@ workspace DAG and relevant ADR first.
   owners. Depends on `dawn-wire` today to build typed wire messages it hands to
   `dawn-actor` (e.g. `PlayerLoadoutWire`).
 - `dawn-actor`: client/server protocol and connection boundary.
-- `dawn-simulation`: current runnable simulation/runtime wiring and demos. #278
-  consolidates this with production runtime orchestration so durability profile,
-  repository reconciliation, ack, retry, and effect policy have one implementation.
+- `dawn-simulation`: runnable simulation/runtime wiring and demos. #278 now
+  shares production runtime orchestration so durability profile, repository
+  reconciliation, ack, retry, and effect policy have one implementation.
   Depends on `dawn-market` to route Market-domain requests and bridge commands
   before they reach the owning `SimulationNode` (ADR-0034 §4, roadmap.md §12
   9D-4/5).
 - `dawn-sector-node`: real hardware node binary and TOML config loading; #278
-  reduces it toward bootstrap/adapter composition rather than a second runtime
-  policy implementation.
+  leaves it as bootstrap/adapter composition rather than a second runtime policy
+  implementation.
 
 ## Change Workflow
 
@@ -344,7 +344,7 @@ For hard bugs, follow the `diagnosing-bugs` skill:
   verification); the gaps worth closing are logic whose failure mode is
   invisible to manual play — recovery reducer/checkpoint-tail equivalence,
   public-event projection (`node/apply_event.rs`), and wire conversion
-  (`dawn-actor/src/protocol.rs`) first. New match arms in public replay/wire
+  (`dawn-wire` conversion modules) first. New match arms in public replay/wire
   conversion need direct tests in the same PR. Deliberately uncovered code is
   named in the PR description with the reason, never silently skipped. See
   #112 for the audit pattern.

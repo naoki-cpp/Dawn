@@ -58,7 +58,10 @@ mod warp;
 pub use crate::transit::StopTransitionError;
 pub use crate::transit::TickTransitionError;
 pub use command_module::ModuleActivationRejection;
-pub use commands::{ClientCommandFollowup, ClientRequestAdmissionError};
+pub use commands::{
+    collect_runtime_commands, ClientCommandFollowup, ClientRequestAdmissionError,
+    RuntimeCommandDispatch,
+};
 pub use jump::JumpOutcome;
 pub use repositories::{
     ProjectionApplyError, ProjectionApplyResult, ProjectionReadError, StationProjectionMutation,
@@ -503,9 +506,19 @@ impl SimulationNode {
     pub fn open_repositories(&mut self, path: &str) -> Result<(), String> {
         self.repositories =
             repositories::SectorRepository::open(path).map_err(|error| error.to_string())?;
-        self.observe_materialized_identities()?;
-        self.reconcile_client_admission_identities()?;
+        self.reconcile_runtime_repositories()?;
         Ok(())
+    }
+
+    /// Reconcile repository-owned admission and identity watermarks after a
+    /// committed runtime transition and before its outputs are published.
+    ///
+    /// The runtime owns when this boundary runs; the repository owns the
+    /// transaction and allocator invariants. Station projection mutation
+    /// remains a separate idempotent projection port.
+    pub fn reconcile_runtime_repositories(&mut self) -> Result<(), String> {
+        self.observe_materialized_identities()?;
+        self.reconcile_client_admission_identities()
     }
 
     fn observe_materialized_identities(&self) -> Result<(), String> {

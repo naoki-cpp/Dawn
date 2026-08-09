@@ -64,22 +64,22 @@ Wall-clock time is non-deterministic across nodes; only logical Tick order is re
 
 ```rust
 // Forbidden: Actor A calls Actor B's methods directly
-struct SectorSimulatorActor {
+struct SectorRuntimeDriver {
     replication_actor: Arc<ReplicationActor>, // must not hold an Arc directly
 }
 
-impl SectorSimulatorActor {
+impl SectorRuntimeDriver {
     async fn on_tick_complete(&self) {
         self.replication_actor.sync(delta).await; // direct call forbidden
     }
 }
 
 // Correct: send a message through the mailbox
-struct SectorSimulatorActor {
+struct SectorRuntimeDriver {
     replication_tx: mpsc::Sender<ReplicationMessage>, // hold only the Sender
 }
 
-impl SectorSimulatorActor {
+impl SectorRuntimeDriver {
     async fn on_tick_complete(&self, delta: Delta) {
         let _ = self.replication_tx.send(ReplicationMessage::Sync(delta)).await;
     }

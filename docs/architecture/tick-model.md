@@ -23,26 +23,30 @@ after it is the current production status.
 > the old mutate-then-append pipeline; those current call shapes are migration debt,
 > not a competing commit contract.
 
-The production node now uses the prepared Tick transition described below: it
-durably appends the RecoveryDelta before applying the same delta locally,
-catching up required projections, and publishing its public/reliable outputs.
-The legacy call shapes named above are retained only for deterministic unit
-fixtures and non-persistent adapters, not as an alternative production commit
-contract.
+The production node and local runtime adapters now use the prepared Tick
+transition described below: they durably append the RecoveryDelta before
+applying the same delta locally, run the required reconciliation hook, and
+publish their public/reliable outputs only after that hook succeeds. The legacy
+call shapes named above are retained only for deterministic unit fixtures, not
+as an alternative production commit contract.
 
 The #272 migration now exposes both the logical counter seam and a complete
 Tick seam. `SimulationNode::prepare_tick_state_transition` executes the legacy
 systems against a ship-level write-set image, restores the live state, and
 returns the complete post-tick ship image, node routing/maps, queues, public
-events, and recovery context. `run_durable_runtime_tick` appends that
-transition to the production `FileJournal` before applying the same delta and
-publishing outputs. It does not clone the whole ECS world. The older
-`tick_with_lock_commands` / `run_runtime_tick` path remains for deterministic
-unit fixtures and adapters that have not opted into persistence, not as the
-production Node commit contract. Recovery applies the persisted delta together
-with its journal `TransitionContext`; the node validates the Sector identity,
-while owner-epoch fencing remains the runtime orchestration responsibility of
-#278.
+events, and recovery context. `run_durable_runtime_tick_with_consensus` appends
+that transition before applying the same delta and publishing outputs. Its
+consensus port has a Raft adapter for production/cluster deployments and a
+local adapter for single-sector simulation. Its policy port validates local or
+replicated durability evidence, and its reconciliation hook and health gate run
+before publication. This keeps the durable ordering in one implementation while
+allowing deployment-specific consensus, journal, quorum, and repository
+adapters. It does not clone the whole ECS world. The older
+`tick_with_lock_commands` / `run_runtime_tick` path remains only for
+deterministic unit fixtures, not as a runtime adapter contract. Recovery applies
+the persisted delta together with its journal `TransitionContext`; the node
+validates the Sector identity, while owner-epoch fencing remains the runtime
+orchestration responsibility of #278.
 
 ## 1. Tick Definition
 
@@ -301,8 +305,9 @@ Step 11: Runtime/consensus pacing after local commit
 
 ### Current committed-Raft input path (legacy Step 7.5 label)
 
-Current `transit::run_runtime_tick()` calls `transit::apply_committed_raft_entries()`
-before `node.tick`. Today this may directly mutate ECS and append Transit events:
+The shared runtime frame drains committed entries through its injected
+`RuntimeConsensus` port before `node.tick`. The Raft adapter applies the same
+Transit pipeline that the older `transit::run_runtime_tick()` path exposed:
 
 ```
 TransitOp::Request -> current owner marks InTransit, appends SectorTransitRequested,

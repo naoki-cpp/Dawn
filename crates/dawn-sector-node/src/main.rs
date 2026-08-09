@@ -193,7 +193,7 @@ async fn main() -> anyhow::Result<()> {
     // Raft warm-up: tick until a leader is elected (≤ 20 ticks election timeout).
     println!("[Node] Raft warm-up (30 ticks)...");
     for _ in 0..30 {
-        let transition_id = transition_id_for(&node, node_id);
+        let transition_id = transit::runtime_transition_id(&node);
         let output = transit::run_durable_runtime_tick(
             &mut node,
             &mut recovery_journal,
@@ -204,6 +204,7 @@ async fn main() -> anyhow::Result<()> {
                 transition_id,
                 owner_epoch: 0,
                 durability: DurabilityMode::Synced,
+                profile: transit::RuntimeDurabilityProfile::LocalDurable,
             },
             |_, _, _| {},
         )
@@ -268,7 +269,6 @@ async fn main() -> anyhow::Result<()> {
                 &mut committed_rx,
                 &mut event_store,
                 &mut recovery_journal,
-                node_id,
             )
             .expect("authoritative recovery journal failed; node is fenced");
 
@@ -541,13 +541,4 @@ fn build_node(
             )
         });
     (node, store, recovery_journal, is_fresh)
-}
-
-fn transition_id_for(
-    node: &SimulationNode,
-    node_id: NodeId,
-) -> dawn_sector::transition::SectorTransitionId {
-    dawn_sector::transition::SectorTransitionId(
-        (u128::from(node.current_tick().value()) << 8) | u128::from(node_id.0),
-    )
 }

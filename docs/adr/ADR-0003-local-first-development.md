@@ -112,7 +112,7 @@ AI エージェントによる継続開発を前提にすると、
 ────────────────────      ────────────────────
 In-Memory Channel    →    gRPC / QUIC
 Tick::ZERO ベース    →    VectorClock
-SimulationNode       →    SectorSimulatorActor
+SimulationNode       →    SectorRuntimeDriver
 InMemoryEventStore   →    ファイルベース EventStore → 分散 EventStore
 ```
 

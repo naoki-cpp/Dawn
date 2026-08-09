@@ -72,7 +72,7 @@ total events      : 1,010,000（spawn 10,000 + move 1,000,000）
 | タスク | 状態 | 備考 |
 |---|---|---|
 | `dawn-actor` クレート作成（ClientConnection 境界） | ✅ 完了 | ReplicationBus は 8D-2a で dawn-replication へ移動 |
-| `SectorSimulatorActor` 実装 | ✅ 完了 | dawn-simulation 内 |
+| `SectorRuntimeDriver` 実装 | ✅ 完了 | dawn-simulation 内 |
 | `EventStoreActor` 実装 | 🗑️ 削除 | wire されないまま残っていたため削除（`SimulationNode` が EventStore を直接所有） |
 | ノード間 In-Memory Channel 接続 | ✅ 完了 | 単一チャンネル設計で決定論的 |
 | 3 ノード整合性テスト | ✅ 完了 | 65 テスト全パス |

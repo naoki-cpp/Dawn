@@ -5,7 +5,7 @@ update   : 大規模リファクタ実施後 / 新クレート追加時 / archit
 related  : AI_DEVELOPMENT_GUIDE.md「Crate Boundaries」, docs/architecture/architecture.md,
            docs/architecture/architecture-review/server-completed.md（完了済みログ）,
            docs/architecture/architecture-review/server-pending.md（未完項目・issue一覧）
-date     : 2026-08-09（#277 repository split後の全体再計測、wc -l相当）
+date     : 2026-08-09（#277 repository split、#278 shared runtime frame後の再計測）
 ---
 
 # Architecture Review — Dawn Codebase（現行構造評価）
@@ -44,8 +44,11 @@ Transitについては、Raftの回復判断とShipの状態変更を別module�
 
 Open:
 
-1. **M-3** `SectorSimulatorActor`と`SimulationNode`の密結合（保留）
-2. **M-9** `EventStore::append`のinfallible contract（保留）
+1. **M-9** `EventStore::append`のinfallible contract（保留）
+
+Resolved in #278: production, single-sector, clustered, and in-process test
+drivers now call the shared durable runtime frame. `SectorRuntimeDriver` remains
+only as an async in-memory adapter; it is not a second Tick implementation.
 
 `ClientCommand`外側matchと`StationDispatchCommand`、domain固有の戻り値、process model固有の薄いadapterは
 意図的に維持する。
@@ -56,7 +59,7 @@ Open:
 |---|---:|---|
 | `crates/dawn-sector/src/node/repositories.rs` | 1860 | 🟡 #277のSQLite schema・explicit repository views・allocator/projection tests。bounded-contextごとの追加分割は次回architecture reviewで再計測 |
 | `crates/dawn-sector/src/node/transit.rs` | 1694 | 🟡 Transit state mutation・live/replay tests。実装とテストの責務は凝集しておりR-3で監視 |
-| `crates/dawn-sector/src/node/commands.rs` | 1181 | 🟢 網羅的family選択・follow-up射影・統合tests。family policyは専用moduleへ分離済み（issue #264、ADR-0047 amendment） |
+| `crates/dawn-sector/src/node/commands.rs` | 1286 | 🟢 網羅的family選択・共通runtime command collection・follow-up射影・統合tests。family policyは専用moduleへ分離済み（issue #264、ADR-0047 amendment） |
 | `crates/dawn-sector/src/node/warp.rs` | 1190 | 🟢 warp state machine・geometry kernel・tests |
 | `crates/dawn-market/src/order_book.rs` | 1139 | 🟡 SQLite authority・Currency escrow・order boundary。matching policyは`matching.rs`へ分離済み |
 | `crates/dawn-sector/src/node/orbit.rs` | 950 | 🟢 Orbit / Keep-at-Range steering kernel・tests |
