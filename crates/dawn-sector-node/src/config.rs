@@ -35,6 +35,9 @@ pub struct NodeConfig {
     /// source. Exact world recovery uses the ADR-0049 journal boundary.
     #[serde(default = "default_event_log_path")]
     pub event_log_path: String,
+    /// Path to the authoritative ADR-0049 RecoveryDelta journal.
+    #[serde(default = "default_recovery_journal_path")]
+    pub recovery_journal_path: String,
     /// Path to the latest authoritative snapshot (ADR-0017 §5-C). Overwritten
     /// on every checkpoint.
     #[serde(default = "default_snapshot_path")]
@@ -43,6 +46,9 @@ pub struct NodeConfig {
     /// snapshotted-and-confirmed segments into.
     #[serde(default = "default_cold_path")]
     pub cold_path: String,
+    /// Path to the cold archive for compacted authoritative recovery records.
+    #[serde(default = "default_recovery_cold_path")]
+    pub recovery_cold_path: String,
     /// Logical ticks between checkpoints (snapshot + hot-log compaction).
     /// Driven by the logical tick, not wall-clock time (INV-005/FBD-003), so
     /// checkpointing stays deterministic and replay-stable.
@@ -67,8 +73,14 @@ fn default_event_log_path() -> String {
 fn default_snapshot_path() -> String {
     "data/snapshot.bin".to_string()
 }
+fn default_recovery_journal_path() -> String {
+    "data/recovery.log".to_string()
+}
 fn default_cold_path() -> String {
     "data/cold.log".to_string()
+}
+fn default_recovery_cold_path() -> String {
+    "data/recovery.cold.log".to_string()
 }
 fn default_checkpoint_interval_ticks() -> u64 {
     600
@@ -145,8 +157,10 @@ mod tests {
                 ws_addr: "127.0.0.1:7883".parse().unwrap(),
             }],
             event_log_path: String::new(),
+            recovery_journal_path: String::new(),
             snapshot_path: String::new(),
             cold_path: String::new(),
+            recovery_cold_path: String::new(),
             checkpoint_interval_ticks: 1,
             station_inventory_db_path: String::new(),
         }

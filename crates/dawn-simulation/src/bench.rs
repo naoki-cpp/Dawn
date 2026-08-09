@@ -343,9 +343,9 @@ pub(crate) fn run_phase3_demo() {
                 .expect("checkpoint failed")
             {
                 println!(
-                    "  [session 1] checkpoint at tick {}  (log_index={}, hot_base={})",
+                    "  [session 1] checkpoint at tick {}  (covered_recovery_index={}, hot_base={})",
                     snap.tick.value(),
-                    snap.log_index,
+                    snap.covered_recovery_index,
                     store.base_index(),
                 );
             }
@@ -373,7 +373,7 @@ pub(crate) fn run_phase3_demo() {
 
     // ADR-0008: these NPC ships move at a constant velocity and never emit
     // VelocityChanged, so there is nothing to replay past the snapshot's
-    // log_index. `restore_from` leaves the node at the snapshot tick; run
+    // covered_recovery_index. `restore_from` leaves the node at the snapshot tick; run
     // the remaining ticks (same as session 1 did) to reach session1_tick.
     let remaining = session1_tick
         .value()

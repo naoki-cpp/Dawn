@@ -13,8 +13,10 @@ pop_cap    = 500
 # distinct per node when multiple nodes share a machine (e.g. local 3-process
 # testing) -- they are not, by default, namespaced by node_id.
 event_log_path           = "data/node-0/events.log"
+recovery_journal_path    = "data/node-0/recovery.log"
 snapshot_path             = "data/node-0/snapshot.bin"
 cold_path                 = "data/node-0/cold.log"
+recovery_cold_path        = "data/node-0/recovery.cold.log"
 checkpoint_interval_ticks = 600
 
 [[peers]]

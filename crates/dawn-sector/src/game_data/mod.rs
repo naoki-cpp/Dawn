@@ -141,6 +141,19 @@ impl GameDataCatalog {
         self.ship_type_index.get(&id)
     }
 
+    /// Stable content fingerprint for checkpoint compatibility checks.
+    ///
+    /// Definitions are sorted during construction, so the postcard bytes are
+    /// independent of TOML map/order presentation while still changing when
+    /// a balance value or schema-visible definition changes.
+    pub fn fingerprint(&self) -> u64 {
+        let bytes = postcard::to_stdvec(&(self.modules.as_ref(), self.ship_types.as_ref()))
+            .expect("validated game-data definitions must be serializable");
+        bytes.iter().fold(0xcbf29ce484222325, |hash, byte| {
+            (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
+        })
+    }
+
     pub(crate) fn module_index(&self) -> Arc<BTreeMap<ModuleId, ModuleDefinition>> {
         Arc::clone(&self.module_index)
     }

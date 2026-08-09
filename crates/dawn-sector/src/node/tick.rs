@@ -119,9 +119,7 @@ impl SimulationNode {
         }
         let mut seen = HashSet::new();
         for state in &delta.ship_states {
-            if !seen.insert(state.snapshot.ship_id)
-                || !self.ships.index.contains_key(&state.snapshot.ship_id)
-            {
+            if !seen.insert(state.snapshot.ship_id) {
                 return Err(TransitionApplyError::InvalidTickShipState(
                     state.snapshot.ship_id,
                 ));
@@ -132,15 +130,24 @@ impl SimulationNode {
             if !removed_seen.insert(*ship_id) {
                 return Err(TransitionApplyError::InvalidTickShipState(*ship_id));
             }
-            let Some(state) = delta
+            if delta
                 .ship_states
                 .iter()
-                .find(|state| state.snapshot.ship_id == *ship_id)
-            else {
+                .any(|state| state.snapshot.ship_id == *ship_id)
+            {
                 return Err(TransitionApplyError::InvalidTickShipState(*ship_id));
-            };
-            if !state.snapshot.is_destroyed {
-                return Err(TransitionApplyError::InvalidTickShipState(*ship_id));
+            }
+        }
+        for state in &delta.ship_states {
+            if !state.fitting_present {
+                continue;
+            }
+            let mut fitting =
+                FittingComp::from_snapshot(&state.snapshot.fitting, &self.module_registry);
+            if !Self::restore_tick_fitting(&mut fitting, &state.fitting) {
+                return Err(TransitionApplyError::InvalidTickShipState(
+                    state.snapshot.ship_id,
+                ));
             }
         }
         Ok(())
@@ -158,7 +165,36 @@ impl SimulationNode {
             self.apply_validated_logical_tick(delta);
             return Ok(());
         }
+        let expected_ships: HashSet<_> = delta
+            .ship_states
+            .iter()
+            .map(|state| state.snapshot.ship_id)
+            .collect();
+        let stale_ships: Vec<_> = self
+            .ships
+            .index
+            .keys()
+            .copied()
+            .filter(|ship_id| !expected_ships.contains(ship_id))
+            .collect();
+        for ship_id in stale_ships {
+            self.remove_ship(ship_id);
+        }
+
+        // Restore node-level maps before materialising a ship so a newly
+        // admitted player ship receives PLAYER stats rather than NPC stats.
+        self.ships.active_ship = delta.active_ships.clone().into_iter().collect();
+        self.ships.owners = delta.owners.clone().into_iter().collect();
+        self.docked_ships = delta.docked_ships.clone();
+        self.docked_players = delta.docked_players.clone();
+        self.id_counter = delta.id_counter;
+        self.player_id_counter = delta.player_id_counter;
+        self.completed_incoming_transits = delta.completed_incoming_transits.clone();
+
         for state in &delta.ship_states {
+            if !self.ships.index.contains_key(&state.snapshot.ship_id) {
+                self.restore_ship_from_snapshot(&state.snapshot);
+            }
             self.apply_tick_ship_state(state)?;
         }
         for ship_id in &delta.removed_ships {
@@ -210,10 +246,15 @@ impl SimulationNode {
         result.events.extend(deferred_events);
         result.events_emitted = result.events.len();
         let after_states = self.capture_tick_write_set();
+        // Keep the complete post-tick ship image. Commands are admitted before
+        // this preparation starts, so a diff against `before_states` would
+        // omit command-only mutations from the durable record. The full image
+        // is still bounded by the Sector population and makes each committed
+        // Tick a self-contained recovery boundary.
         let ship_states = after_states
-            .iter()
-            .filter(|(ship_id, state)| before_states.get(ship_id) != Some(*state))
-            .map(|(_, state)| state.clone())
+            .values()
+            .filter(|state| !state.snapshot.is_destroyed)
+            .cloned()
             .collect();
         let removed_ships = before_states
             .keys()
@@ -221,7 +262,7 @@ impl SimulationNode {
                 after_states
                     .get(ship_id)
                     .map(|state| state.snapshot.is_destroyed)
-                    .unwrap_or(false)
+                    .unwrap_or(true)
             })
             .copied()
             .collect();
@@ -234,6 +275,23 @@ impl SimulationNode {
             pending_bot_lock_commands: self.pending_bot_lock_commands.clone(),
             pending_auto_jumps: self.pending_auto_jumps.clone(),
             completed_warps: self.completed_warps.clone(),
+            id_counter: self.id_counter,
+            player_id_counter: self.player_id_counter,
+            active_ships: self
+                .ships
+                .active_ship
+                .iter()
+                .map(|(&player, &ship)| (player, ship))
+                .collect(),
+            owners: self
+                .ships
+                .owners
+                .iter()
+                .map(|(&ship, &player)| (ship, player))
+                .collect(),
+            docked_ships: self.docked_ships.clone(),
+            docked_players: self.docked_players.clone(),
+            completed_incoming_transits: self.completed_incoming_transits.clone(),
         };
 
         self.current_tick = before_tick;
@@ -254,7 +312,7 @@ impl SimulationNode {
                 sector_id,
                 owner_epoch,
             },
-            recovery_delta: SectorRecoveryDelta::Tick(delta),
+            recovery_delta: SectorRecoveryDelta::Tick(Box::new(delta)),
             public_events: result.events.clone(),
             reliable_effects: Vec::new(),
         };
@@ -951,6 +1009,16 @@ mod tests {
             Position::new(10.0, 20.0, 30.0),
             Velocity::new(2.0, 0.0, 0.0),
         );
+        let destroyed_ship = node.spawn_ship(
+            dawn_core::ShipTypeId(1),
+            Position::new(40.0, 50.0, 60.0),
+            Velocity::ZERO,
+        );
+        let destroyed_entity = *node.ships.index.get(&destroyed_ship).unwrap();
+        node.world
+            .get_mut::<dawn_ecs::components::HullComp>(destroyed_entity)
+            .unwrap()
+            .set_hp(0.0, 0.0, 0.0);
         let before = node.capture_tick_write_set();
 
         let prepared = node
@@ -960,14 +1028,11 @@ mod tests {
         assert_eq!(node.current_tick(), Tick::ZERO);
         assert_eq!(node.capture_tick_write_set(), before);
         assert_eq!(prepared.context.sector_id, SectorId(0));
-        assert!(matches!(
-            prepared.recovery_delta,
-            SectorRecoveryDelta::Tick(TickRecoveryDelta {
-                from: Tick::ZERO,
-                to: Tick(1),
-                ..
-            })
-        ));
+        let SectorRecoveryDelta::Tick(delta) = prepared.recovery_delta else {
+            panic!("full Tick must produce a Tick recovery delta");
+        };
+        assert_eq!(delta.from, Tick::ZERO);
+        assert_eq!(delta.to, Tick(1));
 
         let mut journal = InMemoryJournal::new();
         crate::transit::commit_tick_state_transition(
@@ -996,7 +1061,7 @@ mod tests {
         );
         recovered
             .apply_tick_transition(
-                delta,
+                *delta,
                 TransitionContext {
                     sector_id: record.context.sector_id,
                     owner_epoch: record.context.owner_epoch,
@@ -1006,6 +1071,8 @@ mod tests {
         assert_eq!(recovered.current_tick(), Tick(1));
         assert_eq!(recovered.capture_tick_write_set(), committed);
         assert!(recovered.ships.index.contains_key(&ship_id));
+        assert!(!node.ships.index.contains_key(&destroyed_ship));
+        assert!(!recovered.ships.index.contains_key(&destroyed_ship));
     }
 
     #[test]
@@ -1056,7 +1123,7 @@ mod tests {
         let mut recovered = mem_node();
         recovered
             .apply_tick_transition(
-                delta,
+                *delta,
                 TransitionContext {
                     sector_id: record.context.sector_id,
                     owner_epoch: record.context.owner_epoch,

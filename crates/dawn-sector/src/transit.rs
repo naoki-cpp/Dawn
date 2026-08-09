@@ -86,7 +86,7 @@ pub fn commit_tick_state_transition<J: DurableJournal>(
     node.validate_tick_transition(delta, prepared.context)?;
     let receipt =
         crate::transition_journal::append_prepared_transition(journal, &prepared, durability)?;
-    node.apply_validated_full_tick(delta.clone())?;
+    node.apply_validated_full_tick(delta.as_ref().clone())?;
     node.observe_committed_events(&prepared.public_events);
     Ok(receipt)
 }
@@ -108,7 +108,7 @@ pub fn commit_tick_transition<J: DurableJournal>(
     node.validate_tick_transition(delta, prepared.context)?;
     let receipt =
         crate::transition_journal::append_prepared_transition(journal, &prepared, durability)?;
-    node.apply_validated_logical_tick(delta.clone());
+    node.apply_validated_logical_tick(delta.as_ref().clone());
     Ok(receipt)
 }
 
@@ -333,14 +333,15 @@ where
         }
     };
     let delta = match &prepared.recovery_delta {
-        crate::transition::SectorRecoveryDelta::Tick(delta) => delta.clone(),
+        crate::transition::SectorRecoveryDelta::Tick(delta) => delta.as_ref().clone(),
         crate::transition::SectorRecoveryDelta::Stop(_) => {
             unreachable!("full runtime Tick preparation produces a Tick delta")
         }
     };
-    if let Err(error) = crate::transition_journal::append_prepared_transition(
+    if let Err(error) = crate::transition_journal::append_prepared_transition_with_events(
         journal,
         &prepared,
+        &prior_events,
         context.durability,
     ) {
         node.restore_pending_events(prior_events);

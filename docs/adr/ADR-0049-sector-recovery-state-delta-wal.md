@@ -210,8 +210,9 @@ lossy session decoration. It changes:
 - what authoritative routing state a reconnect resumes into.
 
 Therefore `SelectActiveShip` and `Disembark` can require a recovery transition even
-when they emit no public `DomainEvent`. The current snapshot omission is migration
-debt to be removed under #284/#275, not an accepted recovery gap.
+when they emit no public `DomainEvent`. The local checkpoint/RecoveryDelta path
+persists the routing maps explicitly; #275 may extract the PlayerState aggregate
+without weakening that recovery requirement.
 
 Socket handles, transient connection queues, rendered selection, AoI caches, and
 other presentation/session transport objects remain non-authoritative unless a
@@ -500,9 +501,10 @@ Durability-quorum copies already staged before the failure may remain; they are 
 healthy applied replicas until their own reducer/projection/repository checks
 succeed.
 
-### 14. RTO
+### 14. Operational RTO
 
-No numeric production RTO is selected by this architecture slice. #284 must still
+No portable numeric production RTO is selected by this architecture slice. After
+#280 fixes the peer transport and reference hardware, deployment operations must
 benchmark representative ship counts/eventless Ticks and define:
 
 - maximum authoritative tail transitions/bytes;
@@ -510,7 +512,8 @@ benchmark representative ship counts/eventless Ticks and define:
 - checkpoint cadence/trigger thresholds; and
 - the production recovery target derived from those measurements.
 
-A recovery procedure is not itself an RTO.
+A recovery procedure is not itself an RTO, and #284 does not invent a number that
+would only be valid for one machine and one replica topology.
 
 ## Alternatives considered
 
@@ -580,7 +583,7 @@ retry use explicit operation IDs.
   defining exact ECS recovery.
 - eventless Ticks and no-public-event authoritative commands become explicitly
   recoverable.
-- numeric RTO remains an open #284 benchmark deliverable.
+- numeric RTO remains a deployment benchmark deliverable after #280.
 
 ## Implementation sequence
 
@@ -598,7 +601,8 @@ retry use explicit operation IDs.
    fencing/acknowledgement policy.
 9. #280 consumes the final checkpoint/catch-up/durability representation in peer
    transport.
-10. #284 runs recovery benchmarks and closes numeric RTO/checkpoint policy.
+10. After #280 selects the peer transport and reference hardware, run recovery
+    benchmarks and close the deployment RTO/checkpoint policy.
 
 ## Implementation checklist
 
@@ -616,14 +620,20 @@ retry use explicit operation IDs.
 - [x] Define generic ambiguous client retry as non-exactly-once without RequestId.
 - [x] Define at-least-once durable output semantics and exclude ephemeral clients
   from durable retention cursors.
-- [ ] Benchmark and define numeric production RTO/checkpoint budget in #284.
-- [ ] Implement generic fallible atomic journal in #271.
+- [ ] Benchmark and define the deployment-specific numeric RTO/checkpoint budget
+  after #280 selects the reference topology.
+- [x] Implement generic fallible atomic journal in #271; #284 consumes its
+  versioned recovery records, contiguous ranges, and corruption/failure fence.
 - [x] Implement prepare -> durable -> live apply in #272 for Stop and the bounded full Tick write set; the default legacy runtime wiring and remaining state-owner migrations continue under #275/#278.
-- [ ] Implement versioned checkpoint/tail and eventless-Tick persistence.
-- [ ] Persist Player routing/pending bot authoritative state.
+- [x] Implement versioned checkpoint/tail and eventless-Tick persistence through the runtime-owned `FileJournal`.
+- [x] Recover from a pre-checkpoint crash by reconstructing configured genesis
+  state and replaying the RecoveryDelta journal from index 0; public-event
+  genesis replay is not an authoritative requirement.
+- [x] Add the `DAWNCKP1` checkpoint envelope, payload checksum, catalog fingerprint, explicit covered recovery position, and rejection of incompatible/corrupt checkpoints.
+- [x] Persist Player routing, allocator state, docking context, and pending bot/auto-jump authoritative state.
 - [ ] Implement Station projection plus admission/identity repository/allocator
   catch-up under #277.
 - [ ] Implement Transit durable Saga under #276.
 - [ ] Implement unified runtime durability/quorum/reconciliation policy under #278.
 - [ ] Implement final snapshot/catch-up/durability transport under #280.
-- [ ] Add full crash-point and checkpoint-plus-tail equivalence tests.
+- [x] Add checkpoint-plus-tail equivalence and malformed/missing-boundary rejection tests for the local recovery path; replica/Transit/admission crash matrices remain with #276/#277/#280.

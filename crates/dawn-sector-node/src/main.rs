@@ -23,13 +23,15 @@ mod runtime;
 use dawn_actor::ws_server;
 use dawn_consensus::{RaftActor, RaftActorHandle, RaftActorMessage, RaftState, TcpRaftTransport};
 use dawn_core::{NodeId, SectorBounds, SectorId};
-use dawn_event_store::{EventStore, FileEventStore};
+use dawn_event_store::{DurabilityMode, DurableJournal, EventStore, FileEventStore, FileJournal};
 use dawn_replication::{
     CatchUpConfig, CatchUpEvent, CatchUpManager, CatchUpStep, CatchUpTransport, ReplicaSnapshot,
     ReplicationTransport, TcpReplicationTransport,
 };
 use dawn_sector::node::SimulationNode;
-use dawn_sector::persistence::{CheckpointConfig, CheckpointScheduler, StateSnapshot};
+use dawn_sector::persistence::{
+    recovery::apply_tail, CheckpointConfig, CheckpointScheduler, StateSnapshot,
+};
 use dawn_sector::{galaxy::Galaxy, game_data::GameDataCatalog, transit};
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -78,7 +80,8 @@ async fn main() -> anyhow::Result<()> {
 
     // ── SimulationNode ────────────────────────────────────────────────────────
 
-    let (mut node, mut event_store, is_fresh) = build_node(&cfg, node_id, sector_id, bounds);
+    let (mut node, mut event_store, mut recovery_journal, is_fresh) =
+        build_node(&cfg, node_id, sector_id, bounds);
     if is_fresh {
         node.spawn_npc_frigates(cfg.npc_ships);
     }
@@ -190,8 +193,21 @@ async fn main() -> anyhow::Result<()> {
     // Raft warm-up: tick until a leader is elected (≤ 20 ticks election timeout).
     println!("[Node] Raft warm-up (30 ticks)...");
     for _ in 0..30 {
-        let output =
-            transit::run_runtime_tick(&mut node, &raft, &mut committed_rx, &[], |_, _, _| {});
+        let transition_id = transition_id_for(&node, node_id);
+        let output = transit::run_durable_runtime_tick(
+            &mut node,
+            &mut recovery_journal,
+            &raft,
+            &mut committed_rx,
+            &[],
+            transit::DurableRuntimeTickContext {
+                transition_id,
+                owner_epoch: 0,
+                durability: DurabilityMode::Synced,
+            },
+            |_, _, _| {},
+        )
+        .unwrap_or_else(|error| panic!("durable Raft warm-up tick failed: {error}"));
         event_store.append_batch(output.events);
     }
     println!("[Node] warm-up done. Waiting for players...");
@@ -212,7 +228,7 @@ async fn main() -> anyhow::Result<()> {
     let mut checkpoints = CheckpointScheduler::new(CheckpointConfig {
         interval_ticks: cfg.checkpoint_interval_ticks,
         snapshot_path: cfg.snapshot_path.clone().into(),
-        cold_path: cfg.cold_path.clone().into(),
+        cold_path: cfg.recovery_cold_path.clone().into(),
     });
     let mut interval = tokio::time::interval(std::time::Duration::from_millis(TICK_MS));
 
@@ -245,19 +261,28 @@ async fn main() -> anyhow::Result<()> {
         }
         emit_catch_up_step(&repl_transport, catch_up.tick());
 
-        runtime.run_frame(&mut node, &raft, &mut committed_rx, &mut event_store);
+        runtime
+            .run_frame(
+                &mut node,
+                &raft,
+                &mut committed_rx,
+                &mut event_store,
+                &mut recovery_journal,
+                node_id,
+            )
+            .expect("authoritative recovery journal failed; node is fenced");
 
         // Snapshot + compact on a fixed logical-tick cadence (ADR-0017 §5-C).
         // A checkpoint failure (e.g. disk full) is logged and skipped rather
         // than killing the live server -- the hot log keeps appending
         // normally on the next tick either way, and the next scheduled
         // checkpoint will retry.
-        match checkpoints.maybe_checkpoint(&mut node, &mut event_store) {
+        match checkpoints.maybe_checkpoint(&mut node, &mut recovery_journal) {
             Ok(Some(snapshot)) => {
                 println!(
-                    "[Node] checkpoint at tick {} (log_index={})",
+                    "[Node] checkpoint at tick {} (covered_recovery_index={})",
                     snapshot.tick.value(),
-                    snapshot.log_index
+                    snapshot.covered_recovery_index
                 );
                 match replica_snapshot_from_state(&snapshot, CATCH_UP_MAX_SNAPSHOT_BYTES) {
                     Ok(cached) => replica_snapshot = Some(cached),
@@ -311,7 +336,7 @@ fn emit_catch_up_step<T: CatchUpTransport>(transport: &T, step: CatchUpStep) {
                 bytes,
             } => {
                 eprintln!(
-                    "[Repl] sector={sector_id:?} installed recovery snapshot log_index={log_index} bytes={bytes}"
+                    "[Repl] sector={sector_id:?} installed recovery snapshot covered_recovery_index={log_index} bytes={bytes}"
                 );
             }
             CatchUpEvent::Completed {
@@ -345,8 +370,8 @@ fn load_replica_snapshot(
     }
 
     let bytes = std::fs::read(path)?;
-    let snapshot: StateSnapshot = postcard::from_bytes(&bytes)
-        .map_err(|error| anyhow::anyhow!("cannot decode current snapshot: {error}"))?;
+    let snapshot = StateSnapshot::decode_checkpoint(&bytes)
+        .map_err(|error| anyhow::anyhow!("cannot decode current checkpoint: {error}"))?;
     if snapshot.sector_id != expected_sector_id {
         anyhow::bail!(
             "snapshot sector {:?} does not match local sector {:?}",
@@ -356,7 +381,7 @@ fn load_replica_snapshot(
     }
     Ok(Some(ReplicaSnapshot::new(
         snapshot.sector_id,
-        snapshot.log_index,
+        snapshot.covered_recovery_index,
         bytes,
     )))
 }
@@ -365,14 +390,15 @@ fn replica_snapshot_from_state(
     snapshot: &StateSnapshot,
     max_bytes: usize,
 ) -> anyhow::Result<ReplicaSnapshot> {
-    let bytes = postcard::to_stdvec(snapshot)
-        .map_err(|error| anyhow::anyhow!("cannot encode current snapshot: {error}"))?;
+    let bytes = snapshot
+        .encode_checkpoint()
+        .map_err(|error| anyhow::anyhow!("cannot encode current checkpoint: {error}"))?;
     if bytes.len() > max_bytes {
         anyhow::bail!("snapshot is {} bytes, limit is {max_bytes}", bytes.len());
     }
     Ok(ReplicaSnapshot::new(
         snapshot.sector_id,
-        snapshot.log_index,
+        snapshot.covered_recovery_index,
         bytes,
     ))
 }
@@ -390,7 +416,7 @@ fn build_node(
     node_id: NodeId,
     sector_id: SectorId,
     bounds: SectorBounds,
-) -> (SimulationNode, FileEventStore, bool) {
+) -> (SimulationNode, FileEventStore, FileJournal, bool) {
     let catalog = Arc::new(
         GameDataCatalog::load_runtime()
             .unwrap_or_else(|error| panic!("failed to load required game-data catalog: {error}")),
@@ -406,8 +432,10 @@ fn build_node(
     // directory) up front.
     for path in [
         &cfg.event_log_path,
+        &cfg.recovery_journal_path,
         &cfg.snapshot_path,
         &cfg.cold_path,
+        &cfg.recovery_cold_path,
         &cfg.station_inventory_db_path,
     ] {
         if let Some(parent) = std::path::Path::new(path).parent() {
@@ -419,32 +447,81 @@ fn build_node(
 
     let store = FileEventStore::open(&cfg.event_log_path)
         .unwrap_or_else(|e| panic!("failed to open event log '{}': {e}", cfg.event_log_path));
+    let recovery_journal = FileJournal::open(&cfg.recovery_journal_path).unwrap_or_else(|e| {
+        panic!(
+            "failed to open recovery journal '{}': {e}",
+            cfg.recovery_journal_path
+        )
+    });
 
     let (mut node, is_fresh) = match StateSnapshot::load(&cfg.snapshot_path) {
         Ok(snapshot) => {
             println!(
-                "[Node] restoring from snapshot (tick={}, log_index={})",
+                "[Node] restoring from checkpoint (tick={}, covered_recovery_index={})",
                 snapshot.tick.value(),
-                snapshot.log_index
+                snapshot.covered_recovery_index
             );
-            (
-                SimulationNode::restore_from(&snapshot, Arc::clone(&galaxy), Arc::clone(&catalog)),
-                false,
+            if snapshot.node_id != node_id || snapshot.sector_id != sector_id {
+                panic!(
+                    "checkpoint '{}' belongs to node={} sector={}, expected node={} sector={}",
+                    cfg.snapshot_path, snapshot.node_id, snapshot.sector_id, node_id, sector_id
+                );
+            }
+            let node = SimulationNode::restore_from_checked(
+                &snapshot,
+                Arc::clone(&galaxy),
+                Arc::clone(&catalog),
             )
+            .unwrap_or_else(|error| {
+                panic!(
+                    "checkpoint '{}' is incompatible with the runtime catalog: {error}",
+                    cfg.snapshot_path
+                )
+            });
+            let (node, _) = apply_tail(node, &recovery_journal, snapshot.covered_recovery_index)
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "checkpoint tail cannot be applied from recovery journal '{}': {error}",
+                        cfg.recovery_journal_path
+                    )
+                });
+            (node, false)
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            println!(
-                "[Node] no snapshot at '{}', starting fresh",
-                cfg.snapshot_path
-            );
-            let node = SimulationNode::new(
+            let mut node = SimulationNode::new(
                 node_id,
                 sector_id,
                 bounds,
                 Arc::clone(&galaxy),
                 Arc::clone(&catalog),
             );
-            (node, true)
+            let recovery_index = recovery_journal
+                .next_index()
+                .unwrap_or_else(|e| panic!("failed to inspect recovery journal: {e}"));
+            if recovery_index.0 == 0 {
+                println!(
+                    "[Node] no snapshot at '{}', starting fresh",
+                    cfg.snapshot_path
+                );
+                (node, true)
+            } else {
+                // A crash before the first checkpoint still has an exact
+                // recovery path: reconstruct only the configured genesis
+                // state, then apply the authoritative journal from index 0.
+                // Public-event replay is deliberately not used here.
+                println!(
+                    "[Node] no snapshot at '{}', replaying RecoveryDelta genesis tail through {}",
+                    cfg.snapshot_path, recovery_index
+                );
+                node.spawn_npc_frigates(cfg.npc_ships);
+                let (node, _) = apply_tail(node, &recovery_journal, 0).unwrap_or_else(|error| {
+                    panic!(
+                        "genesis recovery tail cannot be applied from recovery journal '{}': {error}",
+                        cfg.recovery_journal_path
+                    )
+                });
+                (node, false)
+            }
         }
         Err(e) => panic!(
             "snapshot '{}' exists but could not be read: {e}",
@@ -463,5 +540,14 @@ fn build_node(
                 cfg.station_inventory_db_path
             )
         });
-    (node, store, is_fresh)
+    (node, store, recovery_journal, is_fresh)
+}
+
+fn transition_id_for(
+    node: &SimulationNode,
+    node_id: NodeId,
+) -> dawn_sector::transition::SectorTransitionId {
+    dawn_sector::transition::SectorTransitionId(
+        (u128::from(node.current_tick().value()) << 8) | u128::from(node_id.0),
+    )
 }

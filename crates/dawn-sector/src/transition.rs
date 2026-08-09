@@ -6,10 +6,11 @@
 //! apply the same recovery delta.
 
 use dawn_core::{
-    ApproachTarget, DomainEvent, JumpGateId, LockOnCommand, SectorId, ShipId, Tick, Velocity,
-    WarpTarget,
+    ApproachTarget, DomainEvent, JumpGateId, LockOnCommand, PlayerId, SectorId, ShipId, StationId,
+    Tick, Velocity, WarpTarget,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use thiserror::Error;
 
 use crate::persistence::ShipSnapshot;
@@ -84,6 +85,17 @@ pub struct TickRecoveryDelta {
     /// Presentation corrections are carried with the transition output so a
     /// runtime can publish them after the durable commit.
     pub completed_warps: Vec<ShipId>,
+    /// Node-level authority captured after the tick. These fields make the
+    /// delta include command mutations that happened before the tick runner
+    /// prepared its write set, so a successful tick is a complete recovery
+    /// boundary rather than only a movement diff.
+    pub id_counter: u64,
+    pub player_id_counter: u64,
+    pub active_ships: BTreeMap<PlayerId, ShipId>,
+    pub owners: BTreeMap<ShipId, PlayerId>,
+    pub docked_ships: BTreeMap<ShipId, StationId>,
+    pub docked_players: BTreeMap<PlayerId, StationId>,
+    pub completed_incoming_transits: Vec<crate::persistence::CompletedIncomingTransit>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -103,6 +115,13 @@ impl TickRecoveryDelta {
             pending_bot_lock_commands: Vec::new(),
             pending_auto_jumps: Vec::new(),
             completed_warps: Vec::new(),
+            id_counter: 0,
+            player_id_counter: 0,
+            active_ships: BTreeMap::new(),
+            owners: BTreeMap::new(),
+            docked_ships: BTreeMap::new(),
+            docked_players: BTreeMap::new(),
+            completed_incoming_transits: Vec::new(),
         }
     }
 }
@@ -203,7 +222,7 @@ pub enum TickLockPhase {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SectorRecoveryDelta {
     Stop(StopRecoveryDelta),
-    Tick(TickRecoveryDelta),
+    Tick(Box<TickRecoveryDelta>),
 }
 
 /// A complete transition prepared before any live authoritative mutation.
@@ -326,10 +345,10 @@ impl SectorEngine {
         Ok(PreparedSectorTransition {
             transition_id,
             context,
-            recovery_delta: SectorRecoveryDelta::Tick(TickRecoveryDelta::logical(
+            recovery_delta: SectorRecoveryDelta::Tick(Box::new(TickRecoveryDelta::logical(
                 state.current_tick,
                 next_tick,
-            )),
+            ))),
             public_events: Vec::new(),
             reliable_effects: Vec::new(),
         })
@@ -413,7 +432,7 @@ mod tests {
         assert_eq!(state.current_tick, Tick(41));
         assert_eq!(
             prepared.recovery_delta,
-            SectorRecoveryDelta::Tick(TickRecoveryDelta::logical(Tick(41), Tick(42)))
+            SectorRecoveryDelta::Tick(Box::new(TickRecoveryDelta::logical(Tick(41), Tick(42))))
         );
     }
 
@@ -451,7 +470,8 @@ mod tests {
 
     #[test]
     fn tick_recovery_delta_round_trips_through_the_version_gate() {
-        let delta = SectorRecoveryDelta::Tick(TickRecoveryDelta::logical(Tick(41), Tick(42)));
+        let delta =
+            SectorRecoveryDelta::Tick(Box::new(TickRecoveryDelta::logical(Tick(41), Tick(42))));
         let payload = encode_recovery_delta(&delta).expect("delta should encode");
 
         assert_eq!(decode_recovery_delta(&payload), Ok(delta));

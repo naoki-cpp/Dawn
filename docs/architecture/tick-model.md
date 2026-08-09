@@ -7,6 +7,12 @@ related  : event-catalog.md, recovery-contract.md, ownership.md, ../adr/ADR-0049
 
 # Tick Model
 
+The production implementation now satisfies the recovery boundary described
+below: it prepares a Tick, durably commits one RecoveryDelta, applies that same
+delta locally, and only then publishes outputs. The historical target wording
+in the following ADR note is retained for context; the implementation note
+after it is the current production status.
+
 > **ADR-0049 recovery amendment (2026-08-07):** The detailed system order and game
 > mechanics in this document remain normative. What changes is the **mutation and
 > durability boundary** around them. In the target #272 architecture, the logical
@@ -17,18 +23,26 @@ related  : event-catalog.md, recovery-contract.md, ownership.md, ../adr/ADR-0049
 > the old mutate-then-append pipeline; those current call shapes are migration debt,
 > not a competing commit contract.
 
+The production node now uses the prepared Tick transition described below: it
+durably appends the RecoveryDelta before applying the same delta locally,
+catching up required projections, and publishing its public/reliable outputs.
+The legacy call shapes named above are retained only for deterministic unit
+fixtures and non-persistent adapters, not as an alternative production commit
+contract.
+
 The #272 migration now exposes both the logical counter seam and a complete
-bounded Tick seam. `SimulationNode::prepare_tick_state_transition` executes the
-legacy systems against a ship-level write-set image, restores the live state,
-and returns the changed ship fields, queues, public events, and recovery context.
-`run_durable_runtime_tick` appends that transition before applying the same
-delta and publishing outputs. It does not clone the whole ECS world. The older
-`tick_with_lock_commands` / `run_runtime_tick` path remains as a compatibility
-adapter until every runtime is wired to an owned recovery journal; those call
-shapes are migration debt, not a competing commit contract. Recovery applies
-the persisted delta together with its journal `TransitionContext`; the node
-validates the Sector identity, while owner-epoch fencing remains the runtime
-orchestration responsibility of #278.
+Tick seam. `SimulationNode::prepare_tick_state_transition` executes the legacy
+systems against a ship-level write-set image, restores the live state, and
+returns the complete post-tick ship image, node routing/maps, queues, public
+events, and recovery context. `run_durable_runtime_tick` appends that
+transition to the production `FileJournal` before applying the same delta and
+publishing outputs. It does not clone the whole ECS world. The older
+`tick_with_lock_commands` / `run_runtime_tick` path remains for deterministic
+unit fixtures and adapters that have not opted into persistence, not as the
+production Node commit contract. Recovery applies the persisted delta together
+with its journal `TransitionContext`; the node validates the Sector identity,
+while owner-epoch fencing remains the runtime orchestration responsibility of
+#278.
 
 ## 1. Tick Definition
 
