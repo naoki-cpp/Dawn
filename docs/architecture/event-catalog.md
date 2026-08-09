@@ -15,8 +15,8 @@ related  : entity-model.md, tick-model.md, recovery-contract.md, event-schema-ev
 > durable recovery transition with no public event. `Replay` notes below describe
 > the event's supported public/projection/legacy replay behavior; they do not imply
 > that public-event history alone reconstructs every authoritative field. Transit
-> EventStore-scan retry descriptions are current/legacy behavior to be replaced by
-> #276's durable Saga under the same ADR-0049 recovery contract.
+> EventStore-scan retry descriptions are historical behavior superseded by #276's
+> durable Saga under the same ADR-0049 recovery contract.
 
 ## 1. Using This Catalog
 
@@ -151,7 +151,7 @@ Validation-stage rejection is expressed via `CommandRejected`, not an event (INV
 
 The corresponding command is `TransitCommand { ship_id, to }`. Raft carries `TransitOp::Request`, `Commit`, and `Ack`: Request freezes the source, allocates a `TransitAttemptId`, and persists the canonical `OutgoingTransitAttempt` with `gate_id`, `entry_pos: AbsolutePosition`, and the complete handoff. Commit and Ack carry that same attempt ID. Commit materializes the destination by deriving its anchor and local offset from the absolute entry point through the same seam used by replay, then records an `IncomingTransitReceipt`; duplicate Commit is answered from that receipt without rematerializing. Ack removes the source recovery copy only when the keyed outgoing Saga attempt is still in transit. Retries read the checkpointed Saga directly with bounded exponential backoff, so public-event retention and checkpoint compaction are independent of Transit retry state.
 
-> **ADR-0049 / #276:** the `TransitAttemptId` Saga is the exact recovery authority. It is checkpointed in `TransitSagaSnapshot` and carried by recovery deltas; public Transit events remain business facts and test/projection inputs, but are not scanned to reconstruct outgoing retries or incoming receipts.
+> **ADR-0049 / #276:** the `TransitAttemptId` Saga is the exact recovery authority. It is checkpointed in `TransitSagaSnapshot` and carried by recovery deltas; public Transit events remain business facts and replay/projection inputs, but are not scanned to reconstruct outgoing retries or incoming receipts.
 >
 > Retry proposals use bounded exponential backoff and quarantine an attempt after
 > the configured retry limit. `SimulationNode::transit_saga_diagnostics()` exposes
@@ -504,7 +504,7 @@ The current destination appends this event when Commit materialization succeeds,
 
 **Public/legacy Replay:** on `from`, remove `handoff.ship_id`; on `to`, feed `handoff` through the current destination materialization seam and derive anchor/offset from `entry_pos`. The current live `AnchorRebased` fact precedes Completed where emitted. For player-owned Ships, current replay can also restore the Ship-to-Player public/domain projection.
 
-**ADR-0049/#276:** exact owner/routing/state recovery and attempt/receipt retry semantics are RecoveryDelta/Saga authority. #276 may change `request_tick` to an opaque `TransitAttemptId` without preserving this pre-release persistence shape.
+**ADR-0049/#276:** exact owner/routing/state recovery and attempt/receipt retry semantics are RecoveryDelta/Saga authority. Transit operations use the opaque `TransitAttemptId`; the pre-release event `request_tick` shape is not a persistence compatibility contract.
 
 ---
 

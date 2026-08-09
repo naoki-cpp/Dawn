@@ -109,8 +109,8 @@ boundary in Step 8.5; current code may still mutate live structures earlier duri
 
 A committed distributed input such as a Raft Transit operation is applied as authoritative
 input at the appropriate pre-Tick boundary, but any resulting Sector state/public output must
-also enter the ADR-0049 recovery model. #276 may reshape the Transit persistence/lifecycle
-without changing the following simulation ordering.
+also enter the ADR-0049 recovery model. #276 now persists Transit lifecycle state in the
+durable Saga without changing the following simulation ordering.
 
 ```
 Step 1: Prepare the Tick counter increment
@@ -552,7 +552,7 @@ eve-reference §11 / ADR-0022.
 
 | Operation | Handling | Status |
 |---|---|---|
-| Discrete crossing (a ship crosses the boundary) | SectorTransit hands off `entry_pos` + `velocity` through consensus (ADR-0014); final durable attempt state migrates under #276 | Implemented baseline / persistence migrating |
+| Discrete crossing (a ship crosses the boundary) | SectorTransit hands off `entry_pos` + `velocity` through consensus (ADR-0014); final durable attempt state is owned by the #276 Saga | Implemented |
 | In-flight Warp crossing the boundary | Each Sector computes its own segment locally via **parametric warp** (clipping entry->endpoint at the boundary). Transit carries "warp endpoint + committed"; the receiving side skips Align and continues. Position/public motion is recorded as specified by ADR-0022/INV-MOVE; exact state would enter RecoveryDelta | Not implemented — to be designed at Fission time ([ADR-0022](../adr/ADR-0022-intra-sector-warp.md)'s parametric-warp revision is the basis) |
 | Cross-boundary combat (interaction spans the boundary) | The hard case: requires per-Tick state sync between both Sectors every Tick. Fission is for separable load only, so this is **assumed not to occur at boundaries**. If a single dense battle exceeds node capacity, it's diverted to **local TiDi** rather than split | Fundamentally hard -> avoided by not splitting (local TiDi) (ADR-0018 / eve-reference §11.1, §11.3) |
 

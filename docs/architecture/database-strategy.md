@@ -132,7 +132,8 @@ identityについて#277 repositoryがcaught-upまたはdeterministically reconc
 > stored in `StateSnapshot` and `TickRecoveryDelta`; `TransitAttemptId` provides
 > direct lookup, while `OutgoingTransitAttempt` and `IncomingTransitReceipt` own
 > retry, terminal, and destination deduplication state. The public EventStore
-> remains an audit/projection stream only.
+> remains an audit/projection stream only. The following historical notes describe
+> the pre-#276 split and are retained only as migration context.
 
 現行Transitはpublic EventStore scanとsnapshot receiptへretry/dedup authorityが分散している。
 これは#276が置換するlegacy implementationである。
@@ -276,7 +277,7 @@ Accepted target / work package:
 - #271: fallible atomic durable journal
 - #272: pure engineからstorage ownershipを除去
 - #277: Station projectionとauthoritative admission/identity repositoryを分離しreconciliationを定義
-- #276: Transit EventStore scanをdurable Sagaへ置換
+- #276: Transit EventStore scanをdurable Sagaへ置換（implemented）
 - #278: runtime durability profile/quorum/fencing/repository reconciliation/ack policyを統一
 - #280: selected recovery/repository catch-up/durability representationをpeer transportへ載せる
 

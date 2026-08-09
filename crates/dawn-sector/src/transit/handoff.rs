@@ -468,6 +468,15 @@ pub(super) fn apply_ack_with_attempt(
         return false;
     }
     if !node.is_ship_in_transit(ship_id) || node.get_ship_position(ship_id).is_none() {
+        node.quarantine_transit_attempt(
+            attempt_id,
+            if node.get_ship_position(ship_id).is_none() {
+                "pending Transit source Ship is missing during Ack validation"
+            } else {
+                "pending Transit source Ship is not frozen in Transit state"
+            }
+            .to_owned(),
+        );
         return false;
     }
     node.complete_outgoing_transit_for_attempt(
@@ -838,6 +847,33 @@ mod tests {
         ));
         assert!(source.is_ship_in_transit(ship_id));
         assert_eq!(source.ship_count(), 1);
+    }
+
+    #[test]
+    fn missing_source_ship_during_ack_quarantines_the_attempt() {
+        let mut source = node(0);
+        let ship_id = source.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        let effect = apply_request(&mut source, ship_id, SectorId(1), None).unwrap();
+        source.remove_ship(ship_id);
+        let current = journal(&source);
+        let event_count = source.total_event_count();
+
+        assert!(!apply_ack(
+            &mut source,
+            &current,
+            ship_id,
+            effect.from,
+            effect.to,
+            effect.request_tick,
+        ));
+        assert_eq!(source.total_event_count(), event_count);
+        assert!(matches!(
+            journal(&source)
+                .outgoing(effect.attempt_id)
+                .expect("missing source remains diagnosable")
+                .state,
+            TransitAttemptState::Quarantined { .. }
+        ));
     }
 
     #[test]

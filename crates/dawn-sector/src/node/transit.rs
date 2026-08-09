@@ -89,6 +89,14 @@ impl SimulationNode {
             .is_some_and(|attempt| matches!(attempt.state, TransitAttemptState::Acknowledged))
     }
 
+    pub(crate) fn quarantine_transit_attempt(
+        &mut self,
+        attempt_id: TransitAttemptId,
+        reason: String,
+    ) {
+        self.transit_journal.quarantine(attempt_id, reason);
+    }
+
     fn allocate_transit_attempt(&mut self, ship_id: ShipId) -> Result<TransitAttemptId, DawnError> {
         loop {
             let sequence = self.transit_attempt_counter;
@@ -464,6 +472,10 @@ impl SimulationNode {
         };
         let Some(event) = self.complete_outgoing_state(&handoff, to, entry_pos, request_tick)
         else {
+            self.transit_journal.quarantine(
+                attempt_id,
+                "pending Transit source Ship is missing during Ack cleanup".to_owned(),
+            );
             return;
         };
         self.emit_event(event);

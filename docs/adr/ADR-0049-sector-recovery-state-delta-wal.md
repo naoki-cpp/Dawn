@@ -552,9 +552,9 @@ identity-consumption, and promotion rules in §6A.
 
 ### Public Transit events as the durable handoff repository
 
-Retained only as current/legacy behavior while #276 migrates. Long-term retry and
-receipt authority belongs to the explicit durable Saga because log scanning and
-implicit attempt identity are the exact problems #276 is chartered to remove.
+Retained only as historical public facts and replay/projection inputs. The #276
+durable Saga now owns retry and receipt authority because log scanning and implicit
+attempt identity are the exact problems it removes.
 
 ### Generic exactly-once client retry without a RequestId
 
