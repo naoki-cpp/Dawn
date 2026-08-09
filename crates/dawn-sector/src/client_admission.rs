@@ -603,11 +603,11 @@ mod tests {
     }
 
     #[test]
-    fn reopening_station_inventory_db_preserves_the_rotated_resume_ticket() {
+    fn reopening_repository_preserves_the_rotated_resume_ticket() {
         let db_file = tempfile::NamedTempFile::new().unwrap();
         let db_path = db_file.path().to_str().unwrap();
         let mut node = node();
-        node.open_station_inventory_db(db_path).unwrap();
+        node.open_repositories(db_path).unwrap();
 
         let fresh = node
             .begin_client_admission(
@@ -633,7 +633,7 @@ mod tests {
         let rotated_ticket = resume.resume_ticket();
         resume.commit(&mut node).expect("resume should commit");
 
-        node.open_station_inventory_db(db_path)
+        node.open_repositories(db_path)
             .expect("reopening the durable DB should reconcile grants");
 
         let retry = node
@@ -659,6 +659,25 @@ mod tests {
             ClientAdmissionRefusal::ResumeTicketInvalid
         );
         assert!(node.is_active_ship(committed.player_id, committed.ship_id));
+    }
+
+    #[test]
+    fn fresh_admission_skips_ship_ids_already_materialized_in_the_node() {
+        let mut node = node();
+        let materialized = node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+
+        let attempt = node
+            .begin_client_admission(
+                ClientAdmissionIntent::Fresh {
+                    spawn_position: Position::ORIGIN,
+                },
+                AOI_CELL_SIZE,
+            )
+            .expect("fresh admission should begin");
+
+        assert_ne!(attempt.ship_id(), materialized);
+        assert!(attempt.ship_id().0.counter() > materialized.0.counter());
+        attempt.abort(&mut node);
     }
 
     #[test]

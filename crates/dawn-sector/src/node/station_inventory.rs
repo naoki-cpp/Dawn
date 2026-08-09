@@ -1,136 +1,63 @@
-//! Current Station inventory cache + SQLite write-through seam.
+//! Station projection helpers for `SimulationNode`.
 //!
-//! This is the ADR-0038 implementation baseline: `station_inventory_db.rs`
-//! currently owns the durable SQLite representation, while this module owns the
-//! bounded cache and the `SimulationNode` helpers. ADR-0049 changes the target
-//! authority split: the Sector recovery journal owns the Station aggregate and
-//! SQLite becomes an idempotent projection/read model under #277. Do not infer
-//! the final recovery ordering from this legacy write-through path.
+//! The repository is the bounded read/write boundary. The engine intentionally
+//! keeps no interior-mutability cache: a read must not mutate state through
+//! `&self`. A future runtime may add a cache beside the repository if it owns
+//! invalidation and promotion freshness explicitly.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
 
 use dawn_core::{events::ClientAdmissionCommitted, ItemId, PlayerId, StationId};
 
 use super::{station::StationOperationRejection, SimulationNode};
 
-/// Bounded in-memory cache of recently-touched players' Station inventory.
-///
-/// In the current implementation SQLite is the write-through authority for
-/// this cache, so eviction only causes the next read to query SQLite again.
-/// Under ADR-0049/#277, the same cache is a read optimization over the
-/// journal-owned Station aggregate and SQLite projection; that target contract
-/// is not implemented by this module yet.
-pub(super) struct StationInventoryCache {
-    entries: std::collections::HashMap<(PlayerId, StationId), BTreeMap<ItemId, u64>>,
-    /// Recency order, oldest first. A player can appear more than once (the
-    /// stale occurrence is just skipped on eviction); capacity is small
-    /// enough that this doesn't need a proper LRU data structure.
-    recency: VecDeque<(PlayerId, StationId)>,
-}
-
-/// How many players' Station inventory to keep cached at once. Arbitrary but
-/// generous relative to `POPULATION_CAP` (500) -- most docked/recently-active
-/// players fit comfortably; the point is bounding memory, not this exact
-/// number.
-const STATION_INVENTORY_CACHE_CAPACITY: usize = 256;
-
-impl StationInventoryCache {
-    pub(super) fn new() -> Self {
-        Self {
-            entries: std::collections::HashMap::new(),
-            recency: VecDeque::new(),
-        }
-    }
-
-    fn touch(&mut self, key: (PlayerId, StationId)) {
-        self.recency.push_back(key);
-        while self.entries.len() > STATION_INVENTORY_CACHE_CAPACITY {
-            let Some(oldest) = self.recency.pop_front() else {
-                break;
-            };
-            // Only actually evict if `oldest` isn't more-recently touched
-            // elsewhere in the queue (a stale duplicate).
-            if !self.recency.contains(&oldest) {
-                self.entries.remove(&oldest);
-            }
-        }
-    }
-
-    /// Populate the cache from a DB read (cache miss) or record a write's
-    /// resulting value, and mark `player_id` as just-touched.
-    fn insert(
-        &mut self,
-        player_id: PlayerId,
-        station_id: StationId,
-        inventory: BTreeMap<ItemId, u64>,
-    ) {
-        let key = (player_id, station_id);
-        self.entries.insert(key, inventory);
-        self.touch(key);
-    }
-
-    /// Cache-hit read: clones the entry (cheap -- inventories are small) and
-    /// bumps recency. `None` means a cache miss, not "empty inventory" --
-    /// callers query SQLite and `insert()` the result.
-    fn get_cloned_and_touch(
-        &mut self,
-        player_id: PlayerId,
-        station_id: StationId,
-    ) -> Option<BTreeMap<ItemId, u64>> {
-        let key = (player_id, station_id);
-        let inventory = self.entries.get(&key).cloned();
-        if inventory.is_some() {
-            self.touch(key);
-        }
-        inventory
-    }
-
-    /// Mutable access for the write path, inserting an empty entry (and
-    /// marking it just-touched) if this player isn't cached yet -- the write
-    /// path never needs to distinguish "not cached" from "cached and empty".
-    fn entry_mut(
-        &mut self,
-        player_id: PlayerId,
-        station_id: StationId,
-    ) -> &mut BTreeMap<ItemId, u64> {
-        let key = (player_id, station_id);
-        if !self.entries.contains_key(&key) {
-            self.insert(player_id, station_id, BTreeMap::new());
-        } else {
-            self.touch(key);
-        }
-        self.entries
-            .get_mut(&key)
-            .expect("just inserted or already present")
-    }
-}
-
 impl SimulationNode {
-    /// The player's station inventory in this Sector, owned rather than
-    /// borrowed (ADR-0038: a cache hit clones out of the `RefCell`-guarded
-    /// cache; a miss queries SQLite and populates the cache before
-    /// returning). `None` only when the player has never had a Station
-    /// inventory entry at all -- `station_item_count` treats that the same
-    /// as an empty one.
+    /// Return the next global journal index required by the Station projection.
+    ///
+    /// The runtime should use this cursor when applying a committed
+    /// `RecoveryDelta`; it is intentionally persisted with the projection so
+    /// restart and replay preserve the same contiguous-prefix contract.
+    pub fn station_projection_applied_through(&self) -> Result<u64, super::ProjectionReadError> {
+        self.repositories
+            .station_inventory()
+            .projection_applied_through()
+            .map_err(|error| super::ProjectionReadError::Storage {
+                message: error.to_string(),
+            })
+    }
+
+    /// Apply the Station part of one committed transition exactly once.
+    ///
+    /// Pass `None` for transitions that do not affect Station inventory. The
+    /// caller must invoke this only after the enclosing `RecoveryDelta` has
+    /// been durably committed to the runtime journal.
+    pub fn apply_station_projection(
+        &self,
+        transition_id: &str,
+        journal_index: u64,
+        mutation: Option<super::StationProjectionMutation>,
+    ) -> Result<super::ProjectionApplyResult, super::ProjectionApplyError> {
+        self.repositories.station_inventory().apply_projection(
+            transition_id,
+            journal_index,
+            mutation,
+        )
+    }
+
+    /// Read the player's Station projection at one station.
     pub fn station_inventory(
         &self,
         player_id: PlayerId,
         station_id: StationId,
     ) -> Option<BTreeMap<ItemId, u64>> {
-        let mut cache = self.station_inventory_cache.borrow_mut();
-        if let Some(inventory) = cache.get_cloned_and_touch(player_id, station_id) {
-            return Some(inventory);
-        }
-        let inventory = self.station_inventory_db.get_all(player_id, station_id);
-        cache.insert(player_id, station_id, inventory.clone());
-        if inventory.is_empty() {
-            None
-        } else {
-            Some(inventory)
-        }
+        let inventory = self
+            .repositories
+            .station_inventory()
+            .get_all(player_id, station_id);
+        (!inventory.is_empty()).then_some(inventory)
     }
 
-    /// Count one item stack inside the player's station inventory.
+    /// Count one item stack inside the player's Station projection.
     pub fn station_item_count(
         &self,
         player_id: PlayerId,
@@ -138,7 +65,7 @@ impl SimulationNode {
         item_id: ItemId,
     ) -> u64 {
         self.station_inventory(player_id, station_id)
-            .and_then(|inv| inv.get(&item_id).copied())
+            .and_then(|inventory| inventory.get(&item_id).copied())
             .unwrap_or(0)
     }
 
@@ -149,46 +76,38 @@ impl SimulationNode {
         station_id: StationId,
         inventory: BTreeMap<ItemId, u64>,
     ) {
-        for (item_id, count) in &inventory {
-            self.station_inventory_db
-                .credit(player_id, station_id, *item_id, *count);
+        for (item_id, count) in inventory {
+            self.repositories
+                .station_inventory()
+                .credit(player_id, station_id, item_id, count);
         }
-        self.station_inventory_cache
-            .get_mut()
-            .insert(player_id, station_id, inventory);
     }
 
     pub(super) fn ensure_client_admission_grant(&mut self, event: &ClientAdmissionCommitted) {
-        self.station_inventory_db.ensure_client_admission_grant(
-            event.ship_id,
-            event.player_id,
-            event.resume_ticket,
-            event.starter_station_id,
-            event.starter_item_id,
-            event.starter_item_count,
-        );
-        let inventory = self
-            .station_inventory_db
-            .get_all(event.player_id, event.starter_station_id);
-        self.station_inventory_cache.get_mut().insert(
-            event.player_id,
-            event.starter_station_id,
-            inventory,
-        );
+        self.repositories
+            .transaction()
+            .expect("client admission Station grant transaction")
+            .ensure_client_admission_grant(
+                event.ship_id,
+                event.player_id,
+                event.resume_ticket,
+                event.starter_station_id,
+                event.starter_item_id,
+                event.starter_item_count,
+            )
+            .expect("client admission Station grant transaction");
     }
 
-    pub(super) fn reconcile_client_admission_grants(&mut self) -> Result<(), String> {
-        // Admission reconciliation is a runtime/repository concern. The
-        // storage-independent engine cannot reconstruct it from an event log;
-        // callers must feed committed admission records through the explicit
-        // projection API before opening a client session.
-        Ok(())
+    pub(super) fn reconcile_client_admission_identities(&mut self) -> Result<(), String> {
+        self.repositories
+            .reconcile_admission_identity_watermarks()
+            .map_err(|error| error.to_string())
     }
 
-    /// Add `count` of `item_id` to the player's station inventory. Writes
-    /// through to SQLite synchronously (ADR-0038) before updating the cache
-    /// -- Station commands are low-frequency and player-triggered, not
-    /// per-tick, so this doesn't need a write-behind queue.
+    /// Transitional command adapter. Authoritative Station mutations should
+    /// use `StationInventoryRepository::apply_projection` after the enclosing
+    /// RecoveryDelta is durable; this method remains for existing command
+    /// seams until the runtime projection hook is wired by #278.
     pub fn credit_station_item(
         &mut self,
         player_id: PlayerId,
@@ -199,31 +118,9 @@ impl SimulationNode {
         if count == 0 {
             return;
         }
-        // Write through first, always. Then either patch the cache entry
-        // with the same delta (it holds pre-write data if it was already
-        // cached) or, if this player wasn't cached at all, load the
-        // already-updated value straight from SQLite -- patching a freshly
-        // DB-loaded value would double-apply the delta.
-        self.station_inventory_db
+        self.repositories
+            .station_inventory()
             .credit(player_id, station_id, item_id, count);
-        let already_cached = self
-            .station_inventory_cache
-            .get_mut()
-            .get_cloned_and_touch(player_id, station_id)
-            .is_some();
-        if already_cached {
-            *self
-                .station_inventory_cache
-                .get_mut()
-                .entry_mut(player_id, station_id)
-                .entry(item_id)
-                .or_default() += count;
-        } else {
-            let inventory = self.station_inventory_db.get_all(player_id, station_id);
-            self.station_inventory_cache
-                .get_mut()
-                .insert(player_id, station_id, inventory);
-        }
     }
 
     pub(super) fn try_debit_station_item(
@@ -236,42 +133,16 @@ impl SimulationNode {
         if count == 0 {
             return Ok(());
         }
-        // The current SQLite-backed path makes the rejection decision here,
-        // because a fresh cache miss may still have a stack in SQLite. The
-        // ADR-0049 target moves this decision to the journal-owned Station
-        // aggregate and keeps SQLite as an idempotent projection.
-        self.station_inventory_db
-            .try_debit(player_id, station_id, item_id, count)?;
-        let already_cached = self
-            .station_inventory_cache
-            .get_mut()
-            .get_cloned_and_touch(player_id, station_id)
-            .is_some();
-        if already_cached {
-            let cached = self
-                .station_inventory_cache
-                .get_mut()
-                .entry_mut(player_id, station_id);
-            if let Some(stack) = cached.get_mut(&item_id) {
-                *stack = stack.saturating_sub(count);
-                if *stack == 0 {
-                    cached.remove(&item_id);
-                }
-            }
-        } else {
-            let inventory = self.station_inventory_db.get_all(player_id, station_id);
-            self.station_inventory_cache
-                .get_mut()
-                .insert(player_id, station_id, inventory);
-        }
-        Ok(())
+        self.repositories
+            .station_inventory()
+            .try_debit(player_id, station_id, item_id, count)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dawn_core::{ItemId, NodeId, SectorBounds, SectorId};
+    use dawn_core::{NodeId, SectorBounds, SectorId};
 
     const TEST_STATION_ID: StationId = StationId(0);
 
@@ -311,10 +182,6 @@ mod tests {
             ),
             1
         );
-        assert_eq!(
-            node.station_item_count(player_b, TEST_STATION_ID, ItemId::ScrapMetal),
-            0
-        );
     }
 
     #[test]
@@ -335,32 +202,16 @@ mod tests {
         );
     }
 
-    /// ADR-0038: the whole point of the SQLite-backed cache is to never hold
-    /// every player in memory at once. Touch more players than
-    /// `STATION_INVENTORY_CACHE_CAPACITY`, then read one from early in the
-    /// sequence back -- it must still be correct (served from SQLite on the
-    /// resulting cache miss), proving eviction doesn't lose data.
     #[test]
-    fn station_inventory_survives_cache_eviction() {
+    fn station_projection_reads_do_not_require_an_in_memory_cache() {
         let mut node = node();
-        for i in 0..(STATION_INVENTORY_CACHE_CAPACITY as u64 + 10) {
-            node.credit_station_item(PlayerId(i), TEST_STATION_ID, ItemId::ScrapMetal, i + 1);
-        }
+        node.credit_station_item(PlayerId(1), TEST_STATION_ID, ItemId::ScrapMetal, 2);
 
-        // PlayerId(0) was touched first and is well outside the capacity
-        // window by the time the loop finishes -- it must have been evicted.
         assert_eq!(
-            node.station_item_count(PlayerId(0), TEST_STATION_ID, ItemId::ScrapMetal),
-            1
-        );
-        // The most recently touched player is still a guaranteed cache hit.
-        assert_eq!(
-            node.station_item_count(
-                PlayerId(STATION_INVENTORY_CACHE_CAPACITY as u64 + 9),
-                TEST_STATION_ID,
-                ItemId::ScrapMetal
-            ),
-            STATION_INVENTORY_CACHE_CAPACITY as u64 + 10
+            node.station_inventory(PlayerId(1), TEST_STATION_ID)
+                .unwrap()
+                .get(&ItemId::ScrapMetal),
+            Some(&2)
         );
     }
 
@@ -383,10 +234,6 @@ mod tests {
             node.try_debit_station_item(player_id, TEST_STATION_ID, ItemId::ScrapMetal, 3),
             Err(StationOperationRejection::InsufficientStationItem)
         ));
-        assert_eq!(
-            node.station_item_count(player_id, TEST_STATION_ID, ItemId::ScrapMetal),
-            2
-        );
         assert!(node
             .try_debit_station_item(player_id, TEST_STATION_ID, ItemId::ScrapMetal, 2)
             .is_ok());

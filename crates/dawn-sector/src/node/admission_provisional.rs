@@ -2,12 +2,9 @@
 //!
 //! # ADR-0049 / #277 migration status
 //!
-//! The code below still implements the pre-refactor persistence path: fresh
-//! allocation watermarks are appended as public `DomainEvent`s, prepared spawn
-//! input and resume-ticket state are stored in the catch-all SQLite adapter, and
-//! `ClientAdmissionCommitted` is used by the current replay/reconciliation path.
-//! Those mechanics describe the **current migration baseline**, not the final
-//! recovery authority selected by ADR-0049.
+//! The public admission facts remain useful audit output, but the durable
+//! reservation and resume-ticket state now goes through the explicit
+//! admission/identity repository views in `repositories.rs`.
 //!
 //! The target contract separates the authorities:
 //!
@@ -23,9 +20,8 @@
 //! - public admission events may remain useful facts, but are not the sole exact
 //!   recovery reducer or allocator authority.
 //!
-//! Until #277/#278 migrate this code, comments on individual methods explicitly
-//! describe current behavior without promoting it to the target persistence
-//! contract.
+//! #278 still owns the runtime hook that applies Station projection records
+//! after the authoritative RecoveryDelta is durable.
 
 use dawn_core::{
     events::{ClientAdmissionCommitted, ClientAdmissionIdentityReserved},
@@ -44,26 +40,23 @@ fn generate_resume_ticket() -> ResumeTicket {
 }
 
 impl SimulationNode {
-    /// Current implementation of a fresh identity reservation.
+    /// Durably reserve a fresh identity before producing the admission handoff.
     ///
-    /// Today the allocation watermark is emitted as a public output first and
-    /// SQLite then records the exact prepared spawn input. The runtime must
-    /// persist the output and the prepared row before exposing the identity;
-    /// returning only after both operations is what makes it retryable after
-    /// restart.
-    ///
-    /// Under ADR-0049/#277, the normative invariant is instead that the durable
-    /// Admission/Identity repository reservation also durably consumes the
-    /// `PlayerId` / `ShipId` before `Welcome`; EventStore replay is migration
-    /// baseline rather than the final allocator/recovery authority.
+    /// The repository transaction records the prepared spawn, resume ticket,
+    /// consumed identities, and allocator watermarks before the caller can
+    /// expose `Welcome`. The public reservation event is an audit fact, not the
+    /// allocator authority.
     pub(crate) fn reserve_fresh_admission_identity(
         &mut self,
         spawn_position: Position,
     ) -> (PlayerId, ShipId, ResumeTicket) {
-        let player_id = self.next_player_id();
-        let ship_id = ShipId::new(self.node_id, self.id_counter);
         let resume_ticket = generate_resume_ticket();
-        self.id_counter += 1;
+        let (player_id, ship_id) = self
+            .repositories
+            .reserve_fresh_admission_identity(self.node_id, spawn_position, resume_ticket)
+            .expect("fresh admission identity reservation");
+        self.player_id_counter = self.player_id_counter.max(player_id.0 + 1);
+        self.id_counter = self.id_counter.max(ship_id.0.counter() + 1);
         self.emit_event(DomainEvent::ClientAdmissionIdentityReserved(
             ClientAdmissionIdentityReserved {
                 player_id,
@@ -71,12 +64,6 @@ impl SimulationNode {
                 tick: self.current_tick,
             },
         ));
-        self.station_inventory_db.reserve_client_admission(
-            ship_id,
-            player_id,
-            spawn_position,
-            resume_ticket,
-        );
         let inserted = self.pending_fresh_admissions.insert(ship_id);
         debug_assert!(
             inserted,
@@ -89,8 +76,10 @@ impl SimulationNode {
         &self,
         resume_ticket: ResumeTicket,
     ) -> Option<(PlayerId, ShipId, Position)> {
-        self.station_inventory_db
+        self.repositories
+            .admissions()
             .prepared_client_admission_by_ticket(resume_ticket)
+            .expect("client admission prepared query")
             .map(|prepared| {
                 (
                     prepared.player_id,
@@ -104,12 +93,16 @@ impl SimulationNode {
     /// Besides materialized Ships, this includes a client-visible fresh
     /// identity whose durable prepared row survived a disconnect or restart.
     pub fn hosts_client_resume_ticket(&self, resume_ticket: ResumeTicket) -> bool {
-        self.station_inventory_db
+        self.repositories
+            .admissions()
             .prepared_client_admission_by_ticket(resume_ticket)
+            .expect("client admission prepared query")
             .is_some()
             || self
-                .station_inventory_db
+                .repositories
+                .identities()
                 .client_ownership_by_ticket(resume_ticket)
+                .expect("client ownership query")
                 .is_some_and(|(_, ship_id)| {
                     self.ship_absolute_pos(ship_id).is_some() && !self.is_ship_in_transit(ship_id)
                 })
@@ -119,8 +112,10 @@ impl SimulationNode {
         &self,
         resume_ticket: ResumeTicket,
     ) -> Option<(PlayerId, ShipId)> {
-        self.station_inventory_db
+        self.repositories
+            .identities()
             .client_ownership_by_ticket(resume_ticket)
+            .expect("client ownership query")
     }
 
     pub(crate) fn issue_resume_ticket(&self) -> ResumeTicket {
@@ -133,8 +128,9 @@ impl SimulationNode {
         player_id: PlayerId,
         resume_ticket: ResumeTicket,
     ) {
-        self.station_inventory_db
-            .record_client_ownership(ship_id, player_id, resume_ticket);
+        self.repositories
+            .record_client_ownership(ship_id, player_id, resume_ticket)
+            .expect("client ownership upsert");
     }
 
     pub(crate) fn stage_client_resume_ticket(
@@ -144,18 +140,17 @@ impl SimulationNode {
         presented_ticket: ResumeTicket,
         proposed_next_ticket: ResumeTicket,
     ) -> Option<ResumeTicket> {
-        self.station_inventory_db.stage_client_resume_ticket(
-            ship_id,
-            player_id,
-            presented_ticket,
-            proposed_next_ticket,
-        )
+        self.repositories
+            .stage_client_resume_ticket(ship_id, player_id, presented_ticket, proposed_next_ticket)
+            .expect("client ownership ticket staging")
     }
 
     #[cfg(test)]
     pub(crate) fn client_resume_ticket(&self, ship_id: ShipId) -> Option<ResumeTicket> {
-        self.station_inventory_db
+        self.repositories
+            .identities()
             .client_resume_tickets(ship_id)
+            .expect("client ownership tickets query")
             .map(|(current, _pending)| current)
     }
 
@@ -163,7 +158,10 @@ impl SimulationNode {
         &self,
         ship_id: ShipId,
     ) -> Option<(ResumeTicket, Option<ResumeTicket>)> {
-        self.station_inventory_db.client_resume_tickets(ship_id)
+        self.repositories
+            .identities()
+            .client_resume_tickets(ship_id)
+            .expect("client ownership tickets query")
     }
 
     pub(crate) fn claim_prepared_fresh_admission(
@@ -174,8 +172,10 @@ impl SimulationNode {
     ) -> bool {
         if self.pending_fresh_admissions.contains(&ship_id)
             || self
-                .station_inventory_db
+                .repositories
+                .admissions()
                 .prepared_client_admission(ship_id)
+                .expect("client admission prepared query")
                 .is_none_or(|prepared| {
                     prepared.player_id != player_id || prepared.resume_ticket != resume_ticket
                 })
@@ -200,11 +200,12 @@ impl SimulationNode {
         handoff
     }
 
-    /// Current legacy commit path for a reserved fresh admission.
+    /// Commit a reserved fresh admission and finalize its repository grant.
     ///
     /// It materializes live state, emits `ClientAdmissionCommitted`, then
-    /// finalizes the SQLite grant/identity rows. Current
-    /// replay/reconciliation repairs several crash cases around that ordering.
+    /// finalizes the SQLite grant/identity rows. Retryable finalization repairs
+    /// the identity watermark after a restart without replaying the Station
+    /// item grant.
     ///
     /// ADR-0049/#272/#277 replaces this as the normative commit contract with a
     /// prepared Sector transition whose `RecoveryDelta` is durable before live
@@ -221,8 +222,10 @@ impl SimulationNode {
         if !self.pending_fresh_admissions.contains(&ship_id)
             || self.ships.index.contains_key(&ship_id)
             || self
-                .station_inventory_db
+                .repositories
+                .admissions()
                 .prepared_client_admission(ship_id)
+                .expect("client admission prepared query")
                 .is_none_or(|prepared| {
                     prepared.player_id != player_id
                         || prepared.spawn_position != spawn_position
@@ -330,19 +333,17 @@ impl SimulationNode {
     }
 
     /// True when the requested resume would overwrite a different established
-    /// Player/Ship relationship. The current path consults the catch-all SQLite
-    /// adapter as its durable fallback plus live maps for active routing.
-    ///
-    /// #277 replaces that adapter with explicit identity authority and #278
-    /// gates serving after failover until repository/world reconciliation is
-    /// current.
+    /// Player/Ship relationship. The explicit IdentityRepository is the
+    /// durable fallback; live maps additionally protect active routing.
     pub(crate) fn resume_admission_identity_conflicts(
         &self,
         player_id: PlayerId,
         ship_id: ShipId,
     ) -> bool {
-        self.station_inventory_db
+        self.repositories
+            .identities()
             .client_owner(ship_id)
+            .expect("client ownership query")
             .is_some_and(|owner| owner != player_id)
             || self
                 .ships
@@ -403,15 +404,18 @@ impl SimulationNode {
             return false;
         }
         if self
-            .station_inventory_db
+            .repositories
+            .identities()
             .client_ownership_by_ticket(presented_ticket)
+            .expect("client ownership query")
             != Some((player_id, ship_id))
         {
             self.release_resume_admission(player_id, ship_id);
             return false;
         }
-        self.station_inventory_db
-            .record_client_ownership(ship_id, player_id, next_ticket);
+        self.repositories
+            .record_client_ownership(ship_id, player_id, next_ticket)
+            .expect("client ownership upsert");
         let committed = self.resume_player_ship(ship_id, player_id);
         self.release_resume_admission(player_id, ship_id);
         committed

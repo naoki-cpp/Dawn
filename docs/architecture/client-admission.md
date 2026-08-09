@@ -24,19 +24,25 @@ Hello -> begin -> await Welcome/InitialState/PlayerLoadout
 
 ## Fresh admission
 
-Begin appends `ClientAdmissionIdentityReserved`, permanently consuming the
-`PlayerId`/`ShipId`, then uses a temporary in-memory Ship to construct the
-observer-scoped handoff. The preview is removed before begin returns. Therefore
-an in-flight attempt has one durable allocation-watermark event but no durable
-Ship, fitting, ownership, AoI, or Station inventory.
+Begin durably reserves the `PlayerId`/`ShipId`, resume ticket, prepared spawn
+row, and allocator watermark through the explicit Admission/Identity
+repositories before exposing `Welcome`. It then uses a temporary in-memory Ship
+to construct the observer-scoped handoff. The preview is removed before begin
+returns. Therefore an in-flight attempt has a durable protocol reservation but
+no durable Ship, fitting, ownership, AoI, or Station inventory.
 
 Commit materializes the starter state and appends exactly one
 `ClientAdmissionCommitted` event containing the Ship creation, fitting/cargo
-snapshot, ownership identity, and starter Station grant description. The
-Station grant is applied through a SQLite ledger keyed by `ShipId`; the ledger
-marker and inventory upsert share one SQLite transaction. If the process dies
-after the event append but before the SQLite write, snapshot+tail replay and
-`open_station_inventory_db` reconciliation apply the missing grant exactly once.
+snapshot, ownership identity, and starter Station grant description. The grant
+is finalized through a `SectorTransaction`: its marker, Station upsert,
+consumed identities, ownership binding, and prepared-row cleanup share one
+SQLite transaction. Repeating the same stable admission identity is a no-op; a
+different grant payload or owner binding is rejected rather than silently
+overwritten. If the process dies after the world transition but before
+repository finalization, runtime retries the same identity and never allocates
+a replacement Player/Ship. Reopening the repository only rebuilds identity
+watermarks; it does not replay the starter Station grant, because that item may
+already have been consumed after the original commit.
 No checkpoint can cover a partially-returned commit because commit runs
 synchronously on the owning Sector thread.
 

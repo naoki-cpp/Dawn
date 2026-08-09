@@ -637,8 +637,9 @@ retry use explicit operation IDs.
   genesis replay is not an authoritative requirement.
 - [x] Add the `DAWNCKP1` checkpoint envelope, payload checksum, catalog fingerprint, explicit covered recovery position, and rejection of incompatible/corrupt checkpoints.
 - [x] Persist Player routing, allocator state, docking context, and pending bot/auto-jump authoritative state.
-- [ ] Implement Station projection plus admission/identity repository/allocator
-  catch-up under #277.
+- [x] Implement Station projection API plus admission/identity repository,
+  allocator, and local identity-watermark reconciliation under #277; runtime
+  RecoveryDelta catch-up/orchestration remains with #278/#280.
 - [ ] Implement Transit durable Saga under #276.
 - [ ] Implement unified runtime durability/quorum/reconciliation policy under #278.
 - [ ] Implement final snapshot/catch-up/durability transport under #280.
