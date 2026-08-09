@@ -19,7 +19,6 @@ dawn-sector      = { path = "../dawn-sector" }
 dawn-consensus   = { path = "../dawn-consensus" }
 dawn-replication = { path = "../dawn-replication" }
 serde            = { workspace = true }
-postcard         = { workspace = true }
 rand             = { workspace = true }
 tokio            = { workspace = true }
 anyhow           = "1"
