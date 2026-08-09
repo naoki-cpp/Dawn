@@ -9,7 +9,7 @@
 //! Server side                     Client side
 //! ─────────────────────────       ──────────────────
 //! serve loop (WsServer)           Godot scene / tests
-//!     │  send_events()                ↑  recv_event()
+//!     │  send_facts()                 ↑  recv_fact()
 //!     │                              │
 //!     └─── ClientConnection ─────────┘
 //!              │  try_recv_request() → ClientRequest (Sector)
@@ -29,8 +29,7 @@
 //! `SimulationNode::apply_client_request`.
 
 pub use dawn_core::ClientRequest;
-use dawn_core::DomainEvent;
-use dawn_wire::MarketCommandWire;
+use dawn_wire::{MarketCommandWire, ServerFact};
 use tokio::sync::mpsc;
 
 // ── Error ─────────────────────────────────────────────────────────────────────
@@ -42,6 +41,9 @@ pub enum ConnectionError {
     /// The peer (client) is already disconnected.
     #[error("client disconnected")]
     Disconnected,
+    /// The typed server fact could not be serialized into a wire frame.
+    #[error("server message encoding failed: {0}")]
+    Encoding(String),
 }
 
 // ── Trait ─────────────────────────────────────────────────────────────────────
@@ -50,13 +52,13 @@ pub enum ConnectionError {
 ///
 /// # Implementation rules
 ///
-/// - `send_events` must complete without blocking (`Err` signals back-pressure
+/// - `send_facts` must complete without blocking (`Err` signals back-pressure
 ///   / disconnection).
 /// - `try_recv_request` must be non-blocking (`None` when no command is ready).
 /// - Implementations must be `Send + 'static` (they move across actor threads).
 pub trait ClientConnection: Send + 'static {
-    /// Send events from the server to the client.
-    fn send_events(&self, events: &[DomainEvent]) -> Result<(), ConnectionError>;
+    /// Send projected, client-visible facts from the server to the client.
+    fn send_facts(&self, facts: &[ServerFact]) -> Result<(), ConnectionError>;
 
     /// Take one pending command from the client, non-blocking.
     fn try_recv_request(&mut self) -> Option<ClientRequest>;
@@ -83,7 +85,7 @@ pub trait ClientConnection: Send + 'static {
 /// ```
 #[derive(Debug)]
 pub struct InProcessConnection {
-    event_tx: mpsc::UnboundedSender<DomainEvent>,
+    fact_tx: mpsc::UnboundedSender<ServerFact>,
     request_rx: mpsc::UnboundedReceiver<ClientRequest>,
     market_command_rx: mpsc::UnboundedReceiver<MarketCommandWire>,
 }
@@ -91,24 +93,24 @@ pub struct InProcessConnection {
 /// The client-side endpoint of an [`InProcessConnection`].
 #[derive(Debug)]
 pub struct InProcessClientEndpoint {
-    pub event_rx: mpsc::UnboundedReceiver<DomainEvent>,
+    pub fact_rx: mpsc::UnboundedReceiver<ServerFact>,
     pub request_tx: mpsc::UnboundedSender<ClientRequest>,
     pub market_command_tx: mpsc::UnboundedSender<MarketCommandWire>,
 }
 
 impl InProcessConnection {
     pub fn pair() -> (Self, InProcessClientEndpoint) {
-        let (event_tx, event_rx) = mpsc::unbounded_channel();
+        let (fact_tx, fact_rx) = mpsc::unbounded_channel();
         let (request_tx, request_rx) = mpsc::unbounded_channel();
         let (market_command_tx, market_command_rx) = mpsc::unbounded_channel();
         (
             InProcessConnection {
-                event_tx,
+                fact_tx,
                 request_rx,
                 market_command_rx,
             },
             InProcessClientEndpoint {
-                event_rx,
+                fact_rx,
                 request_tx,
                 market_command_tx,
             },
@@ -117,10 +119,10 @@ impl InProcessConnection {
 }
 
 impl ClientConnection for InProcessConnection {
-    fn send_events(&self, events: &[DomainEvent]) -> Result<(), ConnectionError> {
-        for event in events {
-            self.event_tx
-                .send(event.clone())
+    fn send_facts(&self, facts: &[ServerFact]) -> Result<(), ConnectionError> {
+        for fact in facts {
+            self.fact_tx
+                .send(fact.clone())
                 .map_err(|_| ConnectionError::Disconnected)?;
         }
         Ok(())
@@ -144,6 +146,7 @@ mod tests {
     use dawn_core::{
         AbsolutePosition, DomainEvent, EntityId, NodeId, Position, SectorId, ShipId, Tick,
     };
+    use dawn_wire::project_domain_event;
 
     fn make_ship_spawned() -> DomainEvent {
         DomainEvent::ShipSpawned(ShipSpawned {
@@ -153,6 +156,10 @@ mod tests {
             ship_type_id: dawn_core::ShipTypeId(1),
             tick: Tick::ZERO,
         })
+    }
+
+    fn make_ship_spawned_fact() -> dawn_wire::ServerFact {
+        project_domain_event(&make_ship_spawned()).expect("ShipSpawned is client-visible")
     }
 
     fn make_move_command() -> ClientRequest {
@@ -172,15 +179,12 @@ mod tests {
     }
 
     #[test]
-    fn server_events_are_received_by_client_endpoint() {
+    fn server_facts_are_received_by_client_endpoint() {
         let (server, mut client) = InProcessConnection::pair();
-        let event = make_ship_spawned();
-        server.send_events(std::slice::from_ref(&event)).unwrap();
-        let received = client
-            .event_rx
-            .try_recv()
-            .expect("event should be available");
-        assert_eq!(format!("{:?}", received), format!("{:?}", event));
+        let fact = make_ship_spawned_fact();
+        server.send_facts(std::slice::from_ref(&fact)).unwrap();
+        let received = client.fact_rx.try_recv().expect("fact should be available");
+        assert_eq!(received, fact);
     }
 
     #[test]
@@ -253,26 +257,26 @@ mod tests {
     }
 
     #[test]
-    fn send_events_returns_disconnected_when_client_dropped() {
+    fn send_facts_returns_disconnected_when_client_dropped() {
         let (server, client) = InProcessConnection::pair();
         drop(client);
-        let result = server.send_events(&[make_ship_spawned()]);
+        let result = server.send_facts(&[make_ship_spawned_fact()]);
         assert!(matches!(result, Err(ConnectionError::Disconnected)));
     }
 
     #[test]
-    fn send_events_with_empty_slice_is_always_ok() {
+    fn send_facts_with_empty_slice_is_always_ok() {
         let (server, _client) = InProcessConnection::pair();
-        assert!(server.send_events(&[]).is_ok());
+        assert!(server.send_facts(&[]).is_ok());
     }
 
     #[test]
-    fn multiple_events_are_delivered_in_order() {
+    fn multiple_facts_are_delivered_in_order() {
         let (server, mut client) = InProcessConnection::pair();
-        let events: Vec<DomainEvent> = (0..3).map(|_| make_ship_spawned()).collect();
-        server.send_events(&events).unwrap();
+        let facts: Vec<dawn_wire::ServerFact> = (0..3).map(|_| make_ship_spawned_fact()).collect();
+        server.send_facts(&facts).unwrap();
         let mut count = 0;
-        while client.event_rx.try_recv().is_ok() {
+        while client.fact_rx.try_recv().is_ok() {
             count += 1;
         }
         assert_eq!(count, 3);

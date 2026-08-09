@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "EventWire",
-  "description": "Every message the server sends to a client over the WebSocket connection,\nwrapped by `ServerMessage::Event` and postcard-encoded (ADR-0042).\n\nThis enum is the schema-of-record for the server -> client half of the\nwire protocol: [`event_wire_json_schema()`] renders it to a JSON Schema\ndocument that `docs/architecture/wire-protocol.md` is generated from.\nAdding, removing, or renaming a field here changes the wire format for\nevery client (Godot today; any future client written against\n`docs/architecture/wire-protocol.md`).\n\nExternally tagged (serde's default enum representation), not\n`#[serde(tag = \"type\")]` -- `postcard` cannot deserialize an internally\ntagged enum (no `deserialize_any`). `dawn-client-gdext` decodes this\nenum into a typed client outcome and performs all variant dispatch in\nRust; GDScript never reconstructs this enum from a string tag.\n\n`Deserialize` (ADR-0042) exists so `dawn-client-gdext` can decode a\n`ServerMessage` it receives; the server itself only ever serializes this\ntype, never parses it back.",
+  "title": "ServerFact",
+  "description": "Every message the server sends to a client over the WebSocket connection,\nwrapped by `ServerMessage::Fact` and postcard-encoded (ADR-0042).\n\nThis enum is the schema-of-record for the server -> client half of the\nwire protocol: [`server_fact_json_schema()`] renders it to a JSON Schema\ndocument that `docs/architecture/wire-protocol.md` is generated from.\nAdding, removing, or renaming a field here changes the wire format for\nevery client (Godot today; any future client written against\n`docs/architecture/wire-protocol.md`).\n\nExternally tagged (serde's default enum representation), not\n`#[serde(tag = \"type\")]` -- `postcard` cannot deserialize an internally\ntagged enum (no `deserialize_any`). `dawn-client-gdext` decodes this\nenum into a typed client outcome and performs all variant dispatch in\nRust; GDScript never reconstructs this enum from a string tag.\n\n`Deserialize` (ADR-0042) exists so `dawn-client-gdext` can decode a\n`ServerMessage` it receives; the server itself only ever serializes this\ntype, never parses it back.",
   "oneOf": [
     {
       "type": "object",
@@ -275,7 +275,7 @@
               "format": "float"
             },
             "layer": {
-              "type": "string"
+              "$ref": "#/$defs/ServerFactRepairLayer"
             },
             "ship_id": {
               "type": "integer",
@@ -423,7 +423,7 @@
               "minimum": 0
             },
             "slot": {
-              "type": "string"
+              "$ref": "#/$defs/ServerFactSlot"
             },
             "target_ship_id": {
               "description": "Target of a targeted module (Weapon/Tackle), per ADR-0035.",
@@ -466,10 +466,14 @@
               "minimum": 0
             },
             "reason": {
-              "description": "Why the system forced this off (\"cap\" | \"range\"); `None` for a\nplayer-issued deactivation (ADR-0035).",
-              "type": [
-                "string",
-                "null"
+              "description": "Why the system forced this off; `None` for a player-issued\ndeactivation (ADR-0035).",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ServerFactDeactivationReason"
+                },
+                {
+                  "type": "null"
+                }
               ],
               "default": null
             },
@@ -479,7 +483,7 @@
               "minimum": 0
             },
             "slot": {
-              "type": "string"
+              "$ref": "#/$defs/ServerFactSlot"
             },
             "tick": {
               "type": "integer",
@@ -615,6 +619,32 @@
         "x",
         "y",
         "z"
+      ]
+    },
+    "ServerFactDeactivationReason": {
+      "description": "Protocol-owned reason for a system-forced module deactivation.",
+      "type": "string",
+      "enum": [
+        "CapacitorExhausted",
+        "OutOfRange"
+      ]
+    },
+    "ServerFactRepairLayer": {
+      "description": "Protocol-owned repair-layer identity.",
+      "type": "string",
+      "enum": [
+        "Shield",
+        "Armor"
+      ]
+    },
+    "ServerFactSlot": {
+      "description": "Protocol-owned slot identity. The client-facing schema must not expose a\ndebug-formatted domain enum or an arbitrary string.",
+      "type": "string",
+      "enum": [
+        "High",
+        "Mid",
+        "Low",
+        "Rig"
       ]
     },
     "VelWire": {

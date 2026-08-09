@@ -19,7 +19,7 @@
 //! production WebSocket transport, shared by both binaries (previously
 //! duplicated). Every message travels as a postcard-encoded binary frame
 //! (ADR-0042), using the `dawn-wire` schema (`ClientMessage`/`ServerMessage`,
-//! `domain_event_to_event_wire`, `ClientRequest`) directly --
+//! `project_domain_event`, `ClientRequest`) directly --
 //! this crate no longer re-exports it under its own `protocol` module
 //! (deleted: it was 28 lines of `pub use` and 900 lines of tests that
 //! belonged in `dawn-wire`, where they now live).

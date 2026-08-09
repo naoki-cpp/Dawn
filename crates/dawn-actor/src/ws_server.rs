@@ -9,7 +9,7 @@
 //!
 //! ## Protocol (ADR-0042)
 //!
-//! Every server -> client message (Hello/Welcome/Redirect/DomainEvent/
+//! Every server -> client message (Hello/Welcome/Redirect/ServerFact/
 //! ClientRequest/Market/InitialState/PlayerLoadout/AoiEnter/AoiLeave/
 //! PositionSnap) travels as a binary WebSocket frame, postcard-encoded via the
 //! [`ClientMessage`]/[`ServerMessage`] envelope in `dawn-wire` (ADR-0042
@@ -21,16 +21,16 @@
 //! Client → Server:  ClientMessage::Hello           (binary, postcard)
 //! Server → Client:  ServerMessage::Welcome         (binary, postcard)
 //! Server → Client:  ServerMessage::InitialState(..) (binary, postcard)
-//! Server → Client:  ServerMessage::Event(..)       (binary, postcard stream)
+//! Server → Client:  ServerMessage::Fact(..)       (binary, postcard stream)
 //! Client → Server:  ClientMessage::Command(..)     (binary, postcard)
 //! Client → Server:  ClientMessage::Market(..)      (binary, postcard)
 //! ```
 
 use crate::{ClientConnection, ClientRequest};
-use dawn_core::{DomainEvent, PlayerId, ShipId};
+use dawn_core::{PlayerId, ShipId};
 use dawn_wire::{
-    domain_event_to_event_wire, ClientMessage, InitialStateWire, MarketCommandWire,
-    PlayerLoadoutWire, ResumeTicket, ServerMessage,
+    ClientMessage, InitialStateWire, MarketCommandWire, PlayerLoadoutWire, ResumeTicket,
+    ServerFact, ServerMessage,
 };
 use futures_util::{
     stream::{SplitSink, SplitStream},
@@ -46,8 +46,10 @@ use tokio::{
 use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 
 /// Postcard-encode a [`ServerMessage`] and wrap it as a binary WS frame.
-fn server_message_frame(msg: &ServerMessage) -> Message {
-    Message::Binary(msg.encode().into())
+fn server_message_frame(msg: &ServerMessage) -> Result<Message, crate::ConnectionError> {
+    msg.encode()
+        .map(|bytes| Message::Binary(bytes.into()))
+        .map_err(|error| crate::ConnectionError::Encoding(error.to_string()))
 }
 
 // ── WsClientConnection ────────────────────────────────────────────────────────
@@ -73,18 +75,19 @@ impl WsClientConnection {
     /// (ADR-0042: every server -> client message, now that stage 2c folded
     /// in the last ad-hoc JSON messages).
     pub fn send_message(&self, msg: &ServerMessage) -> bool {
-        self.event_tx.send(server_message_frame(msg)).is_ok()
+        match server_message_frame(msg) {
+            Ok(frame) => self.event_tx.send(frame).is_ok(),
+            Err(_) => false,
+        }
     }
 }
 
 impl ClientConnection for WsClientConnection {
-    fn send_events(&self, events: &[DomainEvent]) -> Result<(), crate::ConnectionError> {
-        for event in events {
-            if let Some(event_wire) = domain_event_to_event_wire(event) {
-                self.event_tx
-                    .send(server_message_frame(&ServerMessage::Event(event_wire)))
-                    .map_err(|_| crate::ConnectionError::Disconnected)?;
-            }
+    fn send_facts(&self, facts: &[ServerFact]) -> Result<(), crate::ConnectionError> {
+        for fact in facts {
+            self.event_tx
+                .send(server_message_frame(&ServerMessage::Fact(fact.clone()))?)
+                .map_err(|_| crate::ConnectionError::Disconnected)?;
         }
         Ok(())
     }
@@ -158,16 +161,18 @@ impl HandshakeRequest {
                 player_id: player_id.raw(),
                 ship_id: ship_id.raw(),
                 resume_ticket,
-            }))
+            })?)
             .await?;
         ws_sink
             .send(server_message_frame(&ServerMessage::InitialState(
                 initial_state,
-            )))
+            ))?)
             .await?;
         if let Some(loadout) = player_loadout {
             ws_sink
-                .send(server_message_frame(&ServerMessage::PlayerLoadout(loadout)))
+                .send(server_message_frame(&ServerMessage::PlayerLoadout(
+                    loadout,
+                ))?)
                 .await?;
         }
 
@@ -207,7 +212,9 @@ impl HandshakeRequest {
                             // here prevents untrusted input from growing the
                             // unbounded outbound queue without limit.
                             let rejection = ServerMessage::ClientRequestRejected(error.rejection());
-                            let _ = rejection_tx.send(server_message_frame(&rejection));
+                            if let Ok(frame) = server_message_frame(&rejection) {
+                                let _ = rejection_tx.send(frame);
+                            }
                             let _ = rejection_tx.send(Message::Close(None));
                             return;
                         }
@@ -236,9 +243,9 @@ impl HandshakeRequest {
 }
 
 impl PlayerSession {
-    /// Send events to this client. Returns false on send failure (disconnect).
-    pub fn send_events(&self, events: &[DomainEvent]) -> bool {
-        self.conn.send_events(events).is_ok()
+    /// Send projected facts to this client. Returns false on send failure.
+    pub fn send_facts(&self, facts: &[ServerFact]) -> bool {
+        self.conn.send_facts(facts).is_ok()
     }
 
     /// Pull one pending request, if any.

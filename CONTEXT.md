@@ -101,11 +101,12 @@ Use these names consistently:
 - Use "Tackle" for escape denial.
 - Use "TiDi" only for real-time pacing, not for changing logical tick order.
 - Use a `*Wire` suffix for adapter-only `dawn-wire` schema types
-  (`EventWire`, `AbsPosWire`, `VelWire`, ...), not `*Json` -- ADR-0042 moved
-  every client<->server message onto the postcard binary envelope. The Sector
+  (`AbsPosWire`, `VelWire`, ...). `ServerFact` is the typed client projection,
+  not a durable-event mirror -- ADR-0042/#274 moved every client<->server
+  message onto the postcard binary envelope. The Sector
   request exception is the shared typed `ClientRequest` authority, re-exported
   by `dawn-wire` rather than duplicated as a `*Wire` mirror. Functions that
-  genuinely produce a JSON Schema document (`event_wire_json_schema()`,
+  genuinely produce a JSON Schema document (`server_fact_json_schema()`,
   `client_request_json_schema()`) keep `json` in their names.
 
 ## Non-Goals

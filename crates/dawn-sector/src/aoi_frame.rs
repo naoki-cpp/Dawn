@@ -103,10 +103,6 @@ mod tests {
     }
 
     impl AoiSink for FakeSink {
-        fn send_events(&mut self, _events: &[DomainEvent]) -> bool {
-            true
-        }
-
         fn send_message(&mut self, message: &ServerMessage) -> bool {
             match message {
                 ServerMessage::AoiEnter(ship) => self.enters.push(ship.ship_id),

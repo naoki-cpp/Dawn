@@ -19,7 +19,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use dawn_core::{AbsolutePosition, DomainEvent, PlayerId, ShipId};
-use dawn_wire::{AbsPosWire, ServerMessage, VelWire};
+use dawn_wire::{project_domain_event, AbsPosWire, ServerMessage, VelWire};
 
 use crate::view::SectorView;
 
@@ -157,7 +157,6 @@ pub struct Observer {
 /// implements this trait (orphan-rule friendly: the wrapper type is local to
 /// the calling crate even though the trait lives here).
 pub trait AoiSink {
-    fn send_events(&mut self, events: &[DomainEvent]) -> bool;
     fn send_message(&mut self, msg: &ServerMessage) -> bool;
 }
 
@@ -267,8 +266,14 @@ impl AoiDelivery {
             })
             .cloned()
             .collect();
-        if !sink.send_events(&visible_events) {
-            return false;
+        // Project only after visibility filtering. Internal durable events do
+        // not get placeholder protocol variants and never reach a transport.
+        for event in visible_events {
+            if let Some(fact) = project_domain_event(&event) {
+                if !sink.send_message(&ServerMessage::Fact(fact)) {
+                    return false;
+                }
+            }
         }
 
         // Client-side prediction authority (ADR-0043): the owning client gets
@@ -485,7 +490,7 @@ mod tests {
 
     #[derive(Default)]
     struct FakeSink {
-        events: Vec<DomainEvent>,
+        facts: Vec<dawn_wire::ServerFact>,
         aoi_enters: Vec<ShipStateWire>,
         aoi_leaves: Vec<u64>,
         position_snaps: Vec<(u64, AbsPosWire)>,
@@ -493,10 +498,6 @@ mod tests {
     }
 
     impl AoiSink for FakeSink {
-        fn send_events(&mut self, events: &[DomainEvent]) -> bool {
-            self.events.extend_from_slice(events);
-            true
-        }
         fn send_message(&mut self, msg: &ServerMessage) -> bool {
             match msg {
                 ServerMessage::AoiEnter(ship) => self.aoi_enters.push(ship.clone()),
@@ -512,6 +513,7 @@ mod tests {
                 } => self
                     .motion_corrections
                     .push((*ship_id, *position, *velocity, *tick)),
+                ServerMessage::Fact(fact) => self.facts.push(fact.clone()),
                 _ => {}
             }
             true
@@ -641,8 +643,14 @@ mod tests {
         );
 
         assert_eq!(
-            sink.events,
-            vec![event],
+            sink.facts,
+            vec![dawn_wire::ServerFact::ModuleActivated {
+                ship_id: own_ship.raw(),
+                module_id: 7,
+                slot: dawn_wire::ServerFactSlot::Mid,
+                target_ship_id: None,
+                tick: 1,
+            }],
             "the owning client must receive its own module event so HUD state updates"
         );
     }
