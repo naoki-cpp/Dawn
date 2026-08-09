@@ -78,8 +78,48 @@ as legacy/current behavior rather than normative recovery authority.
   up or deterministically reconciled to the required position.
 - "Acknowledged RPO 0" is qualified by the selected durability profile and its
   explicit failure domain; it is never an unqualified machine-loss promise.
-- No numeric production RTO is currently claimed. #284 must benchmark replay
-  tail size/time and set the checkpoint budget before that acceptance item closes.
+- No portable numeric production RTO is claimed by #284. Tail-size/time
+  measurements and the checkpoint budget are operational follow-up work after
+  the deployment hardware and peer transport in #280 are fixed.
+
+### #284 implementation
+
+The production checkpoint and recovery path has one explicit storage boundary:
+
+- `StateSnapshot::covered_recovery_index` names the global position covered by
+  the checkpoint; it is no longer exposed as the ambiguous public-event
+  `log_index`.
+- Durable snapshot files and replica snapshot bytes use the `DAWNCKP1` envelope
+  with `CHECKPOINT_FORMAT_VERSION` and a payload checksum; unknown magic,
+  versions, corrupt, or malformed payloads fail before state construction.
+- `FileJournal` is the authoritative runtime journal. Every production Tick is
+  appended as one `JournalBatch` whose first record is a versioned
+  `RecoveryDelta`, including eventless ticks. The full Tick image carries ship
+  ECS state, allocator/ownership/active-ship maps, docking context, and
+  cross-tick bot/auto-jump queues.
+- Startup restores the checkpoint with its catalog fingerprint, then applies a
+  contiguous journal tail. If no checkpoint exists, the configured genesis
+  state is constructed once and the same RecoveryDelta reader replays from
+  index 0; public-event genesis replay is not required. A tail that starts in
+  the middle of a batch, skips a record, repeats a delta, crosses Sectors, or
+  has an incompatible payload is rejected before the node serves clients.
+- Recovery applies into a newly owned node value and returns that node only
+  after the complete tail succeeds. A semantic apply failure consumes/fences
+  the candidate rather than leaving a partially recovered node available for
+  reuse. When starting from journal index 0, the configured NPC genesis is a
+  deterministic deployment invariant and must remain unchanged for that
+  journal's lifetime.
+- Checkpoint scheduling and recovery-journal compaction use separate recovery
+  paths from the legacy public-event log. Public events remain an independent
+  projection/audit stream.
+- Snapshot publication remains crash-safe and uses the same encode/decode path
+  for disk and replica transfer.
+
+The remaining work is outside this issue's local world recovery boundary:
+replica transport/promotion (#280), durable Transit continuation (#276), and
+admission/Station repository reconciliation (#277). Those consumers must use
+this checkpoint-plus-tail contract rather than reintroducing public-event-only
+recovery.
 
 ## 2. State and obligation classification
 
@@ -89,7 +129,7 @@ as legacy/current behavior rather than normative recovery authority.
 | Entity/Player allocator watermarks | Yes | Admission/spawn helpers | Checkpoint/RecoveryDelta for materialized allocation **plus every durable #277 reservation/allocator record** | Recovery must choose a next value above every materialized or durably reserved ID. Gaps are allowed; reuse is not. #277 may store an explicit allocator watermark or make reserved rows sufficient to derive it. |
 | Ship existence and type | Yes | Spawn, destroy, assemble, disassemble, Transit | Create/delete delta and checkpoint | Stable `ShipId` is the recovery key, not ECS entity handle. |
 | Player ownership maps | Yes | Admission, Station operations, Transit | Ordered map delta and checkpoint | Materialized world ownership is durable PlayerState under #275. |
-| Active-ship routing map | Yes | Admission, `SelectActiveShip`, `Disembark`, removal/Transit | Ordered map delta and checkpoint | This is authoritative routing state because it changes which ship receives commands and whether Undock is legal. It may have no public `DomainEvent`. The current snapshot omission is implementation debt, not intended lossiness. |
+| Active-ship routing map | Yes | Admission, `SelectActiveShip`, `Disembark`, removal/Transit | Ordered map delta and checkpoint | This is authoritative routing state because it changes which ship receives commands and whether Undock is legal. It may have no public `DomainEvent`; the local checkpoint/RecoveryDelta path persists it explicitly. |
 | Position, velocity, anchor | Yes | Movement, Warp, docking, Transit, commands | Component final-value delta and checkpoint | `VelocityChanged` does not cover every exact position/representation change. |
 | Thrust/braking and flight modes | Yes | Move/Stop/Approach/Orbit/KeepAtRange/Warp | Component add/remove/update delta and checkpoint | Determines future motion even when no event is emitted. |
 | Hull shield/armor/hull/destroyed state | Yes | Combat and repair | Component final-value delta and checkpoint | Public damage/repair events are facts/outputs, not exact reducer authority. |
@@ -516,17 +556,22 @@ Diagnostic accepted-input/RNG metadata may be included, but it is supplementary.
 `DomainEvent`s remain mandatory durable public outputs when produced, not the sole
 exact-state reducer.
 
-## 12. RTO status
+## 12. Operational RTO status
 
-RTO is intentionally **TBD**, not implied by having a recovery procedure. #284 must
-benchmark representative ship counts and eventless Ticks, then define:
+RTO is intentionally **deployment-specific**, not implied by having a recovery
+procedure. After the peer transport and reference hardware are fixed, the
+operator must benchmark representative ship counts and eventless Ticks, then
+define:
 
 - maximum authoritative tail transitions and bytes;
 - maximum replay time on named reference hardware;
 - checkpoint cadence/trigger thresholds; and
 - the production recovery target derived from those measurements.
 
-Until those measurements land, the numeric-RTO acceptance criterion remains open.
+This does not weaken the #284 correctness contract: a checkpoint plus its
+contiguous RecoveryDelta tail must reproduce the exact authoritative state. It
+only avoids pretending that a machine-independent RTO number exists before the
+deployment topology is selected.
 
 ## 13. Required tests
 

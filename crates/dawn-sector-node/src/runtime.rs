@@ -8,6 +8,7 @@
 use dawn_actor::ws_server;
 use dawn_consensus::RaftActorHandle;
 use dawn_core::{DomainEvent, PlayerId, SectorId, ShipId};
+use dawn_event_store::DurableJournal;
 use dawn_replication::{OutboundLogPublisher, TcpReplicationTransport};
 use dawn_sector::aoi::{AoiSink, Observer};
 use dawn_sector::aoi_frame::AoiFrame;
@@ -89,13 +90,30 @@ impl SectorNodeRuntime {
         raft: &RaftActorHandle,
         committed_rx: &mut mpsc::UnboundedReceiver<Vec<u8>>,
         event_store: &mut impl dawn_event_store::store::EventStore,
-    ) {
+        recovery_journal: &mut impl DurableJournal,
+        node_id: dawn_core::NodeId,
+    ) -> anyhow::Result<()> {
         let (lock_commands, pending_jumps) = self.collect_player_commands(node);
         self.propose_player_jumps(node, raft, pending_jumps);
 
         let sector_id = self.sector_id;
-        let output =
-            transit::run_runtime_tick(node, raft, committed_rx, &lock_commands, |_, _, _| {});
+        let transition_id = dawn_sector::transition::SectorTransitionId(
+            (u128::from(node.current_tick().value()) << 8) | u128::from(node_id.0),
+        );
+        let output = transit::run_durable_runtime_tick(
+            node,
+            recovery_journal,
+            raft,
+            committed_rx,
+            &lock_commands,
+            transit::DurableRuntimeTickContext {
+                transition_id,
+                owner_epoch: 0,
+                durability: dawn_event_store::DurabilityMode::Synced,
+            },
+            |_, _, _| {},
+        )
+        .map_err(|error| anyhow::anyhow!("authoritative recovery tick failed: {error}"))?;
         event_store.append_batch(output.events.clone());
         self.outbound_replication
             .publish_events(sector_id, &output.events);
@@ -103,6 +121,7 @@ impl SectorNodeRuntime {
         self.log_auto_jumps(&output.pending_auto_jumps);
         let jumped_ships = self.jumped_ships(&output.events);
         self.deliver_frames(node, &output.events, &output.completed_warps, &jumped_ships);
+        Ok(())
     }
 
     fn collect_player_commands(

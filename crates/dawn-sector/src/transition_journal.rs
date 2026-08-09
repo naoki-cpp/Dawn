@@ -17,12 +17,34 @@ pub(crate) fn append_prepared_transition<J: DurableJournal>(
     prepared: &PreparedSectorTransition,
     durability: DurabilityMode,
 ) -> Result<AppendReceipt, JournalError> {
+    append_prepared_transition_with_events(journal, prepared, &[], durability)
+}
+
+/// Append a prepared transition together with public events accumulated by
+/// command-side adapters before the Tick preparation began. Keeping those
+/// events in the same JournalBatch preserves the one-transition visibility
+/// boundary while the authoritative delta remains the first entry.
+pub(crate) fn append_prepared_transition_with_events<J: DurableJournal>(
+    journal: &mut J,
+    prepared: &PreparedSectorTransition,
+    preceding_public_events: &[dawn_core::DomainEvent],
+    durability: DurabilityMode,
+) -> Result<AppendReceipt, JournalError> {
     let mut entries = vec![JournalEntry::new(
         JournalStream::RecoveryDelta,
         encode_recovery_delta(&prepared.recovery_delta)
             .map_err(|error| JournalError::Encode(error.to_string()))?,
     )];
 
+    entries.extend(
+        preceding_public_events
+            .iter()
+            .map(|event| {
+                encode_payload(event)
+                    .map(|payload| JournalEntry::new(JournalStream::PublicEvent, payload))
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+    );
     entries.extend(
         prepared
             .public_events

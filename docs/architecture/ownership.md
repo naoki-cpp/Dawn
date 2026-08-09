@@ -273,4 +273,6 @@ Flight/steering commands and Undock require `is_active_ship`. A Player can be do
 
 `TransferToStationCommand { ship_id, station_id, item_id, direction }` moves an item stack between a docked Ship's cargo and the caller's Station inventory according to the Station rules. Exact Station durability follows ADR-0049/ADR-0038 as amended; #277 owns repository APIs.
 
-**Current implementation debt:** the current `StateSnapshot` does not persist all `ShipRegistry.owners` / `active_ship` state. #284's recovery implementation and #275's PlayerState extraction must remove this gap before the exact-recovery acceptance criterion can close. It is not an accepted lossy-state exception.
+The local `StateSnapshot` and Tick `RecoveryDelta` now persist the ownership and
+active-ship maps required to restore this routing state exactly. #275 may still
+extract the PlayerState aggregate, but it must preserve this recovery contract.

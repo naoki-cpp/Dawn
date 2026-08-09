@@ -254,7 +254,6 @@ dependencies = [
  "dawn-sector",
  "dawn-wire",
  "futures-util",
- "postcard",
  "rand 0.8.6",
  "serde",
  "tokio",

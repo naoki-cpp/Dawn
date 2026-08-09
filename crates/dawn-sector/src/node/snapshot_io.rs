@@ -7,21 +7,20 @@ use super::SimulationNode;
 
 impl SimulationNode {
     /// Capture the current ECS state as a `StateSnapshot` with no journal
-    /// coverage from an external journal. The pending output length is used as
-    /// a test/local cursor only; runtime code must use [`Self::take_snapshot_at`]
-    /// with the committed recovery-journal position it owns.
+    /// coverage. Runtime code must use [`Self::take_snapshot_at`] with the
+    /// committed recovery-journal position it owns.
     ///
     /// The node is destructured exhaustively (no `..`) on purpose: adding a
     /// field to `SimulationNode` breaks this function until someone decides
     /// whether it survives a restart. Deciding by memory is what silently lost
     /// `player_id_counter` before. `apply_snapshot` is the matching read side.
     pub fn take_snapshot(&self) -> StateSnapshot {
-        self.take_snapshot_at(self.pending_events.len() as u64)
+        self.take_snapshot_at(0)
     }
 
     /// Capture the current ECS state and explicitly record the external
     /// recovery-journal position covered by the snapshot.
-    pub fn take_snapshot_at(&self, log_index: u64) -> StateSnapshot {
+    pub fn take_snapshot_at(&self, covered_recovery_index: u64) -> StateSnapshot {
         let Self {
             // ── persisted ──────────────────────────────────────────────────
             node_id,
@@ -30,9 +29,12 @@ impl SimulationNode {
             current_tick,
             id_counter,
             player_id_counter,
+            catalog_fingerprint,
             docked_ships,
             docked_players,
             completed_incoming_transits,
+            pending_bot_lock_commands,
+            pending_auto_jumps,
             // Pending public events are an in-memory output buffer, not state.
             pending_events: _,
             // ── captured per ship, below ───────────────────────────────────
@@ -57,13 +59,10 @@ impl SimulationNode {
             // Independently durable in SQLite (ADR-0038), plus its cache.
             station_inventory_db: _,
             station_inventory_cache: _,
-            // Legacy snapshot path: these queues are not persisted here.
-            // ADR-0049 classifies pending bot commands and auto-jump retry
-            // obligations as recovery authority; the RecoveryDelta/checkpoint
-            // path must carry them. Completed-warp corrections remain lossy
-            // presentation output.
-            pending_bot_lock_commands: _,
-            pending_auto_jumps: _,
+            // Completed-warp corrections remain lossy presentation output.
+            // The bot-command and auto-jump queues are persisted above because
+            // they affect a future Tick and therefore belong to recovery
+            // authority under ADR-0049.
             completed_warps: _,
             transit_journal: _,
         } = self;
@@ -123,10 +122,11 @@ impl SimulationNode {
             node_id: *node_id,
             sector_id: *sector_id,
             bounds: *bounds,
-            log_index,
+            covered_recovery_index,
             tick: *current_tick,
             id_counter: *id_counter,
             player_id_counter: *player_id_counter,
+            catalog_fingerprint: *catalog_fingerprint,
             ships,
             owners: ship_registry
                 .owners
@@ -136,6 +136,13 @@ impl SimulationNode {
             docked_ships: docked_ships.clone(),
             docked_players: docked_players.clone(),
             completed_incoming_transits: completed_incoming_transits.clone(),
+            active_ships: ship_registry
+                .active_ship
+                .iter()
+                .map(|(&player, &ship)| (player, ship))
+                .collect(),
+            pending_bot_lock_commands: pending_bot_lock_commands.clone(),
+            pending_auto_jumps: pending_auto_jumps.clone(),
         }
     }
 
@@ -158,15 +165,19 @@ impl SimulationNode {
             tick,
             id_counter,
             player_id_counter,
+            catalog_fingerprint: _,
             docked_ships,
             docked_players,
             owners,
             completed_incoming_transits,
+            active_ships,
+            pending_bot_lock_commands,
+            pending_auto_jumps,
             // `ships` needs the module and ship-type registries in place first.
-            // `log_index` is external journal coverage, not a replay cursor for
+            // `covered_recovery_index` is external journal coverage, not a replay cursor for
             // this storage-independent restore operation.
             ships: _,
-            log_index: _,
+            covered_recovery_index: _,
         } = snapshot;
 
         self.node_id = *node_id;
@@ -181,7 +192,13 @@ impl SimulationNode {
             .iter()
             .map(|(&ship, &player)| (ship, player))
             .collect();
+        self.ships.active_ship = active_ships
+            .iter()
+            .map(|(&player, &ship)| (player, ship))
+            .collect();
         self.completed_incoming_transits = completed_incoming_transits.clone();
+        self.pending_bot_lock_commands = pending_bot_lock_commands.clone();
+        self.pending_auto_jumps = pending_auto_jumps.clone();
     }
 }
 
@@ -246,7 +263,7 @@ mod tests {
         );
 
         assert_eq!(
-            postcard::to_stdvec(&node.take_snapshot()).unwrap(),
+            postcard::to_stdvec(&node.take_snapshot_at(original.covered_recovery_index)).unwrap(),
             postcard::to_stdvec(&original).unwrap(),
             "restore lost or altered state that take_snapshot had captured"
         );
@@ -280,18 +297,34 @@ mod tests {
         );
     }
 
+    #[test]
+    fn restore_rejects_a_checkpoint_from_a_different_catalog() {
+        let mut snapshot = snapshot_fixture(0);
+        snapshot.catalog_fingerprint ^= 1;
+
+        let result = SimulationNode::restore_from_checked(
+            &snapshot,
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
+            std::sync::Arc::new(crate::game_data::test_catalog().clone()),
+        );
+
+        let error = result.expect_err("an incompatible catalog must fence restore");
+        assert!(error.contains("catalog fingerprint"));
+    }
+
     /// Every field non-default, so a field that fails to survive the round
     /// trip above actually changes the encoded bytes. Exhaustive by
     /// construction: a struct literal cannot omit a field.
-    fn snapshot_fixture(log_index: u64) -> StateSnapshot {
+    fn snapshot_fixture(covered_recovery_index: u64) -> StateSnapshot {
         StateSnapshot {
             node_id: NodeId(0),
             sector_id: SectorId(0),
             bounds: SectorBounds::centered(SectorBounds::DEFAULT_HALF),
-            log_index,
+            covered_recovery_index,
             tick: Tick(17),
             id_counter: 5,
             player_id_counter: 3,
+            catalog_fingerprint: crate::game_data::test_catalog().fingerprint(),
             ships: vec![ShipSnapshot {
                 ship_id: ShipId::new(NodeId(0), 0),
                 ship_type_id: dawn_core::ShipTypeId(1),
@@ -318,6 +351,12 @@ mod tests {
                 dawn_core::PlayerId(9),
                 dawn_core::StationId(0),
             )]),
+            active_ships: std::collections::BTreeMap::from([(
+                dawn_core::PlayerId(9),
+                ShipId::new(NodeId(0), 0),
+            )]),
+            pending_bot_lock_commands: Vec::new(),
+            pending_auto_jumps: Vec::new(),
         }
     }
 
@@ -335,10 +374,10 @@ mod tests {
             node.tick();
         }
 
-        let snap = node.take_snapshot();
+        let snap = node.take_snapshot_at(node.total_event_count() as u64);
         assert_eq!(snap.ships.len(), 3);
         assert_eq!(snap.tick, Tick(5));
-        assert_eq!(snap.log_index, node.total_event_count() as u64);
+        assert_eq!(snap.covered_recovery_index, node.total_event_count() as u64);
     }
 
     #[test]
@@ -446,7 +485,7 @@ mod tests {
             node.tick();
         }
 
-        let snap1 = node.take_snapshot();
+        let snap1 = node.take_snapshot_at(node.total_event_count() as u64);
 
         let mut store2 = InMemoryEventStore::new();
         for event in node.pending_events() {
@@ -459,7 +498,7 @@ mod tests {
             crate::game_data::test_catalog().modules(),
             crate::game_data::test_catalog().ship_types(),
         );
-        let snap2 = node2.take_snapshot();
+        let snap2 = node2.take_snapshot_at(snap1.covered_recovery_index);
 
         assert_eq!(
             postcard::to_stdvec(&snap1).unwrap(),
@@ -492,11 +531,11 @@ mod tests {
         for _ in 0..12 {
             live.tick();
         }
-        let snap = live.take_snapshot();
+        let snap = live.take_snapshot_at(live.total_event_count() as u64);
         let events_up_to_snapshot: Vec<_> = live
             .pending_events()
             .iter()
-            .take(snap.log_index as usize)
+            .take(snap.covered_recovery_index as usize)
             .cloned()
             .collect();
 
@@ -571,8 +610,8 @@ mod tests {
         }
         let mut restored_final = restored.take_snapshot_at(0);
         let mut live_final = live_final;
-        live_final.log_index = 0;
-        restored_final.log_index = 0;
+        live_final.covered_recovery_index = 0;
+        restored_final.covered_recovery_index = 0;
 
         assert_eq!(
             postcard::to_stdvec(&live_final).unwrap(),

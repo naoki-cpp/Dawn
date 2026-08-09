@@ -72,10 +72,13 @@ syncing the parent directory poisons the in-memory handle; callers must reopen
 the journal before appending again.
 
 The archive is append-only across repeated compactions. Each subsequent
-compaction requires the archive's `next_index` to equal the current hot
-`base_index`, then appends the next complete prefix without changing the
-global index space. The archive path must not alias the hot journal or its
-compaction temporary path; such requests are rejected before any mutation.
+compaction accepts an archive whose `next_index` is between the current hot
+`base_index` and the requested boundary: an already archived overlap is
+verified byte-for-byte, and only the missing complete prefix is appended.
+This allows a retry after archive sync succeeded but hot replacement failed
+without changing the global index space. The archive path must not alias the
+hot journal or its compaction temporary path; such requests are rejected
+before any mutation.
 
 After compaction, `read_from` serves the retained hot range and returns
 `CompactedRange` for an archived prefix. The archive is itself a versioned

@@ -35,12 +35,12 @@ pub struct CheckpointScheduler {
 /// adapter boundary so the legacy public-event log and the authoritative
 /// recovery journal can be migrated independently.
 pub trait CheckpointJournal {
-    fn next_checkpoint_index(&self) -> io::Result<u64>;
+    fn next_recovery_index(&self) -> io::Result<u64>;
     fn compact_checkpoint(&mut self, boundary: u64, cold_path: &Path) -> io::Result<()>;
 }
 
 impl CheckpointJournal for FileJournal {
-    fn next_checkpoint_index(&self) -> io::Result<u64> {
+    fn next_recovery_index(&self) -> io::Result<u64> {
         self.next_index()
             .map(|index| index.0)
             .map_err(|error| io::Error::other(error.to_string()))
@@ -54,7 +54,7 @@ impl CheckpointJournal for FileJournal {
 }
 
 impl CheckpointJournal for FileEventStore {
-    fn next_checkpoint_index(&self) -> io::Result<u64> {
+    fn next_recovery_index(&self) -> io::Result<u64> {
         Ok(self.next_index())
     }
 
@@ -86,10 +86,10 @@ impl CheckpointScheduler {
             return Ok(None);
         }
 
-        let log_index = journal.next_checkpoint_index()?;
-        let snapshot = node.take_snapshot_at(log_index);
+        let covered_recovery_index = journal.next_recovery_index()?;
+        let snapshot = node.take_snapshot_at(covered_recovery_index);
         snapshot.save(&self.config.snapshot_path)?;
-        journal.compact_checkpoint(log_index, &self.config.cold_path)?;
+        journal.compact_checkpoint(covered_recovery_index, &self.config.cold_path)?;
         self.last_checkpoint_tick = tick;
         Ok(Some(snapshot))
     }
@@ -176,8 +176,8 @@ mod tests {
             .unwrap()
             .expect("checkpoint at tick five");
 
-        assert_eq!(snapshot.log_index, 1);
-        assert_eq!(journal.next_checkpoint_index().unwrap(), 1);
+        assert_eq!(snapshot.covered_recovery_index, 1);
+        assert_eq!(journal.next_recovery_index().unwrap(), 1);
         assert!(dir.path().join("snapshot.bin").exists());
         assert!(dir.path().join("cold.log").exists());
     }

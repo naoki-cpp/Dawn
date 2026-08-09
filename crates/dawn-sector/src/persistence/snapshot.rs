@@ -3,9 +3,10 @@
 //!
 //! # Recovery contract status (ADR-0049 / #284)
 //!
-//! This file still implements the **pre-ADR-0049 snapshot/EventStore recovery
-//! path**. Its `log_index`, postcard layout, and restore call sites describe the
-//! current migration baseline; they are not the final exact-recovery contract.
+//! This file implements the checkpoint state payload and its explicit
+//! versioned/checksummed envelope. The production runtime pairs it with the
+//! authoritative RecoveryDelta tail; the legacy public-event store remains a
+//! separate projection/audit log.
 //!
 //! ADR-0049 has selected the target operational model:
 //!
@@ -20,12 +21,12 @@
 //! supported projection/audit/legacy purposes, but is not the complete exact-state
 //! reducer.
 //!
-//! # Current legacy test-fixture restore procedure
+//! # Legacy test-fixture restore procedure
 //!
-//! This remains a compatibility checkpoint path while #271/#284 version the
-//! physical recovery representation. #272 has moved journal ownership out of
-//! the engine; the runtime supplies the covered recovery position when it
-//! captures a checkpoint.
+//! #272 has moved journal ownership out of the engine; the runtime supplies the
+//! covered recovery position when it captures a checkpoint. The test-only
+//! `FileEventStore` replay helper remains for public-event reducer coverage,
+//! not as the production recovery path.
 //!
 //! The compatibility fixture:
 //! 1. loads `StateSnapshot` from disk;
@@ -44,20 +45,24 @@
 //! The crash-safe publication mechanics in this file remain a required property:
 //! encode/validate replacement material, write it to a sibling file, flush+sync,
 //! atomically publish it, sync the directory, and preserve/restore a readable
-//! rollback copy on handled failure. #284 requires the future versioned checkpoint
-//! implementation to retain or strengthen this guarantee.
+//! rollback copy on handled failure. The `DAWNCKP1` envelope makes the current
+//! schema boundary explicit; the future checkpoint manifest must retain or
+//! strengthen this guarantee.
 //!
-//! The current struct includes values such as position, capacitor, and tackle state.
-//! Under ADR-0049 these are **authoritative recovery values**, not merely transient
-//! values that may be recomputed arbitrarily after restart. The final checkpoint
-//! schema and authoritative journal position are implemented by #271/#284; old
-//! pre-release snapshot compatibility is not required.
+//! The current struct includes values such as position, capacitor, tackle state,
+//! active-ship routing, and cross-tick queues. Under ADR-0049 these are
+//! **authoritative recovery values**, not merely transient values that may be
+//! recomputed arbitrarily after restart. The catalog fingerprint and payload
+//! checksum reject incompatible/corrupt checkpoints; replica transport and
+//! Transit/admission projection reconciliation remain owned by their follow-up
+//! issues. Old pre-release snapshot compatibility is not required.
 
 use std::{
     collections::BTreeMap,
     ffi::OsString,
     fs::{self, File, OpenOptions},
     io::{self, Read, Seek, SeekFrom, Write},
+    mem::size_of,
     path::{Path, PathBuf},
     process,
     sync::atomic::{AtomicU64, Ordering},
@@ -67,8 +72,8 @@ use std::{
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 
 use dawn_core::{
-    fitting::FittingSnapshot, AbsolutePosition, NodeId, Position, SectorBounds, SectorId, ShipId,
-    ShipTypeId, Tick, Velocity,
+    fitting::FittingSnapshot, AbsolutePosition, JumpGateId, LockOnCommand, NodeId, PlayerId,
+    Position, SectorBounds, SectorId, ShipId, ShipTypeId, Tick, Velocity,
 };
 use serde::{Deserialize, Serialize};
 
@@ -143,15 +148,32 @@ pub struct CompletedIncomingTransit {
 
 // ── Node-level snapshot ───────────────────────────────────────────────────────
 
-/// Complete state of a `SimulationNode` in the current snapshot format at a
-/// specific legacy EventStore `log_index`.
+/// Current checkpoint format version.
 ///
-/// This struct is the current implementation baseline, not the final ADR-0049
-/// checkpoint manifest. #284/#271 replace the implicit binary-version contract
-/// with an explicit versioned/fingerprinted checkpoint whose coverage is an
-/// authoritative recovery-journal position rather than a public-event-only index.
+/// The version is encoded in the checkpoint envelope rather than in the state
+/// payload so an incompatible payload can be rejected before postcard tries to
+/// interpret it as a different struct layout.
+pub const CHECKPOINT_FORMAT_VERSION: u16 = 1;
+
+const CHECKPOINT_MAGIC: [u8; 8] = *b"DAWNCKP1";
+const CHECKPOINT_HEADER_LEN: usize = CHECKPOINT_MAGIC.len() + size_of::<u16>() + size_of::<u64>();
+
+fn checkpoint_checksum(payload: &[u8]) -> u64 {
+    payload.iter().fold(0xcbf29ce484222325, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
+    })
+}
+
+/// Complete state of a `SimulationNode` at a specific authoritative recovery
+/// position.
 ///
-/// # Current format compatibility (ADR-0017 legacy path)
+/// This is the versioned ADR-0049 checkpoint payload. Its envelope and
+/// publication protocol are implemented here; #271 still owns the physical
+/// recovery-journal framing and compaction mechanics. The checkpoint coverage
+/// is an authoritative recovery-journal position rather than a public-event
+/// cursor.
+///
+/// # Format compatibility
 ///
 /// The on-disk format is **version-locked to the binary**: postcard is not
 /// self-describing, so fields are read positionally and a snapshot written by
@@ -176,11 +198,10 @@ pub struct StateSnapshot {
     pub sector_id: SectorId,
     /// Spatial bounds of the Sector.
     pub bounds: SectorBounds,
-    /// Legacy EventStore coverage: events with index < `log_index` are covered
-    /// by this current snapshot and events at/after it are replayed by the
-    /// current restore path. ADR-0049 replaces this with an authoritative
-    /// recovery-journal covered position in the versioned checkpoint manifest.
-    pub log_index: u64,
+    /// Authoritative recovery-journal coverage: committed recovery records
+    /// with index below this position are covered by the checkpoint. Recovery
+    /// resumes by applying records at and after this position.
+    pub covered_recovery_index: u64,
     /// Logical tick at the time of the snapshot.
     pub tick: Tick,
     /// Next value for `SimulationNode::id_counter`.
@@ -191,6 +212,9 @@ pub struct StateSnapshot {
     /// Must be restored so a freshly-admitted client cannot receive a
     /// `PlayerId` already handed out before restart.
     pub player_id_counter: u64,
+    /// Content fingerprint of the validated module/ship catalog used to
+    /// materialize this checkpoint.
+    pub catalog_fingerprint: u64,
     /// State of every Ship in the Sector at the snapshot instant.
     pub ships: Vec<ShipSnapshot>,
     /// Authoritative Ship -> Player ownership bindings, including Ships that
@@ -203,9 +227,88 @@ pub struct StateSnapshot {
     pub docked_ships: BTreeMap<dawn_core::ShipId, dawn_core::StationId>,
     /// Current docked station context per player.
     pub docked_players: BTreeMap<dawn_core::PlayerId, dawn_core::StationId>,
+    /// Player -> currently routable ship mapping (ADR-0037).
+    pub active_ships: BTreeMap<PlayerId, ShipId>,
+    /// Cross-tick bot commands that have not yet been consumed.
+    pub pending_bot_lock_commands: Vec<LockOnCommand>,
+    /// Auto-jump obligations produced by a committed warp and awaiting the
+    /// runtime's transit proposal.
+    pub pending_auto_jumps: Vec<(ShipId, JumpGateId)>,
 }
 
 impl StateSnapshot {
+    /// Encode this checkpoint for durable storage or replica transfer.
+    ///
+    /// The envelope is intentionally small and independent of postcard's
+    /// positional payload format. A future incompatible payload increments
+    /// [`CHECKPOINT_FORMAT_VERSION`] and is rejected before deserialisation.
+    pub fn encode_checkpoint(&self) -> io::Result<Vec<u8>> {
+        let payload = postcard::to_stdvec(self).map_err(|e| io::Error::other(e.to_string()))?;
+        let mut bytes = Vec::with_capacity(CHECKPOINT_HEADER_LEN + payload.len());
+        bytes.extend_from_slice(&CHECKPOINT_MAGIC);
+        bytes.extend_from_slice(&CHECKPOINT_FORMAT_VERSION.to_le_bytes());
+        bytes.extend_from_slice(&checkpoint_checksum(&payload).to_le_bytes());
+        bytes.extend_from_slice(&payload);
+        Self::decode_checkpoint_with_context(&bytes, "encoded checkpoint")?;
+        Ok(bytes)
+    }
+
+    /// Decode a checkpoint envelope and reject unknown or malformed formats.
+    pub fn decode_checkpoint(bytes: &[u8]) -> io::Result<Self> {
+        Self::decode_checkpoint_with_context(bytes, "checkpoint")
+    }
+
+    fn decode_checkpoint_with_context(bytes: &[u8], context: &str) -> io::Result<Self> {
+        if bytes.len() < CHECKPOINT_HEADER_LEN {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("{context}: truncated checkpoint header"),
+            ));
+        }
+        if bytes[..CHECKPOINT_MAGIC.len()] != CHECKPOINT_MAGIC {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("{context}: unsupported checkpoint magic"),
+            ));
+        }
+        let version_offset = CHECKPOINT_MAGIC.len();
+        let version_end = version_offset + size_of::<u16>();
+        let version = u16::from_le_bytes(
+            bytes[version_offset..version_end]
+                .try_into()
+                .expect("checkpoint header has a fixed version width"),
+        );
+        if version != CHECKPOINT_FORMAT_VERSION {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "{context}: unsupported checkpoint format version {version} (expected {CHECKPOINT_FORMAT_VERSION})"
+                ),
+            ));
+        }
+
+        let checksum_offset = version_end;
+        let expected_checksum = u64::from_le_bytes(
+            bytes[checksum_offset..CHECKPOINT_HEADER_LEN]
+                .try_into()
+                .expect("checkpoint header has a fixed checksum width"),
+        );
+        let payload = &bytes[CHECKPOINT_HEADER_LEN..];
+        if checkpoint_checksum(payload) != expected_checksum {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("{context}: checkpoint payload checksum mismatch"),
+            ));
+        }
+
+        postcard::from_bytes(payload).map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("{context} payload: {e}"),
+            )
+        })
+    }
+
     /// Encode, validate, durably write, and atomically publish this snapshot.
     ///
     /// The temporary file and rollback copy are siblings of `path`, so every
@@ -219,8 +322,7 @@ impl StateSnapshot {
     where
         F: FnOnce(&Path) -> io::Result<()>,
     {
-        let bytes = postcard::to_stdvec(self).map_err(|e| io::Error::other(e.to_string()))?;
-        Self::decode(&bytes, "encoded snapshot")?;
+        let bytes = self.encode_checkpoint()?;
 
         // Open the parent before replacement. On Unix this preserves a usable
         // directory handle even if a path lookup would fail after the rename.
@@ -243,7 +345,7 @@ impl StateSnapshot {
                     "temporary snapshot bytes differ from the encoded snapshot",
                 ));
             }
-            Self::decode(&persisted, "temporary snapshot")?;
+            Self::decode_checkpoint_with_context(&persisted, "temporary snapshot")?;
         }
         temp.close();
 
@@ -278,12 +380,7 @@ impl StateSnapshot {
     /// Read from `path` and deserialise.
     pub fn load(path: impl AsRef<Path>) -> io::Result<Self> {
         let bytes = fs::read(path)?;
-        Self::decode(&bytes, "current snapshot")
-    }
-
-    fn decode(bytes: &[u8], context: &str) -> io::Result<Self> {
-        postcard::from_bytes(bytes)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("{context}: {e}")))
+        Self::decode_checkpoint_with_context(&bytes, "current snapshot")
     }
 }
 
@@ -800,10 +897,11 @@ mod tests {
             node_id: NodeId(0),
             sector_id: dawn_core::SectorId(0),
             bounds: SectorBounds::centered(SectorBounds::DEFAULT_HALF),
-            log_index: 42,
+            covered_recovery_index: 42,
             tick: Tick(10),
             id_counter: 5,
             player_id_counter: 3,
+            catalog_fingerprint: 0x1234,
             ships: vec![ShipSnapshot {
                 ship_id: ShipId::new(NodeId(0), 0),
                 ship_type_id: ShipTypeId(1),
@@ -827,6 +925,9 @@ mod tests {
             completed_incoming_transits: Vec::new(),
             docked_ships: BTreeMap::from([(ShipId::new(NodeId(0), 0), dawn_core::StationId(0))]),
             docked_players: BTreeMap::from([(dawn_core::PlayerId(9), dawn_core::StationId(0))]),
+            active_ships: BTreeMap::from([(dawn_core::PlayerId(9), ShipId::new(NodeId(0), 0))]),
+            pending_bot_lock_commands: Vec::new(),
+            pending_auto_jumps: Vec::new(),
         }
     }
 
@@ -845,7 +946,7 @@ mod tests {
         );
     }
 
-    /// Re-encoding what postcard decoded must reproduce the original bytes.
+    /// Re-encoding what postcard decoded must reproduce the original payload.
     ///
     /// Asserted on the encoded form rather than field by field on purpose: a
     /// field-by-field list is itself hand-maintained, so it goes stale in
@@ -861,11 +962,30 @@ mod tests {
         assert_eq!(postcard::to_stdvec(&restored).unwrap(), bytes);
     }
 
-    /// postcard is not self-describing: struct fields are read positionally,
-    /// so a buffer written from a different field list cannot be decoded and
-    /// `#[serde(default)]` does not rescue it. This pins the behaviour the
-    /// current format-compatibility note on `StateSnapshot` depends on. The
-    /// ADR-0049 replacement instead requires an explicit version/fingerprint.
+    #[test]
+    fn checkpoint_envelope_round_trips_and_carries_its_format_version() {
+        let original = sample_snapshot();
+        let bytes = original.encode_checkpoint().unwrap();
+
+        assert_eq!(&bytes[..CHECKPOINT_MAGIC.len()], &CHECKPOINT_MAGIC);
+        assert_eq!(
+            u16::from_le_bytes(
+                bytes[CHECKPOINT_MAGIC.len()..CHECKPOINT_MAGIC.len() + size_of::<u16>()]
+                    .try_into()
+                    .unwrap()
+            ),
+            CHECKPOINT_FORMAT_VERSION
+        );
+        let restored = StateSnapshot::decode_checkpoint(&bytes).unwrap();
+        assert_eq!(
+            postcard::to_stdvec(&restored).unwrap(),
+            postcard::to_stdvec(&original).unwrap()
+        );
+    }
+
+    /// postcard is not self-describing: struct fields are read positionally.
+    /// The checkpoint envelope must reject such a payload before it reaches
+    /// the state decoder.
     #[test]
     fn a_snapshot_written_with_fewer_fields_fails_to_load() {
         #[derive(Serialize)]
@@ -873,8 +993,35 @@ mod tests {
             node_id: NodeId,
         }
 
-        let bytes = postcard::to_stdvec(&Truncated { node_id: NodeId(0) }).unwrap();
-        assert!(postcard::from_bytes::<StateSnapshot>(&bytes).is_err());
+        let payload = postcard::to_stdvec(&Truncated { node_id: NodeId(0) }).unwrap();
+        let mut bytes = CHECKPOINT_MAGIC.to_vec();
+        bytes.extend_from_slice(&CHECKPOINT_FORMAT_VERSION.to_le_bytes());
+        bytes.extend_from_slice(&payload);
+        assert!(StateSnapshot::decode_checkpoint(&bytes).is_err());
+    }
+
+    #[test]
+    fn checkpoint_with_an_unknown_version_is_rejected() {
+        let mut bytes = sample_snapshot().encode_checkpoint().unwrap();
+        let version_end = CHECKPOINT_MAGIC.len() + size_of::<u16>();
+        bytes[CHECKPOINT_MAGIC.len()..version_end]
+            .copy_from_slice(&(CHECKPOINT_FORMAT_VERSION + 1).to_le_bytes());
+
+        let error = StateSnapshot::decode_checkpoint(&bytes).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(error
+            .to_string()
+            .contains("unsupported checkpoint format version"));
+    }
+
+    #[test]
+    fn checkpoint_payload_corruption_is_rejected_before_deserialization() {
+        let mut bytes = sample_snapshot().encode_checkpoint().unwrap();
+        bytes[CHECKPOINT_HEADER_LEN] ^= 0x01;
+
+        let error = StateSnapshot::decode_checkpoint(&bytes).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("checksum mismatch"));
     }
 
     #[test]
@@ -886,7 +1033,10 @@ mod tests {
         original.save(&path).unwrap();
 
         let restored = StateSnapshot::load(&path).unwrap();
-        assert_eq!(restored.log_index, original.log_index);
+        assert_eq!(
+            restored.covered_recovery_index,
+            original.covered_recovery_index
+        );
         assert_eq!(restored.tick, original.tick);
         assert_eq!(restored.id_counter, original.id_counter);
         #[cfg(unix)]
@@ -900,17 +1050,20 @@ mod tests {
         let path = dir.path().join("snapshot.bin");
 
         let mut previous = sample_snapshot();
-        previous.log_index = 7;
+        previous.covered_recovery_index = 7;
         previous.tick = Tick(3);
         previous.save(&path).unwrap();
 
         let mut replacement = sample_snapshot();
-        replacement.log_index = 99;
+        replacement.covered_recovery_index = 99;
         replacement.tick = Tick(25);
         replacement.save(&path).unwrap();
 
         let restored = StateSnapshot::load(&path).unwrap();
-        assert_eq!(restored.log_index, replacement.log_index);
+        assert_eq!(
+            restored.covered_recovery_index,
+            replacement.covered_recovery_index
+        );
         assert_eq!(restored.tick, replacement.tick);
         assert_no_publication_artifacts(dir.path());
     }
@@ -922,12 +1075,12 @@ mod tests {
         let path = dir.path().join("snapshot.bin");
 
         let mut previous = sample_snapshot();
-        previous.log_index = 7;
+        previous.covered_recovery_index = 7;
         previous.save(&path).unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
 
         let mut replacement = sample_snapshot();
-        replacement.log_index = 99;
+        replacement.covered_recovery_index = 99;
         replacement
             .save_with_before_publish(&path, |temp_path| {
                 assert_eq!(file_mode(temp_path), 0o600);
@@ -947,12 +1100,12 @@ mod tests {
         let path = dir.path().join("snapshot.bin");
 
         let mut previous = sample_snapshot();
-        previous.log_index = 7;
+        previous.covered_recovery_index = 7;
         previous.save(&path).unwrap();
         let previous_bytes = fs::read(&path).unwrap();
 
         let mut replacement = sample_snapshot();
-        replacement.log_index = 99;
+        replacement.covered_recovery_index = 99;
         let error = replacement
             .save_with_before_publish(&path, |_| {
                 Err(io::Error::other("injected failure before replacement"))
@@ -961,7 +1114,10 @@ mod tests {
 
         assert_eq!(error.kind(), io::ErrorKind::Other);
         assert_eq!(fs::read(&path).unwrap(), previous_bytes);
-        assert_eq!(StateSnapshot::load(&path).unwrap().log_index, 7);
+        assert_eq!(
+            StateSnapshot::load(&path).unwrap().covered_recovery_index,
+            7
+        );
         assert_no_publication_artifacts(dir.path());
     }
 
@@ -971,20 +1127,23 @@ mod tests {
         let path = dir.path().join("snapshot.bin");
 
         let mut previous = sample_snapshot();
-        previous.log_index = 7;
+        previous.covered_recovery_index = 7;
         previous.tick = Tick(3);
         previous.save(&path).unwrap();
         let previous_bytes = fs::read(&path).unwrap();
 
         let mut replacement = sample_snapshot();
-        replacement.log_index = 99;
+        replacement.covered_recovery_index = 99;
         replacement.tick = Tick(25);
         inject_directory_sync_failure(&path, 2);
         let error = replacement.save(&path).unwrap_err();
 
         assert_eq!(error.kind(), io::ErrorKind::Other);
         assert_eq!(fs::read(&path).unwrap(), previous_bytes);
-        assert_eq!(StateSnapshot::load(&path).unwrap().log_index, 7);
+        assert_eq!(
+            StateSnapshot::load(&path).unwrap().covered_recovery_index,
+            7
+        );
         assert_no_publication_artifacts(dir.path());
     }
 

@@ -187,6 +187,8 @@ pub struct SimulationNode {
     module_registry: Arc<BTreeMap<ModuleId, ModuleDefinition>>,
     /// Immutable ship-type definitions shared from the validated catalog.
     ship_type_registry: Arc<BTreeMap<ShipTypeId, ShipTypeDefinition>>,
+    /// Content identity of the catalog used to materialize this world.
+    catalog_fingerprint: u64,
     /// Bare ShipStats without fitting. Used as the base for fitting aggregation.
     base_stats: HashMap<ShipId, ShipStatsComp>,
     /// Current in-memory PlayerId allocation counter. ADR-0049/#277 requires
@@ -210,7 +212,7 @@ pub struct SimulationNode {
     /// and injected into the LockSystem at the start of the NEXT tick. Because
     /// they affect a later authoritative Tick, ADR-0049 classifies this queue as
     /// recovery authority until same-Tick consumption or another redesign removes
-    /// the cross-Tick state. Current persistence is migration debt.
+    /// the cross-Tick state. Checkpoints and full Tick RecoveryDeltas persist it.
     pending_bot_lock_commands: Vec<dawn_core::LockOnCommand>,
     /// Static navigation topology for this Sector (gates, bodies, star map).
     sector_map: SectorMap,
@@ -346,7 +348,7 @@ impl SimulationNode {
         let catalog = crate::game_data::test_catalog_with_overrides(modules, ship_types);
         let mut node = Self::restore_from(snapshot, galaxy, catalog);
         let events: Vec<_> = store
-            .iter_from(snapshot.log_index)
+            .iter_from(snapshot.covered_recovery_index)
             .map(|record| record.event.clone())
             .collect();
         for event in &events {
@@ -382,6 +384,7 @@ impl SimulationNode {
             ships: ShipRegistry::new(),
             module_registry: catalog.module_index(),
             ship_type_registry: catalog.ship_type_index(),
+            catalog_fingerprint: catalog.fingerprint(),
             base_stats: HashMap::new(),
             player_id_counter: 0,
             pending_fresh_admissions: HashSet::new(),
@@ -411,6 +414,24 @@ impl SimulationNode {
         galaxy: Arc<crate::galaxy::Galaxy>,
         catalog: Arc<GameDataCatalog>,
     ) -> Self {
+        Self::restore_from_checked(snapshot, galaxy, catalog)
+            .expect("checkpoint catalog is incompatible with the runtime catalog")
+    }
+
+    /// Restore a checkpoint only when its catalog fingerprint matches the
+    /// definitions supplied by the runtime.
+    pub fn restore_from_checked(
+        snapshot: &StateSnapshot,
+        galaxy: Arc<crate::galaxy::Galaxy>,
+        catalog: Arc<GameDataCatalog>,
+    ) -> Result<Self, String> {
+        let expected_fingerprint = catalog.fingerprint();
+        if snapshot.catalog_fingerprint != expected_fingerprint {
+            return Err(format!(
+                "checkpoint catalog fingerprint {} does not match runtime catalog {}",
+                snapshot.catalog_fingerprint, expected_fingerprint
+            ));
+        }
         let node = Self::with_catalog(
             snapshot.node_id,
             snapshot.sector_id,
@@ -418,7 +439,25 @@ impl SimulationNode {
             galaxy,
             catalog,
         );
-        Self::finish_restore(node, snapshot)
+        Ok(Self::finish_restore(node, snapshot))
+    }
+
+    /// Apply one committed authoritative RecoveryDelta during restart or
+    /// replica promotion. Public events are intentionally not involved here:
+    /// the delta is the exact state transition selected by ADR-0049.
+    pub fn apply_recovery_delta(
+        &mut self,
+        delta: crate::transition::SectorRecoveryDelta,
+        context: crate::transition::TransitionContext,
+    ) -> Result<(), crate::transition::TransitionApplyError> {
+        match delta {
+            crate::transition::SectorRecoveryDelta::Stop(delta) => {
+                self.apply_stop_transition(delta)
+            }
+            crate::transition::SectorRecoveryDelta::Tick(delta) => {
+                self.apply_tick_transition(*delta, context)
+            }
+        }
     }
 
     fn finish_restore(mut node: Self, snapshot: &StateSnapshot) -> Self {

@@ -364,7 +364,8 @@ ADR-0049 does not authorize destructive in-place Event mutation. State-delta com
 - #271 owns physical journal/commit/compaction mechanics;
 - #276 ensures Transit Saga/retry authority survives checkpoint/compaction;
 - #280 transports the selected checkpoint/tail representation and cannot promote a staged-but-unapplied replica;
-- numeric RTO remains TBD until #284 benchmarks representative recovery tails.
+- numeric RTO remains deployment-specific until the #280 peer transport and
+  reference recovery benchmark are selected.
 
 See [ADR-0017](../adr/ADR-0017-snapshot-compaction.md), [ADR-0049](../adr/ADR-0049-sector-recovery-state-delta-wal.md), and [recovery-contract.md](./recovery-contract.md).
 
