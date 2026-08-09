@@ -90,12 +90,17 @@ impl SimulationNode {
     }
 
     fn allocate_transit_attempt(&mut self, ship_id: ShipId) -> Result<TransitAttemptId, DawnError> {
-        let sequence = self.transit_attempt_counter;
-        let next_sequence = sequence
-            .checked_add(1)
-            .ok_or(DawnError::TransitAttemptCounterOverflow(self.sector_id))?;
-        self.transit_attempt_counter = next_sequence;
-        Ok(TransitAttemptId::new(self.sector_id, ship_id, sequence))
+        loop {
+            let sequence = self.transit_attempt_counter;
+            let next_sequence = sequence
+                .checked_add(1)
+                .ok_or(DawnError::TransitAttemptCounterOverflow(self.sector_id))?;
+            self.transit_attempt_counter = next_sequence;
+            let attempt_id = TransitAttemptId::new(self.sector_id, ship_id, sequence);
+            if self.transit_journal.outgoing(attempt_id).is_none() {
+                return Ok(attempt_id);
+            }
+        }
     }
 
     pub(crate) fn note_transit_commit_proposed(&mut self, attempt_id: TransitAttemptId) -> bool {

@@ -54,6 +54,20 @@ impl TransitJournal {
                     attempt.attempt_id, attempt.from, sector_id
                 ));
             }
+            if attempt.handoff.ship_id != attempt.ship_id {
+                return Err(format!(
+                    "outgoing Transit {:?} handoff belongs to {:?}, not {:?}",
+                    attempt.attempt_id, attempt.handoff.ship_id, attempt.ship_id
+                ));
+            }
+            if let TransitAttemptState::CommitPending { attempts, .. } = attempt.state {
+                if attempts == 0 || attempts > TRANSIT_RETRY_MAX_ATTEMPTS {
+                    return Err(format!(
+                        "outgoing Transit {:?} has invalid retry count {attempts}",
+                        attempt.attempt_id
+                    ));
+                }
+            }
             if journal
                 .outgoing
                 .insert(attempt.attempt_id, attempt)
@@ -445,7 +459,12 @@ pub(super) fn apply_ack_with_attempt(
     {
         return false;
     }
-    if matches!(pending.state, TransitAttemptState::Acknowledged) {
+    if matches!(
+        pending.state,
+        TransitAttemptState::Acknowledged
+            | TransitAttemptState::Aborted { .. }
+            | TransitAttemptState::Quarantined { .. }
+    ) {
         return false;
     }
     if !node.is_ship_in_transit(ship_id) || node.get_ship_position(ship_id).is_none() {
@@ -575,6 +594,19 @@ mod tests {
         assert_eq!(diagnostics.active_attempts, 0);
         assert_eq!(diagnostics.retrying_attempts, 0);
         assert_eq!(diagnostics.quarantined_attempts, 1);
+
+        let event_count = source.total_event_count();
+        let current = journal(&source);
+        assert!(!apply_ack(
+            &mut source,
+            &current,
+            effect.handoff.ship_id,
+            effect.from,
+            effect.to,
+            effect.request_tick,
+        ));
+        assert!(source.is_ship_in_transit(ship_id));
+        assert_eq!(source.total_event_count(), event_count);
     }
 
     #[test]
@@ -608,6 +640,58 @@ mod tests {
             error,
             "Transit attempt appears in both outgoing and incoming state"
         );
+    }
+
+    #[test]
+    fn restore_rejects_inconsistent_outgoing_retry_state() {
+        let ship_id = ShipId::new(NodeId(1), 7);
+        let attempt_id = TransitAttemptId::new(SectorId(0), ship_id, 11);
+        let snapshot = TransitSagaSnapshot {
+            outgoing: vec![OutgoingTransitAttempt {
+                attempt_id,
+                ship_id,
+                from: SectorId(0),
+                to: SectorId(1),
+                handoff: test_handoff(ShipId::new(NodeId(1), 8)),
+                gate_id: None,
+                entry_pos: AbsolutePosition::ORIGIN,
+                request_tick: Tick(11),
+                state: TransitAttemptState::CommitPending {
+                    attempts: 0,
+                    next_retry_tick: Tick(12),
+                },
+            }],
+            incoming: Vec::new(),
+        };
+
+        let error = TransitJournal::from_snapshot(SectorId(0), snapshot).unwrap_err();
+        assert!(error.contains("handoff belongs to"));
+    }
+
+    #[test]
+    fn restore_rejects_zero_retry_count() {
+        let ship_id = ShipId::new(NodeId(1), 7);
+        let attempt_id = TransitAttemptId::new(SectorId(0), ship_id, 11);
+        let snapshot = TransitSagaSnapshot {
+            outgoing: vec![OutgoingTransitAttempt {
+                attempt_id,
+                ship_id,
+                from: SectorId(0),
+                to: SectorId(1),
+                handoff: test_handoff(ship_id),
+                gate_id: None,
+                entry_pos: AbsolutePosition::ORIGIN,
+                request_tick: Tick(11),
+                state: TransitAttemptState::CommitPending {
+                    attempts: 0,
+                    next_retry_tick: Tick(12),
+                },
+            }],
+            incoming: Vec::new(),
+        };
+
+        let error = TransitJournal::from_snapshot(SectorId(0), snapshot).unwrap_err();
+        assert!(error.contains("invalid retry count"));
     }
 
     #[test]
