@@ -51,15 +51,14 @@ impl SimulationNode {
             sector_map: _,
             anchor_table: _,
             // Configuration, re-applied after construction by the caller
-            // (`set_population_cap` / `open_station_inventory_db`).
+            // (`set_population_cap` / `open_repositories`).
             population_cap: _,
             // Fresh admission reservations exist only while this process is alive.
             pending_fresh_admissions: _,
             // Resume locks protect only live asynchronous handshakes.
             pending_resume_admissions: _,
             // Independently durable in SQLite (ADR-0038), plus its cache.
-            station_inventory_db: _,
-            station_inventory_cache: _,
+            repositories: _,
             // Completed-warp corrections remain lossy presentation output.
             // The bot-command and auto-jump queues are persisted above because
             // they affect a future Tick and therefore belong to recovery
@@ -793,7 +792,7 @@ mod tests {
     /// (they don't, going forward). Simulates a real restart: `node` and
     /// `node2` are otherwise-independent `SimulationNode`s (fresh in-memory
     /// event store, like a real process restart would use a fresh
-    /// `FileEventStore` handle), but both point `open_station_inventory_db`
+    /// `FileEventStore` handle), but both point `open_repositories`
     /// at the same on-disk file.
     #[test]
     fn station_inventory_survives_snapshot_restore() {
@@ -803,7 +802,7 @@ mod tests {
         let db_path = db_path.path().to_str().unwrap();
 
         let mut node = node_with_modules();
-        node.open_station_inventory_db(db_path).unwrap();
+        node.open_repositories(db_path).unwrap();
         node.credit_station_item(PlayerId(7), StationId(0), ItemId::ScrapMetal, 4);
         node.credit_station_item(
             PlayerId(7),
@@ -824,7 +823,7 @@ mod tests {
             crate::game_data::test_catalog().modules(),
             crate::game_data::test_catalog().ship_types(),
         );
-        node2.open_station_inventory_db(db_path).unwrap();
+        node2.open_repositories(db_path).unwrap();
 
         assert_eq!(
             node2.station_item_count(PlayerId(7), StationId(0), ItemId::ScrapMetal),

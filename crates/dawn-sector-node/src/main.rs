@@ -428,7 +428,7 @@ fn build_node(
 
     // FileEventStore::open does not create its parent directory, and a fresh
     // deployment has no `data/node-N/` yet -- create it (and the snapshot/
-    // cold-archive/station-inventory-db parents, which are normally the same
+    // cold-archive/repository parents, which are normally the same
     // directory) up front.
     for path in [
         &cfg.event_log_path,
@@ -436,7 +436,7 @@ fn build_node(
         &cfg.snapshot_path,
         &cfg.cold_path,
         &cfg.recovery_cold_path,
-        &cfg.station_inventory_db_path,
+        &cfg.repository_path,
     ] {
         if let Some(parent) = std::path::Path::new(path).parent() {
             std::fs::create_dir_all(parent).unwrap_or_else(|e| {
@@ -533,11 +533,11 @@ fn build_node(
     // ADR-0038: Station inventory's durability is independent of the event
     // log / snapshot lifecycle above -- opening it is just pointing at the
     // (persistent, on-disk) file, whether this node is fresh or restored.
-    node.open_station_inventory_db(&cfg.station_inventory_db_path)
+    node.open_repositories(&cfg.repository_path)
         .unwrap_or_else(|e| {
             panic!(
-                "failed to open station inventory db '{}': {e}",
-                cfg.station_inventory_db_path
+                "failed to open sector repository '{}': {e}",
+                cfg.repository_path
             )
         });
     (node, store, recovery_journal, is_fresh)

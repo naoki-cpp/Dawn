@@ -119,7 +119,13 @@ impl SimulationNode {
 
     pub fn next_player_id(&mut self) -> PlayerId {
         let id = PlayerId(self.player_id_counter);
-        self.player_id_counter += 1;
+        self.player_id_counter = self
+            .player_id_counter
+            .checked_add(1)
+            .expect("PlayerId allocator exhausted");
+        self.repositories
+            .observe_materialized_identities(std::iter::empty(), [id])
+            .expect("repository identity watermark update");
         id
     }
 
@@ -273,6 +279,9 @@ impl SimulationNode {
     ) {
         let entity = self.world.spawn_ship(ship_id, position, velocity);
         self.ships.index.insert(ship_id, entity);
+        self.repositories
+            .observe_materialized_identities([ship_id], std::iter::empty())
+            .expect("repository identity watermark update");
         // Default to the Sector origin anchor (the star). Spawn paths override
         // this with the nearest body via `set_spawn_anchor`; restore overrides it
         // with the persisted anchor. `position` here is treated as the offset.

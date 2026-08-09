@@ -571,13 +571,14 @@ impl SimulationNode {
         }
         if let Some(player_id) = handoff.owner_player_id {
             if let Some(resume_ticket) = handoff.resume_ticket {
-                self.station_inventory_db
+                self.repositories
                     .record_client_ownership_with_pending(
                         handoff.ship_id,
                         player_id,
                         resume_ticket,
                         handoff.pending_resume_ticket,
-                    );
+                    )
+                    .expect("client ownership upsert");
             }
             debug_assert!(self.adopt_player_ship(handoff.ship_id, player_id));
         }

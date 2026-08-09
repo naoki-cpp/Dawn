@@ -6,14 +6,15 @@ related  : .agents/skills/security-check/SKILL.md,
            .agents/skills/security-check/references/owasp-map.md,
            .agents/skills/security-check/references/baseline.md（初回レビューの凍結記録）,
            docs/architecture/security-review-completed.md（解消済みfindingの作業ログ）
-date     : 2026-07-17
+date     : 2026-08-09
 ---
 
 # Security Review — Dawn Server（OWASP観点）
 
-2026-07-17 update: Market専用wire message、`dawn-simulation`のruntime
-bridge、`dawn-market`のopen-order snapshotをレビューした。ownership・入力値・SQL・
-queue/snapshot上限は健全。既存のSEC-1/SEC-2保留findingは変更なし。
+2026-08-09 update: #277の`dawn-sector` repository分割とStation projection APIを
+レビューした。SQLは引き続き全てparameter bindingで、projectionのtransition indexは
+SQLite INTEGER境界を検証する。ownership・入力値・queue/snapshot上限は健全。
+既存のSEC-1/SEC-2保留findingは変更なし。
 
 `/security-check`スキルによる、クライアントからの信頼できない入力がネットワークフレームから
 ゲーム状態変更に至るまでの経路レビュー。このファイルは「今どういう状態か」
@@ -47,9 +48,9 @@ queue/snapshot上限は健全。既存のSEC-1/SEC-2保留findingは変更なし
 
 ## 検証済み・健全
 
-### A03 SQLインジェクション — `crates/dawn-sector/src/node/station_inventory_db.rs`
+### A03 SQLインジェクション — `crates/dawn-sector/src/node/repositories.rs`
 
-全5クエリが`params![]`によるパラメータ化済み。テーブル/カラム名はクライアント入力から
+Repository queryは`params![]`によるパラメータ化済み。テーブル/カラム名はクライアント入力から
 導出されない（`item_id_to_columns`は`ItemId` enumへの閉じたmatch）。詳細は
 [baseline.md](../../.agents/skills/security-check/references/baseline.md)参照。
 

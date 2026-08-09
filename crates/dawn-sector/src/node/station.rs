@@ -7,7 +7,7 @@
 //!
 //! Station inventory cache + SQLite write-through lives in
 //! `station_inventory.rs`; durable storage details live in
-//! `station_inventory_db.rs`.
+//! `repositories.rs`.
 //! - `station_operation_execution.rs` owns accepted-operation side effects and
 //!   the final Event append ordering.
 

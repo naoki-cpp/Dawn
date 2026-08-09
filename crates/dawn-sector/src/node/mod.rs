@@ -37,6 +37,7 @@ mod navigation;
 mod orbit;
 mod player_loadout_projection;
 mod range_gate;
+mod repositories;
 mod sector_map;
 mod serialization;
 mod ship_cargo;
@@ -46,7 +47,6 @@ mod snapshot_io;
 mod spawner_logic;
 mod station;
 mod station_inventory;
-mod station_inventory_db;
 mod station_lifecycle;
 mod station_materialization;
 mod station_operation_execution;
@@ -60,6 +60,9 @@ pub use crate::transit::TickTransitionError;
 pub use command_module::ModuleActivationRejection;
 pub use commands::{ClientCommandFollowup, ClientRequestAdmissionError};
 pub use jump::JumpOutcome;
+pub use repositories::{
+    ProjectionApplyError, ProjectionApplyResult, ProjectionReadError, StationProjectionMutation,
+};
 pub use serialization::{HandoffPayload, MissingObserverShip};
 pub use tick::TickPreparationError;
 
@@ -225,17 +228,10 @@ pub struct SimulationNode {
     /// Per-Sector population backstop (ADR-0018). Defaults to [`POPULATION_CAP`];
     /// tunable via [`Self::set_population_cap`].
     population_cap: usize,
-    /// Current catch-all SQLite adapter inherited from ADR-0038.
-    ///
-    /// Under ADR-0049/#277, Station inventory rows become an idempotent
-    /// Runtime-owned admission/Station persistence port. The engine sees only
-    /// repository behavior; the current catch-all SQLite adapter is selected at
-    /// the composition boundary until #277 replaces it with explicit
-    /// repositories. Its rows are not Sector recovery authority.
-    station_inventory_db: Box<dyn station_inventory_db::StationRepository>,
-    /// Bounded derived cache over current Station repository access. It is not
-    /// independent recovery authority.
-    station_inventory_cache: std::cell::RefCell<station_inventory::StationInventoryCache>,
+    /// Runtime persistence boundary for admission/identity protocol state and
+    /// the Station projection. The database adapter is kept behind explicit
+    /// repository views; these rows are not Sector recovery authority.
+    repositories: repositories::SectorRepository,
     /// Current docked station per ship. Docking is authoritative state, so
     /// station operations must consult this rather than raw spatial proximity.
     docked_ships: BTreeMap<ShipId, StationId>,
@@ -393,11 +389,8 @@ impl SimulationNode {
             sector_map,
             anchor_table,
             population_cap: POPULATION_CAP,
-            station_inventory_db: station_inventory_db::open_in_memory_repository()
+            repositories: repositories::SectorRepository::open_in_memory()
                 .expect("in-memory repository never fails to open"),
-            station_inventory_cache: std::cell::RefCell::new(
-                station_inventory::StationInventoryCache::new(),
-            ),
             docked_ships: BTreeMap::new(),
             docked_players: BTreeMap::new(),
             pending_auto_jumps: Vec::new(),
@@ -438,7 +431,10 @@ impl SimulationNode {
             galaxy,
             catalog,
         );
-        Ok(Self::finish_restore(node, snapshot))
+        let node = Self::finish_restore(node, snapshot);
+        node.observe_materialized_identities()
+            .map_err(|error| format!("cannot rebuild repository identity watermarks: {error}"))?;
+        Ok(node)
     }
 
     /// Apply one committed authoritative RecoveryDelta during restart or
@@ -504,13 +500,26 @@ impl SimulationNode {
     /// projection of journal authority, while admission/identity rows may be
     /// durable protocol authority with explicit reconciliation. #272 removes the
     /// repository object from the pure engine.
-    pub fn open_station_inventory_db(&mut self, path: &str) -> Result<(), String> {
-        self.station_inventory_db =
-            station_inventory_db::open_repository(path).map_err(|error| error.to_string())?;
-        self.station_inventory_cache
-            .replace(station_inventory::StationInventoryCache::new());
-        self.reconcile_client_admission_grants()?;
+    pub fn open_repositories(&mut self, path: &str) -> Result<(), String> {
+        self.repositories =
+            repositories::SectorRepository::open(path).map_err(|error| error.to_string())?;
+        self.observe_materialized_identities()?;
+        self.reconcile_client_admission_identities()?;
         Ok(())
+    }
+
+    fn observe_materialized_identities(&self) -> Result<(), String> {
+        self.repositories
+            .observe_materialized_identities(
+                self.ships.index.keys().copied(),
+                self.ships
+                    .owners
+                    .values()
+                    .copied()
+                    .chain(self.ships.active_ship.keys().copied())
+                    .chain(self.docked_players.keys().copied()),
+            )
+            .map_err(|error| error.to_string())
     }
 
     /// Read access to the navigation topology.

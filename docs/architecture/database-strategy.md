@@ -28,8 +28,8 @@ SQLite は Dawn の **node-local Station projection**、**admission/identity rep
 |---|---|---|
 | Sector exact recovery | `FileEventStore` + `StateSnapshot` に依存するlegacy path | ADR-0049 authoritative state-delta journal + versioned checkpoint。#271/#272で移行 |
 | Public `DomainEvent` history | `FileEventStore` hot/cold 2層ログ | append-only public fact/archiveとして維持。exact recoveryとは別watermark |
-| Station inventory | node-local SQLite + bounded cache | Sector recovery authorityをidempotentにproject。#277がrepository/schemaを再編 |
-| Prepared admission / identity / resume tickets | 現在は同じSQLite catch-all内 | #277のdurable protocol repository authority。Sector world-state commitとのreconciliationを明示 |
+| Station inventory | `SectorRepository::station_inventory()` が読む node-local SQLite projection | Sector recovery authorityをidempotentにproject。global contiguous watermarkとtransition dedupを保存 |
+| Prepared admission / identity / resume tickets | `AdmissionRepository` / `IdentityRepository` view | #277のdurable protocol authority。予約済みIDはallocatorとconsumed-ID表で再利用しない |
 | 単一プロセスMarket | SQLite | SQLite継続 |
 | 複数プロセス共有Market | 現在対象外 | PostgreSQLを第一候補として別ADR |
 | 世界全体の分散transaction | 導入しない | 実測要件が出た時点で別設計 |
@@ -68,8 +68,10 @@ public-event retentionの必須watermarkにしてはならず、reconnect/curren
 
 ### 2.3 Station inventory projection
 
-各Sectorは現在node-local SQLiteを使い、直近 `(PlayerId, StationId)` をbounded cacheする。この
-**製品選択は維持可能**だがauthority directionはADR-0049で変更された。
+各Sectorはnode-local SQLiteの`SectorRepository`を使う。Station read modelは
+`StationInventoryRepository` viewから直接読むため、`SimulationNode`内に全プレイヤーの
+inventoryやinterior-mutability cacheを保持しない。キャッシュを追加する場合は、projectionの
+watermarkと無効化を所有するruntime側で行う。
 
 Normative ordering:
 
@@ -95,9 +97,10 @@ SQLiteファイルをnetwork filesystemへ置き、複数nodeから直接openす
 
 ### 2.4 Admission / identity protocol repositories
 
-現在の`StationInventoryDb`はStation inventoryだけでなく、prepared admission、grant、Ship ownership、
-current/pending resume ticketまで同じconnectionに保持している。#277ではこれをnarrow repositoryへ
-分割する。
+`crates/dawn-sector/src/node/repositories.rs`の`SectorRepository`はnode-local SQLite connectionの
+atomic boundaryだが、呼び出し側には`AdmissionRepository`、`IdentityRepository`、
+`StationInventoryRepository`の明示的なviewだけを返す。catch-allの名前や汎用的なforwarding APIを
+使わない。複数viewをまたぐ処理だけが`SectorTransaction`を要求する。
 
 このうち**prepared admission / identity / resume-ticket stateはStation projectionではない**。
 Ship materialization前のprepared rowはSector ECSに対応するRecoveryDeltaがまだ存在しないため、
@@ -114,12 +117,13 @@ materialization:
   stable admission identity
     -> durable Sector RecoveryDelta for Ship/ownership/active routing
     -> live apply
-    -> idempotent repository grant/ticket finalization or reconciliation
+    -> idempotent repository grant/ticket finalization
     -> acknowledge/serve resume path
 ```
 
 world transition commit後にrepository finalizationが失敗した場合、同じstable admission identityから
-restart時にreconcileする。別Ship/Playerを再allocateして穴埋めしてはならない。
+restart時に再試行する。再開時のidentity reconciliationはallocator watermarkだけを再構築し、
+すでに消費されたstarter itemを再付与してはならない。別Ship/Playerを再allocateして穴埋めしてはならない。
 
 Replica promotion時も、ECS/RecoveryDeltaがcurrentなだけでは不十分で、promoted nodeがserveする
 identityについて#277 repositoryがcaught-upまたはdeterministically reconciledでなければならない。
@@ -252,9 +256,25 @@ PostgreSQLもSector recovery journalとのdistributed transactionを自動提供
 
 ## 10. Module / repository seam の方針
 
-Station inventoryは呼び出し側からSQLite実装を隠せるseamを維持する。ただし#277ではcatch-all
-`StationInventoryDb` forwarding façadeを残すのではなく、admission/identity/Station repositoryを明示的に
-分割し、repository ownershipをpure engine外へ移す。
+Station inventoryは呼び出し側からSQLite実装を隠せるseamを維持する。#277の実装は
+`repositories.rs`に次の境界を固定する。
+
+- `AdmissionRepository`: prepared fresh-admission rowsとticket lookup
+- `IdentityRepository`: ownership、current/pending ticket、allocatorの観測
+- `StationInventoryRepository`: Station rows、transition dedup、global
+  `projection_applied_through`
+- `SectorTransaction`: admission grantのStation upsert、identity consumption、ownership、
+  prepared-row cleanupを一つのSQLite transactionへ束ねる
+
+Fresh admissionは `reserve_fresh_admission_identity` で、Player/Ship ID・resume ticket・prepared
+row・allocator watermarkをcommitしてからWelcomeを返す。abortはlive claimだけを解放し、
+`consumed_*_ids` とallocator watermarkは残す。既存DBを開く際とsnapshot後にmaterialized IDを
+観測してwatermarkを単調に引き上げるため、予約行が先に失われた場合でもIDを再利用しない。
+
+Station projectionはjournal transitionをglobal index順に受け、同じtransition identityの同じ
+indexを重複適用せず、gapを拒否する。非Station transitionは`mutation = None`でcursorだけを進める。
+#278がこのAPIをdurable RecoveryDeltaの後段へ接続し、projection failure時のfail-stop/catch-upを
+runtime policyとして実装する。
 
 現在の`MarketDb` public interfaceが`rusqlite::Result`を返す点は、2つ目のadapterを導入する時点で
 Market固有errorへ変換する。将来可能性だけを理由に今すぐ抽象traitを増やさない。
@@ -266,17 +286,19 @@ Market固有errorへ変換する。将来可能性だけを理由に今すぐ抽
 Current implementation:
 
 - `FileEventStore` public log + `StateSnapshot` snapshot-era restore pathが存在する
-- `StationInventoryDb` catch-allはStation inventoryだけでなくadmission/identity rowsも持つ
-- source内の一部コメントはこのlegacy implementationを説明しており、ADR-0049/#277 migration前の
-  behaviorとして読む
+- `SectorRepository`はSQLite connectionを所有するが、利用側はadmission/identity/Stationの
+  explicit viewを通す。Station inventoryのin-memory cacheはない
+- fresh identity reservation、allocator watermark再構築、ownership conflict検証、admission grantの
+  atomic finalization/idempotency、Station projectionのdedup/global cursor schemaは実装済み
+- #278のruntime projection hookとfail-stop/reconciliation orchestrationは別責務として残る
 - Marketはsingle `MarketRuntime` + SQLite
 
 Accepted target / work package:
 
 - #284/ADR-0049: exact Sector-world recovery = versioned checkpoint + authoritative state-delta tail
 - #271: fallible atomic durable journal
-- #272: pure engineからstorage ownershipを除去
-- #277: Station projectionとauthoritative admission/identity repositoryを分離しreconciliationを定義
+- #272: pure engineからstorage ownershipを除去するruntime orchestration
+- #277: explicit repository view、fresh identity consumption、Station projection schema/APIを実装（本PR）
 - #276: Transit EventStore scanをdurable Sagaへ置換（implemented）
 - #278: runtime durability profile/quorum/fencing/repository reconciliation/ack policyを統一
 - #280: selected recovery/repository catch-up/durability representationをpeer transportへ載せる

@@ -3,7 +3,7 @@ id      : ADR-0038
 title   : Station Inventory — SQLite as the durable authority, lazy-loaded in memory
 status  : accepted
 date    : 2026-07-08
-updated : 2026-08-07
+updated : 2026-08-09
 deciders: [human, ai-agent]
 related : ADR-0034（Economy Foundations）, ADR-0017（snapshot/public Event archive）, ADR-0049（Sector recovery authority）, docs/process/roadmap.md §12
 ---
@@ -19,9 +19,10 @@ related : ADR-0034（Economy Foundations）, ADR-0017（snapshot/public Event ar
 > - SQLiteを先に同期更新し、その後のpublic Event appendとの間にnarrow inconsistency windowを
 >   許容する§帰結は撤回。authoritative transition durable -> local live apply -> required idempotent
 >   Station projectionの順で、projection failure後はfail-stop/catch-upする。
-> - SQLite/node-local DB + bounded lazy cacheという**製品・read-model選択は維持可能**。
->   #277がcatch-all `StationInventoryDb`をnarrow repositoryへ再編するが、repository shapeは
->   recovery authorityを変更しない。
+> - SQLite/node-local DBという**製品・read-model選択は維持可能**。#277では
+>   `SectorRepository`のconnectionを`AdmissionRepository`、`IdentityRepository`、
+>   `StationInventoryRepository`のexplicit viewへ分け、`SimulationNode`のinterior-mutability
+>   cacheは削除した。repository shapeはrecovery authorityを変更しない。
 > - public `PackagedShipBuilt` / `ShipDisassembled` / `ShipAssembled` replayをStation exact reducerに
 >   戻さない。Station authorityはRecoveryDeltaであり、public Eventはfact/projection inputである。
 > - Station projectionはStation-changing transitionのdedupに加えてglobal contiguous
@@ -30,6 +31,15 @@ related : ADR-0034（Economy Foundations）, ADR-0017（snapshot/public Event ar
 >
 > 以下の旧本文中「SQLiteがauthority」「snapshot+event tail」「不整合windowを許容」は**歴史的な
 > 原決定の記録**であり、現在のnormative recovery behaviorではない。
+
+> **#277 implementation amendment (2026-08-09):** `repositories.rs` now owns the
+> node-local SQLite schema. Fresh admission reservations durably consume IDs and
+> persist allocator watermarks before `Welcome`; existing protocol rows and
+> materialized snapshot IDs raise those watermarks on reopen. Station rows are
+> read through `StationInventoryRepository`, while projection transitions are
+> deduplicated and advanced through a contiguous global journal cursor. The
+> runtime hook that feeds committed RecoveryDeltas into that projection remains
+> the #278 orchestration responsibility.
 
 ## 背景
 
