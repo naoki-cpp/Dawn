@@ -13,7 +13,8 @@ pub(crate) mod pipeline;
 use crate::node::SimulationNode;
 use dawn_consensus::RaftActorHandle;
 use dawn_core::{
-    AbsolutePosition, DomainEvent, JumpGateId, SectorId, ShipId, Tick, TransitHandoffState,
+    AbsolutePosition, DomainEvent, JumpGateId, SectorId, ShipId, Tick, TransitAttemptId,
+    TransitHandoffState,
 };
 use dawn_event_store::{AppendReceipt, DurabilityMode, DurableJournal, JournalError};
 use serde::{Deserialize, Serialize};
@@ -87,7 +88,6 @@ pub fn commit_tick_state_transition<J: DurableJournal>(
     let receipt =
         crate::transition_journal::append_prepared_transition(journal, &prepared, durability)?;
     node.apply_validated_full_tick(delta.as_ref().clone())?;
-    node.observe_committed_events(&prepared.public_events);
     Ok(receipt)
 }
 
@@ -120,6 +120,7 @@ pub enum TransitOp {
         gate_id: Option<JumpGateId>,
     },
     Commit {
+        attempt_id: TransitAttemptId,
         handoff: Box<TransitHandoffState>,
         from: SectorId,
         to: SectorId,
@@ -128,6 +129,7 @@ pub enum TransitOp {
         request_tick: Tick,
     },
     Ack {
+        attempt_id: TransitAttemptId,
         ship_id: ShipId,
         from: SectorId,
         to: SectorId,
@@ -148,6 +150,7 @@ impl TransitOp {
 fn propose_commit(raft: &RaftActorHandle, proposal: pipeline::CommitProposal) {
     raft.propose(
         TransitOp::Commit {
+            attempt_id: proposal.attempt_id,
             handoff: Box::new(proposal.handoff),
             from: proposal.from,
             to: proposal.to,
@@ -162,6 +165,7 @@ fn propose_commit(raft: &RaftActorHandle, proposal: pipeline::CommitProposal) {
 fn propose_ack(raft: &RaftActorHandle, proposal: pipeline::AckProposal) {
     raft.propose(
         TransitOp::Ack {
+            attempt_id: proposal.attempt_id,
             ship_id: proposal.ship_id,
             from: proposal.from,
             to: proposal.to,
@@ -191,6 +195,7 @@ pub fn apply_committed_raft_entries(
                 }
             }
             TransitOp::Commit {
+                attempt_id,
                 handoff,
                 from,
                 to,
@@ -206,17 +211,19 @@ pub fn apply_committed_raft_entries(
                     entry_pos,
                     gate_id,
                     request_tick,
+                    attempt_id,
                 ) {
                     propose_ack(raft, proposal);
                 }
             }
             TransitOp::Ack {
+                attempt_id,
                 ship_id,
                 from,
                 to,
                 request_tick,
             } => {
-                pipeline::apply_ack(node, ship_id, from, to, request_tick);
+                pipeline::apply_ack(node, ship_id, from, to, request_tick, attempt_id);
             }
         }
     }
@@ -349,7 +356,6 @@ where
     }
     node.apply_tick_transition(delta, prepared.context)
         .map_err(TickTransitionError::Validation)?;
-    node.observe_committed_events(&prepared.public_events);
     let mut events = prior_events;
     events.extend(node.drain_pending_events());
     events.extend(prepared.public_events);

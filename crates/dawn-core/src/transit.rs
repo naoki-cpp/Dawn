@@ -6,9 +6,53 @@
 
 use crate::fitting::FittingSnapshot;
 use crate::item::ItemId;
-use crate::{PlayerId, ResumeTicket, ShipId, ShipTypeId, Velocity};
+use crate::{PlayerId, ResumeTicket, SectorId, ShipId, ShipTypeId, Velocity};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+
+/// Opaque identity for one durable Sector Transit handoff attempt.
+///
+/// The identity is allocated independently of the logical simulation Tick.
+/// Its value is intentionally private so callers compare and persist the
+/// identity without deriving routing semantics from its representation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct TransitAttemptId {
+    source_sector: SectorId,
+    source_ship: ShipId,
+    sequence: u64,
+}
+
+impl Ord for TransitAttemptId {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.source_sector
+            .0
+            .cmp(&other.source_sector.0)
+            .then_with(|| self.source_ship.cmp(&other.source_ship))
+            .then_with(|| self.sequence.cmp(&other.sequence))
+    }
+}
+
+impl PartialOrd for TransitAttemptId {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl TransitAttemptId {
+    /// Allocate an attempt identity in the namespace of its source Sector and
+    /// Ship.
+    ///
+    /// The sequence is owned by the source Sector and is persisted with the
+    /// Sector recovery state, so retrying an attempt never allocates a new
+    /// identity and a later handoff cannot collide with an earlier one.
+    pub fn new(source_sector: SectorId, source_ship: ShipId, sequence: u64) -> Self {
+        Self {
+            source_sector,
+            source_ship,
+            sequence,
+        }
+    }
+}
 
 /// Runtime state that follows one Ship across a Sector ownership boundary.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -79,5 +123,24 @@ impl TryFrom<UncheckedTransitHandoffState> for TransitHandoffState {
             fitting: value.fitting,
             inventory: value.inventory,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::NodeId;
+
+    #[test]
+    fn attempt_identity_keeps_all_namespace_components_distinct() {
+        let ship = ShipId::new(NodeId(1), 7);
+        let same = TransitAttemptId::new(SectorId(0), ship, 3);
+
+        assert_ne!(same, TransitAttemptId::new(SectorId(1), ship, 3));
+        assert_ne!(same, TransitAttemptId::new(SectorId(0), ship, 4));
+        assert_ne!(
+            same,
+            TransitAttemptId::new(SectorId(0), ShipId::new(NodeId(1), 8), 3)
+        );
     }
 }

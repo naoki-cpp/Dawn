@@ -189,7 +189,7 @@ impl SimulationNode {
         self.docked_players = delta.docked_players.clone();
         self.id_counter = delta.id_counter;
         self.player_id_counter = delta.player_id_counter;
-        self.completed_incoming_transits = delta.completed_incoming_transits.clone();
+        self.transit_attempt_counter = delta.transit_attempt_counter;
 
         for state in &delta.ship_states {
             if !self.ships.index.contains_key(&state.snapshot.ship_id) {
@@ -203,6 +203,8 @@ impl SimulationNode {
         self.pending_bot_lock_commands = delta.pending_bot_lock_commands;
         self.pending_auto_jumps = delta.pending_auto_jumps;
         self.completed_warps = delta.completed_warps;
+        self.restore_transit_saga(delta.transit_saga)
+            .map_err(TransitionApplyError::InvalidTransitSaga)?;
         self.current_tick = delta.to;
         Ok(())
     }
@@ -238,6 +240,8 @@ impl SimulationNode {
         let before_bot_commands = self.pending_bot_lock_commands.clone();
         let before_auto_jumps = self.pending_auto_jumps.clone();
         let before_completed_warps = self.completed_warps.clone();
+        let before_transit_attempt_counter = self.transit_attempt_counter;
+        let before_transit_saga = self.transit_saga_snapshot();
         let before_transit_journal = self.transit_journal.clone();
 
         let result = self.tick_with_lock_commands_mode(lock_commands, false, false);
@@ -275,6 +279,7 @@ impl SimulationNode {
             pending_bot_lock_commands: self.pending_bot_lock_commands.clone(),
             pending_auto_jumps: self.pending_auto_jumps.clone(),
             completed_warps: self.completed_warps.clone(),
+            transit_attempt_counter: self.transit_attempt_counter,
             id_counter: self.id_counter,
             player_id_counter: self.player_id_counter,
             active_ships: self
@@ -291,7 +296,7 @@ impl SimulationNode {
                 .collect(),
             docked_ships: self.docked_ships.clone(),
             docked_players: self.docked_players.clone(),
-            completed_incoming_transits: self.completed_incoming_transits.clone(),
+            transit_saga: self.transit_saga_snapshot(),
         };
 
         self.current_tick = before_tick;
@@ -304,6 +309,9 @@ impl SimulationNode {
         self.pending_bot_lock_commands = before_bot_commands;
         self.pending_auto_jumps = before_auto_jumps;
         self.completed_warps = before_completed_warps;
+        self.transit_attempt_counter = before_transit_attempt_counter;
+        self.restore_transit_saga(before_transit_saga)
+            .expect("prepared Tick must restore the previous Transit Saga");
         self.pending_events.truncate(before_pending_event_count);
 
         let prepared = PreparedSectorTransition {

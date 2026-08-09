@@ -86,7 +86,7 @@ use dawn_ecs::{
 use dawn_ecs::components::{CapacitorComp, FittingComp, HullComp};
 
 use crate::game_data::GameDataCatalog;
-use crate::persistence::{CompletedIncomingTransit, StateSnapshot};
+use crate::persistence::StateSnapshot;
 use crate::transit::handoff::TransitJournal;
 use crate::view::SectorView;
 
@@ -189,6 +189,9 @@ pub struct SimulationNode {
     ship_type_registry: Arc<BTreeMap<ShipTypeId, ShipTypeDefinition>>,
     /// Content identity of the catalog used to materialize this world.
     catalog_fingerprint: u64,
+    /// Next source-local sequence used to allocate opaque Transit attempts.
+    /// Persisted with the recovery state; it is independent of logical Tick.
+    transit_attempt_counter: u64,
     /// Bare ShipStats without fitting. Used as the base for fitting aggregation.
     base_stats: HashMap<ShipId, ShipStatsComp>,
     /// Current in-memory PlayerId allocation counter. ADR-0049/#277 requires
@@ -253,12 +256,8 @@ pub struct SimulationNode {
     /// repair a missed presentation correction. It is not the durable auto-jump
     /// obligation described above.
     completed_warps: Vec<ShipId>,
-    /// Current destination-side Transit receipt representation used for Commit
-    /// deduplication. #276 replaces this legacy snapshot-era shape with the final
-    /// durable Transit Saga/receipt authority under ADR-0049.
-    completed_incoming_transits: Vec<CompletedIncomingTransit>,
     /// In-memory transit policy projection maintained from the engine's own
-    /// event output. Runtime persistence is deliberately outside this type.
+    /// durable Saga member. Public events are not scanned to reconstruct it.
     transit_journal: TransitJournal,
 }
 
@@ -385,6 +384,7 @@ impl SimulationNode {
             module_registry: catalog.module_index(),
             ship_type_registry: catalog.ship_type_index(),
             catalog_fingerprint: catalog.fingerprint(),
+            transit_attempt_counter: 0,
             base_stats: HashMap::new(),
             player_id_counter: 0,
             pending_fresh_admissions: HashSet::new(),
@@ -402,7 +402,6 @@ impl SimulationNode {
             docked_players: BTreeMap::new(),
             pending_auto_jumps: Vec::new(),
             completed_warps: Vec::new(),
-            completed_incoming_transits: Vec::new(),
             transit_journal: TransitJournal::new(sector_id),
         }
     }
@@ -466,6 +465,9 @@ impl SimulationNode {
         for ship in &snapshot.ships {
             node.restore_ship_from_snapshot(ship);
         }
+
+        node.restore_transit_saga(snapshot.transit_saga.clone())
+            .expect("checkpoint Transit Saga must match the restored Sector");
 
         node
     }
@@ -576,16 +578,7 @@ impl SimulationNode {
         &self.transit_journal
     }
 
-    /// Apply public facts to the node-local Transit projection after their
-    /// enclosing durable transition has committed.
-    pub(crate) fn observe_committed_events(&mut self, events: &[DomainEvent]) {
-        for event in events {
-            self.transit_journal.observe(event);
-        }
-    }
-
     fn emit_event(&mut self, event: DomainEvent) {
-        self.transit_journal.observe(&event);
         self.pending_events.push(event);
     }
 

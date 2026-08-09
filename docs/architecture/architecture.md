@@ -74,7 +74,6 @@ See [ADR-0003](../adr/ADR-0003-local-first-development.md), [ADR-0027](../adr/AD
 - #271 fallible/versioned atomic recovery journal
 - #272 storage-independent Sector engine transition boundary (Stop and full-Tick
   prepare -> durable append -> live-apply slices are implemented)
-- #276 durable Transit Saga replacing EventStore scans
 - #280 unified peer transport carrying the #284 checkpoint/catch-up representation
 
 **Do not implement code ahead of the current phase or redefine a contract owned by another refactor issue.**

@@ -82,9 +82,6 @@ impl CheckpointScheduler {
         if tick.saturating_sub(self.last_checkpoint_tick) < self.config.interval_ticks {
             return Ok(None);
         }
-        if crate::transit::pipeline::has_pending_outgoing_transit(node) {
-            return Ok(None);
-        }
 
         let covered_recovery_index = journal.next_recovery_index()?;
         let snapshot = node.take_snapshot_at(covered_recovery_index);
@@ -180,5 +177,36 @@ mod tests {
         assert_eq!(journal.next_recovery_index().unwrap(), 1);
         assert!(dir.path().join("snapshot.bin").exists());
         assert!(dir.path().join("cold.log").exists());
+    }
+
+    #[test]
+    fn scheduler_checkpoints_pending_transit_saga_without_waiting_for_ack() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut node = node();
+        let ship_id = node.spawn_ship(
+            ShipTypeId(1),
+            dawn_core::Position::ORIGIN,
+            dawn_core::Velocity::ZERO,
+        );
+        node.prepare_transit_commit(ship_id, SectorId(1), None)
+            .expect("Transit request must create a durable Saga attempt");
+        let mut journal = FileJournal::open(dir.path().join("hot.log")).unwrap();
+        seed_journal(&mut journal);
+        let mut scheduler = CheckpointScheduler::new(cfg(dir.path()));
+
+        for _ in 0..5 {
+            node.tick();
+        }
+        let snapshot = scheduler
+            .maybe_checkpoint(&mut node, &mut journal)
+            .unwrap()
+            .expect("pending Transit must not block a checkpoint");
+
+        assert_eq!(snapshot.transit_saga.outgoing.len(), 1);
+        assert_eq!(snapshot.transit_saga.outgoing[0].ship_id, ship_id);
+        assert!(matches!(
+            snapshot.transit_saga.outgoing[0].state,
+            crate::persistence::TransitAttemptState::Prepared
+        ));
     }
 }

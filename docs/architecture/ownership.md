@@ -10,7 +10,7 @@ related  : entity-model.md, event-catalog.md, recovery-contract.md, ../adr/ADR-0
 > | Section | Content | Status |
 > |---|---|---|
 > | §1-2 | Ship ownership, basic state transitions | Implemented |
-> | §2 Sector Transit / §3 Node failure | Cross-Sector move exclusion, Raft failover | Implemented baseline; recovery persistence migrating under ADR-0049/#276 |
+> | §2 Sector Transit / §3 Node failure | Cross-Sector move exclusion, Raft failover | Implemented baseline; Transit recovery persistence implemented under ADR-0049/#276 |
 > | §4 Actor ownership | Data isolation between Actors | Implemented baseline; storage ownership migrates under #272 |
 > | §5 ID generation | NodeId + monotonic counter | Implemented |
 > | §7-8 | Player ownership / active-ship routing | Implemented behavior; recovery persistence gap scheduled by #284/#275 |
@@ -73,7 +73,7 @@ Multiple Sectors must never actively own the same Ship simultaneously.
 [does not exist]
 ```
 
-While in Transit, the source may retain a frozen recovery copy until destination completion/Ack semantics allow cleanup. That copy is not an active second owner. ADR-0014 defines the behavioral consensus invariant; #276 will replace legacy EventStore-scan persistence with a durable handoff Saga under ADR-0049.
+While in Transit, the source may retain a frozen recovery copy until destination completion/Ack semantics allow cleanup. That copy is not an active second owner. ADR-0014 defines the behavioral consensus invariant; #276 implements the durable handoff Saga under ADR-0049 instead of legacy EventStore-scan persistence.
 
 ### Operations forbidden during Transit
 
@@ -83,7 +83,7 @@ While in Transit, the source may retain a frozen recovery copy until destination
 - ShipDespawn outside the handoff lifecycle
 ```
 
-The complete freeze set is specified by ADR-0014 and must remain consistent with the final #276 Saga.
+The complete freeze set is specified by ADR-0014 and is persisted by the #276 Saga.
 
 ### Ownership-check responsibility
 
