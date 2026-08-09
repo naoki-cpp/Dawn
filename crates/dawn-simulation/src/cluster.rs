@@ -1,4 +1,4 @@
-//! `MultiNodeCluster` — orchestrates N `SectorSimulatorActor`s + one `InMemoryReplicationBus`.
+//! `MultiNodeCluster` — orchestrates N shared Sector runtime drivers plus one `InMemoryReplicationBus`.
 //!
 //! This is the Phase 2 completion test harness.
 //!
@@ -13,8 +13,8 @@
 //! the query is guaranteed to observe all events from all ticks.
 //! No sleep, no flush, no barrier is required.
 
-use crate::sector_simulator_actor::{
-    NodeStats, SectorSimulatorConfig, SectorSimulatorHandle, TickSummary,
+use crate::sector_runtime_driver::{
+    NodeStats, SectorRuntimeConfig, SectorRuntimeHandle, TickSummary,
 };
 use dawn_consensus::{
     InProcessTransport, PartitionableTransport, RaftActor, RaftActorHandle, RaftState,
@@ -92,7 +92,7 @@ pub(crate) fn spawn_raft_actors(
 
 #[derive(Debug)]
 pub struct MultiNodeCluster {
-    nodes: Vec<SectorSimulatorHandle>,
+    nodes: Vec<SectorRuntimeHandle>,
     bus: InMemoryReplicationBus,
     /// Shared fault-injection set for the cluster's Raft transports (ADR-0014).
     partitioned: Arc<Mutex<HashSet<NodeId>>>,
@@ -125,8 +125,8 @@ impl MultiNodeCluster {
             .iter()
             .zip(endpoints)
             .map(|(&id, (raft, committed_rx))| {
-                SectorSimulatorHandle::spawn(
-                    SectorSimulatorConfig {
+                SectorRuntimeHandle::spawn(
+                    SectorRuntimeConfig {
                         node_id: id,
                         sector_id: SectorId(id.0),
                         bounds: SectorBounds::centered(SectorBounds::DEFAULT_HALF),
@@ -208,7 +208,7 @@ impl MultiNodeCluster {
 
     /// Per-node actor handles, in `NodeId` order (used by the `--raft-demo`
     /// binary mode to address individual nodes).
-    pub fn nodes(&self) -> &[SectorSimulatorHandle] {
+    pub fn nodes(&self) -> &[SectorRuntimeHandle] {
         &self.nodes
     }
 
@@ -397,7 +397,7 @@ mod tests {
     /// spawns the ship via `gate.position` (f32), which is only ulp-precise
     /// at true-AU magnitude (tens of km — bigger than `activation_radius`),
     /// so the ship never actually lands within jump range. The actor layer
-    /// (`SectorSimulatorActor::spawn_ship`) has no f64-precise spawn entry
+    /// (the runtime driver's spawn adapter) has no f64-precise spawn entry
     /// point yet (unlike `SimulationNode::set_spawn_anchor_abs`, added this
     /// session but only `#[cfg(test)]`-visible within dawn-sector itself).
     /// Needs a `SpawnShipAbs`-style actor message before re-enabling.

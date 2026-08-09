@@ -48,12 +48,82 @@ pub enum ClientRequestAdmissionError {
     UnsupportedRequest { request: &'static str },
 }
 
+/// Result of admitting a request during one runtime frame.
+#[derive(Debug, Clone, Copy)]
+pub enum RuntimeCommandDispatch {
+    /// A jump needs consensus submission after all requests are collected.
+    Jump {
+        session_index: usize,
+        ship_id: ShipId,
+        command: JumpCommand,
+    },
+    /// The adapter must refresh the player's typed loadout projection.
+    RefreshPlayerLoadout {
+        session_index: usize,
+        player_id: PlayerId,
+    },
+    /// The adapter must send a structured rejection to the session.
+    Rejected {
+        session_index: usize,
+        error: ClientRequestAdmissionError,
+    },
+}
+
 fn require_active_ship(active_ship: Option<ShipId>) -> Result<ShipId, ClientRequestAdmissionError> {
     active_ship.ok_or(ClientRequestAdmissionError::NoActiveShip)
 }
 
 fn refresh_loadout(player_id: PlayerId) -> Option<ClientCommandFollowup> {
     Some(ClientCommandFollowup::RefreshPlayerLoadout { player_id })
+}
+
+/// Collect and admit all queued Sector requests for one runtime frame.
+///
+/// This function intentionally stops draining a session after its first Jump
+/// request, matching the existing consensus handoff behavior. Other requests
+/// are applied immediately to the node's prepared command state and their
+/// adapter-visible followups are returned without knowing anything about
+/// WebSockets or a particular deployment.
+pub fn collect_runtime_commands<S, Player, Request>(
+    node: &mut SimulationNode,
+    sessions: &mut [S],
+    lock_commands: &mut Vec<LockOnCommand>,
+    player: Player,
+    mut request: Request,
+) -> Vec<RuntimeCommandDispatch>
+where
+    Player: Fn(&S) -> PlayerId,
+    Request: FnMut(&mut S) -> Option<ClientRequest>,
+{
+    let mut dispatches = Vec::new();
+
+    for (session_index, session) in sessions.iter_mut().enumerate() {
+        while let Some(client_request) = request(session) {
+            match node.apply_client_request(player(session), client_request, lock_commands) {
+                Ok(Some(ClientCommandFollowup::Jump { ship_id, command })) => {
+                    dispatches.push(RuntimeCommandDispatch::Jump {
+                        session_index,
+                        ship_id,
+                        command,
+                    });
+                    break;
+                }
+                Ok(Some(ClientCommandFollowup::RefreshPlayerLoadout { player_id })) => {
+                    dispatches.push(RuntimeCommandDispatch::RefreshPlayerLoadout {
+                        session_index,
+                        player_id,
+                    });
+                }
+                Ok(None) => {}
+                Err(error) => dispatches.push(RuntimeCommandDispatch::Rejected {
+                    session_index,
+                    error,
+                }),
+            }
+        }
+    }
+
+    dispatches
 }
 
 impl SimulationNode {
@@ -1267,5 +1337,49 @@ mod tests {
             result.is_none(),
             "Jump from a docked ship must not produce a followup"
         );
+    }
+
+    #[test]
+    fn runtime_command_collection_stops_a_session_after_jump() {
+        use dawn_core::{ClientRequest, JumpGateId};
+        use std::collections::VecDeque;
+
+        struct FakeSession {
+            player_id: PlayerId,
+            requests: VecDeque<ClientRequest>,
+        }
+
+        let mut node = node_with_catalog();
+        let player_id = node.next_player_id();
+        let ship_id = node.spawn_player_ship_at_pub(player_id, Position::ORIGIN);
+        let mut sessions = [FakeSession {
+            player_id,
+            requests: VecDeque::from([
+                ClientRequest::Jump {
+                    gate: JumpGateId(0),
+                },
+                ClientRequest::Stop,
+            ]),
+        }];
+        let mut locks = Vec::new();
+
+        let dispatches = collect_runtime_commands(
+            &mut node,
+            &mut sessions,
+            &mut locks,
+            |session| session.player_id,
+            |session| session.requests.pop_front(),
+        );
+
+        assert!(matches!(
+            dispatches.as_slice(),
+            [RuntimeCommandDispatch::Jump {
+                session_index: 0,
+                ship_id: id,
+                ..
+            }] if *id == ship_id
+        ));
+        assert_eq!(sessions[0].requests.len(), 1);
+        assert!(locks.is_empty());
     }
 }

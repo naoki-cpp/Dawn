@@ -117,13 +117,13 @@ Actor 化は Phase 2 の分散化と同時に行う。
 ### Phase 2 で導入する Actor 一覧（予定）
 
 ```
-SectorSimulatorActor : ECS World の所有と Tick 実行
+SectorRuntimeDriver : ECS World の所有と Tick 実行を駆動する in-process adapter
 EventStoreActor      : Event Log への Append
 ```
 
 > 補足（後日）: `EventStoreActor` は実装されたが wire されないまま残っていたため削除した。
 > Event Log は `SimulationNode` が直接所有する（専用アクターを介さない）。
-> `SectorSimulatorActor` は実装済みだが、現行の serve 経路は同期 `SimulationNode` を
+> `SectorRuntimeDriver` は実装済みだが、現行の serve 経路は同期 `SimulationNode` を
 > 直接駆動しており、当該アクターはテスト／デモ用ハーネスとして残っている。
 
 ---

@@ -123,6 +123,52 @@ admission/Station repository reconciliation (#277). Those consumers must use
 this checkpoint-plus-tail contract rather than reintroducing public-event-only
 recovery.
 
+### #278 shared runtime frame (current implementation)
+
+The runtime adapters now use one durable frame implementation:
+
+```text
+drain committed consensus input through RuntimeConsensus
+  -> collect/admit Sector commands through one command pass
+  -> prepare the complete Tick RecoveryDelta/public output
+  -> append the transition to the selected DurableJournal
+  -> apply the same RecoveryDelta to live state
+  -> reconcile required repositories/projections or fence the runtime
+  -> invoke the output hook and advance consensus time
+  -> propose validated auto-jump work and drain presentation transients
+```
+
+`dawn-sector::transit::run_durable_runtime_tick_with_consensus` is the shared
+boundary. `dawn-sector-node` supplies the Raft/FileJournal production adapters;
+single-sector serve supplies `LocalRuntimeConsensus`/InMemoryJournal; clustered serve
+and `SectorRuntimeDriver` supply Raft/InMemoryJournal adapters. The latter are
+test/local durability adapters, not a claim that their in-memory journal
+survives process loss.
+
+The frame now exposes a `RuntimeDurabilityPolicy` port. Its replicated policy
+validates distinct replica membership, current owner epoch, transition/range/
+content equality, remote evidence source, and the configured quorum before
+live apply. #280 still owns delivery of those remote receipts and catch-up
+transport; until that adapter is wired, production continues to use the local
+`Synced` profile and must not advertise remote-loss RPO 0.
+
+The same frame also exposes a required reconciliation hook and an adapter-owned
+`RuntimeHealth` gate. It runs after live apply but before presentation or
+consensus acknowledgement. A projection or repository error fences the runtime,
+returns a fail-stop error, and suppresses publication; the committed recovery
+bytes remain available for restart/catch-up. A later Tick is rejected until the
+adapter has replayed/reconciled the committed transition and explicitly marks
+the runtime recovered. A successful frame return is the final acknowledgement
+point for the local profile.
+
+The common presentation boundary is now `dawn-sector::aoi_frame::deliver_sector_sessions`.
+It owns the rebuild, committed-event/warp delivery, jump-session removal, and
+stale-player cleanup sequence for both the production node and single-sector
+serve. Transport adapters provide only session identity, message delivery, and
+redirect callbacks. Cluster serve retains a thin multi-Sector routing wrapper
+because it must select the destination frame and reseed a handoff observer
+before invoking the same per-session `AoiFrame` delivery operation.
+
 ## 2. State and obligation classification
 
 | State / mutation / obligation | Authoritative or reliable? | Current source or mutation site | Required recovery source | Notes |

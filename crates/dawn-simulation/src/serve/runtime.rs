@@ -4,8 +4,12 @@ use super::{AoiDelivery, AOI_CELL_SIZE};
 use crate::ws_server;
 use dawn_consensus::RaftActorHandle;
 use dawn_core::{DomainEvent, PlayerId, ShipId};
+use dawn_event_store::{DurabilityMode, InMemoryJournal};
 use dawn_sector::node::SimulationNode;
-use dawn_sector::transit;
+use dawn_sector::transit::{
+    self, run_durable_runtime_tick_with_consensus_and_health, DurableRuntimeTickContext,
+    RaftRuntimeConsensus, RuntimeDurabilityProfile,
+};
 use dawn_wire::{project_domain_event, InitialStateWire, ServerFact, ServerMessage};
 use std::collections::{HashMap, HashSet};
 use tokio::sync::mpsc;
@@ -19,6 +23,8 @@ pub(crate) struct ClusterRuntimeTickContext<'a> {
     pub(crate) nodes: &'a mut [SimulationNode],
     pub(crate) rafts: &'a [RaftActorHandle],
     pub(crate) committed_rxs: &'a mut [mpsc::UnboundedReceiver<Vec<u8>>],
+    pub(crate) recovery_journals: &'a mut [InMemoryJournal],
+    pub(crate) runtime_health: &'a mut [transit::RuntimeHealth],
     pub(crate) sessions: &'a mut Vec<ws_server::PlayerSession>,
     pub(crate) player_sector: &'a mut HashMap<PlayerId, usize>,
     pub(crate) ship_player: &'a HashMap<ShipId, PlayerId>,
@@ -31,13 +37,23 @@ pub(crate) fn run_cluster_runtime_tick(
 ) -> Vec<transit::RuntimeTickOutput> {
     let tick_outputs: Vec<_> = (0..ctx.nodes.len())
         .map(|i| {
-            transit::run_runtime_tick(
+            let mut consensus = RaftRuntimeConsensus::new(&ctx.rafts[i], &mut ctx.committed_rxs[i]);
+            let transition_id = transit::runtime_transition_id(&ctx.nodes[i]);
+            run_durable_runtime_tick_with_consensus_and_health(
                 &mut ctx.nodes[i],
-                &ctx.rafts[i],
-                &mut ctx.committed_rxs[i],
+                &mut ctx.recovery_journals[i],
+                &mut consensus,
+                &mut ctx.runtime_health[i],
                 &lock_commands[i],
+                DurableRuntimeTickContext {
+                    transition_id,
+                    owner_epoch: 0,
+                    durability: DurabilityMode::Synced,
+                    profile: RuntimeDurabilityProfile::LocalDurable,
+                },
                 |_, _, _| {},
             )
+            .expect("in-memory clustered runtime must accept durable Tick")
         })
         .collect();
 

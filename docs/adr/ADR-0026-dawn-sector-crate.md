@@ -78,7 +78,7 @@ Sector 単位のゲームシミュレーションロジック。
 | `src/bench.rs` | ベンチマーク・デモ |
 | `src/ws_server.rs` | WebSocket フレーム送受信 |
 | `src/protocol.rs` | JSON ⇔ コマンド変換 |
-| `src/sector_simulator_actor.rs` | Actor ラッパー |
+| `src/sector_runtime_driver.rs` | in-process runtime driver |
 | `src/modules.rs` | モジュール定義のfallback値 |
 | `src/ship_types.rs` | 船種定義のfallback値 |
 

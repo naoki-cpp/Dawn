@@ -17,7 +17,7 @@ deciders: [human, ai-agent]
 
 ## 状況
 
-Phase 4 でゲームクライアント（Godot 4）をサーバーの `SectorSimulatorActor` に接続する必要がある。
+Phase 4 でゲームクライアント（Godot 4）をサーバーの `SectorRuntimeDriver` に接続する必要がある。
 Phase 5 では本物のネットワーク（gRPC/QUIC）に移行する予定であり、
 その際にクライアント側（Godot GDScript）のコードを変更したくない。
 
