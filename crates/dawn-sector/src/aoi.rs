@@ -19,7 +19,9 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use dawn_core::{AbsolutePosition, DomainEvent, PlayerId, ShipId};
-use dawn_wire::{project_domain_event, AbsPosWire, ServerMessage, VelWire};
+use dawn_wire::{
+    project_domain_event, AbsPosWire, ServerFact, ServerMessage, ShipStateWire, VelWire,
+};
 
 use crate::view::SectorView;
 
@@ -148,6 +150,57 @@ pub struct Observer {
     pub ship_id: ShipId,
 }
 
+/// The complete set of messages that an AOI frame may deliver.
+///
+/// Keeping this separate from [`ServerMessage`] makes owner-only messages such
+/// as `PlayerLoadout` and `ClientRequestRejected` unavailable through the AOI
+/// sink API. Runtime adapters can convert this constrained set at the final
+/// transport boundary.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AoiMessage {
+    AoiEnter(ShipStateWire),
+    AoiLeave {
+        ship_id: u64,
+    },
+    Fact(ServerFact),
+    MotionCorrection {
+        ship_id: u64,
+        position: AbsPosWire,
+        velocity: VelWire,
+        tick: u64,
+    },
+    PositionSnap {
+        ship_id: u64,
+        position: AbsPosWire,
+    },
+}
+
+impl AoiMessage {
+    /// Convert the constrained AOI message into the transport envelope.
+    pub fn to_server_message(&self) -> ServerMessage {
+        match self {
+            Self::AoiEnter(ship) => ServerMessage::AoiEnter(ship.clone()),
+            Self::AoiLeave { ship_id } => ServerMessage::AoiLeave { ship_id: *ship_id },
+            Self::Fact(fact) => ServerMessage::Fact(fact.clone()),
+            Self::MotionCorrection {
+                ship_id,
+                position,
+                velocity,
+                tick,
+            } => ServerMessage::MotionCorrection {
+                ship_id: *ship_id,
+                position: *position,
+                velocity: *velocity,
+                tick: *tick,
+            },
+            Self::PositionSnap { ship_id, position } => ServerMessage::PositionSnap {
+                ship_id: *ship_id,
+                position: *position,
+            },
+        }
+    }
+}
+
 /// Per-session delivery destination for one Area-of-Interest frame. Two real
 /// adapters justify this seam: the in-process serve loop's `PlayerSession`
 /// and the standalone sector-node binary's `PlayerSession` — both wrap the
@@ -157,7 +210,7 @@ pub struct Observer {
 /// implements this trait (orphan-rule friendly: the wrapper type is local to
 /// the calling crate even though the trait lives here).
 pub trait AoiSink {
-    fn send_message(&mut self, msg: &ServerMessage) -> bool;
+    fn send_aoi_message(&mut self, msg: &AoiMessage) -> bool;
 }
 
 /// Area-of-Interest delivery policy (ADR-0019): tracks each player's visible
@@ -234,7 +287,7 @@ impl AoiDelivery {
 
         for &id in entered.iter().filter(|&&id| id != own_ship_id) {
             if let Some(ship) = view.ship_state(id) {
-                if !sink.send_message(&ServerMessage::AoiEnter(ship)) {
+                if !sink.send_aoi_message(&AoiMessage::AoiEnter(ship)) {
                     return false;
                 }
             }
@@ -243,7 +296,7 @@ impl AoiDelivery {
             .iter()
             .filter(|&&id| id != own_ship_id && !destroyed_this_tick.contains(&id))
         {
-            if !sink.send_message(&ServerMessage::AoiLeave { ship_id: id.raw() }) {
+            if !sink.send_aoi_message(&AoiMessage::AoiLeave { ship_id: id.raw() }) {
                 return false;
             }
         }
@@ -270,7 +323,7 @@ impl AoiDelivery {
         // not get placeholder protocol variants and never reach a transport.
         for event in visible_events {
             if let Some(fact) = project_domain_event(&event) {
-                if !sink.send_message(&ServerMessage::Fact(fact)) {
+                if !sink.send_aoi_message(&AoiMessage::Fact(fact)) {
                     return false;
                 }
             }
@@ -293,7 +346,7 @@ impl AoiDelivery {
             if let (Some(position), Some((velocity, tick))) =
                 (view.ship_absolute_pos(own_ship_id), owner_motion)
             {
-                let msg = ServerMessage::MotionCorrection {
+                let msg = AoiMessage::MotionCorrection {
                     ship_id: own_ship_id.raw(),
                     position: AbsPosWire {
                         x: position[0],
@@ -303,7 +356,7 @@ impl AoiDelivery {
                     velocity: VelWire::from(velocity),
                     tick: tick.0,
                 };
-                if !sink.send_message(&msg) {
+                if !sink.send_aoi_message(&msg) {
                     return false;
                 }
             }
@@ -316,7 +369,7 @@ impl AoiDelivery {
             let relevant = sid == own_ship_id || curr.binary_search(&sid).is_ok();
             if relevant {
                 if let Some(abs) = view.ship_absolute_pos(sid) {
-                    let msg = ServerMessage::PositionSnap {
+                    let msg = AoiMessage::PositionSnap {
                         ship_id: sid.raw(),
                         position: AbsPosWire {
                             x: abs[0],
@@ -324,7 +377,7 @@ impl AoiDelivery {
                             z: abs[2],
                         },
                     };
-                    if !sink.send_message(&msg) {
+                    if !sink.send_aoi_message(&msg) {
                         return false;
                     }
                 }
@@ -498,14 +551,14 @@ mod tests {
     }
 
     impl AoiSink for FakeSink {
-        fn send_message(&mut self, msg: &ServerMessage) -> bool {
+        fn send_aoi_message(&mut self, msg: &AoiMessage) -> bool {
             match msg {
-                ServerMessage::AoiEnter(ship) => self.aoi_enters.push(ship.clone()),
-                ServerMessage::AoiLeave { ship_id } => self.aoi_leaves.push(*ship_id),
-                ServerMessage::PositionSnap { ship_id, position } => {
+                AoiMessage::AoiEnter(ship) => self.aoi_enters.push(ship.clone()),
+                AoiMessage::AoiLeave { ship_id } => self.aoi_leaves.push(*ship_id),
+                AoiMessage::PositionSnap { ship_id, position } => {
                     self.position_snaps.push((*ship_id, *position))
                 }
-                ServerMessage::MotionCorrection {
+                AoiMessage::MotionCorrection {
                     ship_id,
                     position,
                     velocity,
@@ -513,8 +566,7 @@ mod tests {
                 } => self
                     .motion_corrections
                     .push((*ship_id, *position, *velocity, *tick)),
-                ServerMessage::Fact(fact) => self.facts.push(fact.clone()),
-                _ => {}
+                AoiMessage::Fact(fact) => self.facts.push(fact.clone()),
             }
             true
         }

@@ -55,6 +55,13 @@ bookkeeping facts have no public-protocol placeholder and are dropped at that
 boundary. The protocol catalog can therefore evolve for client needs without
 making every durable event public.
 
+The Sector-side `AoiSink` accepts the narrower `AoiMessage` delivery enum, not
+the full `ServerMessage` envelope. It contains only AOI enter/leave, public
+`ServerFact`, motion correction, and position snap messages; the runtime
+adapter converts it to `ServerMessage` immediately before transport. Owner-only
+messages such as `PlayerLoadout` and `ClientRequestRejected` therefore cannot
+be sent through the normal AOI delivery path.
+
 `slot`, repair `layer`, and forced-deactivation `reason` are closed protocol
 enums (`ServerFactSlot`, `ServerFactRepairLayer`, and
 `ServerFactDeactivationReason`), not debug-formatted strings.

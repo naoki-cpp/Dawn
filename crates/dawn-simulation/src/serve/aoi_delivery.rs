@@ -8,10 +8,9 @@
 
 use crate::ws_server;
 use dawn_core::{DomainEvent, PlayerId, ShipId};
-use dawn_sector::aoi::{AoiSink, Observer};
+use dawn_sector::aoi::{AoiMessage, AoiSink, Observer};
 use dawn_sector::aoi_frame::AoiFrame;
 use dawn_sector::node::SimulationNode;
-use dawn_wire::ServerMessage;
 use std::collections::{HashMap, HashSet};
 
 pub(crate) struct AoiDelivery {
@@ -189,8 +188,9 @@ impl RuntimeAoiSession for ws_server::PlayerSession {
 struct SessionSink<'a>(&'a mut ws_server::PlayerSession);
 
 impl AoiSink for SessionSink<'_> {
-    fn send_message(&mut self, msg: &ServerMessage) -> bool {
-        self.0.send_message(msg)
+    fn send_aoi_message(&mut self, msg: &AoiMessage) -> bool {
+        let message = msg.to_server_message();
+        self.0.send_message(&message)
     }
 }
 
@@ -251,12 +251,12 @@ mod tests {
     }
 
     impl AoiSink for FakeSession {
-        fn send_message(&mut self, message: &ServerMessage) -> bool {
+        fn send_aoi_message(&mut self, message: &AoiMessage) -> bool {
             match message {
-                ServerMessage::AoiEnter(ship) => self.sent.push(Sent::Enter(ship.ship_id)),
-                ServerMessage::AoiLeave { ship_id } => self.sent.push(Sent::Leave(*ship_id)),
-                ServerMessage::Fact(_) => self.sent.push(Sent::Events(1)),
-                _ => {}
+                AoiMessage::AoiEnter(ship) => self.sent.push(Sent::Enter(ship.ship_id)),
+                AoiMessage::AoiLeave { ship_id } => self.sent.push(Sent::Leave(*ship_id)),
+                AoiMessage::Fact(_) => self.sent.push(Sent::Events(1)),
+                AoiMessage::MotionCorrection { .. } | AoiMessage::PositionSnap { .. } => {}
             }
             true
         }

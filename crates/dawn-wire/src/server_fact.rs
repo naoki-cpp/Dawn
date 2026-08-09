@@ -212,46 +212,46 @@ pub fn server_fact_json_schema() -> schemars::Schema {
 /// Returns `None` for internal events that are not forwarded to clients
 /// (transit internals, combat bookkeeping).
 pub fn project_domain_event(event: &DomainEvent) -> Option<ServerFact> {
-    Some(match event {
-        DomainEvent::ShipSpawned(e) => ServerFact::ShipSpawned {
+    match event {
+        DomainEvent::ShipSpawned(e) => Some(ServerFact::ShipSpawned {
             ship_id: e.ship_id.raw(),
             position: e.initial_position.into(),
             tick: e.tick.value(),
-        },
-        DomainEvent::VelocityChanged(e) => ServerFact::VelocityChanged {
+        }),
+        DomainEvent::VelocityChanged(e) => Some(ServerFact::VelocityChanged {
             ship_id: e.ship_id.raw(),
             velocity: e.velocity.into(),
             tick: e.tick.value(),
-        },
-        DomainEvent::ShipDespawned(e) => ServerFact::ShipDespawned {
+        }),
+        DomainEvent::ShipDespawned(e) => Some(ServerFact::ShipDespawned {
             ship_id: e.ship_id.raw(),
             tick: e.tick.value(),
-        },
-        DomainEvent::ShipDocked(e) => ServerFact::ShipDocked {
-            ship_id: e.ship_id.raw(),
-            station_id: e.station_id.0,
-            tick: e.tick.value(),
-        },
-        DomainEvent::ShipUndocked(e) => ServerFact::ShipUndocked {
+        }),
+        DomainEvent::ShipDocked(e) => Some(ServerFact::ShipDocked {
             ship_id: e.ship_id.raw(),
             station_id: e.station_id.0,
             tick: e.tick.value(),
-        },
-        DomainEvent::ShipAssembled(e) => ServerFact::ShipAssembled {
+        }),
+        DomainEvent::ShipUndocked(e) => Some(ServerFact::ShipUndocked {
+            ship_id: e.ship_id.raw(),
+            station_id: e.station_id.0,
+            tick: e.tick.value(),
+        }),
+        DomainEvent::ShipAssembled(e) => Some(ServerFact::ShipAssembled {
             ship_id: e.ship_id.raw(),
             station_id: e.station_id.0,
             ship_type_id: e.ship_type_id.0,
             tick: e.tick.value(),
-        },
-        DomainEvent::DamageTaken(e) => ServerFact::DamageTaken {
+        }),
+        DomainEvent::DamageTaken(e) => Some(ServerFact::DamageTaken {
             ship_id: e.ship_id.raw(),
             damage: e.damage,
             current_shield: e.current_shield,
             current_armor: e.current_armor,
             current_hull: e.current_hull,
             tick: e.tick.value(),
-        },
-        DomainEvent::RepairApplied(e) => ServerFact::RepairApplied {
+        }),
+        DomainEvent::RepairApplied(e) => Some(ServerFact::RepairApplied {
             ship_id: e.ship_id.raw(),
             amount: e.amount,
             layer: e.layer.into(),
@@ -259,63 +259,52 @@ pub fn project_domain_event(event: &DomainEvent) -> Option<ServerFact> {
             current_armor: e.current_armor,
             current_hull: e.current_hull,
             tick: e.tick.value(),
-        },
-        DomainEvent::ShipDestroyed(e) => ServerFact::ShipDestroyed {
+        }),
+        DomainEvent::ShipDestroyed(e) => Some(ServerFact::ShipDestroyed {
             ship_id: e.ship_id.raw(),
             killer_id: e.killer_id.raw(),
             tick: e.tick.value(),
-        },
-        DomainEvent::TargetLocked(e) => ServerFact::TargetLocked {
+        }),
+        DomainEvent::TargetLocked(e) => Some(ServerFact::TargetLocked {
             locker_id: e.locker_id.raw(),
             target_id: e.target_id.raw(),
             tick: e.tick.value(),
-        },
-        DomainEvent::LockLost(e) => ServerFact::LockLost {
+        }),
+        DomainEvent::LockLost(e) => Some(ServerFact::LockLost {
             locker_id: e.locker_id.raw(),
             target_id: e.target_id.raw(),
             tick: e.tick.value(),
-        },
-        DomainEvent::ModuleActivated(e) => ServerFact::ModuleActivated {
+        }),
+        DomainEvent::ModuleActivated(e) => Some(ServerFact::ModuleActivated {
             ship_id: e.ship_id.raw(),
             module_id: e.module_id.0,
             slot: e.slot.into(),
             target_ship_id: e.target_ship_id.map(|t| t.raw()),
             tick: e.tick.value(),
-        },
-        DomainEvent::ModuleDeactivated(e) => ServerFact::ModuleDeactivated {
+        }),
+        DomainEvent::ModuleDeactivated(e) => Some(ServerFact::ModuleDeactivated {
             ship_id: e.ship_id.raw(),
             module_id: e.module_id.0,
             slot: e.slot.into(),
             reason: e.forced_reason.map(Into::into),
             tick: e.tick.value(),
-        },
-        DomainEvent::JumpGateUsed(e) => ServerFact::JumpGateUsed {
+        }),
+        DomainEvent::JumpGateUsed(e) => Some(ServerFact::JumpGateUsed {
             ship_id: e.ship_id.raw(),
             gate_id: e.gate_id.0,
             from_sector: e.from_sector.0,
             to_sector: e.to_sector.0,
             entry_pos: e.entry_pos.into(),
             tick: e.tick.value(),
-        },
-        DomainEvent::StarSystemChanged(e) => ServerFact::StarSystemChanged {
+        }),
+        DomainEvent::StarSystemChanged(e) => Some(ServerFact::StarSystemChanged {
             ship_id: e.ship_id.raw(),
             from_system: e.from_system.0,
             to_system: e.to_system.0,
             tick: e.tick.value(),
-        },
-        DomainEvent::ShipFitted(_) => return None,
-        DomainEvent::WeaponFired(_) => return None,
-        DomainEvent::TackleApplied(_) => return None,
-        DomainEvent::TackleReleased(_) => return None,
-        DomainEvent::SectorTransitRequested(_) => return None,
-        DomainEvent::SectorTransitCompleted(_) => return None,
-        DomainEvent::SectorTransitAborted(_) => return None,
-        DomainEvent::AnchorRebased(_) => return None,
-        DomainEvent::PackagedShipBuilt(_) => return None,
-        DomainEvent::ShipDisassembled(_) => return None,
-        DomainEvent::ClientAdmissionIdentityReserved(_) => return None,
-        DomainEvent::ClientAdmissionCommitted(_) => return None,
-    })
+        }),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

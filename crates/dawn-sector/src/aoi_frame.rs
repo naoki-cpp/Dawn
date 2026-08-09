@@ -89,13 +89,12 @@ impl AoiFrame {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::aoi::AoiMessage;
     use crate::node::SimulationNode;
     use crate::view::SectorView;
     use dawn_core::{
         AbsolutePosition, NodeId, PlayerId, Position, SectorBounds, SectorId, ShipId, Velocity,
     };
-    use dawn_wire::ServerMessage;
-
     #[derive(Debug, Default, PartialEq, Eq)]
     struct FakeSink {
         enters: Vec<u64>,
@@ -103,11 +102,13 @@ mod tests {
     }
 
     impl AoiSink for FakeSink {
-        fn send_message(&mut self, message: &ServerMessage) -> bool {
+        fn send_aoi_message(&mut self, message: &AoiMessage) -> bool {
             match message {
-                ServerMessage::AoiEnter(ship) => self.enters.push(ship.ship_id),
-                ServerMessage::AoiLeave { ship_id } => self.leaves.push(*ship_id),
-                _ => {}
+                AoiMessage::AoiEnter(ship) => self.enters.push(ship.ship_id),
+                AoiMessage::AoiLeave { ship_id } => self.leaves.push(*ship_id),
+                AoiMessage::Fact(_)
+                | AoiMessage::MotionCorrection { .. }
+                | AoiMessage::PositionSnap { .. } => {}
             }
             true
         }
