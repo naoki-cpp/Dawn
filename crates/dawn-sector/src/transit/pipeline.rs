@@ -1,15 +1,14 @@
-//! Sector Transit EventStore and consensus adapter (ADR-0014).
+//! Sector Transit output and consensus adapter (ADR-0014).
 //!
-//! This module reconstructs durable Transit facts and translates the deep
+//! This module reads the node-local transit journal and translates the deep
 //! handoff module's explicit effects into Raft proposal payloads. It does not
 //! decide state transitions, idempotency, retry policy, or cleanup behavior.
 
 use super::handoff;
 use crate::node::SimulationNode;
-use dawn_core::{
-    AbsolutePosition, DomainEvent, JumpGateId, SectorId, ShipId, Tick, TransitHandoffState,
-};
-use dawn_event_store::store::EventStore;
+#[cfg(test)]
+use dawn_core::DomainEvent;
+use dawn_core::{AbsolutePosition, JumpGateId, SectorId, ShipId, Tick, TransitHandoffState};
 
 #[derive(Debug)]
 pub(crate) struct CommitProposal {
@@ -53,28 +52,26 @@ impl From<handoff::AckEffect> for AckProposal {
     }
 }
 
+#[cfg(test)]
 pub(crate) use handoff::ReplayDirective;
 
+#[cfg(test)]
 pub(crate) fn replay_directive(event: &DomainEvent) -> Option<ReplayDirective<'_>> {
     handoff::replay_directive(event)
 }
 
-fn journal<S: EventStore>(node: &SimulationNode<S>) -> handoff::TransitJournal {
-    let mut journal = handoff::TransitJournal::new(node.sector_id());
-    for record in node.event_store().iter_from(0) {
-        journal.observe(&record.event);
-    }
-    journal
+fn journal(node: &SimulationNode) -> handoff::TransitJournal {
+    node.transit_journal().clone()
 }
 
 /// Whether checkpoint compaction must be deferred to preserve the durable
 /// outgoing request used for restart retry.
-pub(crate) fn has_pending_outgoing_transit<S: EventStore>(node: &SimulationNode<S>) -> bool {
+pub(crate) fn has_pending_outgoing_transit(node: &SimulationNode) -> bool {
     handoff::has_pending_outgoing_transit(&journal(node))
 }
 
-pub(crate) fn apply_request<S: EventStore>(
-    node: &mut SimulationNode<S>,
+pub(crate) fn apply_request(
+    node: &mut SimulationNode,
     ship_id: ShipId,
     to: SectorId,
     gate_id: Option<JumpGateId>,
@@ -83,8 +80,8 @@ pub(crate) fn apply_request<S: EventStore>(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn apply_commit<S: EventStore>(
-    node: &mut SimulationNode<S>,
+pub(crate) fn apply_commit(
+    node: &mut SimulationNode,
     handoff_state: &TransitHandoffState,
     from: SectorId,
     to: SectorId,
@@ -106,8 +103,8 @@ pub(crate) fn apply_commit<S: EventStore>(
     .map(Into::into)
 }
 
-pub(crate) fn apply_ack<S: EventStore>(
-    node: &mut SimulationNode<S>,
+pub(crate) fn apply_ack(
+    node: &mut SimulationNode,
     ship_id: ShipId,
     from: SectorId,
     to: SectorId,
@@ -117,7 +114,7 @@ pub(crate) fn apply_ack<S: EventStore>(
     handoff::apply_ack(node, &journal, ship_id, from, to, request_tick)
 }
 
-pub(crate) fn due_retries<S: EventStore>(node: &mut SimulationNode<S>) -> Vec<CommitProposal> {
+pub(crate) fn due_retries(node: &mut SimulationNode) -> Vec<CommitProposal> {
     let journal = journal(node);
     handoff::due_retries(node, &journal)
         .into_iter()

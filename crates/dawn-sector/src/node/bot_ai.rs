@@ -8,11 +8,10 @@ use dawn_core::{PlayerId, Position, ShipId};
 use dawn_ecs::components::{
     FittingComp, HullComp, IsBotComp, IsNpcComp, LockComp, PositionComp, ShipStatsComp, WarpComp,
 };
-use dawn_event_store::store::EventStore;
 
 use super::SimulationNode;
 
-impl<S: EventStore> SimulationNode<S> {
+impl SimulationNode {
     /// Run the Bot AI for all `IsBotComp` ships.
     ///
     /// Bots issue the exact same commands as a human player:
@@ -36,6 +35,13 @@ impl<S: EventStore> SimulationNode<S> {
         let mut bots: Vec<BotState> = Vec::new();
         for (&ship_id, &entity) in &self.ships.index {
             if self.world.get::<IsBotComp>(entity).is_none() {
+                continue;
+            }
+            if self
+                .world
+                .get::<HullComp>(entity)
+                .is_some_and(|hull| hull.is_destroyed())
+            {
                 continue;
             }
             let Some(&player_id) = self.ships.owners.get(&ship_id) else {
@@ -103,6 +109,13 @@ impl<S: EventStore> SimulationNode<S> {
         let mut targets: Vec<TargetInfo> = Vec::new();
         for (&ship_id, &entity) in &self.ships.index {
             if self.world.get::<IsBotComp>(entity).is_some() {
+                continue;
+            }
+            if self
+                .world
+                .get::<HullComp>(entity)
+                .is_some_and(|hull| hull.is_destroyed())
+            {
                 continue;
             }
             if self.world.get::<IsNpcComp>(entity).is_some() {

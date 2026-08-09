@@ -618,7 +618,7 @@ retry use explicit operation IDs.
   from durable retention cursors.
 - [ ] Benchmark and define numeric production RTO/checkpoint budget in #284.
 - [ ] Implement generic fallible atomic journal in #271.
-- [x] Implement prepare -> durable -> live apply engine boundary in #272 for the Stop command vertical slice; remaining command/state-owner migrations continue under #275.
+- [x] Implement prepare -> durable -> live apply in #272 for Stop and the bounded full Tick write set; the default legacy runtime wiring and remaining state-owner migrations continue under #275/#278.
 - [ ] Implement versioned checkpoint/tail and eventless-Tick persistence.
 - [ ] Persist Player routing/pending bot authoritative state.
 - [ ] Implement Station projection plus admission/identity repository/allocator

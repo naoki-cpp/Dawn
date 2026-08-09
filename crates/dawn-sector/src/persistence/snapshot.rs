@@ -20,14 +20,21 @@
 //! supported projection/audit/legacy purposes, but is not the complete exact-state
 //! reducer.
 //!
-//! # Current legacy restore procedure
+//! # Current legacy test-fixture restore procedure
 //!
-//! Until #271/#272/#284 replace this path, the implementation below still:
+//! This remains a compatibility checkpoint path while #271/#284 version the
+//! physical recovery representation. #272 has moved journal ownership out of
+//! the engine; the runtime supplies the covered recovery position when it
+//! captures a checkpoint.
 //!
+//! The compatibility fixture:
 //! 1. loads `StateSnapshot` from disk;
 //! 2. opens the `FileEventStore` for the same Sector;
-//! 3. calls `SimulationNode::restore_from_test(store, &snapshot, galaxy, &modules, &ship_types)`;
-//! 4. restores the snapshot state and replays current EventStore tail behavior.
+//! 3. calls the test-only `SimulationNode::restore_from_test` helper;
+//! 4. restores the snapshot state and replays the legacy public-event tail.
+//!
+//! Production restore uses `SimulationNode::restore_from` and receives the
+//! authoritative recovery tail from the runtime-owned journal boundary.
 //!
 //! Code that depends on this behavior must treat it as migration debt, not infer
 //! the future journal/checkpoint API from it.
@@ -92,7 +99,7 @@ pub(crate) fn inject_directory_sync_failure(destination: impl AsRef<Path>, call_
 /// requires the eventual versioned checkpoint + RecoveryDelta tail to preserve all
 /// authoritative values needed for exact recovery, whether or not a public Event
 /// represents them.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ShipSnapshot {
     pub ship_id: ShipId,
     pub ship_type_id: ShipTypeId,

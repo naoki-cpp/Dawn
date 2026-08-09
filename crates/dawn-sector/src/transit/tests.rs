@@ -2,7 +2,7 @@ use super::*;
 use crate::client_admission::{ClientAdmissionIntent, ClientAdmissionRefusal};
 use dawn_core::fitting::FittingSnapshot;
 use dawn_core::{NodeId, Position, SectorBounds, ShipTypeId, Velocity};
-use dawn_event_store::InMemoryEventStore;
+use dawn_event_store::{EventStore, InMemoryEventStore};
 
 fn node(node_id: u8, sector_id: u8) -> SimulationNode {
     SimulationNode::new_test(
@@ -237,8 +237,8 @@ fn transit_carries_owner_binding_to_destination_and_snapshot_restore() {
 
     let snapshot = destination.take_snapshot();
     let mut store = InMemoryEventStore::new();
-    for record in destination.event_store().all_records() {
-        store.append(record.event.clone());
+    for event in destination.pending_events() {
+        store.append(event.clone());
     }
     let mut restored = SimulationNode::restore_from_test(
         store,
@@ -333,9 +333,9 @@ fn duplicate_destination_commit_is_idempotent_and_reissues_ack() {
         request_tick: source.current_tick(),
     };
     let completed_before = destination
-        .event_store()
-        .iter_from(0)
-        .filter(|record| matches!(record.event, DomainEvent::SectorTransitCompleted(_)))
+        .pending_events()
+        .iter()
+        .filter(|event| matches!(event, DomainEvent::SectorTransitCompleted(_)))
         .count();
     let (raft, mut proposals) = raft_handle();
 
@@ -350,9 +350,9 @@ fn duplicate_destination_commit_is_idempotent_and_reissues_ack() {
     }
 
     let completed_after = destination
-        .event_store()
-        .iter_from(0)
-        .filter(|record| matches!(record.event, DomainEvent::SectorTransitCompleted(_)))
+        .pending_events()
+        .iter()
+        .filter(|event| matches!(event, DomainEvent::SectorTransitCompleted(_)))
         .count();
     assert_eq!(destination.ship_count(), 1);
     assert_eq!(completed_after, completed_before + 1);
@@ -368,8 +368,8 @@ fn restored_requested_transit_reproposes_commit_with_the_durable_route() {
         .unwrap();
 
     let mut store = InMemoryEventStore::new();
-    for record in source.event_store().iter_from(0) {
-        store.append(record.event.clone());
+    for event in source.pending_events() {
+        store.append(event.clone());
     }
     let mut restored = SimulationNode::restore_from_test(
         store,
@@ -465,9 +465,9 @@ fn destination_marker_keeps_destination_local_tick() {
     apply_committed_raft_entries(&mut destination, &raft, &mut committed_rx);
 
     let marker = destination
-        .event_store()
-        .iter_from(0)
-        .find_map(|record| match &record.event {
+        .pending_events()
+        .iter()
+        .find_map(|event| match event {
             DomainEvent::SectorTransitRequested(event) => Some(event),
             _ => None,
         })
@@ -536,9 +536,9 @@ fn duplicate_commit_after_destination_checkpoint_does_not_append_a_pending_marke
     assert!(restored.can_propose_transit(ship_id));
     assert_eq!(
         restored
-            .event_store()
-            .iter_from(0)
-            .filter(|record| matches!(record.event, DomainEvent::SectorTransitRequested(_)))
+            .pending_events()
+            .iter()
+            .filter(|event| matches!(event, DomainEvent::SectorTransitRequested(_)))
             .count(),
         0,
         "an already materialized destination must only reissue Ack"
@@ -591,7 +591,7 @@ fn duplicate_commit_after_checkpoint_does_not_resurrect_removed_ship() {
         TransitOp::Ack { .. }
     ));
     assert!(restored.get_ship_position(ship_id).is_none());
-    assert_eq!(restored.event_store().len(), 0);
+    assert!(restored.pending_events().is_empty());
 }
 
 #[test]
@@ -612,8 +612,10 @@ fn runtime_tick_owns_replication_raft_and_transient_order() {
     let ship = node.spawn_player_ship_at_pub(player_id, Position::ORIGIN);
     node.set_spawn_anchor_abs(ship, near_gate_abs);
     node.queue_runtime_transients_for_test((ship, JumpGateId(0)), ship);
+    // The spawn belongs to setup, not to this runtime frame. Clear its
+    // explicit output just as the production runtime does between frames.
+    let _ = node.drain_pending_events();
 
-    let event_cursor = node.total_event_count() as u64;
     let (raft, mut raft_messages) = raft_handle();
     let (_committed_tx, mut committed_rx) = mpsc::unbounded_channel();
     let mut replication_hook_called = false;
@@ -623,17 +625,16 @@ fn runtime_tick_owns_replication_raft_and_transient_order() {
         &raft,
         &mut committed_rx,
         &[],
-        |node, _, events| {
+        |_, tick_result, events| {
             replication_hook_called = true;
             assert!(
                 raft_messages.try_recv().is_err(),
                 "replication hook must run before raft.tick()"
             );
-            let collected = node.event_store().iter_from(event_cursor).count();
             assert_eq!(
-                events.len(),
-                collected,
-                "hook receives the collected Event tail"
+                events,
+                tick_result.events.as_slice(),
+                "hook receives the explicit transition output"
             );
         },
     );

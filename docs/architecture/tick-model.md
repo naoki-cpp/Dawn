@@ -17,15 +17,18 @@ related  : event-catalog.md, recovery-contract.md, ownership.md, ../adr/ADR-0049
 > the old mutate-then-append pipeline; those current call shapes are migration debt,
 > not a competing commit contract.
 
-The current #272 migration slice exposes `SectorEngine::prepare_tick` and
-`SimulationNode::commit_tick_transition` for the logical Tick counter only. It
-proves the durable counter boundary, including eventless append failure, but it
-does not replace `tick_with_lock_commands`: the ECS movement, capacitor, combat,
-and other system write sets remain the legacy path until they acquire bounded
-prepared mutations of their own. Recovery applies the persisted delta together
-with its journal `TransitionContext`; the node validates the Sector identity,
-while owner-epoch fencing remains the runtime orchestration responsibility of
-#278.
+The #272 migration now exposes both the logical counter seam and a complete
+bounded Tick seam. `SimulationNode::prepare_tick_state_transition` executes the
+legacy systems against a ship-level write-set image, restores the live state,
+and returns the changed ship fields, queues, public events, and recovery context.
+`run_durable_runtime_tick` appends that transition before applying the same
+delta and publishing outputs. It does not clone the whole ECS world. The older
+`tick_with_lock_commands` / `run_runtime_tick` path remains as a compatibility
+adapter until every runtime is wired to an owned recovery journal; those call
+shapes are migration debt, not a competing commit contract. Recovery applies
+the persisted delta together with its journal `TransitionContext`; the node
+validates the Sector identity, while owner-epoch fencing remains the runtime
+orchestration responsibility of #278.
 
 ## 1. Tick Definition
 
@@ -414,9 +417,9 @@ runtime effects are not part of the local simulation-compute benchmark. A future
 `ReplicatedDurable` production SLA must separately account for its synchronous durability
 quorum if that profile is used for acknowledgement.
 
-Until #271/#272 land, existing benchmarks that stop after `EventStore::append_batch()` are
-only **legacy implementation proxies**. They must not be interpreted as the semantic commit
-boundary or numeric recovery RTO.
+Until every production runtime is wired to the durable Tick adapter, benchmarks that stop
+after `EventStore::append_batch()` are only **legacy implementation proxies**. They must not
+be interpreted as the semantic commit boundary or numeric recovery RTO.
 
 ### Running the benchmark
 
@@ -438,7 +441,8 @@ This is current implementation topology, not a permanent storage/API constraint:
 
 - #272 moves persistence ownership outside the pure Sector engine and introduces the
   explicit prepared transition boundary. Its current vertical slices cover AoI,
-  Stop, and the logical Tick counter; the full ECS Tick remains a later slice;
+  Stop, and a bounded full ECS Tick; the default production frame still needs
+  to be switched to the runtime-owned recovery journal;
 - #275 splits heterogeneous `SimulationNode` state authority;
 - #276 replaces current Transit scan/retry state with a durable Saga;
 - #280 may replace replication/snapshot transport wiring while preserving the Tick/

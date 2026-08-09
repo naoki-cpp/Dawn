@@ -310,14 +310,13 @@ pub(crate) fn run_phase3_demo() {
     let session1_tick: dawn_core::Tick;
     let session1_positions: Vec<Position>;
     {
-        let store = FileEventStore::open(&event_path).expect("failed to open event log");
-        let mut node = SimulationNode::with_store(
+        let mut store = FileEventStore::open(&event_path).expect("failed to open event log");
+        let mut node = SimulationNode::new(
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
             std::sync::Arc::new(dawn_sector::galaxy::Galaxy::demo()),
             benchmark_catalog(),
-            store,
         );
 
         let config = SpawnConfig::default_for_node(NodeId(0));
@@ -340,14 +339,14 @@ pub(crate) fn run_phase3_demo() {
         for _ in 0..P3_TICKS {
             node.tick();
             if let Some(snap) = scheduler
-                .maybe_checkpoint(&mut node)
+                .maybe_checkpoint(&mut node, &mut store)
                 .expect("checkpoint failed")
             {
                 println!(
                     "  [session 1] checkpoint at tick {}  (log_index={}, hot_base={})",
                     snap.tick.value(),
                     snap.log_index,
-                    node.event_store().base_index(),
+                    store.base_index(),
                 );
             }
         }
@@ -366,9 +365,7 @@ pub(crate) fn run_phase3_demo() {
 
     // ── Session 2 (simulated restart) ────────────────────────────────────────
     let snap = StateSnapshot::load(&snapshot_path).expect("failed to load snapshot");
-    let store2 = FileEventStore::open(&event_path).expect("failed to reopen event log");
     let mut node2 = SimulationNode::restore_from(
-        store2,
         &snap,
         std::sync::Arc::new(dawn_sector::galaxy::Galaxy::demo()),
         benchmark_catalog(),

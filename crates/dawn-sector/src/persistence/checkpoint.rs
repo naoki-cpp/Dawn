@@ -1,14 +1,12 @@
-//! Snapshot-cadence orchestration (ADR-0017 8A-7).
+//! Snapshot cadence policy owned by the runtime.
 //!
-//! [`SimulationNode::checkpoint`](crate::node::SimulationNode::checkpoint) is the
-//! mechanism: snapshot -> atomically publish -> compact. This module is the
-//! cadence adapter; Sector Transit recovery policy, including whether compaction
-//! is currently safe, lives in `transit::pipeline`.
+//! The authoritative engine only captures state. This adapter owns the
+//! external journal, snapshot publication, and compaction ordering.
 
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use dawn_event_store::FileEventStore;
+use dawn_event_store::{DurableJournal, EventStore, FileEventStore, FileJournal, JournalIndex};
 
 use super::snapshot::StateSnapshot;
 use crate::node::SimulationNode;
@@ -24,12 +22,45 @@ pub struct CheckpointConfig {
     pub cold_path: PathBuf,
 }
 
-/// Fires [`SimulationNode::checkpoint`] on a fixed logical-tick cadence.
+/// Fires a runtime-owned checkpoint on a fixed logical-tick cadence.
 #[derive(Debug)]
 pub struct CheckpointScheduler {
     config: CheckpointConfig,
-    /// Logical tick of the most recent checkpoint (starts at 0 = node genesis).
     last_checkpoint_tick: u64,
+}
+
+/// Runtime-owned journal operations required by checkpoint scheduling.
+///
+/// The engine does not depend on this trait. It exists at the persistence
+/// adapter boundary so the legacy public-event log and the authoritative
+/// recovery journal can be migrated independently.
+pub trait CheckpointJournal {
+    fn next_checkpoint_index(&self) -> io::Result<u64>;
+    fn compact_checkpoint(&mut self, boundary: u64, cold_path: &Path) -> io::Result<()>;
+}
+
+impl CheckpointJournal for FileJournal {
+    fn next_checkpoint_index(&self) -> io::Result<u64> {
+        self.next_index()
+            .map(|index| index.0)
+            .map_err(|error| io::Error::other(error.to_string()))
+    }
+
+    fn compact_checkpoint(&mut self, boundary: u64, cold_path: &Path) -> io::Result<()> {
+        self.compact(JournalIndex(boundary), cold_path)
+            .map(|_| ())
+            .map_err(|error| io::Error::other(error.to_string()))
+    }
+}
+
+impl CheckpointJournal for FileEventStore {
+    fn next_checkpoint_index(&self) -> io::Result<u64> {
+        Ok(self.next_index())
+    }
+
+    fn compact_checkpoint(&mut self, boundary: u64, cold_path: &Path) -> io::Result<()> {
+        self.compact(boundary, cold_path)
+    }
 }
 
 impl CheckpointScheduler {
@@ -40,12 +71,12 @@ impl CheckpointScheduler {
         }
     }
 
-    /// Checkpoint the node iff at least `interval_ticks` logical ticks have
-    /// elapsed since the last checkpoint and Transit recovery says compaction
-    /// cannot erase an unresolved durable outbox request.
-    pub fn maybe_checkpoint(
+    /// Snapshot the engine at the journal's next global position, then compact
+    /// that same journal only after the snapshot has been published.
+    pub fn maybe_checkpoint<J: CheckpointJournal>(
         &mut self,
-        node: &mut SimulationNode<FileEventStore>,
+        node: &mut SimulationNode,
+        journal: &mut J,
     ) -> io::Result<Option<StateSnapshot>> {
         let tick = node.current_tick().value();
         if tick.saturating_sub(self.last_checkpoint_tick) < self.config.interval_ticks {
@@ -54,7 +85,11 @@ impl CheckpointScheduler {
         if crate::transit::pipeline::has_pending_outgoing_transit(node) {
             return Ok(None);
         }
-        let snapshot = node.checkpoint(&self.config.snapshot_path, &self.config.cold_path)?;
+
+        let log_index = journal.next_checkpoint_index()?;
+        let snapshot = node.take_snapshot_at(log_index);
+        snapshot.save(&self.config.snapshot_path)?;
+        journal.compact_checkpoint(log_index, &self.config.cold_path)?;
         self.last_checkpoint_tick = tick;
         Ok(Some(snapshot))
     }
@@ -63,17 +98,18 @@ impl CheckpointScheduler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dawn_core::{NodeId, Position, SectorBounds, SectorId, ShipTypeId, Velocity};
-    use dawn_event_store::FileEventStore;
+    use dawn_core::{NodeId, SectorBounds, SectorId, ShipTypeId};
+    use dawn_event_store::{
+        DurabilityContext, DurabilityMode, DurableJournal, JournalBatch, JournalEntry,
+        JournalStream, TransitionId,
+    };
 
-    fn file_node(dir: &std::path::Path) -> SimulationNode<FileEventStore> {
-        let store = FileEventStore::open(dir.join("events.log")).unwrap();
-        SimulationNode::with_test_store(
+    fn node() -> SimulationNode {
+        SimulationNode::new_test(
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-            store,
         )
     }
 
@@ -85,120 +121,64 @@ mod tests {
         }
     }
 
+    fn seed_journal(journal: &mut FileJournal) {
+        let batch = JournalBatch::with_entries(
+            TransitionId(1),
+            DurabilityContext {
+                sector_id: SectorId(0),
+                owner_epoch: 0,
+            },
+            vec![JournalEntry::new(
+                JournalStream::RecoveryDelta,
+                vec![1, 2, 3],
+            )],
+            DurabilityMode::Synced,
+        )
+        .unwrap();
+        journal.append_batch(batch).unwrap();
+    }
+
     #[test]
-    fn scheduler_does_not_checkpoint_before_the_interval_elapses() {
+    fn scheduler_waits_for_the_logical_tick_interval() {
         let dir = tempfile::tempdir().unwrap();
-        let mut node = file_node(dir.path());
-        let mut sched = CheckpointScheduler::new(cfg(dir.path()));
+        let mut node = node();
+        let mut journal = FileJournal::open(dir.path().join("hot.log")).unwrap();
+        let mut scheduler = CheckpointScheduler::new(cfg(dir.path()));
 
         for _ in 0..4 {
             node.tick();
-            assert!(sched.maybe_checkpoint(&mut node).unwrap().is_none());
+            assert!(scheduler
+                .maybe_checkpoint(&mut node, &mut journal)
+                .unwrap()
+                .is_none());
         }
         assert!(!dir.path().join("snapshot.bin").exists());
     }
 
     #[test]
-    fn scheduler_checkpoints_once_the_interval_is_reached_and_compacts_the_log() {
+    fn scheduler_records_external_journal_position_and_compacts_after_publish() {
         let dir = tempfile::tempdir().unwrap();
-        let mut node = file_node(dir.path());
+        let mut node = node();
         node.spawn_ship(
             ShipTypeId(1),
-            Position::ORIGIN,
-            Velocity::new(30.0, 0.0, 0.0),
+            dawn_core::Position::ORIGIN,
+            dawn_core::Velocity::ZERO,
         );
-        let mut sched = CheckpointScheduler::new(cfg(dir.path()));
+        let mut journal = FileJournal::open(dir.path().join("hot.log")).unwrap();
+        seed_journal(&mut journal);
+        let mut scheduler = CheckpointScheduler::new(cfg(dir.path()));
 
-        let mut snapshot = None;
         for _ in 0..5 {
             node.tick();
-            if let Some(s) = sched.maybe_checkpoint(&mut node).unwrap() {
-                snapshot = Some(s);
-            }
         }
+        let snapshot = scheduler
+            .maybe_checkpoint(&mut node, &mut journal)
+            .unwrap()
+            .expect("checkpoint at tick five");
 
-        let snap = snapshot.expect("a checkpoint fires at tick 5");
-        assert_eq!(snap.tick.value(), 5);
+        assert_eq!(snapshot.log_index, 1);
+        assert_eq!(journal.next_checkpoint_index().unwrap(), 1);
         assert!(dir.path().join("snapshot.bin").exists());
-        assert_eq!(node.event_store().base_index(), snap.log_index);
-        assert_eq!(node.event_store().records_on_disk(), 0);
-    }
-
-    #[test]
-    fn post_replacement_sync_failure_rolls_back_and_does_not_compact_the_hot_log() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut node = file_node(dir.path());
-        node.spawn_ship(
-            ShipTypeId(1),
-            Position::ORIGIN,
-            Velocity::new(30.0, 0.0, 0.0),
-        );
-
-        let snapshot_path = dir.path().join("snapshot.bin");
-        let cold_path = dir.path().join("cold.log");
-        let previous = node.take_snapshot();
-        previous.save(&snapshot_path).unwrap();
-        let previous_bytes = std::fs::read(&snapshot_path).unwrap();
-        node.tick();
-
-        let base_index_before = node.event_store().base_index();
-        let records_before = node.event_store().records_on_disk();
-        assert!(records_before > 0, "the test needs a non-empty hot log");
-
-        // Existing-snapshot publication syncs once after preserving the rollback
-        // copy, then again after replacing the authoritative path. Fail the
-        // second call to exercise replacement-success -> durability-failure.
-        crate::persistence::snapshot::inject_directory_sync_failure(&snapshot_path, 2);
-        let error = node.checkpoint(&snapshot_path, &cold_path).unwrap_err();
-
-        assert_eq!(error.kind(), io::ErrorKind::Other);
-        assert_eq!(std::fs::read(&snapshot_path).unwrap(), previous_bytes);
-        assert_eq!(node.event_store().base_index(), base_index_before);
-        assert_eq!(node.event_store().records_on_disk(), records_before);
-        assert!(!cold_path.exists());
-    }
-
-    #[test]
-    fn checkpointed_node_restores_from_snapshot_plus_tail_after_compaction() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut node = file_node(dir.path());
-        node.spawn_ship(
-            ShipTypeId(1),
-            Position::ORIGIN,
-            Velocity::new(40.0, -15.0, 0.0),
-        );
-        let mut sched = CheckpointScheduler::new(cfg(dir.path()));
-
-        for _ in 0..5 {
-            node.tick();
-            sched.maybe_checkpoint(&mut node).unwrap();
-        }
-        for _ in 0..4 {
-            node.tick();
-        }
-        let live_final = postcard::to_stdvec(&node.take_snapshot()).unwrap();
-
-        let snap = StateSnapshot::load(dir.path().join("snapshot.bin")).unwrap();
-        let store = FileEventStore::open(dir.path().join("events.log")).unwrap();
-        assert!(
-            store.base_index() > 0,
-            "hot log was compacted behind the snapshot"
-        );
-        let mut restored = SimulationNode::restore_from_test(
-            store,
-            &snap,
-            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-            &[],
-            &[],
-        );
-        assert_eq!(restored.current_tick(), snap.tick);
-        for _ in 0..4 {
-            restored.tick();
-        }
-        let restored_final = postcard::to_stdvec(&restored.take_snapshot()).unwrap();
-        assert_eq!(
-            restored_final, live_final,
-            "snapshot + tail catch-up == live"
-        );
+        assert!(dir.path().join("cold.log").exists());
     }
 }

@@ -1,37 +1,35 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
+use super::{SimulationNode, TickResult};
+use crate::persistence::ShipSnapshot;
+use crate::transition::{
+    PreparedSectorTransition, SectorEngine, SectorRecoveryDelta, SectorTransitionId,
+    TickApproachState, TickCommandState, TickFittingState, TickKeepAtRangeState, TickLockEntry,
+    TickLockPhase, TickLockState, TickMovementState, TickOrbitState, TickRecoveryDelta,
+    TickRecoveryMode, TickShipState, TickSlotState, TickWarpPhase, TickWarpState,
+    TransitionApplyError, TransitionContext, TransitionError,
+};
 use dawn_core::{DomainEvent, ItemId, ShipId};
 use dawn_ecs::{
     components::{
-        ApproachComp, CapacitorComp, FittingComp, KeepAtRangeComp, LockComp, OrbitComp,
-        TackledComp, WarpComp,
+        ApproachComp, CapacitorComp, FittedSlot, FittingComp, HullComp, InventoryComp,
+        KeepAtRangeComp, LockComp, LockEntry, LockState, OrbitComp, PositionComp, TackledComp,
+        VelocityComp, WarpComp, WarpPhase, WeaponComp,
     },
     systems::{CapacitorSystem, CombatSystem, LockSystem, MovementSystem, RepairSystem},
     Entity,
 };
-use dawn_event_store::{
-    store::EventStore, AppendReceipt, DurabilityMode, DurableJournal, JournalError,
-};
 use thiserror::Error;
-
-use super::{SimulationNode, TickResult};
-use crate::transition::{
-    PreparedSectorTransition, SectorEngine, SectorRecoveryDelta, SectorTransitionId,
-    TickCommandState, TickRecoveryDelta, TransitionApplyError, TransitionContext, TransitionError,
-};
 
 const SCRAP_METAL_PER_SHIP_DESTROYED: u64 = 1;
 
-/// Failure returned by the logical Tick counter's prepare -> durable -> apply
-/// vertical slice. The full ECS system write set remains a later migration.
+/// Failure while building the bounded, storage-independent Tick write set.
 #[derive(Debug, Error)]
-pub enum TickTransitionError {
+pub enum TickPreparationError {
     #[error(transparent)]
-    Preparation(#[from] TransitionError),
-    #[error("durable transition append failed: {0}")]
-    Durable(#[from] JournalError),
-    #[error("prepared Tick cannot be applied to the current state: {0}")]
-    Validation(#[from] TransitionApplyError),
+    Transition(#[from] TransitionError),
+    #[error("prepared Tick could not restore the live state: {0}")]
+    Restoration(#[from] TransitionApplyError),
 }
 
 fn lock_event_touches_transit(event: &DomainEvent, transit_ids: &HashSet<ShipId>) -> bool {
@@ -60,7 +58,7 @@ struct FrozenTransitComponents {
     keep_at_range: Option<KeepAtRangeComp>,
 }
 
-impl<S: EventStore> SimulationNode<S> {
+impl SimulationNode {
     /// Prepare the logical Tick counter without changing the live state.
     pub fn prepare_tick_transition(
         &self,
@@ -85,14 +83,14 @@ impl<S: EventStore> SimulationNode<S> {
         delta: TickRecoveryDelta,
         context: TransitionContext,
     ) -> Result<(), TransitionApplyError> {
-        self.validate_tick_transition(delta, context)?;
-        self.apply_validated_tick(delta);
+        self.validate_tick_transition(&delta, context)?;
+        self.apply_validated_full_tick(delta)?;
         Ok(())
     }
 
-    fn validate_tick_transition(
+    pub(crate) fn validate_tick_transition(
         &self,
-        delta: TickRecoveryDelta,
+        delta: &TickRecoveryDelta,
         context: TransitionContext,
     ) -> Result<(), TransitionApplyError> {
         if context.sector_id != self.sector_id {
@@ -119,34 +117,148 @@ impl<S: EventStore> SimulationNode<S> {
                 actual: self.current_tick,
             });
         }
+        let mut seen = HashSet::new();
+        for state in &delta.ship_states {
+            if !seen.insert(state.snapshot.ship_id)
+                || !self.ships.index.contains_key(&state.snapshot.ship_id)
+            {
+                return Err(TransitionApplyError::InvalidTickShipState(
+                    state.snapshot.ship_id,
+                ));
+            }
+        }
+        let mut removed_seen = HashSet::new();
+        for ship_id in &delta.removed_ships {
+            if !removed_seen.insert(*ship_id) {
+                return Err(TransitionApplyError::InvalidTickShipState(*ship_id));
+            }
+            let Some(state) = delta
+                .ship_states
+                .iter()
+                .find(|state| state.snapshot.ship_id == *ship_id)
+            else {
+                return Err(TransitionApplyError::InvalidTickShipState(*ship_id));
+            };
+            if !state.snapshot.is_destroyed {
+                return Err(TransitionApplyError::InvalidTickShipState(*ship_id));
+            }
+        }
         Ok(())
     }
 
-    fn apply_validated_tick(&mut self, delta: TickRecoveryDelta) {
+    pub(crate) fn apply_validated_logical_tick(&mut self, delta: TickRecoveryDelta) {
         self.current_tick = delta.to;
     }
 
-    /// Commit the logical Tick counter through the ADR-0049 ordering.
-    ///
-    /// This intentionally commits only the counter. The existing ECS systems
-    /// still form the legacy Tick path until their bounded write sets are
-    /// migrated under the same transition.
-    pub fn commit_tick_transition<J: DurableJournal>(
+    pub(crate) fn apply_validated_full_tick(
         &mut self,
-        journal: &mut J,
+        delta: TickRecoveryDelta,
+    ) -> Result<(), TransitionApplyError> {
+        if delta.mode == TickRecoveryMode::Logical {
+            self.apply_validated_logical_tick(delta);
+            return Ok(());
+        }
+        for state in &delta.ship_states {
+            self.apply_tick_ship_state(state)?;
+        }
+        for ship_id in &delta.removed_ships {
+            self.remove_ship(*ship_id);
+        }
+        self.pending_bot_lock_commands = delta.pending_bot_lock_commands;
+        self.pending_auto_jumps = delta.pending_auto_jumps;
+        self.completed_warps = delta.completed_warps;
+        self.current_tick = delta.to;
+        Ok(())
+    }
+
+    /// Prepare the complete ECS Tick write set without changing the live
+    /// authoritative state. The legacy systems execute once against a
+    /// bounded ship-state image, then the image is restored before the
+    /// transition is returned to the runtime.
+    pub fn prepare_tick_state_transition(
+        &mut self,
+        lock_commands: &[dawn_core::LockOnCommand],
         transition_id: SectorTransitionId,
         owner_epoch: u64,
-        durability: DurabilityMode,
-    ) -> Result<AppendReceipt, TickTransitionError> {
-        let prepared = self.prepare_tick_transition(transition_id, owner_epoch)?;
-        let SectorRecoveryDelta::Tick(delta) = prepared.recovery_delta else {
-            unreachable!("prepare_tick_transition always produces a Tick delta");
+    ) -> Result<PreparedSectorTransition, TickPreparationError> {
+        self.prepare_tick_state_transition_with_result(lock_commands, transition_id, owner_epoch)
+            .map(|(prepared, _)| prepared)
+    }
+
+    pub(crate) fn prepare_tick_state_transition_with_result(
+        &mut self,
+        lock_commands: &[dawn_core::LockOnCommand],
+        transition_id: SectorTransitionId,
+        owner_epoch: u64,
+    ) -> Result<(PreparedSectorTransition, TickResult), TickPreparationError> {
+        let logical = self.prepare_tick_transition(transition_id, owner_epoch)?;
+        let TransitionContext {
+            sector_id,
+            owner_epoch,
+        } = logical.context;
+        let before_tick = self.current_tick;
+        let before_states = self.capture_tick_write_set();
+        let before_pending_event_count = self.pending_events.len();
+        let before_bot_commands = self.pending_bot_lock_commands.clone();
+        let before_auto_jumps = self.pending_auto_jumps.clone();
+        let before_completed_warps = self.completed_warps.clone();
+        let before_transit_journal = self.transit_journal.clone();
+
+        let result = self.tick_with_lock_commands_mode(lock_commands, false, false);
+        let deferred_events = self.pending_events.split_off(before_pending_event_count);
+        let mut result = result;
+        result.events.extend(deferred_events);
+        result.events_emitted = result.events.len();
+        let after_states = self.capture_tick_write_set();
+        let ship_states = after_states
+            .iter()
+            .filter(|(ship_id, state)| before_states.get(ship_id) != Some(*state))
+            .map(|(_, state)| state.clone())
+            .collect();
+        let removed_ships = before_states
+            .keys()
+            .filter(|ship_id| {
+                after_states
+                    .get(ship_id)
+                    .map(|state| state.snapshot.is_destroyed)
+                    .unwrap_or(false)
+            })
+            .copied()
+            .collect();
+        let delta = TickRecoveryDelta {
+            from: before_tick,
+            to: result.tick,
+            mode: TickRecoveryMode::Full,
+            ship_states,
+            removed_ships,
+            pending_bot_lock_commands: self.pending_bot_lock_commands.clone(),
+            pending_auto_jumps: self.pending_auto_jumps.clone(),
+            completed_warps: self.completed_warps.clone(),
         };
-        self.validate_tick_transition(delta, prepared.context)?;
-        let receipt =
-            crate::transition_journal::append_prepared_transition(journal, &prepared, durability)?;
-        self.apply_validated_tick(delta);
-        Ok(receipt)
+
+        self.current_tick = before_tick;
+        let restore_result = self.restore_tick_write_set(&before_states);
+        // The legacy systems may emit public facts while preparing. Their
+        // node-local projections are speculative until the enclosing journal
+        // batch commits, just like the ECS write set.
+        self.transit_journal = before_transit_journal;
+        restore_result?;
+        self.pending_bot_lock_commands = before_bot_commands;
+        self.pending_auto_jumps = before_auto_jumps;
+        self.completed_warps = before_completed_warps;
+        self.pending_events.truncate(before_pending_event_count);
+
+        let prepared = PreparedSectorTransition {
+            transition_id,
+            context: TransitionContext {
+                sector_id,
+                owner_epoch,
+            },
+            recovery_delta: SectorRecoveryDelta::Tick(delta),
+            public_events: result.events.clone(),
+            reliable_effects: Vec::new(),
+        };
+        Ok((prepared, result))
     }
 
     /// Execute one simulation tick.
@@ -154,7 +266,8 @@ impl<S: EventStore> SimulationNode<S> {
         self.tick_with_lock_commands(&[])
     }
 
-    // Mirrors the durable SectorTransitRequested payload at the EventStore boundary.
+    // Mirrors the durable SectorTransitRequested payload at the public-output
+    // adapter boundary.
     pub(crate) fn append_incoming_transit_marker(
         &mut self,
         ship_id: ShipId,
@@ -164,7 +277,7 @@ impl<S: EventStore> SimulationNode<S> {
         gate_id: Option<dawn_core::JumpGateId>,
         entry_pos: dawn_core::AbsolutePosition,
     ) {
-        self.event_store.append(DomainEvent::SectorTransitRequested(
+        self.emit_event(DomainEvent::SectorTransitRequested(
             dawn_core::events::SectorTransitRequested {
                 ship_id,
                 from,
@@ -260,9 +373,387 @@ impl<S: EventStore> SimulationNode<S> {
         }
     }
 
+    fn capture_tick_fitting(fitting: &FittingComp) -> TickFittingState {
+        fn capture_slots(slots: &[FittedSlot]) -> Vec<TickSlotState> {
+            slots
+                .iter()
+                .map(|slot| TickSlotState {
+                    module_id: slot.def.id,
+                    is_active: slot.is_active,
+                    cycle_remaining: slot.cycle_remaining,
+                    target_ship_id: slot.target_ship_id,
+                })
+                .collect()
+        }
+
+        TickFittingState {
+            high: capture_slots(&fitting.high),
+            mid: capture_slots(&fitting.mid),
+            low: capture_slots(&fitting.low),
+            rig: capture_slots(&fitting.rig),
+        }
+    }
+
+    fn capture_tick_ship_state(&self, ship_id: ShipId) -> Option<TickShipState> {
+        let entity = *self.ships.index.get(&ship_id)?;
+        let position = self.world.get::<PositionComp>(entity)?.0;
+        let velocity = self.world.get::<VelocityComp>(entity)?.0;
+        let hull = self.world.get::<HullComp>(entity)?;
+        let fitting = self.world.get::<FittingComp>(entity);
+        let fitting_snapshot = fitting
+            .as_deref()
+            .map(FittingComp::to_snapshot)
+            .unwrap_or_else(dawn_core::fitting::FittingSnapshot::empty);
+        let fitting_state = fitting
+            .as_deref()
+            .map(Self::capture_tick_fitting)
+            .unwrap_or_else(|| TickFittingState {
+                high: Vec::new(),
+                mid: Vec::new(),
+                low: Vec::new(),
+                rig: Vec::new(),
+            });
+        let snapshot = ShipSnapshot {
+            ship_id,
+            ship_type_id: self
+                .ships
+                .type_ids
+                .get(&ship_id)
+                .copied()
+                .unwrap_or(dawn_core::ShipTypeId(0)),
+            absolute_position: self.ship_absolute_pos(ship_id),
+            position,
+            anchor: self.world.ship_anchor(entity).unwrap_or_default(),
+            velocity,
+            current_shield: hull.shield(),
+            current_armor: hull.armor(),
+            current_hull: hull.hull(),
+            is_destroyed: hull.is_destroyed(),
+            capacitor: self
+                .world
+                .get::<CapacitorComp>(entity)
+                .map(|capacitor| capacitor.current),
+            fitting: fitting_snapshot,
+            tackled_by: self
+                .world
+                .get::<TackledComp>(entity)
+                .map(|tackled| tackled.tacklers.clone())
+                .unwrap_or_default(),
+            inventory: self
+                .world
+                .get::<InventoryComp>(entity)
+                .map(|inventory| inventory.items.clone())
+                .unwrap_or_default(),
+        };
+        let movement = TickMovementState {
+            thrust: self
+                .world
+                .get::<dawn_ecs::components::ThrustComp>(entity)
+                .map(|thrust| crate::transition::StopThrustState {
+                    direction: thrust.direction,
+                    is_braking: thrust.is_braking,
+                }),
+            approach: self
+                .world
+                .get::<ApproachComp>(entity)
+                .map(|approach| TickApproachState {
+                    target: approach.target,
+                    auto_jump_gate: approach.auto_jump_gate,
+                }),
+            orbit: self
+                .world
+                .get::<OrbitComp>(entity)
+                .map(|orbit| TickOrbitState {
+                    target: orbit.target,
+                    radius: orbit.radius,
+                }),
+            keep_at_range: self
+                .world
+                .get::<KeepAtRangeComp>(entity)
+                .map(|keep_at_range| TickKeepAtRangeState {
+                    target: keep_at_range.target,
+                    range: keep_at_range.range,
+                }),
+            warp: self
+                .world
+                .get::<WarpComp>(entity)
+                .map(|warp| TickWarpState {
+                    target: warp.target,
+                    phase: match warp.phase {
+                        WarpPhase::Aligning => TickWarpPhase::Aligning,
+                        WarpPhase::Warping => TickWarpPhase::Warping,
+                    },
+                    auto_jump: warp.auto_jump,
+                    warp_start_abs: warp.warp_start_abs,
+                    warp_total: warp.warp_total,
+                    warp_elapsed: warp.warp_elapsed,
+                    warp_arrival_abs: warp.warp_arrival_abs,
+                    warp_start_vel: warp.warp_start_vel,
+                }),
+        };
+        let locks = self
+            .world
+            .get::<LockComp>(entity)
+            .map(|lock| TickLockState {
+                entries: lock
+                    .entries
+                    .iter()
+                    .map(|entry| TickLockEntry {
+                        target_id: entry.target_id,
+                        state: match entry.state {
+                            LockState::Locking { remaining_ticks } => {
+                                TickLockPhase::Locking { remaining_ticks }
+                            }
+                            LockState::Locked => TickLockPhase::Locked,
+                        },
+                    })
+                    .collect(),
+            });
+
+        Some(TickShipState {
+            snapshot,
+            fitting_present: fitting.is_some(),
+            inventory_present: self.world.get::<InventoryComp>(entity).is_some(),
+            movement,
+            fitting: fitting_state,
+            locks,
+            weapon_last_fired_tick: self
+                .world
+                .get::<WeaponComp>(entity)
+                .map(|weapon| weapon.last_fired_tick),
+        })
+    }
+
+    fn capture_tick_write_set(&self) -> BTreeMap<ShipId, TickShipState> {
+        self.ships
+            .index
+            .keys()
+            .copied()
+            .filter_map(|ship_id| {
+                self.capture_tick_ship_state(ship_id)
+                    .map(|state| (ship_id, state))
+            })
+            .collect()
+    }
+
+    fn restore_tick_fitting(fitting: &mut FittingComp, state: &TickFittingState) -> bool {
+        fn restore_slots(slots: &mut [FittedSlot], state: &[TickSlotState]) -> bool {
+            if slots.len() != state.len() {
+                return false;
+            }
+            for (slot, saved) in slots.iter_mut().zip(state) {
+                if slot.def.id != saved.module_id {
+                    return false;
+                }
+                slot.is_active = saved.is_active;
+                slot.cycle_remaining = saved.cycle_remaining;
+                slot.target_ship_id = saved.target_ship_id;
+            }
+            true
+        }
+
+        restore_slots(&mut fitting.high, &state.high)
+            && restore_slots(&mut fitting.mid, &state.mid)
+            && restore_slots(&mut fitting.low, &state.low)
+            && restore_slots(&mut fitting.rig, &state.rig)
+    }
+
+    fn apply_tick_ship_state(&mut self, state: &TickShipState) -> Result<(), TransitionApplyError> {
+        let ship = &state.snapshot;
+        let entity = self
+            .ships
+            .index
+            .get(&ship.ship_id)
+            .copied()
+            .ok_or(TransitionApplyError::UnknownShip(ship.ship_id))?;
+
+        self.ships.type_ids.insert(ship.ship_id, ship.ship_type_id);
+        if let Some(absolute_position) = ship.absolute_position {
+            if let Some(offset) = self
+                .anchor_table
+                .to_relative(ship.anchor, absolute_position)
+            {
+                self.world.set_ship_anchor(entity, ship.anchor);
+                if let Some(mut position) = self.world.get_mut::<PositionComp>(entity) {
+                    position.0 = offset;
+                }
+            } else {
+                self.place_entity_at_absolute(entity, absolute_position);
+            }
+        } else {
+            self.world.set_ship_anchor(entity, ship.anchor);
+            if let Some(mut position) = self.world.get_mut::<PositionComp>(entity) {
+                position.0 = ship.position;
+            }
+        }
+        if self.world.get::<VelocityComp>(entity).is_some() {
+            self.world.get_mut::<VelocityComp>(entity).unwrap().0 = ship.velocity;
+        } else {
+            let _ = self.world.insert_one(entity, VelocityComp(ship.velocity));
+        }
+
+        if state.fitting_present {
+            let mut fitting = FittingComp::from_snapshot(&ship.fitting, &self.module_registry);
+            if !Self::restore_tick_fitting(&mut fitting, &state.fitting) {
+                return Err(TransitionApplyError::InvalidTickShipState(ship.ship_id));
+            }
+            let _ = self.world.insert_one(entity, fitting);
+            self.reapply_fitting(ship.ship_id);
+        } else {
+            let _ = self.world.remove_one::<FittingComp>(entity);
+        }
+        if let Some(mut hull) = self.world.get_mut::<HullComp>(entity) {
+            hull.set_hp(ship.current_shield, ship.current_armor, ship.current_hull);
+        }
+        match ship.capacitor {
+            Some(current) => {
+                let _ = self.world.insert_one(entity, CapacitorComp { current });
+            }
+            None => {
+                let _ = self.world.remove_one::<CapacitorComp>(entity);
+            }
+        }
+        if ship.tackled_by.is_empty() {
+            let _ = self.world.remove_one::<TackledComp>(entity);
+        } else {
+            let _ = self.world.insert_one(
+                entity,
+                TackledComp {
+                    tacklers: ship.tackled_by.clone(),
+                },
+            );
+        }
+        if state.inventory_present {
+            let _ = self.world.insert_one(
+                entity,
+                InventoryComp {
+                    items: ship.inventory.clone(),
+                },
+            );
+        } else {
+            let _ = self.world.remove_one::<InventoryComp>(entity);
+        }
+
+        let _ = self.world.remove_one::<WarpComp>(entity);
+        self.clear_steering_modes(entity);
+        let _ = self
+            .world
+            .remove_one::<dawn_ecs::components::ThrustComp>(entity);
+        if let Some(thrust) = state.movement.thrust {
+            let _ = self.world.insert_one(
+                entity,
+                dawn_ecs::components::ThrustComp {
+                    direction: thrust.direction,
+                    is_braking: thrust.is_braking,
+                },
+            );
+        }
+        if let Some(approach) = state.movement.approach {
+            let _ = self.world.insert_one(
+                entity,
+                ApproachComp {
+                    target: approach.target,
+                    auto_jump_gate: approach.auto_jump_gate,
+                },
+            );
+        }
+        if let Some(orbit) = state.movement.orbit {
+            let _ = self.world.insert_one(
+                entity,
+                OrbitComp {
+                    target: orbit.target,
+                    radius: orbit.radius,
+                },
+            );
+        }
+        if let Some(keep_at_range) = state.movement.keep_at_range {
+            let _ = self.world.insert_one(
+                entity,
+                KeepAtRangeComp {
+                    target: keep_at_range.target,
+                    range: keep_at_range.range,
+                },
+            );
+        }
+        if let Some(warp) = state.movement.warp {
+            let _ = self.world.insert_one(
+                entity,
+                WarpComp {
+                    target: warp.target,
+                    phase: match warp.phase {
+                        TickWarpPhase::Aligning => WarpPhase::Aligning,
+                        TickWarpPhase::Warping => WarpPhase::Warping,
+                    },
+                    auto_jump: warp.auto_jump,
+                    warp_start_abs: warp.warp_start_abs,
+                    warp_total: warp.warp_total,
+                    warp_elapsed: warp.warp_elapsed,
+                    warp_arrival_abs: warp.warp_arrival_abs,
+                    warp_start_vel: warp.warp_start_vel,
+                },
+            );
+        }
+
+        match &state.locks {
+            Some(lock) => {
+                let _ = self.world.insert_one(
+                    entity,
+                    LockComp {
+                        entries: lock
+                            .entries
+                            .iter()
+                            .map(|entry| LockEntry {
+                                target_id: entry.target_id,
+                                state: match entry.state {
+                                    TickLockPhase::Locking { remaining_ticks } => {
+                                        LockState::Locking { remaining_ticks }
+                                    }
+                                    TickLockPhase::Locked => LockState::Locked,
+                                },
+                            })
+                            .collect(),
+                    },
+                );
+            }
+            None => {
+                let _ = self.world.remove_one::<LockComp>(entity);
+            }
+        }
+        match state.weapon_last_fired_tick {
+            Some(last_fired_tick) => {
+                let _ = self
+                    .world
+                    .insert_one(entity, WeaponComp { last_fired_tick });
+            }
+            None => {
+                let _ = self.world.remove_one::<WeaponComp>(entity);
+            }
+        }
+        Ok(())
+    }
+
+    fn restore_tick_write_set(
+        &mut self,
+        states: &BTreeMap<ShipId, TickShipState>,
+    ) -> Result<(), TransitionApplyError> {
+        for state in states.values() {
+            self.apply_tick_ship_state(state)?;
+        }
+        Ok(())
+    }
+
     pub fn tick_with_lock_commands(
         &mut self,
         lock_commands: &[dawn_core::LockOnCommand],
+    ) -> TickResult {
+        self.tick_with_lock_commands_mode(lock_commands, true, true)
+    }
+
+    fn tick_with_lock_commands_mode(
+        &mut self,
+        lock_commands: &[dawn_core::LockOnCommand],
+        publish_events: bool,
+        remove_destroyed: bool,
     ) -> TickResult {
         self.current_tick = self.current_tick.next();
         let tick = self.current_tick;
@@ -360,14 +851,16 @@ impl<S: EventStore> SimulationNode<S> {
 
         // Remove destroyed ships from the ECS and all lookup maps.
         // CLAUDE.md §6: run the Bot System after Combat.
-        for ship_id in &combat.destroyed {
-            self.remove_ship(*ship_id);
+        if remove_destroyed {
+            for ship_id in &combat.destroyed {
+                self.remove_ship(*ship_id);
+            }
         }
 
         // 7. Bot System — bot commands pass through the same InTransit guards.
         self.process_bots();
 
-        // 8. Append to the EventStore
+        // 8. Collect public output for the runtime-owned journal/publisher.
         let all_events: Vec<DomainEvent> = warp_events
             .iter()
             .chain(move_events.iter())
@@ -382,7 +875,9 @@ impl<S: EventStore> SimulationNode<S> {
             .collect();
 
         let count = all_events.len();
-        self.event_store.append_batch(all_events.iter().cloned());
+        if publish_events {
+            self.emit_events(all_events.iter().cloned());
+        }
 
         TickResult {
             tick,
@@ -402,7 +897,8 @@ mod tests {
     };
     use dawn_ecs::components::{LockEntry, LockState};
     use dawn_event_store::{
-        DurableJournal, InMemoryJournal, JournalBatch, JournalIndex, JournalRecord,
+        AppendReceipt, DurabilityMode, DurableJournal, InMemoryJournal, JournalBatch, JournalError,
+        JournalIndex, JournalRecord,
     };
 
     fn mem_node() -> SimulationNode {
@@ -429,14 +925,14 @@ mod tests {
         let mut node = mem_node();
         let mut journal = InMemoryJournal::new();
 
-        let receipt = node
-            .commit_tick_transition(
-                &mut journal,
-                SectorTransitionId(20),
-                4,
-                DurabilityMode::Synced,
-            )
-            .expect("durable Tick should apply");
+        let receipt = crate::transit::commit_tick_transition(
+            &mut node,
+            &mut journal,
+            SectorTransitionId(20),
+            4,
+            DurabilityMode::Synced,
+        )
+        .expect("durable Tick should apply");
 
         assert_eq!(receipt.range.first, JournalIndex::ZERO);
         assert_eq!(node.current_tick(), Tick(1));
@@ -448,11 +944,101 @@ mod tests {
     }
 
     #[test]
+    fn full_tick_prepare_restores_live_state_and_recovery_replays_it() {
+        let mut node = mem_node();
+        let ship_id = node.spawn_ship(
+            dawn_core::ShipTypeId(1),
+            Position::new(10.0, 20.0, 30.0),
+            Velocity::new(2.0, 0.0, 0.0),
+        );
+        let before = node.capture_tick_write_set();
+
+        let prepared = node
+            .prepare_tick_state_transition(&[], SectorTransitionId(23), 4)
+            .expect("full Tick should be preparable");
+
+        assert_eq!(node.current_tick(), Tick::ZERO);
+        assert_eq!(node.capture_tick_write_set(), before);
+        assert_eq!(prepared.context.sector_id, SectorId(0));
+        assert!(matches!(
+            prepared.recovery_delta,
+            SectorRecoveryDelta::Tick(TickRecoveryDelta {
+                from: Tick::ZERO,
+                to: Tick(1),
+                ..
+            })
+        ));
+
+        let mut journal = InMemoryJournal::new();
+        crate::transit::commit_tick_state_transition(
+            &mut node,
+            &mut journal,
+            &[],
+            SectorTransitionId(24),
+            4,
+            DurabilityMode::Synced,
+        )
+        .expect("durable full Tick should apply");
+        let committed = node.capture_tick_write_set();
+        assert_eq!(node.current_tick(), Tick(1));
+
+        let record = journal.records()[0].clone();
+        let delta = crate::transition::decode_recovery_delta(&record.payload)
+            .expect("journal payload should contain the full Tick delta");
+        let SectorRecoveryDelta::Tick(delta) = delta else {
+            panic!("full Tick must persist a Tick delta");
+        };
+        let mut recovered = mem_node();
+        recovered.spawn_ship(
+            dawn_core::ShipTypeId(1),
+            Position::new(10.0, 20.0, 30.0),
+            Velocity::new(2.0, 0.0, 0.0),
+        );
+        recovered
+            .apply_tick_transition(
+                delta,
+                TransitionContext {
+                    sector_id: record.context.sector_id,
+                    owner_epoch: record.context.owner_epoch,
+                },
+            )
+            .expect("full Tick delta should replay");
+        assert_eq!(recovered.current_tick(), Tick(1));
+        assert_eq!(recovered.capture_tick_write_set(), committed);
+        assert!(recovered.ships.index.contains_key(&ship_id));
+    }
+
+    #[test]
+    fn failed_full_tick_append_leaves_live_state_and_clock_unchanged() {
+        let mut node = mem_node();
+        node.spawn_ship(
+            dawn_core::ShipTypeId(1),
+            Position::new(10.0, 20.0, 30.0),
+            Velocity::new(2.0, 0.0, 0.0),
+        );
+        let before = node.capture_tick_write_set();
+        let mut journal = FailingJournal;
+
+        assert!(crate::transit::commit_tick_state_transition(
+            &mut node,
+            &mut journal,
+            &[],
+            SectorTransitionId(25),
+            4,
+            DurabilityMode::Synced,
+        )
+        .is_err());
+        assert_eq!(node.current_tick(), Tick::ZERO);
+        assert_eq!(node.capture_tick_write_set(), before);
+    }
+
+    #[test]
     fn committed_tick_delta_can_be_applied_from_its_journal_record() {
         let mut node = mem_node();
         let mut journal = InMemoryJournal::new();
 
-        node.commit_tick_transition(
+        crate::transit::commit_tick_transition(
+            &mut node,
             &mut journal,
             SectorTransitionId(22),
             4,
@@ -486,14 +1072,14 @@ mod tests {
         let mut node = mem_node();
         let mut journal = FailingJournal;
 
-        assert!(node
-            .commit_tick_transition(
-                &mut journal,
-                SectorTransitionId(21),
-                4,
-                DurabilityMode::Synced,
-            )
-            .is_err());
+        assert!(crate::transit::commit_tick_transition(
+            &mut node,
+            &mut journal,
+            SectorTransitionId(21),
+            4,
+            DurabilityMode::Synced,
+        )
+        .is_err());
         assert_eq!(node.current_tick(), Tick::ZERO);
     }
 
@@ -503,10 +1089,7 @@ mod tests {
 
         let error = node
             .apply_tick_transition(
-                TickRecoveryDelta {
-                    from: Tick(1),
-                    to: Tick(2),
-                },
+                TickRecoveryDelta::logical(Tick(1), Tick(2)),
                 TransitionContext {
                     sector_id: SectorId(0),
                     owner_epoch: 4,
@@ -530,10 +1113,7 @@ mod tests {
 
         let error = node
             .apply_tick_transition(
-                TickRecoveryDelta {
-                    from: Tick::ZERO,
-                    to: Tick(2),
-                },
+                TickRecoveryDelta::logical(Tick::ZERO, Tick(2)),
                 TransitionContext {
                     sector_id: SectorId(0),
                     owner_epoch: 4,
@@ -557,10 +1137,7 @@ mod tests {
 
         let error = node
             .apply_tick_transition(
-                TickRecoveryDelta {
-                    from: Tick::ZERO,
-                    to: Tick(1),
-                },
+                TickRecoveryDelta::logical(Tick::ZERO, Tick(1)),
                 TransitionContext {
                     sector_id: SectorId(99),
                     owner_epoch: 4,
@@ -733,8 +1310,8 @@ mod tests {
         node.apply_move_command(ship_id, Position::new(10000.0, 0.0, 0.0));
         node.tick();
         node.tick();
-        let last = node.event_store().all_records().last().unwrap();
-        assert_eq!(last.event.tick(), Tick(2));
+        let last = node.pending_events().last().unwrap();
+        assert_eq!(last.tick(), Tick(2));
     }
 
     #[test]

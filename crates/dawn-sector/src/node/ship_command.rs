@@ -22,7 +22,6 @@
 
 use dawn_core::{PlayerId, ShipId};
 use dawn_ecs::Entity;
-use dawn_event_store::store::EventStore;
 
 use super::SimulationNode;
 
@@ -56,7 +55,7 @@ pub(super) struct ResolvedShip {
     pub ship_id: ShipId,
 }
 
-impl<S: EventStore> SimulationNode<S> {
+impl SimulationNode {
     /// Resolve a flight/steering command (Move, Stop, Warp, Orbit,
     /// KeepAtRange, Approach): `ship_id` must be `player_id`'s active ship
     /// (ADR-0037), and it must not be docked.
@@ -110,22 +109,17 @@ impl<S: EventStore> SimulationNode<S> {
 mod tests {
     use super::*;
     use dawn_core::{DockCommand, NodeId, Position, SectorBounds, SectorId, StationId};
-    use dawn_event_store::memory::InMemoryEventStore;
-
-    fn mem_node() -> SimulationNode<InMemoryEventStore> {
+    fn mem_node() -> SimulationNode {
         SimulationNode::with_test_store(
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-            InMemoryEventStore::new(),
+            (),
         )
     }
 
-    fn spawn_owned_player_at(
-        node: &mut SimulationNode<InMemoryEventStore>,
-        pos: Position,
-    ) -> (PlayerId, ShipId) {
+    fn spawn_owned_player_at(node: &mut SimulationNode, pos: Position) -> (PlayerId, ShipId) {
         let player_id = node.next_player_id();
         let ship_id = node.spawn_player_ship_at_pub(player_id, pos);
         (player_id, ship_id)
@@ -133,9 +127,7 @@ mod tests {
 
     /// Spawns and docks an owned player ship at the demo station
     /// (`StationId(0)`), mirroring `inventory.rs`'s `spawn_owned_player`.
-    fn spawn_docked_owned_player(
-        node: &mut SimulationNode<InMemoryEventStore>,
-    ) -> (PlayerId, ShipId) {
+    fn spawn_docked_owned_player(node: &mut SimulationNode) -> (PlayerId, ShipId) {
         let station = node
             .station(StationId(0))
             .expect("demo station exists")

@@ -1,23 +1,27 @@
+use crate::persistence::{ShipSnapshot, StateSnapshot};
 use dawn_ecs::components::{
     CapacitorComp, FittingComp, HullComp, InventoryComp, PositionComp, TackledComp, VelocityComp,
 };
-use dawn_event_store::store::EventStore;
-
-use crate::persistence::{ShipSnapshot, StateSnapshot};
 
 use super::SimulationNode;
 
-impl<S: EventStore> SimulationNode<S> {
-    /// Capture the current ECS state as a `StateSnapshot`.
-    ///
-    /// The snapshot covers all events with `log_index < event_store.len()`.
-    /// Pair with the event log to reconstruct this exact state on restart.
+impl SimulationNode {
+    /// Capture the current ECS state as a `StateSnapshot` with no journal
+    /// coverage from an external journal. The pending output length is used as
+    /// a test/local cursor only; runtime code must use [`Self::take_snapshot_at`]
+    /// with the committed recovery-journal position it owns.
     ///
     /// The node is destructured exhaustively (no `..`) on purpose: adding a
     /// field to `SimulationNode` breaks this function until someone decides
     /// whether it survives a restart. Deciding by memory is what silently lost
     /// `player_id_counter` before. `apply_snapshot` is the matching read side.
     pub fn take_snapshot(&self) -> StateSnapshot {
+        self.take_snapshot_at(self.pending_events.len() as u64)
+    }
+
+    /// Capture the current ECS state and explicitly record the external
+    /// recovery-journal position covered by the snapshot.
+    pub fn take_snapshot_at(&self, log_index: u64) -> StateSnapshot {
         let Self {
             // ── persisted ──────────────────────────────────────────────────
             node_id,
@@ -29,8 +33,8 @@ impl<S: EventStore> SimulationNode<S> {
             docked_ships,
             docked_players,
             completed_incoming_transits,
-            // `log_index` is derived from the store rather than persisted.
-            event_store,
+            // Pending public events are an in-memory output buffer, not state.
+            pending_events: _,
             // ── captured per ship, below ───────────────────────────────────
             world,
             ships: ship_registry,
@@ -61,6 +65,7 @@ impl<S: EventStore> SimulationNode<S> {
             pending_bot_lock_commands: _,
             pending_auto_jumps: _,
             completed_warps: _,
+            transit_journal: _,
         } = self;
 
         let mut ships: Vec<ShipSnapshot> = ship_registry
@@ -118,7 +123,7 @@ impl<S: EventStore> SimulationNode<S> {
             node_id: *node_id,
             sector_id: *sector_id,
             bounds: *bounds,
-            log_index: event_store.len() as u64,
+            log_index,
             tick: *current_tick,
             id_counter: *id_counter,
             player_id_counter: *player_id_counter,
@@ -138,8 +143,9 @@ impl<S: EventStore> SimulationNode<S> {
     ///
     /// The read half of the seam `take_snapshot` writes. Covers only the state
     /// this struct owns directly — ships are materialised separately by
-    /// `restore_ship_from_snapshot`, and events after `log_index` are replayed
-    /// afterwards, both driven by `restore_from`.
+    /// `restore_ship_from_snapshot`. The external recovery journal is applied
+    /// by the runtime after this checkpoint is loaded; this method does not
+    /// replay public events.
     ///
     /// `StateSnapshot` is destructured exhaustively (no `..`) for the same
     /// reason `take_snapshot` destructures the node: adding a field there must
@@ -156,9 +162,9 @@ impl<S: EventStore> SimulationNode<S> {
             docked_players,
             owners,
             completed_incoming_transits,
-            // Consumed by `restore_from`, not here: `ships` needs the module
-            // and ship-type registries in place first, and `log_index` selects
-            // the replay range once those ships exist.
+            // `ships` needs the module and ship-type registries in place first.
+            // `log_index` is external journal coverage, not a replay cursor for
+            // this storage-independent restore operation.
             ships: _,
             log_index: _,
         } = snapshot;
@@ -181,37 +187,13 @@ impl<S: EventStore> SimulationNode<S> {
 
 // ── Checkpointing (ADR-0017 8A-7) ──────────────────────────────────────────────
 
-impl SimulationNode<dawn_event_store::FileEventStore> {
-    /// Take a snapshot, persist it durably, then compact the hot log behind it.
-    ///
-    /// This is the operational checkpoint of ADR-0017: after it returns, recovery
-    /// only needs `snapshot_path` + the post-snapshot tail of the hot log; the
-    /// prefix it covers lives in the append-only cold archive at `cold_path`.
-    ///
-    /// Ordering is load-bearing for crash safety: the snapshot is saved **before**
-    /// the hot log is compacted. A crash between the two leaves the snapshot
-    /// written and the hot log untouched (a redundant but safe state). Compacting
-    /// first could strand a snapshot whose `log_index` is older than the new
-    /// `base_index`, which would make `iter_from` silently skip events.
-    pub fn checkpoint(
-        &mut self,
-        snapshot_path: impl AsRef<std::path::Path>,
-        cold_path: impl AsRef<std::path::Path>,
-    ) -> std::io::Result<StateSnapshot> {
-        let snapshot = self.take_snapshot();
-        snapshot.save(&snapshot_path)?;
-        self.event_store.compact(snapshot.log_index, cold_path)?;
-        Ok(snapshot)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::node::station::StationOperationOutcome;
     use crate::persistence::StateSnapshot;
-    use dawn_core::{NodeId, Position, SectorBounds, SectorId, ShipId, Tick, Velocity};
-    use dawn_event_store::{FileEventStore, InMemoryEventStore};
+    use dawn_core::{NodeId, PlayerId, Position, SectorBounds, SectorId, ShipId, Tick, Velocity};
+    use dawn_event_store::{store::EventStore, FileEventStore, InMemoryEventStore};
 
     fn mem_node() -> SimulationNode {
         SimulationNode::new_test(
@@ -241,9 +223,9 @@ mod tests {
     /// field.
     #[test]
     fn restoring_a_snapshot_and_recapturing_reproduces_it_exactly() {
-        // The store must already hold `log_index` events: `take_snapshot`
-        // derives that field from the store's length, and `restore_from`
-        // replays everything at or past it (nothing, here).
+        // This fixture uses the test-only EventStore replay helper to preserve
+        // coverage for the legacy public-event reducer. Production restore is
+        // storage-independent and does not use this cursor as a replay range.
         let mut store = InMemoryEventStore::new();
         for i in 0..3 {
             store.append(dawn_core::DomainEvent::ShipDespawned(
@@ -360,38 +342,35 @@ mod tests {
     }
 
     #[test]
-    fn ecs_state_is_fully_restored_from_snapshot_and_event_replay_after_simulated_restart() {
-        let dir = tempfile::tempdir().unwrap();
-        let event_path = dir.path().join("events.log");
-        let snapshot_path = dir.path().join("snapshot.bin");
-
+    fn ecs_state_is_fully_restored_from_snapshot_after_simulated_restart() {
         // ── Session 1: run, snapshot mid-way, continue, shut down ───────────
         let ship_ids: Vec<ShipId>;
+        let snap: StateSnapshot;
         let final_tick: Tick;
         let final_positions: Vec<Position>;
         {
-            let store = FileEventStore::open(&event_path).unwrap();
             let mut node = SimulationNode::with_test_store(
                 NodeId(0),
                 SectorId(0),
                 SectorBounds::centered(SectorBounds::DEFAULT_HALF),
                 std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-                store,
+                dawn_event_store::InMemoryEventStore::new(),
             );
 
-            // Spawn 5 ships as players with thrust so they emit VelocityChanged events.
-            // (ADR-0008: NPC ships at constant velocity emit no events, so tick cannot
-            //  be restored from the event log alone. Using player ships with thrust
-            //  ensures VelocityChanged events carry the tick for replay.)
+            // Spawn owned player ships with a stable velocity. The legacy
+            // snapshot restores the instantaneous movement state; an active
+            // thrust command belongs to the RecoveryDelta write set instead.
             ship_ids = (0..5u64)
                 .map(|i| {
-                    let id = node.spawn_ship(
-                        dawn_core::ShipTypeId(1),
+                    let id = node.spawn_player_ship_at_pub(
+                        PlayerId(i),
                         Position::new(i as f64 * 100.0, 0.0, 0.0),
-                        Velocity::ZERO,
                     );
-                    node.set_player_ship(id);
-                    node.apply_move_command(id, Position::new(10_000.0, 0.0, 0.0));
+                    let entity = *node.ships.index.get(&id).unwrap();
+                    node.world
+                        .get_mut::<dawn_ecs::components::VelocityComp>(entity)
+                        .unwrap()
+                        .0 = Velocity::new(120.0, 0.0, 0.0);
                     id
                 })
                 .collect();
@@ -399,9 +378,7 @@ mod tests {
             for _ in 0..5 {
                 node.tick();
             }
-            let snap = node.take_snapshot();
-            snap.save(&snapshot_path).unwrap();
-
+            snap = node.take_snapshot();
             for _ in 0..3 {
                 node.tick();
             }
@@ -415,16 +392,12 @@ mod tests {
 
         // ── Session 2: restart, restore, verify ─────────────────────────────
         //
-        // ADR-0008: position is derived state — restore replays velocity events,
-        // then we re-run the remaining ticks to reach the exact final position.
-        let snap = StateSnapshot::load(&snapshot_path).unwrap();
-        let store2 = FileEventStore::open(&event_path).unwrap();
-        let mut node2 = SimulationNode::restore_from_test(
-            store2,
+        // The snapshot contains the current position, velocity, and tick, so
+        // the remaining constant-velocity ticks must reach the same position.
+        let mut node2 = SimulationNode::restore_from(
             &snap,
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-            &[],
-            &[],
+            crate::game_data::test_catalog_arc(),
         );
 
         let remaining = final_tick.value() - node2.current_tick().value();
@@ -476,8 +449,8 @@ mod tests {
         let snap1 = node.take_snapshot();
 
         let mut store2 = InMemoryEventStore::new();
-        for rec in node.event_store().all_records() {
-            store2.append(rec.event.clone());
+        for event in node.pending_events() {
+            store2.append(event.clone());
         }
         let node2 = SimulationNode::restore_from_test(
             store2,
@@ -521,11 +494,10 @@ mod tests {
         }
         let snap = live.take_snapshot();
         let events_up_to_snapshot: Vec<_> = live
-            .event_store()
-            .all_records()
+            .pending_events()
             .iter()
             .take(snap.log_index as usize)
-            .map(|r| r.event.clone())
+            .cloned()
             .collect();
 
         for _ in 0..4 {
@@ -561,20 +533,15 @@ mod tests {
     /// restoring from the snapshot still reproduces the live state.
     #[test]
     fn recovery_does_not_require_genesis_replay_after_compaction() {
-        let dir = tempfile::tempdir().unwrap();
-        let hot = dir.path().join("events.log");
-        let cold = dir.path().join("cold.log");
-
         let snap;
         let live_final;
         {
-            let store = FileEventStore::open(&hot).unwrap();
             let mut node = SimulationNode::with_test_store(
                 NodeId(0),
                 SectorId(0),
                 SectorBounds::centered(SectorBounds::DEFAULT_HALF),
                 std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-                store,
+                dawn_event_store::InMemoryEventStore::new(),
             );
             for i in 0..3u64 {
                 node.spawn_ship(
@@ -593,35 +560,19 @@ mod tests {
             live_final = node.take_snapshot();
         }
 
-        {
-            let mut store = FileEventStore::open(&hot).unwrap();
-            store.compact(snap.log_index, &cold).unwrap();
-            assert_eq!(store.base_index(), snap.log_index);
-            assert_eq!(
-                store.records_on_disk(),
-                0,
-                "events behind the snapshot are archived, not in the hot log"
-            );
-        }
-
-        let store2 = FileEventStore::open(&hot).unwrap();
-        assert_eq!(
-            store2.base_index(),
-            snap.log_index,
-            "hot log holds no genesis events"
-        );
-        let mut restored = SimulationNode::restore_from_test(
-            store2,
+        let mut restored = SimulationNode::restore_from(
             &snap,
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-            &[],
-            &[],
+            crate::game_data::test_catalog_arc(),
         );
         assert_eq!(restored.current_tick(), snap.tick);
         for _ in 0..4 {
             restored.tick();
         }
-        let restored_final = restored.take_snapshot();
+        let mut restored_final = restored.take_snapshot_at(0);
+        let mut live_final = live_final;
+        live_final.log_index = 0;
+        restored_final.log_index = 0;
 
         assert_eq!(
             postcard::to_stdvec(&live_final).unwrap(),
@@ -764,8 +715,8 @@ mod tests {
         // Snapshot + restore from the event log (which includes AnchorRebased).
         let snap = node.take_snapshot();
         let mut store2 = InMemoryEventStore::new();
-        for rec in node.event_store().all_records() {
-            store2.append(rec.event.clone());
+        for event in node.pending_events() {
+            store2.append(event.clone());
         }
         let node2 = SimulationNode::restore_from_test(
             store2,
@@ -816,8 +767,8 @@ mod tests {
 
         let snap = node.take_snapshot();
         let mut store2 = InMemoryEventStore::new();
-        for rec in node.event_store().all_records() {
-            store2.append(rec.event.clone());
+        for event in node.pending_events() {
+            store2.append(event.clone());
         }
         let mut node2 = SimulationNode::restore_from_test(
             store2,
@@ -871,8 +822,8 @@ mod tests {
 
         let snap = node.take_snapshot();
         let mut store2 = InMemoryEventStore::new();
-        for rec in node.event_store().all_records() {
-            store2.append(rec.event.clone());
+        for event in node.pending_events() {
+            store2.append(event.clone());
         }
         let node2 = SimulationNode::restore_from_test(
             store2,
@@ -919,8 +870,8 @@ mod tests {
         let live_snapshot = node.take_snapshot();
 
         let mut store2 = InMemoryEventStore::new();
-        for rec in node.event_store().all_records() {
-            store2.append(rec.event.clone());
+        for event in node.pending_events() {
+            store2.append(event.clone());
         }
         let restored = SimulationNode::restore_from_test(
             store2,

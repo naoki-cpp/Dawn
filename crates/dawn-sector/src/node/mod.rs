@@ -1,18 +1,16 @@
 //! `SimulationNode` — the current broad simulation/composition unit for one Sector.
 //!
-//! # Generic over `S: EventStore`
-//!
-//! `SimulationNode<S>` defaults to `SimulationNode<InMemoryEventStore>`. Every
-//! normal construction and restore path requires a complete validated
-//! [`GameDataCatalog`].
+//! The authoritative engine is storage-independent. Every normal construction
+//! and restore path requires a complete validated [`GameDataCatalog`].
 //!
 //! # Recovery contract status (ADR-0049 / #284)
 //!
-//! This module still exposes the **pre-ADR-0049 implementation shape**: the node
-//! owns an `EventStore`, `take_snapshot()` produces the current `StateSnapshot`,
-//! and `restore_from()` restores that snapshot then replays the current public
-//! EventStore tail. That is migration baseline, not the target exact-recovery
-//! contract.
+//! The node is now storage-independent: it owns no journal and never appends
+//! its public output. The runtime prepares a transition, persists it through
+//! its journal boundary, and then applies the committed delta to this node.
+//! `restore_from()` restores only the state carried by the supplied snapshot;
+//! the test-only `restore_from_test()` helper retains the old public-event
+//! replay fixture for reducer coverage, not as a production recovery path.
 //!
 //! The accepted target is a storage-independent engine (#272) whose committed
 //! Sector world state is recovered from a compatible versioned checkpoint plus
@@ -23,7 +21,7 @@
 //! state owners.
 //!
 //! Until those migrations land, comments below distinguish current in-memory or
-//! SQLite/EventStore mechanics from the authority selected by ADR-0049.
+//! SQLite adapter mechanics from the authority selected by ADR-0049.
 
 mod admission_provisional;
 mod apply_event;
@@ -57,12 +55,13 @@ mod tick;
 mod transit;
 mod warp;
 
+pub use crate::transit::StopTransitionError;
+pub use crate::transit::TickTransitionError;
 pub use command_module::ModuleActivationRejection;
 pub use commands::{ClientCommandFollowup, ClientRequestAdmissionError};
 pub use jump::JumpOutcome;
-pub use movement_commands::StopTransitionError;
 pub use serialization::{HandoffPayload, MissingObserverShip};
-pub use tick::TickTransitionError;
+pub use tick::TickPreparationError;
 
 use coordinates::debug_assert_missing_anchor;
 
@@ -82,13 +81,13 @@ use dawn_ecs::{
     components::{PositionComp, ShipStatsComp, WarpComp},
     Entity, SimWorld,
 };
-use dawn_event_store::{store::EventStore, InMemoryEventStore};
 
 #[cfg(test)]
 use dawn_ecs::components::{CapacitorComp, FittingComp, HullComp};
 
 use crate::game_data::GameDataCatalog;
 use crate::persistence::{CompletedIncomingTransit, StateSnapshot};
+use crate::transit::handoff::TransitJournal;
 use crate::view::SectorView;
 
 /// Per-Sector population backstop (ADR-0018 final resort). Set far above the
@@ -168,20 +167,18 @@ pub struct FittedModuleStatus {
 
 // -- SimulationNode ----------------------------------------------------------
 
-/// Current single-Sector simulation node, generic over its legacy EventStore.
+/// Current single-Sector authoritative simulation engine.
 ///
-/// The default store is `InMemoryEventStore`; current production can supply a
-/// `FileEventStore`. #272 removes storage ownership from the final pure engine,
-/// so this generic is an implementation baseline rather than the target API.
-pub struct SimulationNode<S = InMemoryEventStore>
-where
-    S: EventStore,
-{
+/// Persistence is owned by the runtime boundary. The engine only prepares and
+/// exposes public outputs; it never appends them to a journal itself.
+pub struct SimulationNode {
     node_id: NodeId,
     sector_id: SectorId,
     bounds: SectorBounds,
     world: SimWorld,
-    event_store: S,
+    /// Public events produced by state-changing operations since the last
+    /// runtime drain.
+    pending_events: Vec<DomainEvent>,
     current_tick: Tick,
     id_counter: u64,
     /// Ship identity and ownership maps (entity index, type ids, player ownership).
@@ -226,12 +223,11 @@ where
     /// Current catch-all SQLite adapter inherited from ADR-0038.
     ///
     /// Under ADR-0049/#277, Station inventory rows become an idempotent
-    /// projection/read model of journal-owned Station world state, while
-    /// pre-materialization admission/identity rows may remain repository-owned
-    /// protocol authority with explicit reconciliation. The current object mixes
-    /// both domains and is scheduled to be split; SQLite as a whole is **not**
-    /// the Sector world-state authority.
-    station_inventory_db: station_inventory_db::StationInventoryDb,
+    /// Runtime-owned admission/Station persistence port. The engine sees only
+    /// repository behavior; the current catch-all SQLite adapter is selected at
+    /// the composition boundary until #277 replaces it with explicit
+    /// repositories. Its rows are not Sector recovery authority.
+    station_inventory_db: Box<dyn station_inventory_db::StationRepository>,
     /// Bounded derived cache over current Station repository access. It is not
     /// independent recovery authority.
     station_inventory_cache: std::cell::RefCell<station_inventory::StationInventoryCache>,
@@ -259,9 +255,12 @@ where
     /// deduplication. #276 replaces this legacy snapshot-era shape with the final
     /// durable Transit Saga/receipt authority under ADR-0049.
     completed_incoming_transits: Vec<CompletedIncomingTransit>,
+    /// In-memory transit policy projection maintained from the engine's own
+    /// event output. Runtime persistence is deliberately outside this type.
+    transit_journal: TransitJournal,
 }
 
-impl<S: EventStore> std::fmt::Debug for SimulationNode<S> {
+impl std::fmt::Debug for SimulationNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SimulationNode")
             .field("node_id", &self.node_id)
@@ -276,7 +275,7 @@ impl<S: EventStore> std::fmt::Debug for SimulationNode<S> {
     }
 }
 
-impl<S: EventStore> SectorView for SimulationNode<S> {
+impl SectorView for SimulationNode {
     fn ship_absolute_positions(&self) -> Vec<(ShipId, dawn_core::AbsolutePosition)> {
         SimulationNode::ship_absolute_positions(self)
     }
@@ -296,8 +295,8 @@ impl<S: EventStore> SectorView for SimulationNode<S> {
 
 // -- Constructors ------------------------------------------------------------
 
-impl SimulationNode<InMemoryEventStore> {
-    /// Create a node backed by an in-memory event store.
+impl SimulationNode {
+    /// Create an authoritative engine with no persistence side effects.
     pub fn new(
         node_id: NodeId,
         sector_id: SectorId,
@@ -305,14 +304,7 @@ impl SimulationNode<InMemoryEventStore> {
         galaxy: Arc<crate::galaxy::Galaxy>,
         catalog: Arc<GameDataCatalog>,
     ) -> Self {
-        Self::with_catalog_and_store(
-            node_id,
-            sector_id,
-            bounds,
-            galaxy,
-            catalog,
-            InMemoryEventStore::new(),
-        )
+        Self::with_catalog(node_id, sector_id, bounds, galaxy, catalog)
     }
 
     /// Test fixture constructor using the complete validated repository catalog.
@@ -331,47 +323,50 @@ impl SimulationNode<InMemoryEventStore> {
             crate::game_data::test_catalog_arc(),
         )
     }
+
+    #[cfg(test)]
+    pub(crate) fn with_test_store<T>(
+        node_id: NodeId,
+        sector_id: SectorId,
+        bounds: SectorBounds,
+        galaxy: Arc<crate::galaxy::Galaxy>,
+        _store: T,
+    ) -> Self {
+        Self::new_test(node_id, sector_id, bounds, galaxy)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn restore_from_test<S: dawn_event_store::EventStore>(
+        store: S,
+        snapshot: &StateSnapshot,
+        galaxy: Arc<crate::galaxy::Galaxy>,
+        modules: &[ModuleDefinition],
+        ship_types: &[ShipTypeDefinition],
+    ) -> Self {
+        let catalog = crate::game_data::test_catalog_with_overrides(modules, ship_types);
+        let mut node = Self::restore_from(snapshot, galaxy, catalog);
+        let events: Vec<_> = store
+            .iter_from(snapshot.log_index)
+            .map(|record| record.event.clone())
+            .collect();
+        for event in &events {
+            node.apply_event(event);
+        }
+        node.pending_events = store
+            .iter_from(0)
+            .map(|record| record.event.clone())
+            .collect();
+        node
+    }
 }
 
-impl<S: EventStore> SimulationNode<S> {
-    /// Create a node with a caller-supplied event store and validated catalog.
-    pub fn with_store(
+impl SimulationNode {
+    fn with_catalog(
         node_id: NodeId,
         sector_id: SectorId,
         bounds: SectorBounds,
         galaxy: Arc<crate::galaxy::Galaxy>,
         catalog: Arc<GameDataCatalog>,
-        store: S,
-    ) -> Self {
-        Self::with_catalog_and_store(node_id, sector_id, bounds, galaxy, catalog, store)
-    }
-
-    /// Test fixture constructor using the complete validated repository catalog.
-    #[cfg(test)]
-    pub(crate) fn with_test_store(
-        node_id: NodeId,
-        sector_id: SectorId,
-        bounds: SectorBounds,
-        galaxy: Arc<crate::galaxy::Galaxy>,
-        store: S,
-    ) -> Self {
-        Self::with_store(
-            node_id,
-            sector_id,
-            bounds,
-            galaxy,
-            crate::game_data::test_catalog_arc(),
-            store,
-        )
-    }
-
-    fn with_catalog_and_store(
-        node_id: NodeId,
-        sector_id: SectorId,
-        bounds: SectorBounds,
-        galaxy: Arc<crate::galaxy::Galaxy>,
-        catalog: Arc<GameDataCatalog>,
-        store: S,
     ) -> Self {
         let sector_map = SectorMap::from_galaxy(sector_id, Arc::clone(&galaxy));
         let anchor_table = crate::anchor::AnchorTable::from_galaxy(&galaxy);
@@ -381,7 +376,7 @@ impl<S: EventStore> SimulationNode<S> {
             sector_id,
             bounds,
             world: SimWorld::new(sector_id),
-            event_store: store,
+            pending_events: Vec::new(),
             current_tick: Tick::ZERO,
             id_counter: 0,
             ships: ShipRegistry::new(),
@@ -395,8 +390,8 @@ impl<S: EventStore> SimulationNode<S> {
             sector_map,
             anchor_table,
             population_cap: POPULATION_CAP,
-            station_inventory_db: station_inventory_db::StationInventoryDb::open_in_memory()
-                .expect("in-memory sqlite connection never fails to open"),
+            station_inventory_db: station_inventory_db::open_in_memory_repository()
+                .expect("in-memory repository never fails to open"),
             station_inventory_cache: std::cell::RefCell::new(
                 station_inventory::StationInventoryCache::new(),
             ),
@@ -405,48 +400,25 @@ impl<S: EventStore> SimulationNode<S> {
             pending_auto_jumps: Vec::new(),
             completed_warps: Vec::new(),
             completed_incoming_transits: Vec::new(),
+            transit_journal: TransitJournal::new(sector_id),
         }
     }
 
-    /// Restore through the current legacy snapshot + public EventStore-tail path
-    /// using the exact validated catalog selected by the runtime.
-    ///
-    /// ADR-0049 replaces this operational contract with versioned checkpoint +
-    /// authoritative `RecoveryDelta` tail recovery; this method remains migration
-    /// baseline until #271/#272/#284 land the replacement path.
+    /// Restore the engine from a snapshot using the exact validated catalog
+    /// selected by the runtime.
     pub fn restore_from(
-        store: S,
         snapshot: &StateSnapshot,
         galaxy: Arc<crate::galaxy::Galaxy>,
         catalog: Arc<GameDataCatalog>,
     ) -> Self {
-        let node = Self::with_catalog_and_store(
+        let node = Self::with_catalog(
             snapshot.node_id,
             snapshot.sector_id,
             snapshot.bounds,
             galaxy,
             catalog,
-            store,
         );
         Self::finish_restore(node, snapshot)
-    }
-
-    /// Test restore fixture. Overrides are folded into a complete catalog and
-    /// validated before the authoritative engine is constructed.
-    #[cfg(test)]
-    pub(crate) fn restore_from_test(
-        store: S,
-        snapshot: &StateSnapshot,
-        galaxy: Arc<crate::galaxy::Galaxy>,
-        modules: &[ModuleDefinition],
-        ship_types: &[ShipTypeDefinition],
-    ) -> Self {
-        Self::restore_from(
-            store,
-            snapshot,
-            galaxy,
-            crate::game_data::test_catalog_with_overrides(modules, ship_types),
-        )
     }
 
     fn finish_restore(mut node: Self, snapshot: &StateSnapshot) -> Self {
@@ -454,16 +426,6 @@ impl<S: EventStore> SimulationNode<S> {
 
         for ship in &snapshot.ships {
             node.restore_ship_from_snapshot(ship);
-        }
-
-        let post_events: Vec<DomainEvent> = node
-            .event_store
-            .iter_from(snapshot.log_index)
-            .map(|record| record.event.clone())
-            .collect();
-
-        for event in &post_events {
-            node.apply_event(event);
         }
 
         node
@@ -493,17 +455,17 @@ impl<S: EventStore> SimulationNode<S> {
         self.population_cap = cap;
     }
 
-    /// Point the current catch-all Station/admission/identity SQLite adapter at
-    /// a real on-disk file instead of the private in-memory database used by
-    /// `new`/`with_store`/`restore_from`.
+    /// Point the current repository port at a real on-disk adapter instead of
+    /// the private in-memory implementation used by `new`/`restore_from`.
     ///
     /// This is current implementation wiring. Under ADR-0049/#277 the final
     /// runtime owns separate repository APIs: Station rows are an idempotent
     /// projection of journal authority, while admission/identity rows may be
     /// durable protocol authority with explicit reconciliation. #272 removes the
     /// repository object from the pure engine.
-    pub fn open_station_inventory_db(&mut self, path: &str) -> rusqlite::Result<()> {
-        self.station_inventory_db = station_inventory_db::StationInventoryDb::open(path)?;
+    pub fn open_station_inventory_db(&mut self, path: &str) -> Result<(), String> {
+        self.station_inventory_db =
+            station_inventory_db::open_repository(path).map_err(|error| error.to_string())?;
         self.station_inventory_cache
             .replace(station_inventory::StationInventoryCache::new());
         self.reconcile_client_admission_grants()?;
@@ -545,10 +507,56 @@ impl<S: EventStore> SimulationNode<S> {
         self.world.ship_count()
     }
     pub fn total_event_count(&self) -> usize {
-        self.event_store.len()
+        self.pending_events.len()
     }
-    pub fn event_store(&self) -> &S {
-        &self.event_store
+
+    /// Drain public events produced by the authoritative engine since the
+    /// previous runtime boundary. This is the transition-output seam used by
+    /// application adapters; it does not expose the legacy event log.
+    pub fn drain_pending_events(&mut self) -> Vec<DomainEvent> {
+        std::mem::take(&mut self.pending_events)
+    }
+
+    pub fn pending_events(&self) -> &[DomainEvent] {
+        &self.pending_events
+    }
+
+    /// Put an output batch back at the front when an external durable append
+    /// fails. This is a runtime rollback of the output buffer only; the
+    /// authoritative ECS rollback is owned by the prepared transition.
+    pub(crate) fn restore_pending_events(&mut self, mut events: Vec<DomainEvent>) {
+        events.append(&mut self.pending_events);
+        self.pending_events = events;
+    }
+
+    pub fn pending_event_count(&self) -> usize {
+        self.pending_events.len()
+    }
+
+    pub(crate) fn transit_journal(&self) -> &TransitJournal {
+        &self.transit_journal
+    }
+
+    /// Apply public facts to the node-local Transit projection after their
+    /// enclosing durable transition has committed.
+    pub(crate) fn observe_committed_events(&mut self, events: &[DomainEvent]) {
+        for event in events {
+            self.transit_journal.observe(event);
+        }
+    }
+
+    fn emit_event(&mut self, event: DomainEvent) {
+        self.transit_journal.observe(&event);
+        self.pending_events.push(event);
+    }
+
+    fn emit_events<I>(&mut self, events: I)
+    where
+        I: IntoIterator<Item = DomainEvent>,
+    {
+        for event in events {
+            self.emit_event(event);
+        }
     }
 
     /// The Ship's current approach target, if any (ADR-0015).
@@ -657,13 +665,12 @@ impl<S: EventStore> SimulationNode<S> {
                     .collect()
             })
             .unwrap_or_default();
-        self.event_store
-            .append(DomainEvent::ShipFitted(dawn_core::events::ShipFitted {
-                ship_id,
-                fitting,
-                inventory,
-                tick: self.current_tick,
-            }));
+        self.emit_event(DomainEvent::ShipFitted(dawn_core::events::ShipFitted {
+            ship_id,
+            fitting,
+            inventory,
+            tick: self.current_tick,
+        }));
     }
 
     /// Look up the current `ShipStatsComp` of a Ship by its ID. Test-only.
@@ -837,7 +844,7 @@ mod tests {
 
         let snapshot = node.take_snapshot();
         let restored = SimulationNode::restore_from_test(
-            InMemoryEventStore::new(),
+            dawn_event_store::InMemoryEventStore::new(),
             &snapshot,
             Arc::clone(&galaxy),
             &[],
@@ -866,7 +873,7 @@ mod tests {
 
         assert_eq!(node.total_event_count(), 1);
         assert!(matches!(
-            node.event_store().all_records()[0].event,
+            node.pending_events()[0],
             DomainEvent::ShipSpawned(_)
         ));
     }
@@ -967,9 +974,9 @@ mod tests {
         }
         node.tick();
         let spawned = node
-            .event_store()
-            .iter_from(0)
-            .filter(|r| matches!(r.event, DomainEvent::ShipSpawned(_)))
+            .pending_events()
+            .iter()
+            .filter(|event| matches!(event, DomainEvent::ShipSpawned(_)))
             .count();
         assert_eq!(spawned, 5);
     }

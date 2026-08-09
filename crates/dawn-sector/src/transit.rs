@@ -1,11 +1,13 @@
-//! Sector Transit Raft adapter (ADR-0014).
+//! Sector runtime adapters (ADR-0014 / ADR-0049).
 //!
 //! The authoritative handoff state machine lives in the internal `handoff`
-//! module. The pipeline reconstructs durable EventStore facts, while this
-//! module owns only the wire payload and translation to Raft proposals. The
-//! low-level ECS lifecycle operations remain crate-private behind that policy.
+//! module. The pipeline consumes the node's observed transit journal and
+//! translates explicit effects to Raft proposals. The low-level ECS lifecycle
+//! operations remain crate-private behind that policy. This module also owns
+//! the runtime-side durable Stop/Tick transition functions so the
+//! storage-independent `SimulationNode` only prepares and applies state.
 
-mod handoff;
+pub(crate) mod handoff;
 pub(crate) mod pipeline;
 
 use crate::node::SimulationNode;
@@ -13,9 +15,102 @@ use dawn_consensus::RaftActorHandle;
 use dawn_core::{
     AbsolutePosition, DomainEvent, JumpGateId, SectorId, ShipId, Tick, TransitHandoffState,
 };
-use dawn_event_store::store::EventStore;
+use dawn_event_store::{AppendReceipt, DurabilityMode, DurableJournal, JournalError};
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 use tokio::sync::mpsc;
+
+/// Failure returned by the Stop prepare -> durable -> live-apply boundary.
+#[derive(Debug, Error)]
+pub enum StopTransitionError {
+    #[error(transparent)]
+    Preparation(#[from] crate::transition::TransitionError),
+    #[error("durable transition append failed: {0}")]
+    Durable(#[from] JournalError),
+    #[error("prepared Stop cannot be applied to the current state: {0}")]
+    Validation(#[from] crate::transition::TransitionApplyError),
+}
+
+/// Failure returned by the Tick prepare -> durable -> live-apply boundary.
+#[derive(Debug, Error)]
+pub enum TickTransitionError {
+    #[error(transparent)]
+    Preparation(#[from] crate::node::TickPreparationError),
+    #[error("durable transition append failed: {0}")]
+    Durable(#[from] JournalError),
+    #[error("prepared Tick cannot be applied to the current state: {0}")]
+    Validation(#[from] crate::transition::TransitionApplyError),
+}
+
+/// Commit a prepared Stop transition through the runtime-owned journal.
+pub fn commit_stop_transition<J: DurableJournal>(
+    node: &mut SimulationNode,
+    journal: &mut J,
+    ship_id: ShipId,
+    transition_id: crate::transition::SectorTransitionId,
+    owner_epoch: u64,
+    durability: DurabilityMode,
+) -> Result<AppendReceipt, StopTransitionError> {
+    let prepared = node.prepare_stop_transition(ship_id, transition_id, owner_epoch)?;
+    let delta = match &prepared.recovery_delta {
+        crate::transition::SectorRecoveryDelta::Stop(delta) => *delta,
+        crate::transition::SectorRecoveryDelta::Tick(_) => {
+            unreachable!("prepare_stop_transition always produces a Stop delta")
+        }
+    };
+    // Resolve the live entity before the durable append. Once the journal
+    // accepts the transition, applying this already-validated entity is
+    // infallible; a post-commit lookup failure must not masquerade as a
+    // normal command rejection.
+    let entity = node.stop_entity(delta.ship_id)?;
+    let receipt =
+        crate::transition_journal::append_prepared_transition(journal, &prepared, durability)?;
+    node.apply_stop_delta(entity, delta);
+    Ok(receipt)
+}
+
+/// Commit the complete bounded ECS Tick write set through the runtime journal.
+pub fn commit_tick_state_transition<J: DurableJournal>(
+    node: &mut SimulationNode,
+    journal: &mut J,
+    lock_commands: &[dawn_core::LockOnCommand],
+    transition_id: crate::transition::SectorTransitionId,
+    owner_epoch: u64,
+    durability: DurabilityMode,
+) -> Result<AppendReceipt, TickTransitionError> {
+    let (prepared, _) =
+        node.prepare_tick_state_transition_with_result(lock_commands, transition_id, owner_epoch)?;
+    let crate::transition::SectorRecoveryDelta::Tick(ref delta) = prepared.recovery_delta else {
+        unreachable!("prepare_tick_state_transition always produces a Tick delta")
+    };
+    node.validate_tick_transition(delta, prepared.context)?;
+    let receipt =
+        crate::transition_journal::append_prepared_transition(journal, &prepared, durability)?;
+    node.apply_validated_full_tick(delta.clone())?;
+    node.observe_committed_events(&prepared.public_events);
+    Ok(receipt)
+}
+
+/// Commit the logical Tick counter through the runtime journal.
+pub fn commit_tick_transition<J: DurableJournal>(
+    node: &mut SimulationNode,
+    journal: &mut J,
+    transition_id: crate::transition::SectorTransitionId,
+    owner_epoch: u64,
+    durability: DurabilityMode,
+) -> Result<AppendReceipt, TickTransitionError> {
+    let prepared = node
+        .prepare_tick_transition(transition_id, owner_epoch)
+        .map_err(crate::node::TickPreparationError::from)?;
+    let crate::transition::SectorRecoveryDelta::Tick(ref delta) = prepared.recovery_delta else {
+        unreachable!("prepare_tick_transition always produces a Tick delta")
+    };
+    node.validate_tick_transition(delta, prepared.context)?;
+    let receipt =
+        crate::transition_journal::append_prepared_transition(journal, &prepared, durability)?;
+    node.apply_validated_logical_tick(delta.clone());
+    Ok(receipt)
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TransitOp {
@@ -76,8 +171,8 @@ fn propose_ack(raft: &RaftActorHandle, proposal: pipeline::AckProposal) {
     );
 }
 
-pub fn apply_committed_raft_entries<S: EventStore>(
-    node: &mut SimulationNode<S>,
+pub fn apply_committed_raft_entries(
+    node: &mut SimulationNode,
     raft: &RaftActorHandle,
     committed_rx: &mut mpsc::UnboundedReceiver<Vec<u8>>,
 ) {
@@ -141,35 +236,40 @@ pub struct RuntimeTickOutput {
     pub completed_warps: Vec<ShipId>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct DurableRuntimeTickContext {
+    pub transition_id: crate::transition::SectorTransitionId,
+    pub owner_epoch: u64,
+    pub durability: DurabilityMode,
+}
+
 /// Execute the authoritative server frame pipeline.
 ///
 /// Ordering is deliberately centralized here for every runtime adapter:
 /// committed Raft entries -> simulation Tick -> Event collection ->
 /// replication hook -> Raft clock advancement -> auto-jump proposal ->
 /// transient warp-output drain.
-pub fn run_runtime_tick<S, F>(
-    node: &mut SimulationNode<S>,
+pub fn run_runtime_tick<F>(
+    node: &mut SimulationNode,
     raft: &RaftActorHandle,
     committed_rx: &mut mpsc::UnboundedReceiver<Vec<u8>>,
     lock_commands: &[dawn_core::LockOnCommand],
     after_events_collected: F,
 ) -> RuntimeTickOutput
 where
-    S: EventStore,
-    F: FnOnce(&SimulationNode<S>, &crate::node::TickResult, &[DomainEvent]),
+    F: FnOnce(&SimulationNode, &crate::node::TickResult, &[DomainEvent]),
 {
-    let events_before = node.total_event_count() as u64;
+    // Consume the engine's explicit transition output instead of deriving the
+    // frame from a mutable public-event cursor. The legacy log remains a
+    // mirror during migration, but runtime publication is driven by output.
+    let mut events = node.drain_pending_events();
     apply_committed_raft_entries(node, raft, committed_rx);
     let result = node.tick_with_lock_commands(lock_commands);
-    let events: Vec<_> = node
-        .event_store()
-        .iter_from(events_before)
-        .map(|record| record.event.clone())
-        .collect();
+    events.extend(node.drain_pending_events());
 
-    // Replication must observe the newly appended Event tail before the
+    // Replication must observe the newly produced transition output before the
     // consensus clock advances. The immutable node reference keeps this hook
-    // publication-only so the collected output cannot diverge from the log.
+    // publication-only so the collected output cannot diverge from the node.
     after_events_collected(node, &result, &events);
     raft.tick();
 
@@ -195,8 +295,86 @@ where
     }
 }
 
-pub fn propose_jump<S: EventStore>(
-    node: &mut SimulationNode<S>,
+/// Execute one frame with the ADR-0049 durable Tick boundary.
+///
+/// Unlike [`run_runtime_tick`], this path does not let the ECS Tick mutate the
+/// live state before persistence. It prepares the bounded recovery write set,
+/// appends the recovery/public batch to the supplied journal, applies the same
+/// delta, and only then publishes the public events and transient effects.
+/// The legacy frame remains available while callers migrate their journal
+/// wiring to this explicit runtime-owned path.
+pub fn run_durable_runtime_tick<J, F>(
+    node: &mut SimulationNode,
+    journal: &mut J,
+    raft: &RaftActorHandle,
+    committed_rx: &mut mpsc::UnboundedReceiver<Vec<u8>>,
+    lock_commands: &[dawn_core::LockOnCommand],
+    context: DurableRuntimeTickContext,
+    after_events_collected: F,
+) -> Result<RuntimeTickOutput, TickTransitionError>
+where
+    J: DurableJournal,
+    F: FnOnce(&SimulationNode, &crate::node::TickResult, &[DomainEvent]),
+{
+    apply_committed_raft_entries(node, raft, committed_rx);
+    // Command-side and committed-transit public facts belong to this same
+    // runtime output boundary. Keep them outside the prepared Tick until the
+    // journal append has succeeded so a failed append can restore the buffer.
+    let prior_events = node.drain_pending_events();
+    let (prepared, result) = match node.prepare_tick_state_transition_with_result(
+        lock_commands,
+        context.transition_id,
+        context.owner_epoch,
+    ) {
+        Ok(result) => result,
+        Err(error) => {
+            node.restore_pending_events(prior_events);
+            return Err(TickTransitionError::Preparation(error));
+        }
+    };
+    let delta = match &prepared.recovery_delta {
+        crate::transition::SectorRecoveryDelta::Tick(delta) => delta.clone(),
+        crate::transition::SectorRecoveryDelta::Stop(_) => {
+            unreachable!("full runtime Tick preparation produces a Tick delta")
+        }
+    };
+    if let Err(error) = crate::transition_journal::append_prepared_transition(
+        journal,
+        &prepared,
+        context.durability,
+    ) {
+        node.restore_pending_events(prior_events);
+        return Err(TickTransitionError::Durable(error));
+    }
+    node.apply_tick_transition(delta, prepared.context)
+        .map_err(TickTransitionError::Validation)?;
+    node.observe_committed_events(&prepared.public_events);
+    let mut events = prior_events;
+    events.extend(node.drain_pending_events());
+    events.extend(prepared.public_events);
+
+    after_events_collected(node, &result, &events);
+    raft.tick();
+
+    let pending_auto_jumps = node
+        .drain_pending_auto_jumps()
+        .into_iter()
+        .filter_map(|(ship_id, gate_id)| {
+            propose_auto_jump(node, raft, ship_id, gate_id).map(|_| (ship_id, gate_id))
+        })
+        .collect();
+    let completed_warps = node.drain_completed_warps();
+
+    Ok(RuntimeTickOutput {
+        tick_result: result,
+        events,
+        pending_auto_jumps,
+        completed_warps,
+    })
+}
+
+pub fn propose_jump(
+    node: &mut SimulationNode,
     raft: &RaftActorHandle,
     ship_id: ShipId,
     gate_id: JumpGateId,
@@ -208,8 +386,8 @@ pub fn propose_jump<S: EventStore>(
     outcome
 }
 
-pub fn propose_auto_jump<S: EventStore>(
-    node: &mut SimulationNode<S>,
+pub fn propose_auto_jump(
+    node: &mut SimulationNode,
     raft: &RaftActorHandle,
     ship_id: ShipId,
     gate_id: JumpGateId,

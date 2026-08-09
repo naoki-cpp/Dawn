@@ -6,7 +6,6 @@
 //! scoped handoff construction, commit, and abort cleanup.
 
 use dawn_core::{PlayerId, Position, ResumeTicket, ShipId};
-use dawn_event_store::store::EventStore;
 
 use crate::node::{HandoffPayload, MissingObserverShip, SimulationNode};
 
@@ -152,9 +151,9 @@ impl ClientAdmissionAttempt {
     /// Resume ownership is established here, not at begin, so a failed resume
     /// handshake cannot leave ownership or docked-player state behind. Fresh
     /// Ship and gameplay state are materialized here from the reserved identity.
-    pub(crate) fn commit<S: EventStore>(
+    pub(crate) fn commit(
         self,
-        node: &mut SimulationNode<S>,
+        node: &mut SimulationNode,
     ) -> Result<CommittedClientAdmission, ClientAdmissionCommitError> {
         let present = match self.origin {
             AdmissionOrigin::Fresh { spawn_position } => node.commit_reserved_fresh_admission(
@@ -198,7 +197,7 @@ impl ClientAdmissionAttempt {
     /// consumed identity and prepared row for an exact retry. A resume attempt
     /// releases only its non-authoritative Ship/Player lock. Neither path
     /// removes a committed or pre-existing Ship.
-    pub(crate) fn abort<S: EventStore>(self, node: &mut SimulationNode<S>) {
+    pub(crate) fn abort(self, node: &mut SimulationNode) {
         match self.origin {
             AdmissionOrigin::Fresh { .. } => {
                 node.abort_reserved_fresh_admission(self.ship_id);
@@ -210,7 +209,7 @@ impl ClientAdmissionAttempt {
     }
 }
 
-impl<S: EventStore> SimulationNode<S> {
+impl SimulationNode {
     /// Begin a transactional client admission and build its observer-scoped
     /// handoff payload.
     ///
@@ -403,8 +402,8 @@ mod tests {
         let ship_id = attempt.ship_id();
         assert_eq!(node.ship_count(), 0);
         assert!(matches!(
-            node.event_store().all_records(),
-            [record] if matches!(record.event, DomainEvent::ClientAdmissionIdentityReserved(_))
+            node.pending_events(),
+            [DomainEvent::ClientAdmissionIdentityReserved(_)]
         ));
 
         let committed = attempt.commit(&mut node).expect("fresh commit");
@@ -436,14 +435,14 @@ mod tests {
             0
         );
         assert!(matches!(
-            node.event_store().all_records(),
-            [record] if matches!(record.event, DomainEvent::ClientAdmissionIdentityReserved(_))
+            node.pending_events(),
+            [DomainEvent::ClientAdmissionIdentityReserved(_)]
         ));
 
         attempt.abort(&mut node);
 
         assert_eq!(node.ship_count(), 0);
-        assert_eq!(node.event_store().all_records().len(), 1);
+        assert_eq!(node.pending_events().len(), 1);
         node.set_population_cap(1);
         let retry = node
             .begin_client_admission(

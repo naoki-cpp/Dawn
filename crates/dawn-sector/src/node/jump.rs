@@ -13,7 +13,6 @@
 //! know the result; the game-rule conditions stay here.
 
 use dawn_core::{JumpGateId, SectorId, ShipId, WarpTarget};
-use dawn_event_store::store::EventStore;
 
 use super::SimulationNode;
 
@@ -35,7 +34,7 @@ pub enum JumpOutcome {
     Rejected,
 }
 
-impl<S: EventStore> SimulationNode<S> {
+impl SimulationNode {
     /// If `ship_id` has arrived within `gate_id`'s activation radius, return
     /// the destination `SectorId` so the caller can propose a Transit to Raft.
     /// Returns `None` if not yet in range — the attempt is silently dropped;

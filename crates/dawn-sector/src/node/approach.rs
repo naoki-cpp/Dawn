@@ -12,11 +12,10 @@ use dawn_ecs::{
     components::{ApproachComp, PositionComp},
     Entity,
 };
-use dawn_event_store::store::EventStore;
 
 use super::SimulationNode;
 
-impl<S: EventStore> SimulationNode<S> {
+impl SimulationNode {
     /// Begin approaching a Ship or a Jump Gate (semi-automatic piloting, ADR-0015).
     ///
     /// Attaches an `ApproachComp` so `process_approach()` re-aims thrust at the

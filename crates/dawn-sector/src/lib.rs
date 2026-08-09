@@ -1,7 +1,7 @@
 //! # dawn-sector
 //!
 //! Server-side Sector simulation: owns the authoritative `SimulationNode`
-//! (ECS world + tick loop + event log) for one Sector, plus the static
+//! (ECS world + tick loop + pending public output) for one Sector, plus the static
 //! galaxy map (star systems, jump gates, celestial bodies) and Area-of-
 //! Interest delivery used to decide what each client is sent.
 //!

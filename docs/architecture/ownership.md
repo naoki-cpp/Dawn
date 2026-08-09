@@ -138,7 +138,15 @@ The Actor model lives in `dawn-actor` (ADR-0002).
 
 ### Current baseline
 
-Today `SimulationNode<S>` still combines ECS/domain authority with EventStore/repository access in places. `SectorSimulatorActor` and production adapters call into that broad object. The derived AoI consumers use the read-only `dawn_sector::view::SectorView` boundary, while Stop and the logical Tick counter expose #272 prepare -> durable -> live-apply vertical slices. The full ECS Tick and remaining state-owner decomposition belong to later #272/#275 slices and do not require making the legacy `SimulationNode` adapter storage-independent all at once.
+Today the concrete `SimulationNode` still combines ECS/domain authority with
+the legacy Station/repository adapter in places. `SectorSimulatorActor` and
+production adapters call into that broad object, but the node no longer owns an
+`EventStore`. The derived AoI consumers use the read-only
+`dawn_sector::view::SectorView` boundary. Stop and the full Tick now expose
+#272 prepare -> durable -> live-apply APIs, including a bounded ship-level Tick
+write set; the default legacy frame and remaining state-owner decomposition
+still need migration. No new persistence authority should be added to the
+legacy adapter.
 
 ### Target boundary (#272 / #275)
 
@@ -153,7 +161,7 @@ runtime receives input
     -> runtime publishes replication/client/effect outputs
 ```
 
-Repositories, SQL connections, journal handles, sockets, and replication transports must not become hidden fields of the final pure engine merely to preserve the old `SimulationNode<S>` shape. `SectorView` is read-only and exposes only committed state needed by AoI delivery; it is not a second mutation or persistence authority.
+Repositories, SQL connections, journal handles, sockets, and replication transports must not become hidden fields of the final pure engine merely to preserve the old generic node shape. `SectorView` is read-only and exposes only committed state needed by AoI delivery; it is not a second mutation or persistence authority.
 
 ### Inter-Actor data-sharing rules
 

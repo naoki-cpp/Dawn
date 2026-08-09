@@ -16,7 +16,6 @@ use dawn_core::events::ModuleDeactivated;
 use dawn_core::{DomainEvent, ShipId, Tick};
 use dawn_ecs::components::{FittingComp, ShipStatsComp};
 use dawn_ecs::Entity;
-use dawn_event_store::store::EventStore;
 
 use super::SimulationNode;
 
@@ -48,7 +47,7 @@ fn effective_range_from_stats(
     }
 }
 
-impl<S: EventStore> SimulationNode<S> {
+impl SimulationNode {
     /// Effective range for a targeted `ModuleKind`, read from `entity`'s
     /// fitted `ShipStatsComp`. `None` for kinds that are not range-gated
     /// (ADR-0035/0036).

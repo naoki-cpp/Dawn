@@ -1,18 +1,23 @@
+#[cfg(test)]
 use dawn_core::{DomainEvent, Velocity};
+#[cfg(test)]
 use dawn_ecs::components::{
     FittingComp, HullComp, LockComp, PositionComp, TackledComp, VelocityComp,
 };
-use dawn_event_store::store::EventStore;
 
-use super::{station_operation_execution::StationRuntimeState, SimulationNode};
+#[cfg(test)]
+use super::station_operation_execution::StationRuntimeState;
+use super::SimulationNode;
 
-impl<S: EventStore> SimulationNode<S> {
+impl SimulationNode {
     /// Apply a single domain event to the ECS World without appending it.
-    /// Used during `restore_from` to replay post-snapshot events.
-    pub(super) fn apply_event(&mut self, event: &DomainEvent) {
+    /// Used only by the test-only legacy public-event replay fixture.
+    #[cfg(test)]
+    pub(crate) fn apply_event(&mut self, event: &DomainEvent) {
+        self.transit_journal.observe(event);
         // Transit replay policy belongs to the same deep module as the live
-        // Request/Commit/Ack and retry policy. This generic EventStore adapter
-        // only executes the directive using node-private ECS mechanisms.
+        // Request/Commit/Ack and retry policy. This test-only public-event
+        // adapter only executes the directive using node-private ECS mechanisms.
         if let Some(directive) = crate::transit::pipeline::replay_directive(event) {
             match directive {
                 crate::transit::pipeline::ReplayDirective::Requested(event) => {

@@ -11,11 +11,10 @@
 
 use dawn_core::{JumpGateId, Position, ShipId, WarpTarget};
 use dawn_ecs::components::PositionComp;
-use dawn_event_store::store::EventStore;
 
 use super::SimulationNode;
 
-impl<S: EventStore> SimulationNode<S> {
+impl SimulationNode {
     /// Whether a `JumpCommand` for `ship_id` via `gate_id` would currently be
     /// accepted: the Ship exists, is not already in transit, the gate
     /// originates in this Sector, and the Ship is within its `activation_radius`.

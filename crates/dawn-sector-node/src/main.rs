@@ -23,7 +23,7 @@ mod runtime;
 use dawn_actor::ws_server;
 use dawn_consensus::{RaftActor, RaftActorHandle, RaftActorMessage, RaftState, TcpRaftTransport};
 use dawn_core::{NodeId, SectorBounds, SectorId};
-use dawn_event_store::FileEventStore;
+use dawn_event_store::{EventStore, FileEventStore};
 use dawn_replication::{
     CatchUpConfig, CatchUpEvent, CatchUpManager, CatchUpStep, CatchUpTransport, ReplicaSnapshot,
     ReplicationTransport, TcpReplicationTransport,
@@ -78,7 +78,7 @@ async fn main() -> anyhow::Result<()> {
 
     // ── SimulationNode ────────────────────────────────────────────────────────
 
-    let (mut node, is_fresh) = build_node(&cfg, node_id, sector_id, bounds);
+    let (mut node, mut event_store, is_fresh) = build_node(&cfg, node_id, sector_id, bounds);
     if is_fresh {
         node.spawn_npc_frigates(cfg.npc_ships);
     }
@@ -190,7 +190,9 @@ async fn main() -> anyhow::Result<()> {
     // Raft warm-up: tick until a leader is elected (≤ 20 ticks election timeout).
     println!("[Node] Raft warm-up (30 ticks)...");
     for _ in 0..30 {
-        let _ = transit::run_runtime_tick(&mut node, &raft, &mut committed_rx, &[], |_, _, _| {});
+        let output =
+            transit::run_runtime_tick(&mut node, &raft, &mut committed_rx, &[], |_, _, _| {});
+        event_store.append_batch(output.events);
     }
     println!("[Node] warm-up done. Waiting for players...");
 
@@ -205,7 +207,7 @@ async fn main() -> anyhow::Result<()> {
         AOI_CELL_SIZE,
         peer_ws,
         repl_transport.clone(),
-        node.event_store(),
+        &event_store,
     );
     let mut checkpoints = CheckpointScheduler::new(CheckpointConfig {
         interval_ticks: cfg.checkpoint_interval_ticks,
@@ -238,20 +240,19 @@ async fn main() -> anyhow::Result<()> {
             let Ok(message) = catch_up_rx.try_recv() else {
                 break;
             };
-            let step =
-                catch_up.handle_message(message, node.event_store(), || replica_snapshot.clone());
+            let step = catch_up.handle_message(message, &event_store, || replica_snapshot.clone());
             emit_catch_up_step(&repl_transport, step);
         }
         emit_catch_up_step(&repl_transport, catch_up.tick());
 
-        runtime.run_frame(&mut node, &raft, &mut committed_rx);
+        runtime.run_frame(&mut node, &raft, &mut committed_rx, &mut event_store);
 
         // Snapshot + compact on a fixed logical-tick cadence (ADR-0017 §5-C).
         // A checkpoint failure (e.g. disk full) is logged and skipped rather
         // than killing the live server -- the hot log keeps appending
         // normally on the next tick either way, and the next scheduled
         // checkpoint will retry.
-        match checkpoints.maybe_checkpoint(&mut node) {
+        match checkpoints.maybe_checkpoint(&mut node, &mut event_store) {
             Ok(Some(snapshot)) => {
                 println!(
                     "[Node] checkpoint at tick {} (log_index={})",
@@ -389,7 +390,7 @@ fn build_node(
     node_id: NodeId,
     sector_id: SectorId,
     bounds: SectorBounds,
-) -> (SimulationNode<FileEventStore>, bool) {
+) -> (SimulationNode, FileEventStore, bool) {
     let catalog = Arc::new(
         GameDataCatalog::load_runtime()
             .unwrap_or_else(|error| panic!("failed to load required game-data catalog: {error}")),
@@ -427,12 +428,7 @@ fn build_node(
                 snapshot.log_index
             );
             (
-                SimulationNode::restore_from(
-                    store,
-                    &snapshot,
-                    Arc::clone(&galaxy),
-                    Arc::clone(&catalog),
-                ),
+                SimulationNode::restore_from(&snapshot, Arc::clone(&galaxy), Arc::clone(&catalog)),
                 false,
             )
         }
@@ -441,13 +437,12 @@ fn build_node(
                 "[Node] no snapshot at '{}', starting fresh",
                 cfg.snapshot_path
             );
-            let node = SimulationNode::with_store(
+            let node = SimulationNode::new(
                 node_id,
                 sector_id,
                 bounds,
                 Arc::clone(&galaxy),
                 Arc::clone(&catalog),
-                store,
             );
             (node, true)
         }
@@ -468,5 +463,5 @@ fn build_node(
                 cfg.station_inventory_db_path
             )
         });
-    (node, is_fresh)
+    (node, store, is_fresh)
 }

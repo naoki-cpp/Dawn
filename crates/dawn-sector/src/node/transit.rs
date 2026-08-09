@@ -6,11 +6,13 @@
 //! source, materializing and re-anchoring the destination, finalizing the
 //! source after Ack, and applying the same facts during replay.
 //!
-//! The implementation remains an `impl` on `SimulationNode` because the ECS,
-//! ownership maps, and EventStore are private node state. The module boundary
-//! is nevertheless intentional: callers use Transit lifecycle operations and
-//! do not reach into individual component mutations.
+//! The implementation remains an `impl` on `SimulationNode` because the ECS
+//! and ownership maps are private node state. Public facts are emitted through
+//! the node's output boundary; journal persistence is owned by the runtime.
+//! Callers use Transit lifecycle operations and do not reach into individual
+//! component mutations.
 
+use crate::persistence::CompletedIncomingTransit;
 use dawn_core::{
     commands::TransitCommand,
     events::{JumpGateUsed, SectorTransitCompleted, SectorTransitRequested, StarSystemChanged},
@@ -25,9 +27,6 @@ use dawn_ecs::{
     },
     TransitState,
 };
-use dawn_event_store::store::EventStore;
-
-use crate::persistence::CompletedIncomingTransit;
 
 use super::SimulationNode;
 
@@ -43,10 +42,11 @@ pub(crate) struct TransitCommitData {
 const TRANSIT_RETRY_INITIAL_TICKS: u64 = 10;
 const TRANSIT_RETRY_MAX_TICKS: u64 = 160;
 
-/// Process-local retry scheduling. The durable request and route live in the
-/// EventStore; this component only prevents an unresolved request from being
-/// proposed every Tick. It intentionally is not snapshotted, so restart causes
-/// one immediate retry and then resumes bounded exponential backoff.
+/// Process-local retry scheduling. The durable request and route live at the
+/// runtime journal boundary; this component only prevents an unresolved
+/// request from being proposed every Tick. It intentionally is not snapshotted,
+/// so restart causes one immediate retry and then resumes bounded exponential
+/// backoff.
 #[derive(Debug, Clone, Copy)]
 struct TransitRetryComp {
     request_tick: Tick,
@@ -54,7 +54,7 @@ struct TransitRetryComp {
     backoff_ticks: u64,
 }
 
-impl<S: EventStore> SimulationNode<S> {
+impl SimulationNode {
     pub(crate) fn has_completed_incoming_transit(
         &self,
         ship_id: ShipId,
@@ -142,7 +142,7 @@ impl<S: EventStore> SimulationNode<S> {
         entry_pos: dawn_core::AbsolutePosition,
     ) -> Result<Tick, DawnError> {
         let (request_tick, event) = self.begin_transit_with_route(cmd, gate_id, entry_pos)?;
-        self.event_store.append(event);
+        self.emit_event(event);
         Ok(request_tick)
     }
 
@@ -219,7 +219,7 @@ impl<S: EventStore> SimulationNode<S> {
             }
             return None;
         };
-        self.event_store.append(event);
+        self.emit_event(event);
         Some(TransitCommitData {
             handoff: Box::new(handoff),
             entry_pos,
@@ -246,7 +246,7 @@ impl<S: EventStore> SimulationNode<S> {
         entry_pos: dawn_core::AbsolutePosition,
     ) {
         for event in self.jump_events(ship_id, gate_id, from, to, entry_pos) {
-            self.event_store.append(event);
+            self.emit_event(event);
         }
     }
 
@@ -414,7 +414,7 @@ impl<S: EventStore> SimulationNode<S> {
         else {
             return;
         };
-        self.event_store.append(event);
+        self.emit_event(event);
     }
 
     fn complete_outgoing_state(
@@ -455,7 +455,7 @@ impl<S: EventStore> SimulationNode<S> {
             request_tick,
             self.current_tick,
         ) {
-            self.event_store.append(event);
+            self.emit_event(event);
         }
     }
 
@@ -512,8 +512,7 @@ impl<S: EventStore> SimulationNode<S> {
                         player_id,
                         resume_ticket,
                         handoff.pending_resume_ticket,
-                    )
-                    .expect("transit owner binding transaction");
+                    );
             }
             debug_assert!(self.adopt_player_ship(handoff.ship_id, player_id));
         }
@@ -578,6 +577,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// Transit was requested but not yet completed/aborted before a restart
     /// comes back marked `InTransit` instead of silently reverting to
     /// ordinary flight -- matching what the live node had.
+    #[cfg(test)]
     pub(super) fn replay_sector_transit_requested(
         &mut self,
         e: &dawn_core::events::SectorTransitRequested,
@@ -598,6 +598,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// `InTransit` marker. `SectorTransitAborted` currently has no
     /// `request_tick`, so a same-route newer attempt cannot be distinguished;
     /// emitters must not append an Abort after superseding that route.
+    #[cfg(test)]
     pub(super) fn replay_sector_transit_aborted(
         &mut self,
         e: &dawn_core::events::SectorTransitAborted,
@@ -619,6 +620,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// The destination uses the exact same absolute-arrival materialization
     /// seam as live Commit handling, but discards the events that are
     /// already present in the replayed log.
+    #[cfg(test)]
     pub(super) fn replay_sector_transit_completed(
         &mut self,
         e: &dawn_core::events::SectorTransitCompleted,
@@ -652,8 +654,7 @@ mod tests {
     use super::*;
     use crate::persistence::StateSnapshot;
     use dawn_core::{NodeId, SectorBounds, Tick, Velocity};
-    use dawn_event_store::FileEventStore;
-    use dawn_event_store::InMemoryEventStore;
+    use dawn_event_store::{EventStore, FileEventStore, InMemoryEventStore};
 
     fn mem_node() -> SimulationNode {
         SimulationNode::new_test(
@@ -681,8 +682,8 @@ mod tests {
             TransitState::InTransit { to: SectorId(1) }
         );
 
-        let last = node.event_store().all_records().last().unwrap();
-        match &last.event {
+        let last = node.pending_events().last().unwrap();
+        match last {
             DomainEvent::SectorTransitRequested(e) => {
                 assert_eq!(e.ship_id, ship_id);
                 assert_eq!(e.from, node.sector_id());
@@ -707,10 +708,9 @@ mod tests {
         assert_eq!(node.total_event_count(), event_count);
         assert!(node.can_propose_transit(ship_id));
         assert!(!node
-            .event_store()
-            .all_records()
+            .pending_events()
             .iter()
-            .any(|record| { matches!(record.event, DomainEvent::SectorTransitRequested(_)) }));
+            .any(|event| matches!(event, DomainEvent::SectorTransitRequested(_))));
     }
 
     #[test]
@@ -775,10 +775,9 @@ mod tests {
         );
         assert!(
             !node
-                .event_store()
-                .all_records()
+                .pending_events()
                 .iter()
-                .any(|r| matches!(r.event, DomainEvent::SectorTransitCompleted(_))),
+                .any(|event| matches!(event, DomainEvent::SectorTransitCompleted(_))),
             "export alone must not append SectorTransitCompleted"
         );
     }
@@ -807,8 +806,8 @@ mod tests {
         );
         assert_eq!(node.ship_count(), 0);
 
-        let last = node.event_store().all_records().last().unwrap();
-        match &last.event {
+        let last = node.pending_events().last().unwrap();
+        match last {
             DomainEvent::SectorTransitCompleted(e) => {
                 assert_eq!(e.handoff.ship_id, ship_id);
                 assert_eq!(e.from, node.sector_id());
@@ -835,10 +834,9 @@ mod tests {
         node.complete_outgoing_transit(snapshot.ship_id, SectorId(1), entry_pos, Tick::ZERO);
 
         let completed_count = node
-            .event_store()
-            .all_records()
+            .pending_events()
             .iter()
-            .filter(|r| matches!(r.event, DomainEvent::SectorTransitCompleted(_)))
+            .filter(|event| matches!(event, DomainEvent::SectorTransitCompleted(_)))
             .count();
         assert_eq!(
             completed_count, 1,
@@ -928,8 +926,8 @@ mod tests {
         assert_eq!(to_node.ship_count(), 1);
         assert_eq!(to_node.get_ship_position(ship_id), Some(entry_pos));
 
-        let last = to_node.event_store().all_records().last().unwrap();
-        match &last.event {
+        let last = to_node.pending_events().last().unwrap();
+        match last {
             DomainEvent::SectorTransitCompleted(e) => {
                 assert_eq!(e.handoff.ship_id, ship_id);
                 assert_eq!(e.from, SectorId(0));
@@ -1047,10 +1045,10 @@ mod tests {
             to_node.can_propose_jump(ship_id, return_gate.id),
             "the consolidated pair must reproduce the same anchor-fix as the primitives"
         );
-        let records = to_node.event_store().all_records();
+        let records = to_node.pending_events();
         let jump_used = records
             .iter()
-            .find_map(|r| match &r.event {
+            .find_map(|event| match event {
                 DomainEvent::JumpGateUsed(e) => Some(e),
                 _ => None,
             })
@@ -1060,7 +1058,7 @@ mod tests {
         assert!(
             records
                 .iter()
-                .any(|r| matches!(&r.event, DomainEvent::StarSystemChanged(_))),
+                .any(|event| matches!(event, DomainEvent::StarSystemChanged(_))),
             "Sector 0 (Alpha) and Sector 1 (Beta) are different Star Systems, \
              so StarSystemChanged must also be appended"
         );
@@ -1611,8 +1609,8 @@ mod tests {
         // Simulate a restart of both Sectors: snapshot + tail-log replay,
         // exactly as `restore_from` is used in production recovery.
         let mut from_store2 = InMemoryEventStore::new();
-        for rec in from_node.event_store().all_records() {
-            from_store2.append(rec.event.clone());
+        for event in from_node.pending_events() {
+            from_store2.append(event.clone());
         }
         let restored_from = SimulationNode::restore_from_test(
             from_store2,
@@ -1623,8 +1621,8 @@ mod tests {
         );
 
         let mut to_store2 = InMemoryEventStore::new();
-        for rec in to_node.event_store().all_records() {
-            to_store2.append(rec.event.clone());
+        for event in to_node.pending_events() {
+            to_store2.append(event.clone());
         }
         let restored_to = SimulationNode::restore_from_test(
             to_store2,
@@ -1724,8 +1722,8 @@ mod tests {
 
         // Simulate a whole-cluster restart at exactly this point.
         let mut store2 = InMemoryEventStore::new();
-        for rec in from_node.event_store().all_records() {
-            store2.append(rec.event.clone());
+        for event in from_node.pending_events() {
+            store2.append(event.clone());
         }
         let restored = SimulationNode::restore_from_test(
             store2,

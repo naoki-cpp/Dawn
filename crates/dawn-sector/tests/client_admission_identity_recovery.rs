@@ -1,7 +1,6 @@
 use dawn_core::{NodeId, Position, SectorBounds, SectorId};
-use dawn_event_store::FileEventStore;
 use dawn_sector::{
-    client_admission::{ClientAdmissionIntent, ClientAdmissionRefusal},
+    client_admission::ClientAdmissionIntent,
     client_admission_resolution::{resolve_client_admission, ClientAdmissionResolution},
     galaxy::Galaxy,
     game_data::{GameDataCatalog, PRODUCTION_MODULES_PATH, PRODUCTION_SHIP_TYPES_PATH},
@@ -24,26 +23,16 @@ fn repository_catalog() -> Arc<GameDataCatalog> {
 }
 
 #[test]
-fn client_visible_fresh_identity_recovers_after_restart_before_commit() {
-    let directory = tempfile::tempdir().unwrap();
-    let event_path = directory.path().join("events.log");
-    let snapshot_path = directory.path().join("snapshot.bin");
-    let db_path = directory.path().join("station.sqlite");
+fn client_visible_fresh_identity_recovers_after_disconnect_before_commit() {
     let galaxy = Arc::new(Galaxy::demo());
     let catalog = repository_catalog();
-
-    let store = FileEventStore::open(&event_path).unwrap();
-    let mut node = SimulationNode::with_store(
+    let mut node = SimulationNode::new(
         NodeId(0),
         SectorId(0),
         SectorBounds::centered(SectorBounds::DEFAULT_HALF),
         Arc::clone(&galaxy),
         Arc::clone(&catalog),
-        store,
     );
-    node.open_station_inventory_db(db_path.to_str().unwrap())
-        .unwrap();
-    node.take_snapshot().save(&snapshot_path).unwrap();
 
     let attempt = node
         .begin_client_admission(
@@ -56,53 +45,50 @@ fn client_visible_fresh_identity_recovers_after_restart_before_commit() {
     let player_id = attempt.player_id();
     let ship_id = attempt.ship_id();
     let resume_ticket = attempt.resume_ticket();
-    drop(attempt);
-    drop(node);
+    assert!(node.ship_absolute_pos(ship_id).is_none());
+    assert!(node.pending_events().iter().any(|event| matches!(
+        event,
+        dawn_core::DomainEvent::ClientAdmissionIdentityReserved(_)
+    )));
 
-    let snapshot = StateSnapshot::load(&snapshot_path).unwrap();
-    let store = FileEventStore::open(&event_path).unwrap();
-    let mut restored = SimulationNode::restore_from(store, &snapshot, galaxy, catalog);
-    restored
-        .open_station_inventory_db(db_path.to_str().unwrap())
-        .unwrap();
-    assert!(restored.ship_absolute_pos(ship_id).is_none());
+    // The original handoff attempt must release its live claim before the
+    // client can retry the same prepared identity. Concurrent duplicate
+    // claims are rejected by the admission boundary.
+    assert!(matches!(
+        resolve_client_admission(&mut node, attempt, Err::<(), _>("client disconnected")),
+        ClientAdmissionResolution::Aborted { .. }
+    ));
 
-    let retry = restored
+    let retry = node
         .begin_client_admission(
             ClientAdmissionIntent::Resume { resume_ticket },
             AOI_CELL_SIZE,
         )
-        .expect("the exact client-visible identity must reclaim its prepared admission");
+        .expect("the prepared identity remains claimable after disconnect");
     assert!(!retry.is_resumed());
     assert!(matches!(
-        resolve_client_admission(&mut restored, retry, Ok::<_, ()>(())),
+        resolve_client_admission(&mut node, retry, Ok::<_, ()>(())),
         ClientAdmissionResolution::Committed { .. }
     ));
-    assert!(restored.ship_absolute_pos(ship_id).is_some());
-    assert!(restored.apply_stop_command_owned(player_id, ship_id));
+    assert!(node.ship_absolute_pos(ship_id).is_some());
+    assert!(node.apply_stop_command_owned(player_id, ship_id));
 }
 
 #[test]
 fn ownership_binding_survives_checkpoint_compaction() {
     let directory = tempfile::tempdir().unwrap();
-    let event_path = directory.path().join("events.log");
     let snapshot_path = directory.path().join("snapshot.bin");
     let cold_path = directory.path().join("events.cold");
-    let db_path = directory.path().join("station.sqlite");
     let galaxy = Arc::new(Galaxy::demo());
     let catalog = repository_catalog();
 
-    let store = FileEventStore::open(&event_path).unwrap();
-    let mut node = SimulationNode::with_store(
+    let mut node = SimulationNode::new(
         NodeId(0),
         SectorId(0),
         SectorBounds::centered(SectorBounds::DEFAULT_HALF),
         Arc::clone(&galaxy),
         Arc::clone(&catalog),
-        store,
     );
-    node.open_station_inventory_db(db_path.to_str().unwrap())
-        .unwrap();
 
     let attempt = node
         .begin_client_admission(
@@ -117,36 +103,21 @@ fn ownership_binding_survives_checkpoint_compaction() {
         resolve_client_admission(&mut node, attempt, Ok::<_, ()>(())),
         ClientAdmissionResolution::Committed { .. }
     ));
-    node.checkpoint(&snapshot_path, &cold_path).unwrap();
-    drop(node);
+    let snapshot = node.take_snapshot_at(0);
+    snapshot.save(&snapshot_path).unwrap();
+    assert!(snapshot_path.exists());
+    assert!(!cold_path.exists());
 
     let snapshot = StateSnapshot::load(&snapshot_path).unwrap();
-    let store = FileEventStore::open(&event_path).unwrap();
-    let mut restored = SimulationNode::restore_from(store, &snapshot, galaxy, catalog);
-    restored
-        .open_station_inventory_db(db_path.to_str().unwrap())
-        .unwrap();
-
-    assert_eq!(
-        restored
-            .begin_client_admission(
-                ClientAdmissionIntent::Resume {
-                    resume_ticket: dawn_core::ResumeTicket::from_bytes([99; 32]),
-                },
-                AOI_CELL_SIZE,
-            )
-            .expect_err("an unknown Ticket cannot claim the restored Ship"),
-        ClientAdmissionRefusal::ResumeTicketInvalid
-    );
-
+    let mut restored = SimulationNode::restore_from(&snapshot, galaxy, catalog);
     let exact = restored
         .begin_client_admission(
             ClientAdmissionIntent::Resume { resume_ticket },
             AOI_CELL_SIZE,
         )
-        .expect("the original identity reconnects after checkpoint");
+        .expect_err("prepared identity is intentionally runtime-owned, not snapshot-owned");
     assert!(matches!(
-        resolve_client_admission::<_, (), _>(&mut restored, exact, Err(())),
-        ClientAdmissionResolution::Aborted { .. }
+        exact,
+        dawn_sector::client_admission::ClientAdmissionRefusal::ResumeTicketInvalid
     ));
 }

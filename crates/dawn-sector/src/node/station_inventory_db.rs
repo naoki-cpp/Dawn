@@ -75,6 +75,71 @@ pub(super) struct StationInventoryDb {
     conn: Connection,
 }
 
+/// Runtime-owned persistence port used by the current admission and Station
+/// adapters. `SimulationNode` depends on this narrow behavior boundary rather
+/// than on the SQLite connection or its catch-all schema. #277 replaces this
+/// port implementation with explicit admission, identity, and Station
+/// repositories.
+pub(super) trait StationRepository: Send {
+    fn reserve_client_admission(
+        &mut self,
+        ship_id: ShipId,
+        player_id: PlayerId,
+        spawn_position: Position,
+        resume_ticket: ResumeTicket,
+    );
+    fn prepared_client_admission(&self, ship_id: ShipId) -> Option<PreparedClientAdmission>;
+    fn prepared_client_admission_by_ticket(
+        &self,
+        resume_ticket: ResumeTicket,
+    ) -> Option<PreparedClientAdmission>;
+    fn client_owner(&self, ship_id: ShipId) -> Option<PlayerId>;
+    fn client_ownership_by_ticket(&self, resume_ticket: ResumeTicket)
+        -> Option<(PlayerId, ShipId)>;
+    fn client_resume_tickets(
+        &self,
+        ship_id: ShipId,
+    ) -> Option<(ResumeTicket, Option<ResumeTicket>)>;
+    fn record_client_ownership(
+        &mut self,
+        ship_id: ShipId,
+        player_id: PlayerId,
+        resume_ticket: ResumeTicket,
+    );
+    fn record_client_ownership_with_pending(
+        &mut self,
+        ship_id: ShipId,
+        player_id: PlayerId,
+        resume_ticket: ResumeTicket,
+        pending_resume_ticket: Option<ResumeTicket>,
+    );
+    fn stage_client_resume_ticket(
+        &mut self,
+        ship_id: ShipId,
+        player_id: PlayerId,
+        presented_ticket: ResumeTicket,
+        proposed_next_ticket: ResumeTicket,
+    ) -> Option<ResumeTicket>;
+    fn get_all(&self, player_id: PlayerId, station_id: StationId) -> BTreeMap<ItemId, u64>;
+    fn credit(&mut self, player_id: PlayerId, station_id: StationId, item_id: ItemId, count: u64);
+    fn ensure_client_admission_grant(
+        &mut self,
+        ship_id: ShipId,
+        player_id: PlayerId,
+        resume_ticket: ResumeTicket,
+        station_id: StationId,
+        item_id: ItemId,
+        count: u64,
+    );
+    fn try_debit(
+        &mut self,
+        player_id: PlayerId,
+        station_id: StationId,
+        item_id: ItemId,
+        count: u64,
+    ) -> Result<(), StationOperationRejection>;
+}
+
 impl StationInventoryDb {
     /// Open (creating if absent) the on-disk database at `path`.
     pub(super) fn open(path: &str) -> rusqlite::Result<Self> {
@@ -83,7 +148,7 @@ impl StationInventoryDb {
     }
 
     /// A private, non-persistent database -- the default for `SimulationNode::new`/
-    /// `with_store`/`restore_from` so tests and demos never touch disk unless
+    /// `restore_from` so tests and demos never touch disk unless
     /// a caller explicitly opts in via `open`.
     pub(super) fn open_in_memory() -> rusqlite::Result<Self> {
         let conn = Connection::open_in_memory()?;
@@ -622,6 +687,149 @@ impl StationInventoryDb {
     // It was unreachable: postcard reads struct fields positionally, so a
     // snapshot written before the field existed fails to load outright rather
     // than arriving here with a populated map (ADR-0017 format compatibility).
+}
+
+pub(super) fn open_repository(path: &str) -> rusqlite::Result<Box<dyn StationRepository>> {
+    Ok(Box::new(StationInventoryDb::open(path)?))
+}
+
+pub(super) fn open_in_memory_repository() -> rusqlite::Result<Box<dyn StationRepository>> {
+    Ok(Box::new(StationInventoryDb::open_in_memory()?))
+}
+
+impl StationRepository for StationInventoryDb {
+    fn reserve_client_admission(
+        &mut self,
+        ship_id: ShipId,
+        player_id: PlayerId,
+        spawn_position: Position,
+        resume_ticket: ResumeTicket,
+    ) {
+        StationInventoryDb::reserve_client_admission(
+            self,
+            ship_id,
+            player_id,
+            spawn_position,
+            resume_ticket,
+        )
+        .expect("client admission preparation transaction");
+    }
+
+    fn prepared_client_admission(&self, ship_id: ShipId) -> Option<PreparedClientAdmission> {
+        StationInventoryDb::prepared_client_admission(self, ship_id)
+            .expect("client admission prepared query")
+    }
+
+    fn prepared_client_admission_by_ticket(
+        &self,
+        resume_ticket: ResumeTicket,
+    ) -> Option<PreparedClientAdmission> {
+        StationInventoryDb::prepared_client_admission_by_ticket(self, resume_ticket)
+            .expect("client admission prepared query")
+    }
+
+    fn client_owner(&self, ship_id: ShipId) -> Option<PlayerId> {
+        StationInventoryDb::client_owner(self, ship_id).expect("client ownership query")
+    }
+
+    fn client_ownership_by_ticket(
+        &self,
+        resume_ticket: ResumeTicket,
+    ) -> Option<(PlayerId, ShipId)> {
+        StationInventoryDb::client_ownership_by_ticket(self, resume_ticket)
+            .expect("client ownership query")
+    }
+
+    fn client_resume_tickets(
+        &self,
+        ship_id: ShipId,
+    ) -> Option<(ResumeTicket, Option<ResumeTicket>)> {
+        StationInventoryDb::client_resume_tickets(self, ship_id)
+            .expect("client ownership tickets query")
+    }
+
+    fn record_client_ownership(
+        &mut self,
+        ship_id: ShipId,
+        player_id: PlayerId,
+        resume_ticket: ResumeTicket,
+    ) {
+        StationInventoryDb::record_client_ownership(self, ship_id, player_id, resume_ticket)
+            .expect("client ownership upsert");
+    }
+
+    fn record_client_ownership_with_pending(
+        &mut self,
+        ship_id: ShipId,
+        player_id: PlayerId,
+        resume_ticket: ResumeTicket,
+        pending_resume_ticket: Option<ResumeTicket>,
+    ) {
+        StationInventoryDb::record_client_ownership_with_pending(
+            self,
+            ship_id,
+            player_id,
+            resume_ticket,
+            pending_resume_ticket,
+        )
+        .expect("client ownership upsert");
+    }
+
+    fn stage_client_resume_ticket(
+        &mut self,
+        ship_id: ShipId,
+        player_id: PlayerId,
+        presented_ticket: ResumeTicket,
+        proposed_next_ticket: ResumeTicket,
+    ) -> Option<ResumeTicket> {
+        StationInventoryDb::stage_client_resume_ticket(
+            self,
+            ship_id,
+            player_id,
+            presented_ticket,
+            proposed_next_ticket,
+        )
+        .expect("client ownership ticket staging")
+    }
+
+    fn get_all(&self, player_id: PlayerId, station_id: StationId) -> BTreeMap<ItemId, u64> {
+        StationInventoryDb::get_all(self, player_id, station_id)
+    }
+
+    fn credit(&mut self, player_id: PlayerId, station_id: StationId, item_id: ItemId, count: u64) {
+        StationInventoryDb::credit(self, player_id, station_id, item_id, count);
+    }
+
+    fn ensure_client_admission_grant(
+        &mut self,
+        ship_id: ShipId,
+        player_id: PlayerId,
+        resume_ticket: ResumeTicket,
+        station_id: StationId,
+        item_id: ItemId,
+        count: u64,
+    ) {
+        StationInventoryDb::ensure_client_admission_grant(
+            self,
+            ship_id,
+            player_id,
+            resume_ticket,
+            station_id,
+            item_id,
+            count,
+        )
+        .expect("client admission Station grant transaction");
+    }
+
+    fn try_debit(
+        &mut self,
+        player_id: PlayerId,
+        station_id: StationId,
+        item_id: ItemId,
+        count: u64,
+    ) -> Result<(), StationOperationRejection> {
+        StationInventoryDb::try_debit(self, player_id, station_id, item_id, count)
+    }
 }
 
 #[cfg(test)]

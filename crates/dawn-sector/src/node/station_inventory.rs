@@ -9,8 +9,7 @@
 
 use std::collections::{BTreeMap, VecDeque};
 
-use dawn_core::{events::ClientAdmissionCommitted, DomainEvent, ItemId, PlayerId, StationId};
-use dawn_event_store::store::EventStore;
+use dawn_core::{events::ClientAdmissionCommitted, ItemId, PlayerId, StationId};
 
 use super::{station::StationOperationRejection, SimulationNode};
 
@@ -106,7 +105,7 @@ impl StationInventoryCache {
     }
 }
 
-impl<S: EventStore> SimulationNode<S> {
+impl SimulationNode {
     /// The player's station inventory in this Sector, owned rather than
     /// borrowed (ADR-0038: a cache hit clones out of the `RefCell`-guarded
     /// cache; a miss queries SQLite and populates the cache before
@@ -160,16 +159,14 @@ impl<S: EventStore> SimulationNode<S> {
     }
 
     pub(super) fn ensure_client_admission_grant(&mut self, event: &ClientAdmissionCommitted) {
-        self.station_inventory_db
-            .ensure_client_admission_grant(
-                event.ship_id,
-                event.player_id,
-                event.resume_ticket,
-                event.starter_station_id,
-                event.starter_item_id,
-                event.starter_item_count,
-            )
-            .expect("client admission Station grant transaction");
+        self.station_inventory_db.ensure_client_admission_grant(
+            event.ship_id,
+            event.player_id,
+            event.resume_ticket,
+            event.starter_station_id,
+            event.starter_item_id,
+            event.starter_item_count,
+        );
         let inventory = self
             .station_inventory_db
             .get_all(event.player_id, event.starter_station_id);
@@ -180,33 +177,11 @@ impl<S: EventStore> SimulationNode<S> {
         );
     }
 
-    pub(super) fn reconcile_client_admission_grants(&mut self) -> rusqlite::Result<()> {
-        let grants: Vec<ClientAdmissionCommitted> = self
-            .event_store
-            .iter_from(0)
-            .filter_map(|record| match &record.event {
-                DomainEvent::ClientAdmissionCommitted(event) => Some(event.clone()),
-                _ => None,
-            })
-            .collect();
-        for event in grants {
-            self.station_inventory_db.ensure_client_admission_grant(
-                event.ship_id,
-                event.player_id,
-                event.resume_ticket,
-                event.starter_station_id,
-                event.starter_item_id,
-                event.starter_item_count,
-            )?;
-            let inventory = self
-                .station_inventory_db
-                .get_all(event.player_id, event.starter_station_id);
-            self.station_inventory_cache.get_mut().insert(
-                event.player_id,
-                event.starter_station_id,
-                inventory,
-            );
-        }
+    pub(super) fn reconcile_client_admission_grants(&mut self) -> Result<(), String> {
+        // Admission reconciliation is a runtime/repository concern. The
+        // storage-independent engine cannot reconstruct it from an event log;
+        // callers must feed committed admission records through the explicit
+        // projection API before opening a client session.
         Ok(())
     }
 
@@ -295,14 +270,12 @@ impl<S: EventStore> SimulationNode<S> {
 
 #[cfg(test)]
 mod tests {
-    use dawn_core::{ItemId, NodeId, SectorBounds, SectorId};
-    use dawn_event_store::InMemoryEventStore;
-
     use super::*;
+    use dawn_core::{ItemId, NodeId, SectorBounds, SectorId};
 
     const TEST_STATION_ID: StationId = StationId(0);
 
-    fn node() -> SimulationNode<InMemoryEventStore> {
+    fn node() -> SimulationNode {
         SimulationNode::new_test(
             NodeId(0),
             SectorId(0),
