@@ -232,6 +232,7 @@ mod serve_pipeline_tests {
     use dawn_actor::{ClientConnection, InProcessConnection};
     use dawn_core::{ClientRequest, DomainEvent, NodeId, Position, SectorBounds, SectorId};
     use dawn_sector::node;
+    use dawn_wire::{project_domain_event, ServerFact};
 
     fn build_test_node(
         id: NodeId,
@@ -290,14 +291,16 @@ mod serve_pipeline_tests {
         node.tick_with_lock_commands(&lock_commands);
 
         let new_events: Vec<DomainEvent> = node.drain_pending_events();
-        conn.send_events(&new_events)
+        let new_facts: Vec<ServerFact> =
+            new_events.iter().filter_map(project_domain_event).collect();
+        conn.send_facts(&new_facts)
             .expect("client endpoint is alive");
 
         let mut client = client;
         let mut saw_velocity_changed = false;
-        while let Ok(ev) = client.event_rx.try_recv() {
-            if let DomainEvent::VelocityChanged(vc) = ev {
-                if vc.ship_id == ship_id {
+        while let Ok(fact) = client.fact_rx.try_recv() {
+            if let ServerFact::VelocityChanged { ship_id: id, .. } = fact {
+                if id == ship_id.raw() {
                     saw_velocity_changed = true;
                 }
             }
@@ -341,14 +344,17 @@ mod serve_pipeline_tests {
         node.tick_with_lock_commands(&lock_commands);
 
         let new_events: Vec<DomainEvent> = node.drain_pending_events();
-        conn.send_events(&new_events)
+        let new_facts: Vec<ServerFact> =
+            new_events.iter().filter_map(project_domain_event).collect();
+        conn.send_facts(&new_facts)
             .expect("client endpoint is alive");
 
         let mut client = client;
-        while let Ok(ev) = client.event_rx.try_recv() {
-            if let DomainEvent::VelocityChanged(vc) = ev {
+        while let Ok(fact) = client.fact_rx.try_recv() {
+            if let ServerFact::VelocityChanged { ship_id: id, .. } = fact {
                 assert_ne!(
-                    vc.ship_id, other_ship,
+                    id,
+                    other_ship.raw(),
                     "a player with no active ship must not move another player's ship"
                 );
             }

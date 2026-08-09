@@ -64,7 +64,7 @@ Open:
 | `crates/dawn-sector/src/node/inventory.rs` | 923 | 🟢 fitting mutation boundary・tests。cargo操作は`ship_cargo.rs`へ分離済み |
 | `crates/dawn-wire/src/client_command.rs` | 868 | 🟢 client command wire schema/conversion・tests |
 | `crates/dawn-replication/src/catch_up.rs` | 843 | 🟢 catch-up policy・tests |
-| `crates/dawn-wire/src/server_event.rs` | 742 | 🟢 event wire conversion/schema・tests |
+| `crates/dawn-wire/src/server_fact.rs` | 816 | 🟢 server fact projection/schema・tests |
 | `crates/dawn-core/src/events.rs` | 731 | 🟢 domain event catalog/type definitions・tests |
 | `crates/dawn-sector/src/node/spawner_logic.rs` | 725 | 🟢 spawn policy・tests |
 | `crates/dawn-sector/src/aoi.rs` | 721 | 🟢 AoI index/delta delivery contract・tests |

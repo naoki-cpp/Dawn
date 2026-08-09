@@ -6,7 +6,7 @@ use dawn_consensus::RaftActorHandle;
 use dawn_core::{DomainEvent, PlayerId, ShipId};
 use dawn_sector::node::SimulationNode;
 use dawn_sector::transit;
-use dawn_wire::{InitialStateWire, ServerMessage};
+use dawn_wire::{project_domain_event, InitialStateWire, ServerFact, ServerMessage};
 use std::collections::{HashMap, HashSet};
 use tokio::sync::mpsc;
 
@@ -146,7 +146,7 @@ fn deliver_cluster_frames(
 trait JumpHandoffSession {
     fn player_id(&self) -> PlayerId;
     fn ship_id(&self) -> ShipId;
-    fn send_events(&mut self, events: &[DomainEvent]);
+    fn send_facts(&mut self, facts: &[ServerFact]);
     fn send_initial_state(&mut self, initial_state: InitialStateWire);
 }
 
@@ -159,8 +159,8 @@ impl JumpHandoffSession for ws_server::PlayerSession {
         self.ship_id
     }
 
-    fn send_events(&mut self, events: &[DomainEvent]) {
-        let _ = ws_server::PlayerSession::send_events(self, events);
+    fn send_facts(&mut self, facts: &[ServerFact]) {
+        let _ = ws_server::PlayerSession::send_facts(self, facts);
     }
 
     fn send_initial_state(&mut self, initial_state: InitialStateWire) {
@@ -196,7 +196,8 @@ fn resend_jump_initial_state<T: JumpHandoffSession>(
         };
 
         if let Some(events) = handoff.own_events.get(&player_id) {
-            session.send_events(events);
+            let facts: Vec<ServerFact> = events.iter().filter_map(project_domain_event).collect();
+            session.send_facts(&facts);
         }
         session.send_initial_state(initial_state);
         true
@@ -236,7 +237,7 @@ mod tests {
             self.ship_id
         }
 
-        fn send_events(&mut self, _events: &[DomainEvent]) {}
+        fn send_facts(&mut self, _facts: &[ServerFact]) {}
 
         fn send_initial_state(&mut self, initial_state: InitialStateWire) {
             self.initial_state_ship_ids.push(

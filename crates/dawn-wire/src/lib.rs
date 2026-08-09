@@ -28,7 +28,7 @@ mod item;
 mod market;
 mod motion;
 mod player_loadout;
-mod server_event;
+mod server_fact;
 
 pub use client_request::client_request_json_schema;
 pub use dawn_core::ClientRequest;
@@ -45,7 +45,10 @@ pub use motion::VelWire;
 pub use player_loadout::{
     ItemRowWire, ModuleRowWire, OwnedShipRowWire, PlayerLoadoutWire, SlotCapacityWire,
 };
-pub use server_event::{domain_event_to_event_wire, event_wire_json_schema, EventWire};
+pub use server_fact::{
+    project_domain_event, server_fact_json_schema, ServerFact, ServerFactDeactivationReason,
+    ServerFactRepairLayer, ServerFactSlot,
+};
 
 use dawn_core::ClientRequestValidationError;
 use schemars::JsonSchema;
@@ -140,7 +143,12 @@ pub enum ServerMessage {
         ws_addr: String,
         resume_ticket: ResumeTicket,
     },
-    Event(EventWire),
+    /// A client-facing fact projected from committed Sector state.
+    ///
+    /// This is intentionally distinct from the durable `DomainEvent` catalog:
+    /// internal recovery and bookkeeping facts never need a public-protocol
+    /// placeholder variant.
+    Fact(ServerFact),
     PlayerLoadout(PlayerLoadoutWire),
     InitialState(InitialStateWire),
     AoiEnter(ShipStateWire),
@@ -162,8 +170,10 @@ pub enum ServerMessage {
 }
 
 impl ServerMessage {
-    pub fn encode(&self) -> Vec<u8> {
-        postcard::to_stdvec(self).expect("typed wire message serialization")
+    /// Encode one server message, preserving serialization failure at the
+    /// transport boundary instead of turning it into an empty frame or panic.
+    pub fn encode(&self) -> Result<Vec<u8>, postcard::Error> {
+        postcard::to_stdvec(self)
     }
 
     pub fn decode(bytes: &[u8]) -> Result<Self, postcard::Error> {
@@ -405,7 +415,9 @@ mod tests {
             },
             tick: 42,
         };
-        let decoded = ServerMessage::decode(&message.encode()).expect("valid postcard message");
+        let decoded =
+            ServerMessage::decode(&message.encode().expect("valid postcard message encoding"))
+                .expect("valid postcard message");
         assert!(matches!(
             decoded,
             ServerMessage::MotionCorrection {
@@ -500,7 +512,7 @@ mod tests {
     #[test]
     fn wire_schema_doc_is_up_to_date() {
         assert_schema_file_matches(
-            &event_wire_json_schema(),
+            &server_fact_json_schema(),
             concat!(
                 env!("CARGO_MANIFEST_DIR"),
                 "/../../docs/architecture/wire-protocol.schema.json"

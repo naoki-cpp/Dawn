@@ -162,7 +162,7 @@ The corresponding command is `TransitCommand { ship_id, to }`. Raft carries `Tra
 
 Corresponding Command: `JumpCommand { gate_id }`, committed over the same Raft Log path as `TransitCommand` (ADR-0014). The server resolves the command against the caller's active ship (ADR-0037). `TransitOp::Request`/`Commit` carries `gate_id: Option<JumpGateId>`; after destination Commit, the destination appends `JumpGateUsed` alongside `SectorTransitCompleted`, appends `StarSystemChanged` if needed, and then proposes Ack.
 
-Static topology (3 star systems, 4 jump gates) is defined in `dawn-sector/src/galaxy.rs` (ADR-0026). `dawn-wire`'s `domain_event_to_event_wire` serializes both events to clients over the postcard binary envelope (ADR-0042), and the single `ClientRequest` admission seam handles `Jump`. The Godot client (`connection.gd`'s `send_jump_command`, `main.gd`'s `_handle_jump_gate_used` / `_handle_star_system_changed`) is also implemented (ADR-0009 checklist fully complete).
+Static topology (3 star systems, 4 jump gates) is defined in `dawn-sector/src/galaxy.rs` (ADR-0026). The AoI delivery layer projects visible committed events through `dawn_wire::project_domain_event` into `ServerFact` before the postcard envelope (ADR-0042/#274), and the single `ClientRequest` admission seam handles `Jump`. The Godot client (`connection.gd`'s `send_jump_command`, `main.gd`'s `_handle_jump_gate_used` / `_handle_star_system_changed`) is also implemented (ADR-0009 checklist fully complete).
 
 ### 3.8 Tackle (ADR-0024)
 

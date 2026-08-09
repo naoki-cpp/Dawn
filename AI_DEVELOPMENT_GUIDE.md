@@ -220,7 +220,7 @@ when deleting a deprecated one — they cover every public-event pipeline touchp
 
 ### Wire protocol (client<->server)
 
-`EventWire` and the re-exported `ClientRequest` authority in
+`ServerFact` (the typed client projection) and the re-exported `ClientRequest` authority in
 `crates/dawn-wire/src/` are the schema-of-record for the wire format and
 are generated into `docs/architecture/wire-protocol.schema.json` /
 `wire-protocol-commands.schema.json` (see `docs/architecture/wire-protocol.md`).
@@ -256,7 +256,7 @@ workspace DAG and relevant ADR first.
   ADR-0046).
 - `dawn-client-gdext`: GDExtension binding (cdylib) exposing `dawn-client-core`
   to the Godot client. Thin type-conversion adapter only (ADR-0040, ADR-0046).
-- `dawn-wire`: client<->server wire schema (`ClientRequest`/`EventWire`,
+- `dawn-wire`: client<->server wire schema (`ClientRequest`/`ServerFact`,
   the `ServerMessage`/`ClientMessage` binary envelope). Depends only on
   `dawn-core` + serde + postcard -- no transport/runtime dependency, so
   `dawn-client-gdext` can depend on it directly (ADR-0041, ADR-0042).

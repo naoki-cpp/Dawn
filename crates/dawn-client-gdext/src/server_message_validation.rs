@@ -1,5 +1,5 @@
 use dawn_core::ItemId;
-use dawn_wire::{EventWire, ItemWire, PlayerLoadoutWire, ServerMessage};
+use dawn_wire::{ItemWire, PlayerLoadoutWire, ServerFact, ServerMessage};
 
 /// Decode one postcard frame and reject values that cannot cross the Godot
 /// boundary without narrowing or losing canonical item identity.
@@ -27,56 +27,56 @@ fn ensure_canonical_item(item: ItemWire, field: &str) -> Result<(), String> {
         .map_err(|error| format!("{field} has invalid canonical Item identity: {error:?}"))
 }
 
-fn validate_event(event: &EventWire) -> Result<(), String> {
-    match event {
-        EventWire::ShipSpawned { ship_id, tick, .. }
-        | EventWire::VelocityChanged { ship_id, tick, .. }
-        | EventWire::ShipDespawned { ship_id, tick }
-        | EventWire::ShipDocked { ship_id, tick, .. }
-        | EventWire::ShipUndocked { ship_id, tick, .. }
-        | EventWire::ShipAssembled { ship_id, tick, .. }
-        | EventWire::DamageTaken { ship_id, tick, .. }
-        | EventWire::RepairApplied { ship_id, tick, .. }
-        | EventWire::ModuleDeactivated { ship_id, tick, .. }
-        | EventWire::JumpGateUsed { ship_id, tick, .. }
-        | EventWire::StarSystemChanged { ship_id, tick, .. } => {
-            ensure_godot_int(*ship_id, "event.ship_id")?;
-            ensure_godot_int(*tick, "event.tick")?;
+fn validate_server_fact(fact: &ServerFact) -> Result<(), String> {
+    match fact {
+        ServerFact::ShipSpawned { ship_id, tick, .. }
+        | ServerFact::VelocityChanged { ship_id, tick, .. }
+        | ServerFact::ShipDespawned { ship_id, tick }
+        | ServerFact::ShipDocked { ship_id, tick, .. }
+        | ServerFact::ShipUndocked { ship_id, tick, .. }
+        | ServerFact::ShipAssembled { ship_id, tick, .. }
+        | ServerFact::DamageTaken { ship_id, tick, .. }
+        | ServerFact::RepairApplied { ship_id, tick, .. }
+        | ServerFact::ModuleDeactivated { ship_id, tick, .. }
+        | ServerFact::JumpGateUsed { ship_id, tick, .. }
+        | ServerFact::StarSystemChanged { ship_id, tick, .. } => {
+            ensure_godot_int(*ship_id, "fact.ship_id")?;
+            ensure_godot_int(*tick, "fact.tick")?;
         }
-        EventWire::ShipDestroyed {
+        ServerFact::ShipDestroyed {
             ship_id,
             killer_id,
             tick,
         } => {
-            ensure_godot_int(*ship_id, "event.ship_id")?;
-            ensure_godot_int(*killer_id, "event.killer_id")?;
-            ensure_godot_int(*tick, "event.tick")?;
+            ensure_godot_int(*ship_id, "fact.ship_id")?;
+            ensure_godot_int(*killer_id, "fact.killer_id")?;
+            ensure_godot_int(*tick, "fact.tick")?;
         }
-        EventWire::TargetLocked {
+        ServerFact::TargetLocked {
             locker_id,
             target_id,
             tick,
         }
-        | EventWire::LockLost {
+        | ServerFact::LockLost {
             locker_id,
             target_id,
             tick,
         } => {
-            ensure_godot_int(*locker_id, "event.locker_id")?;
-            ensure_godot_int(*target_id, "event.target_id")?;
-            ensure_godot_int(*tick, "event.tick")?;
+            ensure_godot_int(*locker_id, "fact.locker_id")?;
+            ensure_godot_int(*target_id, "fact.target_id")?;
+            ensure_godot_int(*tick, "fact.tick")?;
         }
-        EventWire::ModuleActivated {
+        ServerFact::ModuleActivated {
             ship_id,
             target_ship_id,
             tick,
             ..
         } => {
-            ensure_godot_int(*ship_id, "event.ship_id")?;
+            ensure_godot_int(*ship_id, "fact.ship_id")?;
             if let Some(target_ship_id) = target_ship_id {
-                ensure_godot_int(*target_ship_id, "event.target_ship_id")?;
+                ensure_godot_int(*target_ship_id, "fact.target_ship_id")?;
             }
-            ensure_godot_int(*tick, "event.tick")?;
+            ensure_godot_int(*tick, "fact.tick")?;
         }
     }
     Ok(())
@@ -114,7 +114,7 @@ fn validate_godot_integer_range(message: &ServerMessage) -> Result<(), String> {
             ensure_godot_int(*ship_id, "ship_id")?;
         }
         ServerMessage::Redirect { .. } => {}
-        ServerMessage::Event(event) => validate_event(event)?,
+        ServerMessage::Fact(fact) => validate_server_fact(fact)?,
         ServerMessage::PlayerLoadout(loadout) => validate_player_loadout_godot_ranges(loadout)?,
         ServerMessage::InitialState(state) => {
             for ship in &state.ships {
@@ -151,8 +151,8 @@ mod tests {
     use dawn_core::{ModuleKind, StatDelta};
     use dawn_wire::{
         AbsPosWire, InitialStateWire, ItemRowWire, ItemWire, MarketOrderWire, MarketSnapshotWire,
-        ModuleRowWire, OwnedShipRowWire, PlayerLoadoutWire, ShipStateWire, SlotCapacityWire,
-        VelWire,
+        ModuleRowWire, OwnedShipRowWire, PlayerLoadoutWire, ServerFactDeactivationReason,
+        ServerFactSlot, ShipStateWire, SlotCapacityWire, VelWire,
     };
 
     fn position() -> AbsPosWire {
@@ -223,7 +223,7 @@ mod tests {
                 ws_addr: "127.0.0.1:7880".to_owned(),
                 resume_ticket: dawn_wire::ResumeTicket::from_bytes([3; 32]),
             },
-            ServerMessage::Event(EventWire::ShipDespawned {
+            ServerMessage::Fact(ServerFact::ShipDespawned {
                 ship_id: 7,
                 tick: 2,
             }),
@@ -257,29 +257,42 @@ mod tests {
         ];
 
         for message in messages {
-            assert!(decode_server_message(&message.encode()).is_ok());
+            assert!(decode_server_message(
+                &message.encode().expect("typed server message must encode")
+            )
+            .is_ok());
         }
     }
 
     #[test]
     fn module_events_decode_with_their_ship_identity() {
-        let activated = ServerMessage::Event(EventWire::ModuleActivated {
+        let activated = ServerMessage::Fact(ServerFact::ModuleActivated {
             ship_id: 7,
             module_id: 3,
-            slot: "High".to_owned(),
+            slot: ServerFactSlot::High,
             target_ship_id: Some(9),
             tick: 4,
         });
-        assert!(decode_server_message(&activated.encode()).is_ok());
+        assert!(decode_server_message(
+            &activated
+                .encode()
+                .expect("typed server message must encode")
+        )
+        .is_ok());
 
-        let deactivated = ServerMessage::Event(EventWire::ModuleDeactivated {
+        let deactivated = ServerMessage::Fact(ServerFact::ModuleDeactivated {
             ship_id: 7,
             module_id: 3,
-            slot: "High".to_owned(),
-            reason: Some("range".to_owned()),
+            slot: ServerFactSlot::High,
+            reason: Some(ServerFactDeactivationReason::OutOfRange),
             tick: 5,
         });
-        assert!(decode_server_message(&deactivated.encode()).is_ok());
+        assert!(decode_server_message(
+            &deactivated
+                .encode()
+                .expect("typed server message must encode")
+        )
+        .is_ok());
     }
 
     #[test]
@@ -291,7 +304,8 @@ mod tests {
                 ship_id: invalid,
                 resume_ticket: dawn_wire::ResumeTicket::from_bytes([3; 32]),
             }
-            .encode(),
+            .encode()
+            .expect("typed server message must encode"),
         )
         .unwrap_err();
         assert!(error.contains("ship_id"));
@@ -303,14 +317,22 @@ mod tests {
 
         let mut invalid_tick = loadout();
         invalid_tick.tick = invalid_godot_int;
-        let error = decode_server_message(&ServerMessage::PlayerLoadout(invalid_tick).encode())
-            .unwrap_err();
+        let error = decode_server_message(
+            &ServerMessage::PlayerLoadout(invalid_tick)
+                .encode()
+                .expect("typed server message must encode"),
+        )
+        .unwrap_err();
         assert!(error.contains("player_loadout.tick"));
 
         let mut invalid_ship = loadout();
         invalid_ship.active_ship_id = Some(invalid_godot_int);
-        let error = decode_server_message(&ServerMessage::PlayerLoadout(invalid_ship).encode())
-            .unwrap_err();
+        let error = decode_server_message(
+            &ServerMessage::PlayerLoadout(invalid_ship)
+                .encode()
+                .expect("typed server message must encode"),
+        )
+        .unwrap_err();
         assert!(error.contains("player_loadout.active_ship_id"));
 
         let mut invalid_owned_ship = loadout();
@@ -321,9 +343,12 @@ mod tests {
             docked_station_id: None,
             is_active: false,
         });
-        let error =
-            decode_server_message(&ServerMessage::PlayerLoadout(invalid_owned_ship).encode())
-                .unwrap_err();
+        let error = decode_server_message(
+            &ServerMessage::PlayerLoadout(invalid_owned_ship)
+                .encode()
+                .expect("typed server message must encode"),
+        )
+        .unwrap_err();
         assert!(error.contains("player_loadout.owned_ships.ship_id"));
 
         let mut invalid_count = loadout();
@@ -334,8 +359,12 @@ mod tests {
             slot: String::new(),
             count: invalid_godot_int,
         });
-        let error = decode_server_message(&ServerMessage::PlayerLoadout(invalid_count).encode())
-            .unwrap_err();
+        let error = decode_server_message(
+            &ServerMessage::PlayerLoadout(invalid_count)
+                .encode()
+                .expect("typed server message must encode"),
+        )
+        .unwrap_err();
         assert!(error.contains("player_loadout.inventory.count"));
 
         let mut invalid_cycle = loadout();
@@ -351,8 +380,12 @@ mod tests {
             cycle_time_ticks: (u32::MAX as u64) + 1,
             stat_delta: StatDelta::ZERO,
         });
-        let error = decode_server_message(&ServerMessage::PlayerLoadout(invalid_cycle).encode())
-            .unwrap_err();
+        let error = decode_server_message(
+            &ServerMessage::PlayerLoadout(invalid_cycle)
+                .encode()
+                .expect("typed server message must encode"),
+        )
+        .unwrap_err();
         assert!(error.contains("player_loadout.modules.cycle_time_ticks"));
     }
 
@@ -366,8 +399,12 @@ mod tests {
             slot: String::new(),
             count: 1,
         });
-        let error = decode_server_message(&ServerMessage::PlayerLoadout(invalid_loadout).encode())
-            .unwrap_err();
+        let error = decode_server_message(
+            &ServerMessage::PlayerLoadout(invalid_loadout)
+                .encode()
+                .expect("typed server message must encode"),
+        )
+        .unwrap_err();
         assert!(error.contains("player_loadout.inventory.item_id"));
 
         let error = decode_server_message(
@@ -383,7 +420,8 @@ mod tests {
                 }],
                 notice: String::new(),
             })
-            .encode(),
+            .encode()
+            .expect("typed server message must encode"),
         )
         .unwrap_err();
         assert!(error.contains("market.item_id"));

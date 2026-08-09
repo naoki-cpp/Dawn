@@ -1,5 +1,5 @@
 //! Regenerate the checked-in wire-protocol schema files from
-//! [`dawn_wire::event_wire_json_schema`] (server -> client),
+//! [`dawn_wire::server_fact_json_schema`] (server -> client),
 //! [`dawn_wire::client_request_json_schema`] (Sector client ->
 //! server), and [`dawn_wire::market_command_wire_json_schema`]
 //! (Market client -> server).
@@ -20,7 +20,7 @@ fn write_schema(schema: &schemars::Schema, relative_path: &str) {
 
 fn main() {
     write_schema(
-        &dawn_wire::event_wire_json_schema(),
+        &dawn_wire::server_fact_json_schema(),
         "../../docs/architecture/wire-protocol.schema.json",
     );
     write_schema(

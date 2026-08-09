@@ -10,7 +10,7 @@ use dawn_consensus::RaftActorHandle;
 use dawn_core::{DomainEvent, PlayerId, SectorId, ShipId};
 use dawn_event_store::DurableJournal;
 use dawn_replication::{OutboundLogPublisher, TcpReplicationTransport};
-use dawn_sector::aoi::{AoiSink, Observer};
+use dawn_sector::aoi::{AoiMessage, AoiSink, Observer};
 use dawn_sector::aoi_frame::AoiFrame;
 use dawn_sector::node::{
     ClientCommandFollowup, ClientRequestAdmissionError, JumpOutcome, SimulationNode,
@@ -344,12 +344,9 @@ impl RuntimeAoiSession for ws_server::PlayerSession {
 struct SessionSink<'a>(&'a mut ws_server::PlayerSession);
 
 impl AoiSink for SessionSink<'_> {
-    fn send_events(&mut self, events: &[DomainEvent]) -> bool {
-        self.0.send_events(events)
-    }
-
-    fn send_message(&mut self, msg: &ServerMessage) -> bool {
-        self.0.send_message(msg)
+    fn send_aoi_message(&mut self, msg: &AoiMessage) -> bool {
+        let message = msg.to_server_message();
+        self.0.send_message(&message)
     }
 }
 
@@ -426,16 +423,12 @@ mod tests {
     }
 
     impl AoiSink for FakeSession {
-        fn send_events(&mut self, events: &[DomainEvent]) -> bool {
-            self.sent.push(Sent::Events(events.len()));
-            true
-        }
-
-        fn send_message(&mut self, message: &ServerMessage) -> bool {
+        fn send_aoi_message(&mut self, message: &AoiMessage) -> bool {
             match message {
-                ServerMessage::AoiEnter(ship) => self.sent.push(Sent::Enter(ship.ship_id)),
-                ServerMessage::AoiLeave { ship_id } => self.sent.push(Sent::Leave(*ship_id)),
-                _ => {}
+                AoiMessage::AoiEnter(ship) => self.sent.push(Sent::Enter(ship.ship_id)),
+                AoiMessage::AoiLeave { ship_id } => self.sent.push(Sent::Leave(*ship_id)),
+                AoiMessage::Fact(_) => self.sent.push(Sent::Events(1)),
+                AoiMessage::MotionCorrection { .. } | AoiMessage::PositionSnap { .. } => {}
             }
             true
         }
@@ -500,7 +493,7 @@ mod tests {
             &[],
             &HashMap::new(),
         );
-        assert_eq!(sessions[0].sent, vec![Sent::Events(0)]);
+        assert!(sessions[0].sent.is_empty());
         sessions[0].sent.clear();
 
         deliver_runtime_sessions(
@@ -514,11 +507,7 @@ mod tests {
         );
         assert_eq!(
             sessions[0].sent,
-            vec![
-                Sent::Enter(entering.raw()),
-                Sent::Leave(leaving.raw()),
-                Sent::Events(0),
-            ]
+            vec![Sent::Enter(entering.raw()), Sent::Leave(leaving.raw()),]
         );
     }
 }

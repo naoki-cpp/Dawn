@@ -11,7 +11,7 @@ use dawn_client_core::{
     PositionInput, ShipInput, ShipLeaveReason, ShipRegistration, StationInput, SystemNameInput,
     WorldSessionEffect,
 };
-use dawn_wire::{EventWire, InitialStateWire, ServerMessage, ShipStateWire};
+use dawn_wire::{InitialStateWire, ServerFact, ServerMessage, ShipStateWire};
 use godot::prelude::*;
 
 #[derive(GodotClass)]
@@ -166,12 +166,12 @@ impl ServerMessageDecoder {
                 },
                 tick: 42,
             },
-            "ShipDocked" => ServerMessage::Event(EventWire::ShipDocked {
+            "ShipDocked" => ServerMessage::Fact(ServerFact::ShipDocked {
                 ship_id: 11,
                 station_id: 5,
                 tick: 12,
             }),
-            "ShipSpawnedPending" => ServerMessage::Event(EventWire::ShipSpawned {
+            "ShipSpawnedPending" => ServerMessage::Fact(ServerFact::ShipSpawned {
                 ship_id: 33,
                 position,
                 tick: 14,
@@ -208,7 +208,12 @@ impl ServerMessageDecoder {
             }),
             _ => return None,
         };
-        self.decode(PackedByteArray::from(message.encode().as_slice()))
+        self.decode(PackedByteArray::from(
+            message
+                .encode()
+                .expect("typed server message must encode")
+                .as_slice(),
+        ))
     }
 }
 
@@ -255,7 +260,7 @@ impl ServerMessageOutcome {
                     PackedByteArray::from(resume_ticket.as_bytes().as_slice()),
                 ],
             ),
-            ServerMessage::Event(EventWire::ModuleActivated {
+            ServerMessage::Fact(ServerFact::ModuleActivated {
                 ship_id,
                 module_id,
                 slot,
@@ -277,14 +282,14 @@ impl ServerMessageOutcome {
                     vslice![godot_i64(*ship_id), i64::from(*module_id), slot.as_str()],
                 )
             }
-            ServerMessage::Event(EventWire::ModuleDeactivated {
+            ServerMessage::Fact(ServerFact::ModuleDeactivated {
                 ship_id,
                 module_id,
                 slot,
                 reason,
                 ..
             }) => {
-                let reason = reason.as_deref().unwrap_or("");
+                let reason = reason.map(|reason| reason.as_str()).unwrap_or("");
                 apply_fact(
                     &mut session,
                     &mut loadout,
@@ -306,9 +311,9 @@ impl ServerMessageOutcome {
                     ],
                 )
             }
-            ServerMessage::Event(event) => {
+            ServerMessage::Fact(fact) => {
                 let presentation =
-                    apply_domain_event(&mut session, &mut loadout, event, connection_ship_id);
+                    apply_server_fact(&mut session, &mut loadout, fact, connection_ship_id);
                 dispatch_world_event(&presentation, &mut world_target)
             }
             ServerMessage::PlayerLoadout(wire) => {
@@ -586,14 +591,14 @@ fn dispatch_world_event(event: &EventPresentation, target: &mut Gd<Object>) -> b
     true
 }
 
-fn apply_domain_event(
+fn apply_server_fact(
     session: &mut Gd<WorldSession>,
     loadout: &mut Gd<PlayerLoadout>,
-    event: &EventWire,
+    fact: &ServerFact,
     connection_ship_id: i64,
 ) -> EventPresentation {
-    match event {
-        EventWire::ShipSpawned {
+    match fact {
+        ServerFact::ShipSpawned {
             ship_id, position, ..
         } => {
             let effect = apply_fact(
@@ -612,7 +617,7 @@ fn apply_domain_event(
                 became_player,
             }
         }
-        EventWire::VelocityChanged {
+        ServerFact::VelocityChanged {
             ship_id,
             velocity,
             tick,
@@ -630,7 +635,7 @@ fn apply_domain_event(
                 tick: godot_i64(*tick),
             }
         }
-        EventWire::ShipDespawned { ship_id, .. } => {
+        ServerFact::ShipDespawned { ship_id, .. } => {
             let effect = apply_fact(
                 session,
                 loadout,
@@ -644,7 +649,7 @@ fn apply_domain_event(
                 removed: removed_effect(effect),
             }
         }
-        EventWire::ShipDocked {
+        ServerFact::ShipDocked {
             ship_id,
             station_id,
             tick,
@@ -665,7 +670,7 @@ fn apply_domain_event(
                 accepted: dock_effect(effect),
             }
         }
-        EventWire::ShipUndocked {
+        ServerFact::ShipUndocked {
             ship_id,
             station_id,
             tick,
@@ -685,11 +690,11 @@ fn apply_domain_event(
                 accepted: dock_effect(effect),
             }
         }
-        EventWire::ShipAssembled { .. } => {
+        ServerFact::ShipAssembled { .. } => {
             apply_fact(session, loadout, ClientFact::ObservedEvent);
             EventPresentation::ShipAssembled
         }
-        EventWire::DamageTaken {
+        ServerFact::DamageTaken {
             ship_id,
             current_shield,
             current_armor,
@@ -710,7 +715,7 @@ fn apply_domain_event(
                 ship_id: godot_i64(*ship_id),
             }
         }
-        EventWire::RepairApplied {
+        ServerFact::RepairApplied {
             ship_id,
             current_shield,
             current_armor,
@@ -731,7 +736,7 @@ fn apply_domain_event(
                 ship_id: godot_i64(*ship_id),
             }
         }
-        EventWire::ShipDestroyed { ship_id, .. } => {
+        ServerFact::ShipDestroyed { ship_id, .. } => {
             let effect = apply_fact(
                 session,
                 loadout,
@@ -747,7 +752,7 @@ fn apply_domain_event(
                 outcome: DestructionOutcome::wrap(outcome),
             }
         }
-        EventWire::TargetLocked {
+        ServerFact::TargetLocked {
             locker_id,
             target_id,
             ..
@@ -766,7 +771,7 @@ fn apply_domain_event(
                 changed: lock_effect(effect),
             }
         }
-        EventWire::LockLost {
+        ServerFact::LockLost {
             locker_id,
             target_id,
             ..
@@ -785,10 +790,10 @@ fn apply_domain_event(
                 changed: lock_effect(effect),
             }
         }
-        EventWire::ModuleActivated { .. } | EventWire::ModuleDeactivated { .. } => {
+        ServerFact::ModuleActivated { .. } | ServerFact::ModuleDeactivated { .. } => {
             unreachable!("module events dispatch at the connection boundary")
         }
-        EventWire::JumpGateUsed {
+        ServerFact::JumpGateUsed {
             ship_id,
             gate_id,
             entry_pos,
@@ -803,7 +808,7 @@ fn apply_domain_event(
                 tick: godot_i64(*tick),
             }
         }
-        EventWire::StarSystemChanged {
+        ServerFact::StarSystemChanged {
             ship_id, to_system, ..
         } => {
             let effect = apply_fact(
