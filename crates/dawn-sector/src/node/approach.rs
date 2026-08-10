@@ -46,7 +46,7 @@ impl SimulationNode {
         let Some((entity, _)) = self.begin_maneuver(ship_id, target, None) else {
             return false;
         };
-        let _ = self.world.insert_one(
+        let _ = self.simulation.world.insert_one(
             entity,
             ApproachComp {
                 target,
@@ -91,6 +91,7 @@ impl SimulationNode {
             Option<dawn_core::JumpGateId>,
             Position,
         )> = self
+            .simulation
             .world
             .query::<(Entity, &ApproachComp, &PositionComp)>()
             .iter()
@@ -111,11 +112,17 @@ impl SimulationNode {
             // `None` means the target no longer exists.
             let resolved: Option<(Position, f64)> = match target {
                 ApproachTarget::Ship(target_id) => self
+                    .simulation
                     .ships
                     .index
                     .get(&target_id)
                     .copied()
-                    .and_then(|te| self.world.get::<PositionComp>(te).map(|p| (te, p.0)))
+                    .and_then(|te| {
+                        self.simulation
+                            .world
+                            .get::<PositionComp>(te)
+                            .map(|p| (te, p.0))
+                    })
                     .map(|(te, off)| {
                         let target_abs = self.entity_absolute_f64(te, off);
                         (
@@ -136,19 +143,25 @@ impl SimulationNode {
             match compute_approach_step(ship_pos, resolved) {
                 // Target gone: drop the approach and brake (ADR-0015 §4).
                 ApproachStepOutcome::TargetGone => {
-                    let _ = self.world.remove_one::<ApproachComp>(entity);
+                    let _ = self.simulation.world.remove_one::<ApproachComp>(entity);
                     self.brake_thrust(entity);
                 }
                 // Arrived: hold position, keep ApproachComp so the ship resumes
                 // if a Ship target later drifts back out of range.
                 ApproachStepOutcome::Arrived => {
                     if let Some(gate_id) = auto_jump_gate {
-                        if let Some((&ship_id, _)) =
-                            self.ships.index.iter().find(|(_, &e)| e == entity)
+                        if let Some((&ship_id, _)) = self
+                            .simulation
+                            .ships
+                            .index
+                            .iter()
+                            .find(|(_, &e)| e == entity)
                         {
-                            self.pending_auto_jumps.push((ship_id, gate_id));
+                            self.frame_outputs
+                                .pending_auto_jumps
+                                .push((ship_id, gate_id));
                         }
-                        let _ = self.world.remove_one::<ApproachComp>(entity);
+                        let _ = self.simulation.world.remove_one::<ApproachComp>(entity);
                     }
                     self.brake_thrust(entity)
                 }
@@ -391,9 +404,9 @@ mod tests {
             },
         );
 
-        let entity = *node.ships.index.get(&chaser).unwrap();
+        let entity = *node.simulation.ships.index.get(&chaser).unwrap();
         node.process_approach();
-        let thrust = node.world.get::<ThrustComp>(entity).unwrap();
+        let thrust = node.simulation.world.get::<ThrustComp>(entity).unwrap();
         assert!(
             thrust.direction.dx > 0.9,
             "thrust should point toward +X target, got {:?}",
@@ -507,8 +520,8 @@ mod tests {
             },
         );
 
-        let target_entity = node.ships.index.remove(&target).unwrap();
-        node.world.despawn_ship(target_entity);
+        let target_entity = node.simulation.ships.index.remove(&target).unwrap();
+        node.simulation.world.despawn_ship(target_entity);
 
         node.process_approach();
         assert_eq!(
@@ -516,9 +529,13 @@ mod tests {
             None,
             "approach must drop when target is gone"
         );
-        let entity = *node.ships.index.get(&chaser).unwrap();
+        let entity = *node.simulation.ships.index.get(&chaser).unwrap();
         assert!(
-            node.world.get::<ThrustComp>(entity).unwrap().is_braking,
+            node.simulation
+                .world
+                .get::<ThrustComp>(entity)
+                .unwrap()
+                .is_braking,
             "ship should brake when target vanishes"
         );
     }

@@ -203,7 +203,7 @@ checkpointed recovery delta; a future extraction may represent it as a
 
 ### 5. Player routing state
 
-`ShipRegistry.active_ship` is authoritative Player routing state, not deliberately
+`PlayerState.active_ship` is authoritative Player routing state, not deliberately
 lossy session decoration. It changes:
 
 - which owned Ship receives helm/module commands;
@@ -212,8 +212,8 @@ lossy session decoration. It changes:
 
 Therefore `SelectActiveShip` and `Disembark` can require a recovery transition even
 when they emit no public `DomainEvent`. The local checkpoint/RecoveryDelta path
-persists the routing maps explicitly; #275 may extract the PlayerState aggregate
-without weakening that recovery requirement.
+persists the routing maps explicitly; #275 materializes them under the
+`PlayerState` owner without weakening that recovery requirement.
 
 Socket handles, transient connection queues, rendered selection, AoI caches, and
 other presentation/session transport objects remain non-authoritative unless a
@@ -630,7 +630,7 @@ retry use explicit operation IDs.
   after #280 selects the reference topology.
 - [x] Implement generic fallible atomic journal in #271; #284 consumes its
   versioned recovery records, contiguous ranges, and corruption/failure fence.
-- [x] Implement prepare -> durable -> live apply in #272 for Stop and the bounded full Tick write set; #278 now owns the shared runtime wiring and #275 continues the remaining state-owner migrations.
+- [x] Implement prepare -> durable -> live apply in #272 for Stop and the bounded full Tick write set; #278 now owns the shared runtime wiring and #275 now records the explicit state-owner decomposition.
 - [x] Implement versioned checkpoint/tail and eventless-Tick persistence through the runtime-owned `FileJournal`.
 - [x] Recover from a pre-checkpoint crash by reconstructing configured genesis
   state and replaying the RecoveryDelta journal from index 0; public-event

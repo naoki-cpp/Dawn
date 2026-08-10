@@ -28,21 +28,23 @@ impl SimulationNode {
             return false;
         };
         let entity = resolved.entity;
-        let Some(def) = self.module_registry.get(&cmd.module_id).cloned() else {
+        let Some(def) = self.game_data.module_registry.get(&cmd.module_id).cloned() else {
             return false;
         };
         if def.slot != cmd.slot {
             return false;
         }
-        let Some(&type_id) = self.ships.type_ids.get(&cmd.ship_id) else {
+        let Some(&type_id) = self.simulation.ships.type_ids.get(&cmd.ship_id) else {
             return false;
         };
         let capacity = self
+            .game_data
             .ship_type_registry
             .get(&type_id)
             .map(|d| d.slot_layout.capacity_for(cmd.slot))
             .unwrap_or(0);
         let current_count = self
+            .simulation
             .world
             .get::<FittingComp>(entity)
             .map(|f| f.slot(cmd.slot).len())
@@ -58,6 +60,7 @@ impl SimulationNode {
         use dawn_core::ActivationMode;
         let is_active = matches!(def.activation_mode, ActivationMode::Passive);
         let fitted = self
+            .simulation
             .world
             .get_mut::<FittingComp>(entity)
             .map(|mut fitting| {
@@ -89,18 +92,19 @@ impl SimulationNode {
             return false;
         };
         let entity = resolved.entity;
-        let removed = if let Some(mut fitting) = self.world.get_mut::<FittingComp>(entity) {
-            let slots = fitting.slot_mut(cmd.slot);
-            match slots.iter().position(|s| s.def.id == cmd.module_id) {
-                Some(pos) => {
-                    slots.remove(pos);
-                    true
+        let removed =
+            if let Some(mut fitting) = self.simulation.world.get_mut::<FittingComp>(entity) {
+                let slots = fitting.slot_mut(cmd.slot);
+                match slots.iter().position(|s| s.def.id == cmd.module_id) {
+                    Some(pos) => {
+                        slots.remove(pos);
+                        true
+                    }
+                    None => false,
                 }
-                None => false,
-            }
-        } else {
-            false
-        };
+            } else {
+                false
+            };
         if !removed {
             return false;
         }
@@ -128,19 +132,20 @@ impl SimulationNode {
             return false;
         };
         let entity = resolved.entity;
-        let reordered = if let Some(mut fitting) = self.world.get_mut::<FittingComp>(entity) {
-            let slots = fitting.slot_mut(cmd.slot);
-            let (from, to) = (cmd.from_index as usize, cmd.to_index as usize);
-            if from >= slots.len() || to >= slots.len() {
-                false
+        let reordered =
+            if let Some(mut fitting) = self.simulation.world.get_mut::<FittingComp>(entity) {
+                let slots = fitting.slot_mut(cmd.slot);
+                let (from, to) = (cmd.from_index as usize, cmd.to_index as usize);
+                if from >= slots.len() || to >= slots.len() {
+                    false
+                } else {
+                    let moved = slots.remove(from);
+                    slots.insert(to, moved);
+                    true
+                }
             } else {
-                let moved = slots.remove(from);
-                slots.insert(to, moved);
-                true
-            }
-        } else {
-            false
-        };
+                false
+            };
         if !reordered {
             return false;
         }
@@ -225,8 +230,8 @@ mod tests {
     fn player_ship_starts_with_one_of_every_registered_module() {
         let mut node = node_with_modules();
         let (_player, ship_id) = spawn_owned_player(&mut node);
-        let entity = *node.ships.index.get(&ship_id).unwrap();
-        let inv = node.world.get::<InventoryComp>(entity).unwrap();
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
+        let inv = node.simulation.world.get::<InventoryComp>(entity).unwrap();
         assert_eq!(
             inv.items.len(),
             crate::game_data::test_catalog().modules().to_vec().len()
@@ -237,8 +242,9 @@ mod tests {
     fn market_remove_item_owned_debits_exact_quantity_and_emits_snapshot() {
         let mut node = node_with_modules();
         let (player, ship_id) = spawn_owned_player(&mut node);
-        let entity = *node.ships.index.get(&ship_id).unwrap();
-        node.world
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
+        node.simulation
+            .world
             .get_mut::<InventoryComp>(entity)
             .unwrap()
             .add_item(dawn_core::ItemId::ScrapMetal, 5);
@@ -250,7 +256,8 @@ mod tests {
             quantity: 2,
         }));
         assert_eq!(
-            node.world
+            node.simulation
+                .world
                 .get::<InventoryComp>(entity)
                 .unwrap()
                 .item_count(dawn_core::ItemId::ScrapMetal),
@@ -290,9 +297,10 @@ mod tests {
             quantity: 3,
         }));
 
-        let entity = *node.ships.index.get(&ship_id).unwrap();
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
         assert_eq!(
-            node.world
+            node.simulation
+                .world
                 .get::<InventoryComp>(entity)
                 .unwrap()
                 .item_count(dawn_core::ItemId::ScrapMetal),
@@ -305,8 +313,9 @@ mod tests {
         let mut node = node_with_modules();
         let (player, ship_id) = spawn_owned_player(&mut node);
         let stranger = node.next_player_id();
-        let entity = *node.ships.index.get(&ship_id).unwrap();
-        node.world
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
+        node.simulation
+            .world
             .get_mut::<InventoryComp>(entity)
             .unwrap()
             .add_item(dawn_core::ItemId::ScrapMetal, 2);
@@ -321,14 +330,16 @@ mod tests {
         assert!(!node.remove_item_owned(command(player, 0)));
         assert!(!node.remove_item_owned(command(player, 3)));
         assert_eq!(
-            node.world
+            node.simulation
+                .world
                 .get::<InventoryComp>(entity)
                 .unwrap()
                 .item_count(dawn_core::ItemId::ScrapMetal),
             2
         );
 
-        node.world
+        node.simulation
+            .world
             .get_mut::<InventoryComp>(entity)
             .unwrap()
             .items
@@ -340,7 +351,8 @@ mod tests {
             quantity: 1,
         }));
         assert_eq!(
-            node.world
+            node.simulation
+                .world
                 .get::<InventoryComp>(entity)
                 .unwrap()
                 .item_count(dawn_core::ItemId::ScrapMetal),
@@ -360,8 +372,9 @@ mod tests {
         }));
         let event = node.pending_events().last().unwrap().clone();
 
-        let entity = *node.ships.index.get(&ship_id).unwrap();
-        node.world
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
+        node.simulation
+            .world
             .get_mut::<InventoryComp>(entity)
             .unwrap()
             .items
@@ -369,7 +382,8 @@ mod tests {
         node.apply_event_pub(event);
 
         assert_eq!(
-            node.world
+            node.simulation
+                .world
                 .get::<InventoryComp>(entity)
                 .unwrap()
                 .item_count(dawn_core::ItemId::ScrapMetal),
@@ -381,8 +395,9 @@ mod tests {
     fn fit_module_owned_moves_an_item_from_inventory_into_an_empty_slot() {
         let mut node = node_with_modules();
         let (player, ship_id) = spawn_owned_player(&mut node);
-        let entity = *node.ships.index.get(&ship_id).unwrap();
-        let before_inv_len = total_items(&node.world.get::<InventoryComp>(entity).unwrap());
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
+        let before_inv_len =
+            total_items(&node.simulation.world.get::<InventoryComp>(entity).unwrap());
 
         assert!(node.fit_module_owned(
             player,
@@ -393,12 +408,12 @@ mod tests {
             }
         ));
 
-        let fitting = node.world.get::<FittingComp>(entity).unwrap();
+        let fitting = node.simulation.world.get::<FittingComp>(entity).unwrap();
         assert!(fitting
             .slot(SlotKind::High)
             .iter()
             .any(|s| s.def.id == modules::MODULE_RAILGUN_MEDIUM));
-        let inv = node.world.get::<InventoryComp>(entity).unwrap();
+        let inv = node.simulation.world.get::<InventoryComp>(entity).unwrap();
         assert_eq!(total_items(&inv), before_inv_len - 1);
     }
 
@@ -422,9 +437,10 @@ mod tests {
     fn fit_module_owned_is_rejected_when_the_module_is_not_in_inventory() {
         let mut node = node_with_modules();
         let (player, ship_id) = spawn_owned_player(&mut node);
-        let entity = *node.ships.index.get(&ship_id).unwrap();
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
         // Drain the inventory of this module first.
-        node.world
+        node.simulation
+            .world
             .get_mut::<InventoryComp>(entity)
             .unwrap()
             .take(modules::MODULE_RAILGUN_MEDIUM);
@@ -459,8 +475,9 @@ mod tests {
     fn fit_module_owned_is_rejected_once_the_slot_kind_is_at_capacity() {
         let mut node = node_with_modules();
         let (player, ship_id) = spawn_owned_player(&mut node);
-        let entity = *node.ships.index.get(&ship_id).unwrap();
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
         let capacity = node
+            .game_data
             .ship_type_registry
             .get(&ship_types::SHIP_TYPE_MAGPIE)
             .unwrap()
@@ -469,7 +486,8 @@ mod tests {
         // The default loadout already occupies 1 High slot (a small
         // railgun); give the ship just enough spares to fill the rest.
         let remaining = capacity as usize - 1;
-        node.world
+        node.simulation
+            .world
             .get_mut::<InventoryComp>(entity)
             .unwrap()
             .items
@@ -503,8 +521,9 @@ mod tests {
     fn unfit_module_owned_moves_a_fitted_item_back_into_inventory() {
         let mut node = node_with_modules();
         let (player, ship_id) = spawn_owned_player(&mut node);
-        let entity = *node.ships.index.get(&ship_id).unwrap();
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
         let before_inv_len = node
+            .simulation
             .world
             .get::<InventoryComp>(entity)
             .map(|inv| total_items(&inv))
@@ -519,12 +538,12 @@ mod tests {
             }
         ));
 
-        let fitting = node.world.get::<FittingComp>(entity).unwrap();
+        let fitting = node.simulation.world.get::<FittingComp>(entity).unwrap();
         assert!(!fitting
             .slot(SlotKind::High)
             .iter()
             .any(|s| s.def.id == modules::MODULE_RAILGUN_SMALL));
-        let inv = node.world.get::<InventoryComp>(entity).unwrap();
+        let inv = node.simulation.world.get::<InventoryComp>(entity).unwrap();
         assert_eq!(total_items(&inv), before_inv_len + 1);
     }
 
@@ -595,8 +614,9 @@ mod tests {
     fn fit_then_unfit_round_trips_inventory_count() {
         let mut node = node_with_modules();
         let (player, ship_id) = spawn_owned_player(&mut node);
-        let entity = *node.ships.index.get(&ship_id).unwrap();
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
         let start_len = node
+            .simulation
             .world
             .get::<InventoryComp>(entity)
             .map(|inv| total_items(&inv))
@@ -619,7 +639,7 @@ mod tests {
             }
         ));
 
-        let inv = node.world.get::<InventoryComp>(entity).unwrap();
+        let inv = node.simulation.world.get::<InventoryComp>(entity).unwrap();
         assert_eq!(total_items(&inv), start_len);
     }
 
@@ -653,8 +673,9 @@ mod tests {
     fn transfer_to_station_owned_moves_the_whole_stack_of_scrap_metal() {
         let mut node = node_with_modules();
         let (player, ship_id, station_id) = spawn_and_dock_owned_player(&mut node);
-        let entity = *node.ships.index.get(&ship_id).unwrap();
-        node.world
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
+        node.simulation
+            .world
             .get_mut::<InventoryComp>(entity)
             .unwrap()
             .add_item(dawn_core::ItemId::ScrapMetal, 4);
@@ -669,7 +690,7 @@ mod tests {
             }
         ));
 
-        let inv = node.world.get::<InventoryComp>(entity).unwrap();
+        let inv = node.simulation.world.get::<InventoryComp>(entity).unwrap();
         assert_eq!(inv.item_count(dawn_core::ItemId::ScrapMetal), 0);
         assert_eq!(
             node.station_inventory(player, dawn_core::StationId(0))
@@ -711,8 +732,9 @@ mod tests {
         // A second owned ship, never docked anywhere.
         let other_ship = node.spawn_player_ship_at_pub(player, Position::ORIGIN);
         assert!(node.owns_ship(player, other_ship));
-        let entity = *node.ships.index.get(&other_ship).unwrap();
-        node.world
+        let entity = *node.simulation.ships.index.get(&other_ship).unwrap();
+        node.simulation
+            .world
             .get_mut::<InventoryComp>(entity)
             .unwrap()
             .add_item(dawn_core::ItemId::ScrapMetal, 4);
@@ -729,7 +751,7 @@ mod tests {
                 direction: dawn_core::TransferDirection::ToStation,
             }
         ));
-        let inv = node.world.get::<InventoryComp>(entity).unwrap();
+        let inv = node.simulation.world.get::<InventoryComp>(entity).unwrap();
         assert_eq!(
             inv.item_count(dawn_core::ItemId::ScrapMetal),
             4,
@@ -741,8 +763,9 @@ mod tests {
     fn transfer_to_station_owned_is_rejected_when_not_docked_at_the_station() {
         let mut node = node_with_modules();
         let (player, ship_id) = spawn_owned_player_undocked(&mut node);
-        let entity = *node.ships.index.get(&ship_id).unwrap();
-        node.world
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
+        node.simulation
+            .world
             .get_mut::<InventoryComp>(entity)
             .unwrap()
             .add_item(dawn_core::ItemId::ScrapMetal, 4);
@@ -790,8 +813,8 @@ mod tests {
             }
         ));
 
-        let entity = *node.ships.index.get(&ship_id).unwrap();
-        let inv = node.world.get::<InventoryComp>(entity).unwrap();
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
+        let inv = node.simulation.world.get::<InventoryComp>(entity).unwrap();
         assert_eq!(inv.item_count(dawn_core::ItemId::ScrapMetal), 7);
         assert_eq!(
             node.station_item_count(player, station_id, dawn_core::ItemId::ScrapMetal),
@@ -822,8 +845,9 @@ mod tests {
     fn reorder_fitted_module_owned_swaps_two_modules_within_the_same_slot_kind() {
         let mut node = node_with_modules();
         let (player, ship_id) = spawn_owned_player(&mut node);
-        let entity = *node.ships.index.get(&ship_id).unwrap();
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
         let before: Vec<dawn_core::ModuleId> = node
+            .simulation
             .world
             .get::<FittingComp>(entity)
             .unwrap()
@@ -848,6 +872,7 @@ mod tests {
         ));
 
         let after: Vec<dawn_core::ModuleId> = node
+            .simulation
             .world
             .get::<FittingComp>(entity)
             .unwrap()

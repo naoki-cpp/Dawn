@@ -31,7 +31,11 @@ impl SimulationNode {
                 reason: StationOperationRejection::MissingDockedStationContext,
             };
         }
-        if !self.ship_type_registry.contains_key(&cmd.ship_type_id) {
+        if !self
+            .game_data
+            .ship_type_registry
+            .contains_key(&cmd.ship_type_id)
+        {
             return StationOperationOutcome::Rejected {
                 ship_id: cmd.ship_id,
                 reason: StationOperationRejection::UnknownShipType,
@@ -79,14 +83,14 @@ impl SimulationNode {
                 reason: StationOperationRejection::WrongDockedStation,
             };
         }
-        let Some(&entity) = self.ships.index.get(&cmd.ship_id) else {
+        let Some(&entity) = self.simulation.ships.index.get(&cmd.ship_id) else {
             return StationOperationOutcome::Rejected {
                 ship_id: cmd.ship_id,
                 reason: StationOperationRejection::ShipNotFound,
             };
         };
         let is_fitted = {
-            let Some(fitting) = self.world.get::<FittingComp>(entity) else {
+            let Some(fitting) = self.simulation.world.get::<FittingComp>(entity) else {
                 return StationOperationOutcome::Rejected {
                     ship_id: cmd.ship_id,
                     reason: StationOperationRejection::ShipNotFound,
@@ -102,13 +106,13 @@ impl SimulationNode {
             };
         }
         let is_damaged = {
-            let Some(hull) = self.world.get::<HullComp>(entity) else {
+            let Some(hull) = self.simulation.world.get::<HullComp>(entity) else {
                 return StationOperationOutcome::Rejected {
                     ship_id: cmd.ship_id,
                     reason: StationOperationRejection::ShipNotFound,
                 };
             };
-            let Some(stats) = self.world.get::<ShipStatsComp>(entity) else {
+            let Some(stats) = self.simulation.world.get::<ShipStatsComp>(entity) else {
                 return StationOperationOutcome::Rejected {
                     ship_id: cmd.ship_id,
                     reason: StationOperationRejection::ShipNotFound,
@@ -125,7 +129,7 @@ impl SimulationNode {
                 reason: StationOperationRejection::ShipIsDamaged,
             };
         }
-        let Some(ship_type_id) = self.ships.type_ids.get(&cmd.ship_id).copied() else {
+        let Some(ship_type_id) = self.simulation.ships.type_ids.get(&cmd.ship_id).copied() else {
             return StationOperationOutcome::Rejected {
                 ship_id: cmd.ship_id,
                 reason: StationOperationRejection::ShipNotFound,
@@ -164,7 +168,11 @@ impl SimulationNode {
         if !self.can_use_station(player_id, cmd.station_id) {
             return Err(StationOperationRejection::MissingDockedStationContext);
         }
-        if !self.ship_type_registry.contains_key(&cmd.ship_type_id) {
+        if !self
+            .game_data
+            .ship_type_registry
+            .contains_key(&cmd.ship_type_id)
+        {
             return Err(StationOperationRejection::UnknownShipType);
         }
         match self.execute_station_operation(StationOperationPlan::AssembleShip {
@@ -297,6 +305,7 @@ mod tests {
         ));
 
         let ship_type_id = *node
+            .simulation
             .ships
             .type_ids
             .get(&ship_id)
@@ -314,7 +323,7 @@ mod tests {
             node.station_item_count(player_id, station_id, ItemId::PackagedShip(ship_type_id)),
             2
         );
-        assert!(!node.ships.index.contains_key(&ship_id));
+        assert!(!node.simulation.ships.index.contains_key(&ship_id));
 
         // Regression: the three modules unfit above (now sitting in the
         // ship's cargo hold, not fitted) must follow the ship into station
@@ -390,8 +399,14 @@ mod tests {
         ));
         // Scrap Metal earned from a kill, sitting in cargo alongside the
         // unfit modules -- not just a Module stack.
-        let entity = *node.ships.index.get(&ship_id).expect("ship exists");
-        node.world
+        let entity = *node
+            .simulation
+            .ships
+            .index
+            .get(&ship_id)
+            .expect("ship exists");
+        node.simulation
+            .world
             .get_mut::<dawn_ecs::components::InventoryComp>(entity)
             .expect("player ship has an InventoryComp")
             .add_item(ItemId::ScrapMetal, 5);
@@ -448,6 +463,7 @@ mod tests {
             }
         ));
         let ship_type_id = *node
+            .simulation
             .ships
             .type_ids
             .get(&ship_id)
@@ -550,11 +566,11 @@ mod tests {
         // ship_b must still be a live, owned ship -- untouched by ship_a's
         // disassembly.
         assert!(
-            node.ships.index.contains_key(&ship_b),
+            node.simulation.ships.index.contains_key(&ship_b),
             "ship_b's ECS entity must still exist"
         );
         assert_eq!(
-            node.ships.owners.get(&ship_b),
+            node.players.owners.get(&ship_b),
             Some(&player_id),
             "ship_b must still be owned by the same player"
         );
@@ -629,6 +645,6 @@ mod tests {
             0
         );
         assert_eq!(node.docked_station(new_ship_id), Some(station_id));
-        assert_eq!(node.ships.owners.get(&new_ship_id), Some(&player_id));
+        assert_eq!(node.players.owners.get(&new_ship_id), Some(&player_id));
     }
 }

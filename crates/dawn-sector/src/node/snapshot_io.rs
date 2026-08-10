@@ -3,7 +3,10 @@ use dawn_ecs::components::{
     CapacitorComp, FittingComp, HullComp, InventoryComp, PositionComp, TackledComp, VelocityComp,
 };
 
-use super::SimulationNode;
+use super::{
+    state::{FrameOutputs, GameData, PlayerState, SectorTopology, SimulationState, TransitState},
+    SimulationNode,
+};
 
 impl SimulationNode {
     /// Capture the current ECS state as a `StateSnapshot` with no journal
@@ -22,49 +25,54 @@ impl SimulationNode {
     /// recovery-journal position covered by the snapshot.
     pub fn take_snapshot_at(&self, covered_recovery_index: u64) -> StateSnapshot {
         let Self {
-            // ── persisted ──────────────────────────────────────────────────
             node_id,
             sector_id,
             bounds,
+            simulation,
+            players,
+            stations,
+            transit,
+            topology,
+            game_data,
+            frame_outputs,
+            persistence: _,
+        } = self;
+        let SimulationState {
+            world,
             current_tick,
             id_counter,
+            ships: ship_registry,
+            base_stats: _,
+            pending_bot_lock_commands,
+        } = simulation;
+        let PlayerState {
             player_id_counter,
-            catalog_fingerprint,
+            active_ship,
+            owners,
+            pending_fresh_admissions: _,
+            pending_resume_admissions: _,
+            population_cap: _,
+        } = players;
+        let docked_ships = stations.snapshot_docked_ships();
+        let docked_players = stations.snapshot_docked_players();
+        let TransitState {
             transit_attempt_counter,
             transit_journal,
-            docked_ships,
-            docked_players,
-            pending_bot_lock_commands,
-            pending_auto_jumps,
-            // Pending public events are an in-memory output buffer, not state.
-            pending_events: _,
-            // ── captured per ship, below ───────────────────────────────────
-            world,
-            ships: ship_registry,
-            // ── not persisted ──────────────────────────────────────────────
-            // Rebuilt by `restore_from` from the caller-supplied definitions.
-            module_registry: _,
-            ship_type_registry: _,
-            // Recomputed per ship from `ship_type_registry` during restore.
-            base_stats: _,
-            // Derived from the Galaxy supplied at construction.
+        } = transit;
+        let SectorTopology {
             sector_map: _,
             anchor_table: _,
-            // Configuration, re-applied after construction by the caller
-            // (`set_population_cap` / `open_repositories`).
-            population_cap: _,
-            // Fresh admission reservations exist only while this process is alive.
-            pending_fresh_admissions: _,
-            // Resume locks protect only live asynchronous handshakes.
-            pending_resume_admissions: _,
-            // Independently durable in SQLite (ADR-0038), plus its cache.
-            repositories: _,
-            // Completed-warp corrections remain lossy presentation output.
-            // The bot-command and auto-jump queues are persisted above because
-            // they affect a future Tick and therefore belong to recovery
-            // authority under ADR-0049.
+        } = topology;
+        let GameData {
+            module_registry: _,
+            ship_type_registry: _,
+            catalog_fingerprint,
+        } = game_data;
+        let FrameOutputs {
+            pending_events: _,
+            pending_auto_jumps,
             completed_warps: _,
-        } = self;
+        } = frame_outputs;
 
         let mut ships: Vec<ShipSnapshot> = ship_registry
             .index
@@ -128,16 +136,14 @@ impl SimulationNode {
             catalog_fingerprint: *catalog_fingerprint,
             transit_attempt_counter: *transit_attempt_counter,
             ships,
-            owners: ship_registry
-                .owners
+            owners: owners
                 .iter()
                 .map(|(&ship, &player)| (ship, player))
                 .collect(),
-            docked_ships: docked_ships.clone(),
-            docked_players: docked_players.clone(),
+            docked_ships,
+            docked_players,
             transit_saga: transit_journal.snapshot(),
-            active_ships: ship_registry
-                .active_ship
+            active_ships: active_ship
                 .iter()
                 .map(|(&player, &ship)| (player, ship))
                 .collect(),
@@ -184,27 +190,27 @@ impl SimulationNode {
         self.node_id = *node_id;
         self.sector_id = *sector_id;
         self.bounds = *bounds;
-        self.current_tick = *tick;
-        self.id_counter = *id_counter;
-        self.player_id_counter = *player_id_counter;
-        self.transit_attempt_counter = *transit_attempt_counter;
-        self.docked_ships = docked_ships.clone();
-        self.docked_players = docked_players.clone();
-        self.ships.owners = owners
+        self.simulation.current_tick = *tick;
+        self.simulation.id_counter = *id_counter;
+        self.players.player_id_counter = *player_id_counter;
+        self.transit.transit_attempt_counter = *transit_attempt_counter;
+        self.stations
+            .restore(docked_ships.clone(), docked_players.clone());
+        self.players.owners = owners
             .iter()
             .map(|(&ship, &player)| (ship, player))
             .collect();
-        self.ships.active_ship = active_ships
+        self.players.active_ship = active_ships
             .iter()
             .map(|(&player, &ship)| (player, ship))
             .collect();
-        self.transit_journal = crate::transit::handoff::TransitJournal::from_snapshot(
+        self.transit.transit_journal = crate::transit::handoff::TransitJournal::from_snapshot(
             *sector_id,
             transit_saga.clone(),
         )
         .expect("checkpoint contains an invalid Transit Saga for this Sector");
-        self.pending_bot_lock_commands = pending_bot_lock_commands.clone();
-        self.pending_auto_jumps = pending_auto_jumps.clone();
+        self.simulation.pending_bot_lock_commands = pending_bot_lock_commands.clone();
+        self.frame_outputs.pending_auto_jumps = pending_auto_jumps.clone();
     }
 }
 
@@ -412,8 +418,9 @@ mod tests {
                         PlayerId(i),
                         Position::new(i as f64 * 100.0, 0.0, 0.0),
                     );
-                    let entity = *node.ships.index.get(&id).unwrap();
-                    node.world
+                    let entity = *node.simulation.ships.index.get(&id).unwrap();
+                    node.simulation
+                        .world
                         .get_mut::<dawn_ecs::components::VelocityComp>(entity)
                         .unwrap()
                         .0 = Velocity::new(120.0, 0.0, 0.0);
@@ -928,7 +935,7 @@ mod tests {
         );
 
         assert!(
-            restored.ships.index.contains_key(&ship_id),
+            restored.simulation.ships.index.contains_key(&ship_id),
             "the post-snapshot ship must exist after restore"
         );
         assert_eq!(

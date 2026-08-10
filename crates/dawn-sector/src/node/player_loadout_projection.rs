@@ -21,25 +21,28 @@ impl SimulationNode {
     fn item_id_to_row_json(&self, item_id: ItemId, count: u64) -> Option<ItemRowWire> {
         match item_id {
             ItemId::Module(module_id) => {
-                self.module_registry.get(&module_id).map(|def| ItemRowWire {
-                    item_id: item_id.into(),
-                    name: def.name.clone(),
-                    kind: format!("{:?}", def.kind),
-                    slot: format!("{:?}", def.slot),
-                    count,
-                })
-            }
-            ItemId::PackagedShip(ship_type_id) => {
-                self.ship_type_registry
-                    .get(&ship_type_id)
+                self.game_data
+                    .module_registry
+                    .get(&module_id)
                     .map(|def| ItemRowWire {
                         item_id: item_id.into(),
                         name: def.name.clone(),
-                        kind: String::new(),
-                        slot: String::new(),
+                        kind: format!("{:?}", def.kind),
+                        slot: format!("{:?}", def.slot),
                         count,
                     })
             }
+            ItemId::PackagedShip(ship_type_id) => self
+                .game_data
+                .ship_type_registry
+                .get(&ship_type_id)
+                .map(|def| ItemRowWire {
+                    item_id: item_id.into(),
+                    name: def.name.clone(),
+                    kind: String::new(),
+                    slot: String::new(),
+                    count,
+                }),
             ItemId::ScrapMetal => Some(ItemRowWire {
                 item_id: item_id.into(),
                 name: "Scrap Metal".to_string(),
@@ -55,8 +58,8 @@ impl SimulationNode {
     /// Sent after Welcome + InitialState on connect, and again after every
     /// Fit/Unfit (ADR-0032).
     pub fn build_player_loadout_json(&self, ship_id: ShipId) -> Option<PlayerLoadoutWire> {
-        let entity = self.ships.index.get(&ship_id)?;
-        let fitting = self.world.get::<FittingComp>(*entity)?;
+        let entity = self.simulation.ships.index.get(&ship_id)?;
+        let fitting = self.simulation.world.get::<FittingComp>(*entity)?;
 
         let mut modules: Vec<ModuleRowWire> = Vec::new();
         let slot_names = [
@@ -86,6 +89,7 @@ impl SimulationNode {
         }
 
         let inventory: Vec<ItemRowWire> = self
+            .simulation
             .world
             .get::<InventoryComp>(*entity)
             .map(|inv| {
@@ -96,7 +100,7 @@ impl SimulationNode {
             })
             .unwrap_or_default();
 
-        let player_id = self.ships.owners.get(&ship_id).copied();
+        let player_id = self.players.owners.get(&ship_id).copied();
         let docked_station_id = player_id.and_then(|pid| self.player_docked_station(pid));
         let docked_station_name = docked_station_id
             .and_then(|station_id| self.station(station_id))
@@ -104,16 +108,17 @@ impl SimulationNode {
         let station_inventory = player_id
             .map(|pid| self.station_inventory_json(pid))
             .unwrap_or_default();
-        let active_ship_id = player_id.and_then(|pid| self.ships.active_ship.get(&pid).copied());
+        let active_ship_id = player_id.and_then(|pid| self.players.active_ship.get(&pid).copied());
         let owned_ships = player_id
             .map(|pid| self.owned_ships_json(pid))
             .unwrap_or_default();
 
         let layout = self
+            .simulation
             .ships
             .type_ids
             .get(&ship_id)
-            .and_then(|t| self.ship_type_registry.get(t))
+            .and_then(|t| self.game_data.ship_type_registry.get(t))
             .map(|d| d.slot_layout);
         let slot_capacity = SlotCapacityWire {
             high: layout.map(|l| l.high).unwrap_or(0),
@@ -123,7 +128,7 @@ impl SimulationNode {
         };
 
         Some(PlayerLoadoutWire {
-            tick: self.current_tick.value(),
+            tick: self.simulation.current_tick.value(),
             modules,
             inventory,
             station_inventory,
@@ -168,9 +173,9 @@ impl SimulationNode {
             ship.is_active = ship.ship_id == ship_id.raw();
         }
         if !owned_ships.iter().any(|ship| ship.ship_id == ship_id.raw()) {
-            let ship_type_id = self.ships.type_ids.get(&ship_id).copied();
+            let ship_type_id = self.simulation.ships.type_ids.get(&ship_id).copied();
             let ship_type_name = ship_type_id
-                .and_then(|type_id| self.ship_type_registry.get(&type_id))
+                .and_then(|type_id| self.game_data.ship_type_registry.get(&type_id))
                 .map(|definition| definition.name.clone());
             owned_ships.push(OwnedShipRowWire {
                 ship_id: ship_id.raw(),
@@ -190,7 +195,7 @@ impl SimulationNode {
         &self,
         player_id: PlayerId,
     ) -> Option<PlayerLoadoutWire> {
-        if let Some(ship_id) = self.ships.active_ship.get(&player_id).copied() {
+        if let Some(ship_id) = self.players.active_ship.get(&player_id).copied() {
             return self.build_player_loadout_json(ship_id);
         }
         let docked_station_id = self.player_docked_station(player_id);
@@ -201,7 +206,7 @@ impl SimulationNode {
         let owned_ships = self.owned_ships_json(player_id);
 
         Some(PlayerLoadoutWire {
-            tick: self.current_tick.value(),
+            tick: self.simulation.current_tick.value(),
             modules: Vec::new(),
             inventory: Vec::new(),
             station_inventory,
@@ -220,15 +225,15 @@ impl SimulationNode {
 
     /// Every ship `player_id` owns, active or not.
     fn owned_ships_json(&self, player_id: PlayerId) -> Vec<OwnedShipRowWire> {
-        let active_ship_id = self.ships.active_ship.get(&player_id).copied();
-        self.ships
+        let active_ship_id = self.players.active_ship.get(&player_id).copied();
+        self.players
             .owners
             .iter()
             .filter(|(_, owner)| **owner == player_id)
             .map(|(&ship_id, _)| {
-                let ship_type_id = self.ships.type_ids.get(&ship_id).copied();
+                let ship_type_id = self.simulation.ships.type_ids.get(&ship_id).copied();
                 let ship_type_name = ship_type_id
-                    .and_then(|t| self.ship_type_registry.get(&t))
+                    .and_then(|t| self.game_data.ship_type_registry.get(&t))
                     .map(|def| def.name.clone());
                 OwnedShipRowWire {
                     ship_id: ship_id.raw(),
@@ -282,8 +287,9 @@ mod tests {
 
         let player_id = node.next_player_id();
         let ship_id = node.spawn_player_ship_at_pub(player_id, Position::ORIGIN);
-        let entity = *node.ships.index.get(&ship_id).unwrap();
-        node.world
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
+        node.simulation
+            .world
             .get_mut::<InventoryComp>(entity)
             .unwrap()
             .add_item(ItemId::ScrapMetal, 3);
@@ -319,8 +325,9 @@ mod tests {
             StationOperationOutcome::Accepted { .. }
         ));
 
-        let entity = *node.ships.index.get(&ship_id).unwrap();
-        node.world
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
+        node.simulation
+            .world
             .get_mut::<InventoryComp>(entity)
             .unwrap()
             .add_item(ItemId::ScrapMetal, 1);
@@ -446,7 +453,7 @@ mod tests {
     fn player_loadout_json_for_player_reports_null_active_ship_id_when_shipless() {
         let mut node = mem_node();
         let player_id = node.next_player_id();
-        node.docked_players.insert(player_id, StationId(0));
+        node.stations.dock_player(player_id, StationId(0));
 
         let payload = node
             .build_player_loadout_json_for_player(player_id)

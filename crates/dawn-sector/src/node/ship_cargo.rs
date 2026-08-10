@@ -21,15 +21,16 @@ impl SimulationNode {
     /// seed, so no separate event is needed for the fixed starter cargo.
     pub(super) fn seed_player_inventory(&mut self, entity: Entity) {
         let mut inventory = InventoryComp::empty();
-        for module_id in self.module_registry.keys().copied() {
+        for module_id in self.game_data.module_registry.keys().copied() {
             inventory.add(module_id);
         }
-        let _ = self.world.insert_one(entity, inventory);
+        let _ = self.simulation.world.insert_one(entity, inventory);
     }
 
     /// Consume one module from a ship cargo stack for player fitting.
     pub(super) fn take_ship_module(&mut self, entity: Entity, module_id: ModuleId) -> bool {
-        self.world
+        self.simulation
+            .world
             .get_mut::<InventoryComp>(entity)
             .map(|mut inventory| inventory.take(module_id))
             .unwrap_or(false)
@@ -41,14 +42,14 @@ impl SimulationNode {
         if count == 0 {
             return;
         }
-        if let Some(mut inventory) = self.world.get_mut::<InventoryComp>(entity) {
+        if let Some(mut inventory) = self.simulation.world.get_mut::<InventoryComp>(entity) {
             inventory.add_item(item_id, count);
             return;
         }
 
         let mut inventory = InventoryComp::empty();
         inventory.add_item(item_id, count);
-        let _ = self.world.insert_one(entity, inventory);
+        let _ = self.simulation.world.insert_one(entity, inventory);
     }
 
     /// Remove `cmd.quantity` from the owned ship's cargo for a Market Ask.
@@ -98,38 +99,39 @@ impl SimulationNode {
         if quantity == 0 || !self.owns_ship(player_id, ship_id) {
             return false;
         }
-        let Some(&entity) = self.ships.index.get(&ship_id) else {
+        let Some(&entity) = self.simulation.ships.index.get(&ship_id) else {
             return false;
         };
 
-        let changed = if let Some(mut inventory) = self.world.get_mut::<InventoryComp>(entity) {
-            match mutation {
-                MarketItemMutation::Remove => {
-                    let Some(current) = inventory.items.get(&item_id).copied() else {
-                        return false;
-                    };
-                    if current < quantity {
-                        return false;
+        let changed =
+            if let Some(mut inventory) = self.simulation.world.get_mut::<InventoryComp>(entity) {
+                match mutation {
+                    MarketItemMutation::Remove => {
+                        let Some(current) = inventory.items.get(&item_id).copied() else {
+                            return false;
+                        };
+                        if current < quantity {
+                            return false;
+                        }
+                        if current == quantity {
+                            inventory.items.remove(&item_id);
+                        } else {
+                            inventory.items.insert(item_id, current - quantity);
+                        }
+                        true
                     }
-                    if current == quantity {
-                        inventory.items.remove(&item_id);
-                    } else {
-                        inventory.items.insert(item_id, current - quantity);
+                    MarketItemMutation::Add => {
+                        let current = inventory.item_count(item_id);
+                        let Some(next) = current.checked_add(quantity) else {
+                            return false;
+                        };
+                        inventory.items.insert(item_id, next);
+                        true
                     }
-                    true
                 }
-                MarketItemMutation::Add => {
-                    let current = inventory.item_count(item_id);
-                    let Some(next) = current.checked_add(quantity) else {
-                        return false;
-                    };
-                    inventory.items.insert(item_id, next);
-                    true
-                }
-            }
-        } else {
-            false
-        };
+            } else {
+                false
+            };
 
         if !changed {
             return false;
@@ -158,13 +160,14 @@ impl SimulationNode {
         {
             return false;
         }
-        let Some(&entity) = self.ships.index.get(&cmd.ship_id) else {
+        let Some(&entity) = self.simulation.ships.index.get(&cmd.ship_id) else {
             return false;
         };
 
         match cmd.direction {
             TransferDirection::ToStation => {
                 let taken = self
+                    .simulation
                     .world
                     .get_mut::<InventoryComp>(entity)
                     .map(|mut inventory| inventory.take_all(cmd.item_id))
@@ -240,8 +243,8 @@ mod tests {
     fn player_ship_starts_with_one_of_every_registered_module() {
         let mut node = node_with_modules();
         let (_player, ship_id) = spawn_owned_player(&mut node);
-        let entity = *node.ships.index.get(&ship_id).unwrap();
-        let inventory = node.world.get::<InventoryComp>(entity).unwrap();
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
+        let inventory = node.simulation.world.get::<InventoryComp>(entity).unwrap();
         assert_eq!(
             inventory.items.len(),
             crate::game_data::test_catalog().modules().to_vec().len()
@@ -252,9 +255,10 @@ mod tests {
     fn ship_cargo_module_mutation_takes_and_restores_one_item() {
         let mut node = node_with_modules();
         let (_player, ship_id) = spawn_owned_player(&mut node);
-        let entity = *node.ships.index.get(&ship_id).unwrap();
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
         let module_id = modules::MODULE_RAILGUN_MEDIUM;
         let before = node
+            .simulation
             .world
             .get::<InventoryComp>(entity)
             .unwrap()
@@ -262,7 +266,8 @@ mod tests {
 
         assert!(node.take_ship_module(entity, module_id));
         assert_eq!(
-            node.world
+            node.simulation
+                .world
                 .get::<InventoryComp>(entity)
                 .unwrap()
                 .item_count(ItemId::Module(module_id)),
@@ -271,7 +276,8 @@ mod tests {
 
         node.add_ship_item(entity, ItemId::Module(module_id), 1);
         assert_eq!(
-            node.world
+            node.simulation
+                .world
                 .get::<InventoryComp>(entity)
                 .unwrap()
                 .item_count(ItemId::Module(module_id)),
@@ -283,7 +289,7 @@ mod tests {
     fn market_bridge_records_the_resulting_cargo_snapshot() {
         let mut node = node_with_modules();
         let (player, ship_id) = spawn_owned_player(&mut node);
-        let entity = *node.ships.index.get(&ship_id).unwrap();
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
         node.add_ship_item(entity, ItemId::ScrapMetal, 3);
 
         assert!(node.remove_item_owned(RemoveItemCommand {
@@ -325,9 +331,10 @@ mod tests {
             quantity: 3,
         }));
 
-        let entity = *node.ships.index.get(&ship_id).unwrap();
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
         assert_eq!(
-            node.world
+            node.simulation
+                .world
                 .get::<InventoryComp>(entity)
                 .unwrap()
                 .item_count(ItemId::ScrapMetal),
@@ -340,7 +347,7 @@ mod tests {
         let mut node = node_with_modules();
         let (player, ship_id) = spawn_owned_player(&mut node);
         let stranger = node.next_player_id();
-        let entity = *node.ships.index.get(&ship_id).unwrap();
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
         node.add_ship_item(entity, ItemId::ScrapMetal, 2);
 
         let command = |player_id, quantity| RemoveItemCommand {
@@ -353,14 +360,16 @@ mod tests {
         assert!(!node.remove_item_owned(command(player, 0)));
         assert!(!node.remove_item_owned(command(player, 3)));
         assert_eq!(
-            node.world
+            node.simulation
+                .world
                 .get::<InventoryComp>(entity)
                 .unwrap()
                 .item_count(ItemId::ScrapMetal),
             2
         );
 
-        node.world
+        node.simulation
+            .world
             .get_mut::<InventoryComp>(entity)
             .unwrap()
             .items
@@ -372,7 +381,8 @@ mod tests {
             quantity: 1,
         }));
         assert_eq!(
-            node.world
+            node.simulation
+                .world
                 .get::<InventoryComp>(entity)
                 .unwrap()
                 .item_count(ItemId::ScrapMetal),
@@ -392,8 +402,9 @@ mod tests {
         }));
         let event = node.pending_events().last().unwrap().clone();
 
-        let entity = *node.ships.index.get(&ship_id).unwrap();
-        node.world
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
+        node.simulation
+            .world
             .get_mut::<InventoryComp>(entity)
             .unwrap()
             .items
@@ -401,7 +412,8 @@ mod tests {
         node.apply_event_pub(event);
 
         assert_eq!(
-            node.world
+            node.simulation
+                .world
                 .get::<InventoryComp>(entity)
                 .unwrap()
                 .item_count(ItemId::ScrapMetal),
@@ -413,7 +425,7 @@ mod tests {
     fn transfer_to_station_owned_moves_the_whole_stack_of_scrap_metal() {
         let mut node = node_with_modules();
         let (player, ship_id, station_id) = spawn_and_dock_owned_player(&mut node);
-        let entity = *node.ships.index.get(&ship_id).unwrap();
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
         node.add_ship_item(entity, ItemId::ScrapMetal, 4);
 
         assert!(node.transfer_to_station_owned(
@@ -426,7 +438,7 @@ mod tests {
             }
         ));
 
-        let inventory = node.world.get::<InventoryComp>(entity).unwrap();
+        let inventory = node.simulation.world.get::<InventoryComp>(entity).unwrap();
         assert_eq!(inventory.item_count(ItemId::ScrapMetal), 0);
         assert_eq!(
             node.station_inventory(player, station_id)
@@ -458,7 +470,7 @@ mod tests {
         let mut node = node_with_modules();
         let (player, _active_ship, station_id) = spawn_and_dock_owned_player(&mut node);
         let other_ship = node.spawn_player_ship_at_pub(player, dawn_core::Position::ORIGIN);
-        let entity = *node.ships.index.get(&other_ship).unwrap();
+        let entity = *node.simulation.ships.index.get(&other_ship).unwrap();
         node.add_ship_item(entity, ItemId::ScrapMetal, 4);
 
         assert!(!node.transfer_to_station_owned(
@@ -471,7 +483,8 @@ mod tests {
             }
         ));
         assert_eq!(
-            node.world
+            node.simulation
+                .world
                 .get::<InventoryComp>(entity)
                 .unwrap()
                 .item_count(ItemId::ScrapMetal),
@@ -485,7 +498,7 @@ mod tests {
         let mut node = node_with_modules();
         let player = node.next_player_id();
         let ship_id = node.spawn_player_ship_at_pub(player, dawn_core::Position::ORIGIN);
-        let entity = *node.ships.index.get(&ship_id).unwrap();
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
         node.add_ship_item(entity, ItemId::ScrapMetal, 4);
 
         assert!(!node.transfer_to_station_owned(
@@ -531,9 +544,10 @@ mod tests {
             }
         ));
 
-        let entity = *node.ships.index.get(&ship_id).unwrap();
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
         assert_eq!(
-            node.world
+            node.simulation
+                .world
                 .get::<InventoryComp>(entity)
                 .unwrap()
                 .item_count(ItemId::ScrapMetal),

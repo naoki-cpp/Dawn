@@ -66,8 +66,12 @@ fn module_deactivated_event_replay_resets_cycle_remaining() {
     // to simulate a module that was mid-cycle when the node stopped:
     // is_active = true and cycle_remaining > 0.
     {
-        let entity = *node.ships.index.get(&ship_id).unwrap();
-        let mut fitting = node.world.get_mut::<FittingComp>(entity).unwrap();
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
+        let mut fitting = node
+            .simulation
+            .world
+            .get_mut::<FittingComp>(entity)
+            .unwrap();
         let slot = fitting
             .find_slot_mut(modules::MODULE_RAILGUN_SMALL, SlotKind::High)
             .unwrap();
@@ -85,8 +89,12 @@ fn module_deactivated_event_replay_resets_cycle_remaining() {
         },
     ));
 
-    let entity = *node.ships.index.get(&ship_id).unwrap();
-    let mut fitting = node.world.get_mut::<FittingComp>(entity).unwrap();
+    let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
+    let mut fitting = node
+        .simulation
+        .world
+        .get_mut::<FittingComp>(entity)
+        .unwrap();
     let slot = fitting
         .find_slot_mut(modules::MODULE_RAILGUN_SMALL, SlotKind::High)
         .unwrap();
@@ -271,8 +279,9 @@ fn ship_spawned_event_replay_reconstructs_the_ship_from_scratch() {
         .get_ship_hp(ship_id)
         .expect("ship must exist after replay");
     assert!(hp > 0.0, "freshly replayed ship must start at full HP");
-    let entity = *node.ships.index.get(&ship_id).unwrap();
+    let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
     let inventory = node
+        .simulation
         .world
         .get::<dawn_ecs::components::InventoryComp>(entity)
         .expect("Magpie replay must seed starter inventory (ADR-0032)");
@@ -335,14 +344,15 @@ fn velocity_changed_event_replay_integrates_position_across_the_tick_gap() {
         },
     ));
 
-    let entity = *node.ships.index.get(&ship_id).unwrap();
+    let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
     let vel = node
+        .simulation
         .world
         .get::<dawn_ecs::components::VelocityComp>(entity)
         .unwrap()
         .0;
     assert_eq!(vel.dx, 5.0);
-    assert_eq!(node.current_tick, Tick(3));
+    assert_eq!(node.simulation.current_tick, Tick(3));
 }
 
 #[test]
@@ -357,8 +367,9 @@ fn ship_fitted_event_replay_restores_inventory_snapshot() {
         tick: Tick(4),
     }));
 
-    let entity = *node.ships.index.get(&ship_id).unwrap();
+    let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
     let inventory = node
+        .simulation
         .world
         .get::<dawn_ecs::components::InventoryComp>(entity)
         .unwrap();
@@ -389,8 +400,12 @@ fn module_activated_event_replay_marks_the_slot_active_with_its_target() {
         },
     ));
 
-    let entity = *node.ships.index.get(&ship_id).unwrap();
-    let mut fitting = node.world.get_mut::<FittingComp>(entity).unwrap();
+    let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
+    let mut fitting = node
+        .simulation
+        .world
+        .get_mut::<FittingComp>(entity)
+        .unwrap();
     let slot = fitting
         .find_slot_mut(modules::MODULE_RAILGUN_SMALL, SlotKind::High)
         .unwrap();
@@ -410,9 +425,10 @@ fn target_locked_then_lock_lost_event_replay_round_trips_lock_comp() {
         tick: Tick(6),
     }));
 
-    let entity = *node.ships.index.get(&locker_id).unwrap();
+    let entity = *node.simulation.ships.index.get(&locker_id).unwrap();
     {
         let lock = node
+            .simulation
             .world
             .get::<dawn_ecs::components::LockComp>(entity)
             .unwrap();
@@ -430,6 +446,7 @@ fn target_locked_then_lock_lost_event_replay_round_trips_lock_comp() {
     }));
 
     let lock = node
+        .simulation
         .world
         .get::<dawn_ecs::components::LockComp>(entity)
         .unwrap();
@@ -453,9 +470,10 @@ fn tackle_applied_then_released_event_replay_round_trips_tackled_comp() {
         },
     ));
 
-    let entity = *node.ships.index.get(&ship_id).unwrap();
+    let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
     {
         let tackled = node
+            .simulation
             .world
             .get::<TackledComp>(entity)
             .expect("TackleApplied replay must insert TackledComp");
@@ -471,7 +489,7 @@ fn tackle_applied_then_released_event_replay_round_trips_tackled_comp() {
     ));
 
     assert!(
-        node.world.get::<TackledComp>(entity).is_none(),
+        node.simulation.world.get::<TackledComp>(entity).is_none(),
         "releasing the only tackler must remove TackledComp entirely, \
          matching the live process_tackle behaviour"
     );
@@ -496,7 +514,7 @@ fn anchor_rebased_event_replay_updates_anchor_and_offset() {
         node.get_ship_position(ship_id),
         Some(Position::new(1.0, 2.0, 3.0))
     );
-    assert_eq!(node.current_tick, Tick(10));
+    assert_eq!(node.simulation.current_tick, Tick(10));
 }
 
 #[test]
@@ -520,5 +538,5 @@ fn ship_undocked_event_replay_clears_docked_state() {
 
     assert!(!node.is_ship_docked(ship_id));
     assert_eq!(node.player_docked_station(player_id), None);
-    assert_eq!(node.current_tick, Tick(12));
+    assert_eq!(node.simulation.current_tick, Tick(12));
 }

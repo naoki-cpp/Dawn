@@ -17,19 +17,20 @@ impl SimulationNode {
     pub fn process_tackle(&mut self, tick: Tick) -> Vec<DomainEvent> {
         // Collect ships with at least one active Tackle module.
         let tacklers: Vec<(ShipId, f32, Vec<ShipId>)> = self
+            .simulation
             .ships
             .index
             .iter()
             .filter_map(|(&ship_id, &entity)| {
-                let stats = self.world.get::<ShipStatsComp>(entity)?;
+                let stats = self.simulation.world.get::<ShipStatsComp>(entity)?;
                 if stats.tackle_range <= 0.0 {
                     return None;
                 }
-                let fitting = self.world.get::<FittingComp>(entity)?;
+                let fitting = self.simulation.world.get::<FittingComp>(entity)?;
                 if !fitting.has_active_module_of_kind(ModuleKind::Tackle) {
                     return None;
                 }
-                let lock = self.world.get::<LockComp>(entity)?;
+                let lock = self.simulation.world.get::<LockComp>(entity)?;
                 let locked: Vec<ShipId> = lock.locked_targets().collect();
                 if locked.is_empty() {
                     return None;
@@ -56,11 +57,12 @@ impl SimulationNode {
 
         // Snapshot current tackle state — single ECS scan.
         let current: Vec<(ShipId, Entity, Vec<ShipId>)> = self
+            .simulation
             .ships
             .index
             .iter()
             .filter_map(|(&sid, &entity)| {
-                let t = self.world.get::<TackledComp>(entity)?;
+                let t = self.simulation.world.get::<TackledComp>(entity)?;
                 Some((sid, entity, t.tacklers.clone()))
             })
             .collect();
@@ -93,9 +95,9 @@ impl SimulationNode {
             }
 
             if new_tacklers.is_empty() {
-                let _ = self.world.remove_one::<TackledComp>(entity);
+                let _ = self.simulation.world.remove_one::<TackledComp>(entity);
             } else {
-                if let Some(mut tackled) = self.world.get_mut::<TackledComp>(entity) {
+                if let Some(mut tackled) = self.simulation.world.get_mut::<TackledComp>(entity) {
                     tackled.tacklers = new_tacklers;
                 }
             }
@@ -113,8 +115,8 @@ impl SimulationNode {
                     tick,
                 }));
             }
-            if let Some(&entity) = self.ships.index.get(&target_id) {
-                let _ = self.world.insert_one(
+            if let Some(&entity) = self.simulation.ships.index.get(&target_id) {
+                let _ = self.simulation.world.insert_one(
                     entity,
                     TackledComp {
                         tacklers: new_tacklers.clone(),
@@ -168,7 +170,7 @@ mod tests {
         };
 
         fit_fold_disruptor(&mut node, ship_a);
-        let owner_a = node.ships.owners.get(&ship_a).copied().unwrap();
+        let owner_a = node.players.owners.get(&ship_a).copied().unwrap();
 
         let lock_cmd = LockOnCommand {
             ship_id: ship_a,
@@ -194,7 +196,14 @@ mod tests {
             node.tick_with_lock_commands(std::slice::from_ref(&lock_cmd));
         }
 
-        let gate_id = node.sector_map.gates.keys().next().copied().unwrap();
+        let gate_id = node
+            .topology
+            .sector_map
+            .gates
+            .keys()
+            .next()
+            .copied()
+            .unwrap();
         assert!(
             !node.can_propose_warp(ship_b, dawn_core::WarpTarget::Gate(gate_id)),
             "tackled ship must not be allowed to warp"
@@ -222,7 +231,7 @@ mod tests {
         };
 
         fit_fold_disruptor(&mut node, ship_a);
-        let owner_a = node.ships.owners.get(&ship_a).copied().unwrap();
+        let owner_a = node.players.owners.get(&ship_a).copied().unwrap();
 
         let lock_cmd = LockOnCommand {
             ship_id: ship_a,
@@ -248,7 +257,14 @@ mod tests {
             node.tick_with_lock_commands(std::slice::from_ref(&lock_cmd));
         }
 
-        let gate_id = node.sector_map.gates.keys().next().copied().unwrap();
+        let gate_id = node
+            .topology
+            .sector_map
+            .gates
+            .keys()
+            .next()
+            .copied()
+            .unwrap();
         assert!(
             !node.can_propose_warp(ship_b, dawn_core::WarpTarget::Gate(gate_id)),
             "should be tackled first"
@@ -286,7 +302,7 @@ mod tests {
         };
 
         fit_fold_disruptor(&mut node, ship_a);
-        let owner_a = node.ships.owners.get(&ship_a).copied().unwrap();
+        let owner_a = node.players.owners.get(&ship_a).copied().unwrap();
 
         let lock_cmd = LockOnCommand {
             ship_id: ship_a,
@@ -312,7 +328,14 @@ mod tests {
             node.tick_with_lock_commands(std::slice::from_ref(&lock_cmd));
         }
 
-        let gate_id = node.sector_map.gates.keys().next().copied().unwrap();
+        let gate_id = node
+            .topology
+            .sector_map
+            .gates
+            .keys()
+            .next()
+            .copied()
+            .unwrap();
         assert!(
             !node.can_propose_warp(ship_b, dawn_core::WarpTarget::Gate(gate_id)),
             "should be tackled before snapshot"

@@ -20,22 +20,23 @@ impl SimulationNode {
     /// originates in this Sector, and the Ship is within its `activation_radius`.
     /// Used to reject commands up front, before proposing to the Raft Log (INV-006).
     pub fn can_propose_jump(&self, ship_id: ShipId, gate_id: JumpGateId) -> bool {
-        let Some(&entity) = self.ships.index.get(&ship_id) else {
+        let Some(&entity) = self.simulation.ships.index.get(&ship_id) else {
             return false;
         };
-        if self.world.transit_state(entity).is_in_transit() {
+        if self.simulation.world.transit_state(entity).is_in_transit() {
             return false;
         }
-        if self.world.is_tackled(entity) {
+        if self.simulation.world.is_tackled(entity) {
             return false;
         }
-        let Some(gate) = self.sector_map.gates.get(&gate_id) else {
+        let Some(gate) = self.topology.sector_map.gates.get(&gate_id) else {
             return false;
         };
         // Compare in absolute (Sector-frame) f64 coords: the gate's f64 `abs_m` is
         // Sector-frame, the ship offset is anchor-relative. f64 keeps the check
         // precise at true-AU distances (ADR-0029 review R1 / #4).
         let offset = self
+            .simulation
             .world
             .get::<PositionComp>(entity)
             .map(|p| p.0)
@@ -48,26 +49,28 @@ impl SimulationNode {
     /// the Ship exists, is not in transit, is not already warping, not tackled,
     /// the target belongs to this Sector, and is at least `MIN_WARP_DISTANCE` away.
     pub fn can_propose_warp(&self, ship_id: ShipId, target: WarpTarget) -> bool {
-        let Some(&entity) = self.ships.index.get(&ship_id) else {
+        let Some(&entity) = self.simulation.ships.index.get(&ship_id) else {
             return false;
         };
-        if self.world.transit_state(entity).is_in_transit() {
+        if self.simulation.world.transit_state(entity).is_in_transit() {
             return false;
         }
         if self
+            .simulation
             .world
             .get::<dawn_ecs::components::WarpComp>(entity)
             .is_some()
         {
             return false;
         }
-        if self.world.is_tackled(entity) {
+        if self.simulation.world.is_tackled(entity) {
             return false;
         }
         // Absolute (Sector-frame) f64 ship position vs the f64 gate/body source
         // (ADR-0029 R1 / #4 — never compare a raw anchor offset to absolute data,
         // and keep the distance precise at true-AU scale).
         let offset = self
+            .simulation
             .world
             .get::<PositionComp>(entity)
             .map(|p| p.0)
@@ -76,13 +79,13 @@ impl SimulationNode {
         let min = super::MIN_WARP_DISTANCE;
         match target {
             WarpTarget::Gate(gate_id) => {
-                let Some(gate) = self.sector_map.gates.get(&gate_id) else {
+                let Some(gate) = self.topology.sector_map.gates.get(&gate_id) else {
                     return false;
                 };
                 gate.distance_abs(ship_abs) >= min
             }
             WarpTarget::Body(body_id) => {
-                let Some(body) = self.sector_map.bodies.get(&body_id) else {
+                let Some(body) = self.topology.sector_map.bodies.get(&body_id) else {
                     return false;
                 };
                 let d = [

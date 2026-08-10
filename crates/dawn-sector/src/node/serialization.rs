@@ -90,7 +90,7 @@ impl SimulationNode {
     /// Full-world state for diagnostics and non-network tests. Admission,
     /// resume, and handoff paths must use the observer-scoped builders above.
     pub fn build_initial_state_json(&self) -> InitialStateWire {
-        self.initial_state_json(self.ships.index.keys().copied())
+        self.initial_state_json(self.simulation.ships.index.keys().copied())
     }
 
     /// `InitialState` scoped to an observer's Area of Interest: only ships in the
@@ -110,6 +110,7 @@ impl SimulationNode {
             .collect();
 
         let celestial_bodies: Vec<CelestialBodyWire> = self
+            .topology
             .sector_map
             .bodies
             .values()
@@ -126,7 +127,7 @@ impl SimulationNode {
         // Navigation topology (ADR-0009/0025). The client renders gates/bodies
         // and resolves system names from this instead of holding a hard-coded
         // copy of the galaxy. Gates and bodies are already scoped to this Sector.
-        let galaxy = &self.sector_map.galaxy;
+        let galaxy = &self.topology.sector_map.galaxy;
         let system_name_of = |sector| {
             galaxy
                 .system_for_sector_opt(sector)
@@ -145,6 +146,7 @@ impl SimulationNode {
             .collect();
 
         let jump_gates: Vec<JumpGateWire> = self
+            .topology
             .sector_map
             .gates
             .values()
@@ -157,6 +159,7 @@ impl SimulationNode {
             .collect();
 
         let stations: Vec<StationWire> = self
+            .topology
             .sector_map
             .stations
             .values()
@@ -172,6 +175,7 @@ impl SimulationNode {
         // not per-tick, so it's cheapest to send once alongside the rest of
         // InitialState rather than as its own message type.
         let buildable_ship_types: Vec<BuildableShipTypeWire> = self
+            .game_data
             .ship_type_registry
             .values()
             .filter(|def| def.buildable)
@@ -197,28 +201,31 @@ impl SimulationNode {
     /// directly (`ServerMessage::AoiEnter`), no separate wrapper needed.
     /// `None` if the ship is gone.
     pub fn ship_state_json(&self, ship_id: ShipId) -> Option<ShipStateWire> {
-        let entity = self.ships.index.get(&ship_id)?;
+        let entity = self.simulation.ships.index.get(&ship_id)?;
         // Send the ABSOLUTE position (anchor + offset, f64), not the raw
         // anchor-relative offset (ADR-0029). After a warp rebase the offset is
         // body-relative, so a client that read it as absolute would misplace the
         // ship near the origin. The client renders absolute coords via its
         // floating origin.
         let pos = self.ship_absolute(ship_id)?;
-        let stats = self.world.get::<ShipStatsComp>(*entity)?;
-        let hull = self.world.get::<HullComp>(*entity)?;
-        let is_player = self.ships.owners.contains_key(&ship_id);
+        let stats = self.simulation.world.get::<ShipStatsComp>(*entity)?;
+        let hull = self.simulation.world.get::<HullComp>(*entity)?;
+        let is_player = self.players.owners.contains_key(&ship_id);
         let ship_type_name = self
+            .simulation
             .ships
             .type_ids
             .get(&ship_id)
-            .and_then(|tid| self.ship_type_registry.get(tid))
+            .and_then(|tid| self.game_data.ship_type_registry.get(tid))
             .map(|def| def.name.as_str())
             .unwrap_or("Unknown");
         Some(ShipStateWire {
             ship_id: ship_id.raw(),
             ship_type_name: ship_type_name.to_string(),
             position: abs_pos_json(pos),
-            velocity: dawn_wire::VelWire::from(self.world.get::<VelocityComp>(*entity)?.0),
+            velocity: dawn_wire::VelWire::from(
+                self.simulation.world.get::<VelocityComp>(*entity)?.0,
+            ),
             max_speed: stats.max_speed,
             mass: stats.mass,
             inertia_modifier: stats.inertia_modifier,
@@ -243,7 +250,8 @@ impl SimulationNode {
     /// distances (an f32 absolute would have a ~16 km ulp). `CellGrid` sorts each
     /// bucket, so query results are deterministic.
     pub fn ship_absolute_positions(&self) -> Vec<(ShipId, dawn_core::AbsolutePosition)> {
-        self.ships
+        self.simulation
+            .ships
             .index
             .iter()
             .map(|(&id, &entity)| (id, self.entity_abs_pos_f64(entity)))
@@ -413,7 +421,7 @@ mod tests {
 
         let bodies_json = &v.celestial_bodies;
         assert_eq!(bodies_json.len(), 3, "Helios + Forge + Meridian");
-        let first_body = node.sector_map.bodies.values().next().unwrap();
+        let first_body = node.topology.sector_map.bodies.values().next().unwrap();
         let first_body_json = bodies_json
             .iter()
             .find(|b| b.id == first_body.id.0)

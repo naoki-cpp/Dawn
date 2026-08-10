@@ -212,7 +212,7 @@ before invoking the same per-session `AoiFrame` delivery operation.
 | Deliberately lossy runtime effects | No | Runtime/application layer | None | Must be explicitly classified and cannot be required for authoritative continuity. |
 
 Any newly added mutable field or post-commit obligation must be added to this table
-before code lands. #275 may split Sector-world rows among sub-aggregates, while #277
+before code lands. #275 splits Sector-world rows among explicit state owners, while #277
 may split repository-owned admission/identity protocol state, but neither may
 silently downgrade an authoritative row to frame-local state.
 

@@ -39,7 +39,7 @@ impl SimulationNode {
         if !self.can_propose_warp(ship_id, target) {
             return false;
         }
-        let &entity = match self.ships.index.get(&ship_id) {
+        let &entity = match self.simulation.ships.index.get(&ship_id) {
             Some(e) => e,
             None => return false,
         };
@@ -49,7 +49,7 @@ impl SimulationNode {
         // relied on tick order alone -- process_warp happens to run after
         // them and overwrite ThrustComp each tick, which masked this).
         self.clear_steering_modes(entity);
-        let _ = self.world.insert_one(
+        let _ = self.simulation.world.insert_one(
             entity,
             WarpComp {
                 target,
@@ -88,7 +88,7 @@ impl SimulationNode {
     /// commit a replayable/idempotent continuation obligation, which #276 may
     /// represent as Transit Saga state before this queue is drained.
     pub fn drain_pending_auto_jumps(&mut self) -> Vec<(ShipId, JumpGateId)> {
-        std::mem::take(&mut self.pending_auto_jumps)
+        std::mem::take(&mut self.frame_outputs.pending_auto_jumps)
     }
 
     /// Drain the ships that finished a warp this tick (ADR-0029 warp-arrival
@@ -98,7 +98,7 @@ impl SimulationNode {
     /// cleared after delivery; it is separate from the durable auto-jump
     /// obligation required by ADR-0049.
     pub fn drain_completed_warps(&mut self) -> Vec<ShipId> {
-        std::mem::take(&mut self.completed_warps)
+        std::mem::take(&mut self.frame_outputs.completed_warps)
     }
 
     #[cfg(test)]
@@ -107,8 +107,8 @@ impl SimulationNode {
         auto_jump: (ShipId, JumpGateId),
         completed_warp: ShipId,
     ) {
-        self.pending_auto_jumps.push(auto_jump);
-        self.completed_warps.push(completed_warp);
+        self.frame_outputs.pending_auto_jumps.push(auto_jump);
+        self.frame_outputs.completed_warps.push(completed_warp);
     }
 
     /// Warp System (ADR-0022 §6): advance every ship carrying a `WarpComp`.
@@ -125,6 +125,7 @@ impl SimulationNode {
         // Collect warpers up front so the ECS query borrow is released before
         // the mutable write pass below.
         let warpers: Vec<(Entity, ShipId, WarpComp, Position, Velocity, f64)> = self
+            .simulation
             .world
             .query::<(
                 Entity,
@@ -154,24 +155,28 @@ impl SimulationNode {
                         g.position,
                         g.activation_radius * WARP_ARRIVAL_FACTOR,
                         warp.auto_jump.then_some(gate_id),
-                        self.anchor_table.nearest_anchor(g.from_sector, g.abs_m),
+                        self.topology
+                            .anchor_table
+                            .nearest_anchor(g.from_sector, g.abs_m),
                         g.abs_m,
                     )
                 }),
-                WarpTarget::Body(body_id) => self.sector_map.bodies.get(&body_id).map(|b| {
-                    (
-                        b.position,
-                        b.radius * BODY_WARP_ARRIVAL_FACTOR,
-                        None,
-                        Some(AnchorId::from(body_id)),
-                        b.abs_m,
-                    )
-                }),
+                WarpTarget::Body(body_id) => {
+                    self.topology.sector_map.bodies.get(&body_id).map(|b| {
+                        (
+                            b.position,
+                            b.radius * BODY_WARP_ARRIVAL_FACTOR,
+                            None,
+                            Some(AnchorId::from(body_id)),
+                            b.abs_m,
+                        )
+                    })
+                }
             };
             let Some((dest_world, arrival, auto_jump_gate, dest_anchor, target_abs)) = resolved
             else {
                 // Target vanished — cancel and brake.
-                let _ = self.world.remove_one::<WarpComp>(entity);
+                let _ = self.simulation.world.remove_one::<WarpComp>(entity);
                 self.brake_thrust(entity);
                 continue;
             };
@@ -183,8 +188,8 @@ impl SimulationNode {
 
             // Tackle interrupts the aligning phase (ADR-0024): a tackled ship
             // cannot enter warp. Cancel and brake; the Warping phase is committed.
-            if warp.phase == WarpPhase::Aligning && self.world.is_tackled(entity) {
-                let _ = self.world.remove_one::<WarpComp>(entity);
+            if warp.phase == WarpPhase::Aligning && self.simulation.world.is_tackled(entity) {
+                let _ = self.simulation.world.remove_one::<WarpComp>(entity);
                 self.brake_thrust(entity);
                 continue;
             }
@@ -220,7 +225,7 @@ impl SimulationNode {
                     // as the curve's start tangent so the Aligning cruise speed
                     // flows continuously into the warp-speed ramp, instead of
                     // snapping to near-zero before re-accelerating.
-                    if let Some(mut w) = self.world.get_mut::<WarpComp>(entity) {
+                    if let Some(mut w) = self.simulation.world.get_mut::<WarpComp>(entity) {
                         w.warp_start_abs = start_abs;
                         w.warp_arrival_abs = arrival_abs.into();
                         w.warp_start_vel = vel;
@@ -309,9 +314,10 @@ impl SimulationNode {
     ) {
         let total = total.max(1);
         let anchor_abs = self
+            .simulation
             .world
             .ship_anchor(entity)
-            .and_then(|a| self.anchor_table.abs(a))
+            .and_then(|a| self.topology.anchor_table.abs(a))
             .unwrap_or(dawn_core::AbsolutePosition::ORIGIN);
         let (new_pos, new_vel, arrived) = compute_warp_step(
             pos,
@@ -323,29 +329,29 @@ impl SimulationNode {
             elapsed,
         );
 
-        if let Some(mut p) = self.world.get_mut::<PositionComp>(entity) {
+        if let Some(mut p) = self.simulation.world.get_mut::<PositionComp>(entity) {
             p.0 = new_pos;
         }
-        if let Some(mut v) = self.world.get_mut::<VelocityComp>(entity) {
+        if let Some(mut v) = self.simulation.world.get_mut::<VelocityComp>(entity) {
             v.0 = new_vel;
         }
 
         if arrived {
             // Warp complete: drop the component and clear thrust. Movement resumes next tick.
-            let _ = self.world.remove_one::<WarpComp>(entity);
-            if let Some(mut t) = self.world.get_mut::<ThrustComp>(entity) {
+            let _ = self.simulation.world.remove_one::<WarpComp>(entity);
+            if let Some(mut t) = self.simulation.world.get_mut::<ThrustComp>(entity) {
                 t.direction = Velocity::ZERO;
                 t.is_braking = false;
             }
             // Queue auto-jump for Gate targets (ADR-0023).
             if let Some(gid) = auto_jump_gate {
-                self.pending_auto_jumps.push((ship_id, gid));
+                self.frame_outputs.pending_auto_jumps.push((ship_id, gid));
             }
             // Authoritative arrival: the serve loop sends the owner a PositionSnap
             // so its capped warp-visual dead-reckoning is corrected, regardless of
             // whether the arrival rebased the anchor (ADR-0029 warp-arrival authority).
-            self.completed_warps.push(ship_id);
-        } else if let Some(mut w) = self.world.get_mut::<WarpComp>(entity) {
+            self.frame_outputs.completed_warps.push(ship_id);
+        } else if let Some(mut w) = self.simulation.world.get_mut::<WarpComp>(entity) {
             // Persist the plan + progress for the next tick.
             w.warp_start_abs = start_abs.into();
             w.warp_total = total;
@@ -393,27 +399,27 @@ impl SimulationNode {
         arrival_abs: [f64; 3],
         tick: Tick,
     ) -> Option<DomainEvent> {
-        let cur_anchor = self.world.ship_anchor(entity)?;
+        let cur_anchor = self.simulation.world.ship_anchor(entity)?;
         if cur_anchor == to {
             return None;
         }
-        let to_abs = self.anchor_table.abs(to)?;
+        let to_abs = self.topology.anchor_table.abs(to)?;
         // Prefer the precise f64 arrival point (set at engage) over a position
         // reconstructed from an unrelated anchor (ADR-0029). Fall back to the
         // offset compose if arrival is unset.
         let world = if arrival_abs != [0.0, 0.0, 0.0] {
             dawn_core::AbsolutePosition::from(arrival_abs)
         } else {
-            let offset = self.world.get::<PositionComp>(entity)?.0;
-            self.anchor_table.absolute(cur_anchor, offset)?
+            let offset = self.simulation.world.get::<PositionComp>(entity)?.0;
+            self.topology.anchor_table.absolute(cur_anchor, offset)?
         };
         let new_off = Position::new(
             world[0] - to_abs[0],
             world[1] - to_abs[1],
             world[2] - to_abs[2],
         );
-        self.world.set_ship_anchor(entity, to);
-        if let Some(mut p) = self.world.get_mut::<PositionComp>(entity) {
+        self.simulation.world.set_ship_anchor(entity, to);
+        if let Some(mut p) = self.simulation.world.get_mut::<PositionComp>(entity) {
             p.0 = new_off;
         }
         Some(DomainEvent::AnchorRebased(
@@ -438,6 +444,7 @@ impl SimulationNode {
     ) -> [f64; 3] {
         let target_abs = target_abs.into();
         let offset = self
+            .simulation
             .world
             .get::<PositionComp>(entity)
             .map(|p| p.0)
@@ -477,7 +484,7 @@ impl SimulationNode {
 
     /// Overwrite the phase of a ship's `WarpComp` (no-op if absent).
     fn set_warp_phase(&mut self, entity: Entity, phase: WarpPhase) {
-        if let Some(mut w) = self.world.get_mut::<WarpComp>(entity) {
+        if let Some(mut w) = self.simulation.world.get_mut::<WarpComp>(entity) {
             w.phase = phase;
         }
     }
@@ -709,7 +716,7 @@ mod tests {
         // overwrite ThrustComp every tick.
         let mut node = mem_node();
         let (player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
-        let entity = *node.ships.index.get(&ship).unwrap();
+        let entity = *node.simulation.ships.index.get(&ship).unwrap();
 
         assert!(node.apply_orbit_command(
             ship,
@@ -717,6 +724,7 @@ mod tests {
             None,
         ));
         assert!(node
+            .simulation
             .world
             .get::<dawn_ecs::components::OrbitComp>(entity)
             .is_some());
@@ -730,7 +738,8 @@ mod tests {
         ));
 
         assert!(
-            node.world
+            node.simulation
+                .world
                 .get::<dawn_ecs::components::OrbitComp>(entity)
                 .is_none(),
             "OrbitComp should be cleared once Warp starts"
@@ -795,10 +804,10 @@ mod tests {
             );
             let player_id = node.next_player_id();
             let ship = node.spawn_player_ship_at_pub(player_id, Position::ORIGIN);
-            let entity = *node.ships.index.get(&ship).unwrap();
-            let mut stats = *node.world.get::<ShipStatsComp>(entity).unwrap();
+            let entity = *node.simulation.ships.index.get(&ship).unwrap();
+            let mut stats = *node.simulation.world.get::<ShipStatsComp>(entity).unwrap();
             stats.mass = mass;
-            node.world.set_ship_stats(entity, stats);
+            node.simulation.world.set_ship_stats(entity, stats);
             node.apply_warp_command_owned(
                 player_id,
                 ship,
@@ -832,12 +841,12 @@ mod tests {
             },
         );
 
-        let entity = *node.ships.index.get(&ship).unwrap();
+        let entity = *node.simulation.ships.index.get(&ship).unwrap();
         let mut saw_decel_step = false;
         for _ in 0..250 {
             node.tick();
             let warping = node.warp_phase(ship) == Some(WarpPhase::Warping);
-            let v = node.world.get::<VelocityComp>(entity).unwrap().0;
+            let v = node.simulation.world.get::<VelocityComp>(entity).unwrap().0;
             let speed = (v.dx * v.dx + v.dy * v.dy + v.dz * v.dz).sqrt();
             if warping && speed > f64::EPSILON && speed < WARP_SPEED * 0.9 {
                 saw_decel_step = true;
@@ -870,11 +879,11 @@ mod tests {
             },
         );
 
-        let entity = *node.ships.index.get(&ship).unwrap();
+        let entity = *node.simulation.ships.index.get(&ship).unwrap();
         let mut speed_before_engage = 0.0_f64;
         loop {
             let phase = node.warp_phase(ship);
-            let v = node.world.get::<VelocityComp>(entity).unwrap().0;
+            let v = node.simulation.world.get::<VelocityComp>(entity).unwrap().0;
             let speed = (v.dx * v.dx + v.dy * v.dy + v.dz * v.dz).sqrt();
             if phase == Some(WarpPhase::Aligning) {
                 speed_before_engage = speed;
@@ -888,7 +897,7 @@ mod tests {
                 "warp should not cancel before engaging"
             );
         }
-        let v_after_engage = node.world.get::<VelocityComp>(entity).unwrap().0;
+        let v_after_engage = node.simulation.world.get::<VelocityComp>(entity).unwrap().0;
         let speed_after_engage = (v_after_engage.dx * v_after_engage.dx
             + v_after_engage.dy * v_after_engage.dy
             + v_after_engage.dz * v_after_engage.dz)

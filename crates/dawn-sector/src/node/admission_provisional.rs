@@ -52,19 +52,19 @@ impl SimulationNode {
     ) -> (PlayerId, ShipId, ResumeTicket) {
         let resume_ticket = generate_resume_ticket();
         let (player_id, ship_id) = self
-            .repositories
+            .persistence
             .reserve_fresh_admission_identity(self.node_id, spawn_position, resume_ticket)
             .expect("fresh admission identity reservation");
-        self.player_id_counter = self.player_id_counter.max(player_id.0 + 1);
-        self.id_counter = self.id_counter.max(ship_id.0.counter() + 1);
+        self.players.player_id_counter = self.players.player_id_counter.max(player_id.0 + 1);
+        self.simulation.id_counter = self.simulation.id_counter.max(ship_id.0.counter() + 1);
         self.emit_event(DomainEvent::ClientAdmissionIdentityReserved(
             ClientAdmissionIdentityReserved {
                 player_id,
                 ship_id,
-                tick: self.current_tick,
+                tick: self.simulation.current_tick,
             },
         ));
-        let inserted = self.pending_fresh_admissions.insert(ship_id);
+        let inserted = self.players.pending_fresh_admissions.insert(ship_id);
         debug_assert!(
             inserted,
             "fresh admission ShipId reservation must be unique"
@@ -76,7 +76,7 @@ impl SimulationNode {
         &self,
         resume_ticket: ResumeTicket,
     ) -> Option<(PlayerId, ShipId, Position)> {
-        self.repositories
+        self.persistence
             .admissions()
             .prepared_client_admission_by_ticket(resume_ticket)
             .expect("client admission prepared query")
@@ -93,13 +93,13 @@ impl SimulationNode {
     /// Besides materialized Ships, this includes a client-visible fresh
     /// identity whose durable prepared row survived a disconnect or restart.
     pub fn hosts_client_resume_ticket(&self, resume_ticket: ResumeTicket) -> bool {
-        self.repositories
+        self.persistence
             .admissions()
             .prepared_client_admission_by_ticket(resume_ticket)
             .expect("client admission prepared query")
             .is_some()
             || self
-                .repositories
+                .persistence
                 .identities()
                 .client_ownership_by_ticket(resume_ticket)
                 .expect("client ownership query")
@@ -112,7 +112,7 @@ impl SimulationNode {
         &self,
         resume_ticket: ResumeTicket,
     ) -> Option<(PlayerId, ShipId)> {
-        self.repositories
+        self.persistence
             .identities()
             .client_ownership_by_ticket(resume_ticket)
             .expect("client ownership query")
@@ -128,7 +128,7 @@ impl SimulationNode {
         player_id: PlayerId,
         resume_ticket: ResumeTicket,
     ) {
-        self.repositories
+        self.persistence
             .record_client_ownership(ship_id, player_id, resume_ticket)
             .expect("client ownership upsert");
     }
@@ -140,14 +140,14 @@ impl SimulationNode {
         presented_ticket: ResumeTicket,
         proposed_next_ticket: ResumeTicket,
     ) -> Option<ResumeTicket> {
-        self.repositories
+        self.persistence
             .stage_client_resume_ticket(ship_id, player_id, presented_ticket, proposed_next_ticket)
             .expect("client ownership ticket staging")
     }
 
     #[cfg(test)]
     pub(crate) fn client_resume_ticket(&self, ship_id: ShipId) -> Option<ResumeTicket> {
-        self.repositories
+        self.persistence
             .identities()
             .client_resume_tickets(ship_id)
             .expect("client ownership tickets query")
@@ -158,7 +158,7 @@ impl SimulationNode {
         &self,
         ship_id: ShipId,
     ) -> Option<(ResumeTicket, Option<ResumeTicket>)> {
-        self.repositories
+        self.persistence
             .identities()
             .client_resume_tickets(ship_id)
             .expect("client ownership tickets query")
@@ -170,9 +170,9 @@ impl SimulationNode {
         ship_id: ShipId,
         resume_ticket: ResumeTicket,
     ) -> bool {
-        if self.pending_fresh_admissions.contains(&ship_id)
+        if self.players.pending_fresh_admissions.contains(&ship_id)
             || self
-                .repositories
+                .persistence
                 .admissions()
                 .prepared_client_admission(ship_id)
                 .expect("client admission prepared query")
@@ -182,7 +182,7 @@ impl SimulationNode {
         {
             return false;
         }
-        self.pending_fresh_admissions.insert(ship_id)
+        self.players.pending_fresh_admissions.insert(ship_id)
     }
 
     /// Build a fresh handoff from a temporary in-memory Ship and remove it
@@ -219,10 +219,10 @@ impl SimulationNode {
         spawn_position: Position,
         resume_ticket: ResumeTicket,
     ) -> bool {
-        if !self.pending_fresh_admissions.contains(&ship_id)
-            || self.ships.index.contains_key(&ship_id)
+        if !self.players.pending_fresh_admissions.contains(&ship_id)
+            || self.simulation.ships.index.contains_key(&ship_id)
             || self
-                .repositories
+                .persistence
                 .admissions()
                 .prepared_client_admission(ship_id)
                 .expect("client admission prepared query")
@@ -236,15 +236,17 @@ impl SimulationNode {
         }
 
         self.materialize_admission_player_ship(player_id, ship_id, spawn_position);
-        let Some(&entity) = self.ships.index.get(&ship_id) else {
+        let Some(&entity) = self.simulation.ships.index.get(&ship_id) else {
             return false;
         };
         let fitting = self
+            .simulation
             .world
             .get::<FittingComp>(entity)
             .map(|fitting| fitting.to_snapshot())
             .unwrap_or_else(dawn_core::FittingSnapshot::empty);
         let inventory = self
+            .simulation
             .world
             .get::<InventoryComp>(entity)
             .map(|inventory| inventory.items.clone())
@@ -267,11 +269,11 @@ impl SimulationNode {
             starter_station_id: StationId(0),
             starter_item_id: ItemId::PackagedShip(crate::ship_types::SHIP_TYPE_MAGPIE),
             starter_item_count: 1,
-            tick: self.current_tick,
+            tick: self.simulation.current_tick,
         };
 
         self.emit_event(DomainEvent::ClientAdmissionCommitted(event.clone()));
-        self.pending_fresh_admissions.remove(&ship_id);
+        self.players.pending_fresh_admissions.remove(&ship_id);
         self.ensure_client_admission_grant(&event);
         true
     }
@@ -285,7 +287,7 @@ impl SimulationNode {
     /// reconciliation for protocol authority.
     #[cfg(test)]
     pub(super) fn replay_client_admission_commit(&mut self, event: &ClientAdmissionCommitted) {
-        if !self.ships.index.contains_key(&event.ship_id) {
+        if !self.simulation.ships.index.contains_key(&event.ship_id) {
             self.insert_to_world(event.ship_id, Position::ORIGIN, Velocity::ZERO);
             self.set_spawn_anchor_abs(event.ship_id, event.initial_position);
             self.materialize_ship_stats(
@@ -293,11 +295,12 @@ impl SimulationNode {
                 event.ship_type_id,
                 dawn_ecs::components::ShipStatsComp::PLAYER,
             );
-            if let Some(&entity) = self.ships.index.get(&event.ship_id) {
-                let _ = self.world.remove_one::<IsNpcComp>(entity);
+            if let Some(&entity) = self.simulation.ships.index.get(&event.ship_id) {
+                let _ = self.simulation.world.remove_one::<IsNpcComp>(entity);
                 self.seed_player_inventory(entity);
-                let fitting = FittingComp::from_snapshot(&event.fitting, &self.module_registry);
-                let _ = self.world.insert_one(entity, fitting);
+                let fitting =
+                    FittingComp::from_snapshot(&event.fitting, &self.game_data.module_registry);
+                let _ = self.simulation.world.insert_one(entity, fitting);
                 let items = event.inventory.iter().copied().fold(
                     std::collections::BTreeMap::new(),
                     |mut items, item_id| {
@@ -305,16 +308,22 @@ impl SimulationNode {
                         items
                     },
                 );
-                let _ = self.world.insert_one(entity, InventoryComp { items });
+                let _ = self
+                    .simulation
+                    .world
+                    .insert_one(entity, InventoryComp { items });
                 self.reapply_fitting(event.ship_id);
             }
         }
-        self.ships
+        self.players
             .active_ship
             .insert(event.player_id, event.ship_id);
-        self.ships.owners.insert(event.ship_id, event.player_id);
-        self.player_id_counter = self.player_id_counter.max(event.player_id.0 + 1);
-        self.id_counter = self.id_counter.max(event.ship_id.0.counter() + 1);
+        self.players.owners.insert(event.ship_id, event.player_id);
+        self.players.player_id_counter = self.players.player_id_counter.max(event.player_id.0 + 1);
+        self.simulation.id_counter = self
+            .simulation
+            .id_counter
+            .max(event.ship_id.0.counter() + 1);
         self.ensure_client_admission_grant(event);
     }
 
@@ -325,9 +334,9 @@ impl SimulationNode {
     /// invariant is explicit: terminating the prepared protocol record may
     /// release resources, but its durably consumed IDs are never reusable.
     pub(crate) fn abort_reserved_fresh_admission(&mut self, ship_id: ShipId) {
-        self.pending_fresh_admissions.remove(&ship_id);
+        self.players.pending_fresh_admissions.remove(&ship_id);
         debug_assert!(
-            !self.ships.index.contains_key(&ship_id),
+            !self.simulation.ships.index.contains_key(&ship_id),
             "fresh admission preview must not survive begin"
         );
     }
@@ -340,18 +349,18 @@ impl SimulationNode {
         player_id: PlayerId,
         ship_id: ShipId,
     ) -> bool {
-        self.repositories
+        self.persistence
             .identities()
             .client_owner(ship_id)
             .expect("client ownership query")
             .is_some_and(|owner| owner != player_id)
             || self
-                .ships
+                .players
                 .owners
                 .get(&ship_id)
                 .is_some_and(|owner| *owner != player_id)
             || self
-                .ships
+                .players
                 .active_ship
                 .get(&player_id)
                 .is_some_and(|active_ship| *active_ship != ship_id)
@@ -363,9 +372,13 @@ impl SimulationNode {
         player_id: PlayerId,
         ship_id: ShipId,
     ) -> bool {
-        if !self.ships.index.contains_key(&ship_id)
-            || self.pending_resume_admissions.contains_key(&ship_id)
+        if !self.simulation.ships.index.contains_key(&ship_id)
             || self
+                .players
+                .pending_resume_admissions
+                .contains_key(&ship_id)
+            || self
+                .players
                 .pending_resume_admissions
                 .values()
                 .any(|pending_player| *pending_player == player_id)
@@ -373,13 +386,15 @@ impl SimulationNode {
         {
             return false;
         }
-        self.pending_resume_admissions.insert(ship_id, player_id);
+        self.players
+            .pending_resume_admissions
+            .insert(ship_id, player_id);
         true
     }
 
     pub(crate) fn release_resume_admission(&mut self, player_id: PlayerId, ship_id: ShipId) {
-        if self.pending_resume_admissions.get(&ship_id) == Some(&player_id) {
-            self.pending_resume_admissions.remove(&ship_id);
+        if self.players.pending_resume_admissions.get(&ship_id) == Some(&player_id) {
+            self.players.pending_resume_admissions.remove(&ship_id);
         }
     }
 
@@ -396,15 +411,15 @@ impl SimulationNode {
         presented_ticket: ResumeTicket,
         next_ticket: ResumeTicket,
     ) -> bool {
-        if self.pending_resume_admissions.get(&ship_id) != Some(&player_id)
-            || !self.ships.index.contains_key(&ship_id)
+        if self.players.pending_resume_admissions.get(&ship_id) != Some(&player_id)
+            || !self.simulation.ships.index.contains_key(&ship_id)
             || self.resume_admission_identity_conflicts(player_id, ship_id)
         {
             self.release_resume_admission(player_id, ship_id);
             return false;
         }
         if self
-            .repositories
+            .persistence
             .identities()
             .client_ownership_by_ticket(presented_ticket)
             .expect("client ownership query")
@@ -413,7 +428,7 @@ impl SimulationNode {
             self.release_resume_admission(player_id, ship_id);
             return false;
         }
-        self.repositories
+        self.persistence
             .record_client_ownership(ship_id, player_id, next_ticket)
             .expect("client ownership upsert");
         let committed = self.resume_player_ship(ship_id, player_id);
@@ -435,13 +450,13 @@ impl SimulationNode {
             dawn_ecs::components::ShipStatsComp::PLAYER,
         );
 
-        if let Some(&entity) = self.ships.index.get(&ship_id) {
-            let _ = self.world.remove_one::<IsNpcComp>(entity);
+        if let Some(&entity) = self.simulation.ships.index.get(&ship_id) {
+            let _ = self.simulation.world.remove_one::<IsNpcComp>(entity);
         }
-        self.ships.active_ship.insert(player_id, ship_id);
-        self.ships.owners.insert(ship_id, player_id);
+        self.players.active_ship.insert(player_id, ship_id);
+        self.players.owners.insert(ship_id, player_id);
 
-        if let Some(&entity) = self.ships.index.get(&ship_id) {
+        if let Some(&entity) = self.simulation.ships.index.get(&ship_id) {
             self.seed_player_inventory(entity);
         }
 
@@ -461,14 +476,14 @@ impl SimulationNode {
         slot: SlotKind,
         module_id: dawn_core::ModuleId,
     ) {
-        let Some(def) = self.module_registry.get(&module_id).cloned() else {
+        let Some(def) = self.game_data.module_registry.get(&module_id).cloned() else {
             return;
         };
-        let Some(&entity) = self.ships.index.get(&ship_id) else {
+        let Some(&entity) = self.simulation.ships.index.get(&ship_id) else {
             return;
         };
         let is_active = matches!(def.activation_mode, ActivationMode::Passive);
-        if let Some(mut fitting) = self.world.get_mut::<FittingComp>(entity) {
+        if let Some(mut fitting) = self.simulation.world.get_mut::<FittingComp>(entity) {
             fitting.slot_mut(slot).push(FittedSlot {
                 def,
                 is_active,
