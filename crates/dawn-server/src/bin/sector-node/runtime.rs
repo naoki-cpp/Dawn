@@ -6,10 +6,10 @@
 //! Redirect handling, and AoI delivery.
 
 use dawn_actor::ws_server;
-use dawn_consensus::RaftActorHandle;
 use dawn_core::{DomainEvent, SectorId, ShipId};
-use dawn_event_store::DurableJournal;
-use dawn_replication::{OutboundLogPublisher, PeerReplicationTransport};
+use dawn_distributed::RaftActorHandle;
+use dawn_distributed::{OutboundLogPublisher, PeerReplicationTransport};
+use dawn_protocol::ServerMessage;
 use dawn_sector::aoi::{AoiMessage, AoiSink, Observer};
 use dawn_sector::aoi_frame::{deliver_sector_sessions, AoiFrame, AoiSessionCallbacks};
 use dawn_sector::node::{
@@ -18,23 +18,23 @@ use dawn_sector::node::{
 };
 use dawn_sector::transit;
 use dawn_sector::transit::RuntimeHealth;
-use dawn_wire::ServerMessage;
+use dawn_storage::DurableJournal;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use tokio::sync::mpsc;
 
 fn client_request_rejection(
     error: ClientRequestAdmissionError,
-) -> dawn_wire::ClientRequestRejectionWire {
+) -> dawn_protocol::ClientRequestRejectionWire {
     match error {
         ClientRequestAdmissionError::Validation(error) => {
-            dawn_wire::ClientRequestRejectionWire::validation(error)
+            dawn_protocol::ClientRequestRejectionWire::validation(error)
         }
         ClientRequestAdmissionError::NoActiveShip => {
-            dawn_wire::ClientRequestRejectionWire::no_active_ship()
+            dawn_protocol::ClientRequestRejectionWire::no_active_ship()
         }
         ClientRequestAdmissionError::UnsupportedRequest { request } => {
-            dawn_wire::ClientRequestRejectionWire::unsupported_request(request)
+            dawn_protocol::ClientRequestRejectionWire::unsupported_request(request)
         }
     }
 }
@@ -54,7 +54,7 @@ impl SectorNodeRuntime {
         aoi_cell_size: f64,
         peer_ws: HashMap<SectorId, SocketAddr>,
         repl_transport: PeerReplicationTransport,
-        event_store: &impl dawn_event_store::store::EventStore,
+        event_store: &impl dawn_storage::store::EventStore,
     ) -> Self {
         Self {
             sector_id,
@@ -99,7 +99,7 @@ impl SectorNodeRuntime {
         node: &mut SimulationNode,
         raft: &RaftActorHandle,
         committed_rx: &mut mpsc::UnboundedReceiver<Vec<u8>>,
-        event_store: &mut impl dawn_event_store::store::EventStore,
+        event_store: &mut impl dawn_storage::store::EventStore,
         recovery_journal: &mut impl DurableJournal,
     ) -> anyhow::Result<()> {
         let (lock_commands, pending_jumps) = self.collect_player_commands(node);
@@ -117,7 +117,7 @@ impl SectorNodeRuntime {
             transit::DurableRuntimeTickContext {
                 transition_id,
                 owner_epoch: 0,
-                durability: dawn_event_store::DurabilityMode::Synced,
+                durability: dawn_storage::DurabilityMode::Synced,
                 profile: transit::RuntimeDurabilityProfile::LocalDurable,
             },
             |_, _, _| {},

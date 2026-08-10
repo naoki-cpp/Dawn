@@ -1,5 +1,5 @@
 [package]
-name    = "dawn-event-store"
+name    = "dawn-storage"
 version = "0.1.0"
 edition = "2021"
 description = "Append-only event storage and replay support for Dawn."

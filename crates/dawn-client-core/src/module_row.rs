@@ -36,7 +36,7 @@ pub struct ModuleRow {
     pub cycle_time_ticks: u32,
     /// `dawn_core::StatDelta` directly (not a client-side copy): the wire
     /// already carries this exact type unchanged (`ModuleRowWire.stat_delta`,
-    /// `dawn-wire`), so a client-side mirror only risked silently dropping
+    /// `dawn-protocol`), so a client-side mirror only risked silently dropping
     /// fields as `dawn_core::StatDelta` grew -- it previously did, missing
     /// `weapon_cooldown_add`/`lock_time_add`/`max_locks_add`/`cap_max_add`/
     /// `cap_recharge_add`/`repair_amount`.

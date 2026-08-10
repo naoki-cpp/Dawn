@@ -41,11 +41,11 @@ AI_DEVELOPMENT_GUIDE.md「Crate Boundaries」の設計意図では `dawn-simulat
 dawn-core
     ↑
     ├── dawn-ecs
-    ├── dawn-consensus
-    └── dawn-event-store
+    ├── dawn-distributed
+    └── dawn-storage
             ↑
             ├── dawn-actor
-            ├── dawn-replication
+            ├── dawn-distributed
             └── dawn-sector          ← NEW: ゲームロジック専用
                     ↑
                     └── dawn-simulation  ← 配線・起動のみ
@@ -88,8 +88,8 @@ Sector 単位のゲームシミュレーションロジック。
 # crates/dawn-sector/Cargo.toml [dependencies]
 dawn-core      = { path = "../dawn-core" }
 dawn-ecs       = { path = "../dawn-ecs" }
-dawn-event-store = { path = "../dawn-event-store" }
-dawn-consensus = { path = "../dawn-consensus" }   # TransitOp が RaftActorHandle を参照
+dawn-storage = { path = "../dawn-storage" }
+dawn-distributed = { path = "../dawn-distributed" }   # TransitOp が RaftActorHandle を参照
 serde          = { version = "1", features = ["derive"] }
 postcard       = "1"
 hecs           = "0.10"
@@ -115,7 +115,7 @@ Phase 3（P3-1/P3-2）で実施済みの方向。サブモジュール化はで�
 ### C: dawn-actor にゲームロジックを移す
 
 `dawn-actor` はクライアント転送境界（ClientConnection）。ゲームロジックを入れると
-転送境界とドメインロジックが混在し、`dawn-replication` との責務分離が崩れる。不採用。
+転送境界とドメインロジックが混在し、`dawn-distributed` との責務分離が崩れる。不採用。
 
 ## 実装チェックリスト
 

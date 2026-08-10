@@ -5,7 +5,7 @@ status  : accepted
 date    : 2026-07-11
 deciders: [human, ai-agent]
 related : ADR-0007（マルチプレイヤー対応設計・WebSocket+JSON採用）, ADR-0039（dawn-client-core）,
-          ADR-0040（dawn-client-gdext）, ADR-0041（dawn-wire・コマンド送信のGDExtension化）,
+          ADR-0040（dawn-client-gdext）, ADR-0041（dawn-protocol・コマンド送信のGDExtension化）,
           docs/process/roadmap.md §13（Phase 10 タスク4）
 ---
 
@@ -17,7 +17,7 @@ ADR-0007（Phase 5）は「gRPC への移行を行わず WebSocket + JSON を維
 Phase 9 以降（分散ノード間通信が必要になったとき）に再検討する」と決定した。
 
 このトリガーは既に発火し、解決済みである——ただし WebSocket+JSON ではなく、
-`dawn-consensus`/`dawn-replication` の `TcpRaftTransport`/`TcpReplicationTransport`
+`dawn-distributed`/`dawn-distributed` の `TcpRaftTransport`/`TcpReplicationTransport`
 （生TCP + `[u32 LE length][postcard message]` フレーミング）という**別の**プロトコルとして
 実装された。`docs/architecture/architecture.md` も「Inter-node: TCP」「Client: WebSocket+JSON」
 と明確に分離済みである。つまり ADR-0007 の元のトリガー（分散ノード間通信）は
@@ -42,8 +42,8 @@ Godot側に組み込みサポートがなく、実装コストが動機（移行
 
 ### シリアライズ形式は postcard
 
-`dawn-consensus`/`dawn-replication` が既に使っており、依存が増えない。`serde` ベースなので
-`dawn-wire`/`dawn-actor::protocol` の既存型定義（`#[derive(Serialize, Deserialize)]`）を
+`dawn-distributed`/`dawn-distributed` が既に使っており、依存が増えない。`serde` ベースなので
+`dawn-protocol`/`dawn-actor::protocol` の既存型定義（`#[derive(Serialize, Deserialize)]`）を
 ほぼそのまま流用できる。FlatBuffers/protobuf のような新しいスキーマ言語の導入は
 既存の serde ベースの型定義を全部書き直すことになり、動機に反する。
 
@@ -51,8 +51,8 @@ Godot側に組み込みサポートがなく、実装コストが動機（移行
 
 現状の実装を調査した結果、`ws_server.rs` は既に「1メッセージ = 1回の `Message::Text` send
 = 1 WSフレーム」という設計になっている（`"\n"` 区切りはクライアント側の行バッファ処理の
-名残で、実際のフレーミングは WebSocket 自体が提供している）。`dawn-consensus`/
-`dawn-replication` の `[u32 LE length]` プレフィックスは生TCPソケット（フレーミングなし）
+名残で、実際のフレーミングは WebSocket 自体が提供している）。`dawn-distributed`/
+`dawn-distributed` の `[u32 LE length]` プレフィックスは生TCPソケット（フレーミングなし）
 向けのものであり、WebSocket上では不要な二重の複雑さになる。`Message::Text(json+"\n")` を
 `Message::Binary(postcard bytes)` に置き換え、クライアント側の行バッファ分割ロジックは撤去する。
 
@@ -61,7 +61,7 @@ Godot側に組み込みサポートがなく、実装コストが動機（移行
 postcard は JSON と異なり自己記述的なタグを持たず、デシリアライズ側が先に型を
 決め打ちする必要がある。現状 Hello/Welcome/InitialState/Redirect/DomainEvent/
 ClientCommand はそれぞれ別々の型（JSON `"type"` 文字列で判別）になっているため、
-`dawn-wire` に以下の統合 enum を新設する:
+`dawn-protocol` に以下の統合 enum を新設する:
 
 ```rust
 #[derive(Serialize, Deserialize)]
@@ -80,13 +80,13 @@ pub enum ClientMessage {
 
 受信側はまずこの外側の enum として postcard デコードし、中身の variant で分岐する。
 
-### `EventJson`/Hello関連の型も `dawn-wire` に統合する
+### `EventJson`/Hello関連の型も `dawn-protocol` に統合する
 
-ADR-0041 が `ClientCommandJson` を `dawn-wire` に切り出した理由（`dawn-client-gdext` が
+ADR-0041 が `ClientCommandJson` を `dawn-protocol` に切り出した理由（`dawn-client-gdext` が
 tokio 等のトランスポート依存を持たずに同じ型を扱える）は `EventJson` にも同様に当てはまる
 ——将来 GDExtension 側で DomainEvent 受信をデコードする実装（roadmap タスク2の残り
 チャンネル）が入る際、同じ型を再利用できる。`hello_resume.rs` の `ResumeIdentity` も
-`ClientMessage::Hello` の一部として `dawn-wire` に移動する。`dawn-actor::protocol` は
+`ClientMessage::Hello` の一部として `dawn-protocol` に移動する。`dawn-actor::protocol` は
 （ADR-0041 のときと同様）薄い再エクスポート層になる。
 
 `EventJson` は現状 `Serialize` のみだが、`Deserialize` も追加する（クライアント側で
@@ -133,7 +133,7 @@ GDScript 自身は postcard をデコードできない。`connection.gd::_flush
 - **JSON対応を残したデュアルパス**: 実際に存在しない「外部非Godotクライアント」の
   ために両対応を維持するのは仮想要件対応であり、今回の動機（機能追加前の移行
   コスト低減）に反する。プレ・リリースにつき直接的な破壊的変更を許容する。
-- **`dawn-consensus`/`dawn-replication` と同じ長さプレフィックスフレーミング**:
+- **`dawn-distributed`/`dawn-distributed` と同じ長さプレフィックスフレーミング**:
   WebSocket が既にメッセージ境界を提供しているため不要な二重の複雑さ。
 - **段階1で `InitialState`/`AoiEnter`/`PlayerLoadout` も含めて全部postcard化**:
   自由形式 JSON を固定型に起こす作業が当初想定より大きく、1セッションでは
@@ -143,13 +143,13 @@ GDScript 自身は postcard をデコードできない。`connection.gd::_flush
 
 ### 段階1（本PR）
 
-- [x] `dawn-wire`: `postcard` 依存追加（workspace依存を流用）
-- [x] `crates/dawn-actor/src/protocol/server_event.rs` を `dawn-wire/src/server_event.rs`
+- [x] `dawn-protocol`: `postcard` 依存追加（workspace依存を流用）
+- [x] `crates/dawn-actor/src/protocol/server_event.rs` を `dawn-protocol/src/server_event.rs`
       へ移動、`EventJson` に `Deserialize` を追加
-- [x] `crates/dawn-actor/src/protocol/hello_resume.rs` を `dawn-wire/src/hello_resume.rs`
+- [x] `crates/dawn-actor/src/protocol/hello_resume.rs` を `dawn-protocol/src/hello_resume.rs`
       へ移動、`ResumeIdentity`/`HelloMessage` に `Serialize`/`Deserialize` を追加
-- [x] `dawn-wire`: `ServerMessage`/`ClientMessage` 統合 enum を新設
-- [x] `dawn-actor::protocol`: `pub use dawn_wire::{...}` で再エクスポート（ADR-0041と同じパターン）
+- [x] `dawn-protocol`: `ServerMessage`/`ClientMessage` 統合 enum を新設
+- [x] `dawn-actor::protocol`: `pub use dawn_protocol::{...}` で再エクスポート（ADR-0041と同じパターン）
 - [x] `dawn-actor/src/ws_server.rs`: `Message::Text(json+"\n")` を
       `Message::Binary(postcard::to_stdvec(&ServerMessage::...))` に置き換え。
       `InitialState`/`AoiEnter`/`PlayerLoadout`（`send_raw`）は現状のJSON `Message::Text`
@@ -183,15 +183,15 @@ GDScript側の既存コンシューマ（`main.gd`/`hud_manager.gd`）には影�
 
 ### 段階2a（`PlayerLoadout`、2026-07-11 完了）
 
-- [x] `dawn-wire`: `PlayerLoadoutJson`/`ModuleRowJson`/`ItemRowJson`/
+- [x] `dawn-protocol`: `PlayerLoadoutJson`/`ModuleRowJson`/`ItemRowJson`/
       `SlotCapacityJson`/`OwnedShipRowJson` を新設。`ModuleKind`/`StatDelta`
       は `dawn-core` の既存型を再利用（重複定義しない）
       （`ClientCommandJson`/`EventJson` は独自の decoupled mirror 型を持つが、
       `PlayerLoadoutJson` はサーバー専用の一方向シリアライズなので、
       dawn-client-core 側の decoupled mirror -- `Unknown` フォールバック等
-      -- は据え置き、dawn-wire 側は re-evaluate 不要と判断）
+      -- は据え置き、dawn-protocol 側は re-evaluate 不要と判断）
 - [x] `ServerMessage::PlayerLoadout(PlayerLoadoutJson)` を追加
-- [x] `dawn-sector`: DAGに`dawn-wire`依存を追加（`dawn-core`+serde+postcard
+- [x] `dawn-sector`: DAGに`dawn-protocol`依存を追加（`dawn-core`+serde+postcard
       のみの葉クレートで、既存の「dawn-actorへは依存しない」方針に反しない
       と判断——`dawn-actor`とは違いトランスポート依存を一切持ち込まない）。
       `player_loadout_projection.rs`/`serialization.rs`
@@ -225,7 +225,7 @@ GDScript側の既存コンシューマ（`main.gd`/`hud_manager.gd`）には影�
 
 ### 段階2b（`InitialState`、2026-07-11 完了）
 
-- [x] `dawn-wire`: `InitialStateJson`/`ShipStateJson`/`CelestialBodyJson`/
+- [x] `dawn-protocol`: `InitialStateJson`/`ShipStateJson`/`CelestialBodyJson`/
       `SystemJson`/`JumpGateJson`/`StationJson`/`BuildableShipTypeJson`/
       `AbsPosJson`（f64 絶対座標、ADR-0029 -- 既存の`PosJson`はf32でクライアント
       コマンド用途なので流用しない）を新設
@@ -319,13 +319,13 @@ policy is called.
 
 ### 命名規則の是正・死んだJSON経路の削除（2026-07-11 完了）
 
-段階2c完了直後の`/architecture-review`スキルで、`dawn-wire`のスキーマ型が
+段階2c完了直後の`/architecture-review`スキルで、`dawn-protocol`のスキーマ型が
 全て`*Json`サフィックスを持つ一方、実際の配線はpostcardバイナリになっており
 名前が実態と食い違っている点が見つかった（併せて`domain_event_to_json`/
 `parse_client_command`/`parse_hello`/`redirect_json`が本番未使用の薄い
 JSON文字列ラッパーとして残っていることも判明）。以下を同一PRで実施:
 
-- [x] `dawn-wire`のスキーマ型16個を`*Json`→`*Wire`サフィックスへ一括リネーム
+- [x] `dawn-protocol`のスキーマ型16個を`*Json`→`*Wire`サフィックスへ一括リネーム
       （`EventWire`、`ClientCommandWire`、`PosWire`、`VelWire`、
       `WarpTargetWire`、`PlayerLoadoutWire`とその構成型、`InitialStateWire`
       とその構成型）。実際に`serde_json::Value`を扱う`json_variant.rs`の
@@ -354,7 +354,7 @@ JSON文字列ラッパーとして残っていることも判明）。以下を�
       変換テストを`serde_json::Value`によるフィールド往復チェックから
       `assert_eq!(wire, EventWire::Variant{...})`の直接比較へ書き換え
       （JSON文字列経由は変換ロジックの検証に対して無関係な間接層だった）
-- [x] `dawn-wire/src/lib.rs`に`ServerMessage::Event`のencode/decode往復
+- [x] `dawn-protocol/src/lib.rs`に`ServerMessage::Event`のencode/decode往復
       doctestを新設（既存の`ClientMessage::Hello`doctestと対になる形。
       この経路のテストが従来ゼロ件だったカバレッジの穴を埋める）
 - [x] `docs/architecture/wire-protocol.schema.json`/

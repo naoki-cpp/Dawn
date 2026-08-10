@@ -6,8 +6,8 @@
 use dawn_core::{ItemId, PlayerId, ShipId};
 use dawn_ecs::components::{FittingComp, InventoryComp};
 #[cfg(test)]
-use dawn_wire::ItemWire;
-use dawn_wire::{
+use dawn_protocol::ItemWire;
+use dawn_protocol::{
     ItemRowWire, ModuleRowWire, OwnedShipRowWire, PlayerLoadoutWire, SlotCapacityWire,
 };
 

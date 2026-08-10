@@ -2,15 +2,15 @@
 
 use super::{AoiDelivery, AOI_CELL_SIZE};
 use crate::ws_server;
-use dawn_consensus::RaftActorHandle;
 use dawn_core::{DomainEvent, PlayerId, ShipId};
-use dawn_event_store::{DurabilityMode, InMemoryJournal};
+use dawn_distributed::RaftActorHandle;
+use dawn_protocol::{project_domain_event, InitialStateWire, ServerFact, ServerMessage};
 use dawn_sector::node::SimulationNode;
 use dawn_sector::transit::{
     self, run_durable_runtime_tick_with_consensus_and_health, DurableRuntimeTickContext,
     RaftRuntimeConsensus, RuntimeDurabilityProfile,
 };
-use dawn_wire::{project_domain_event, InitialStateWire, ServerFact, ServerMessage};
+use dawn_storage::{DurabilityMode, InMemoryJournal};
 use std::collections::{HashMap, HashSet};
 use tokio::sync::mpsc;
 

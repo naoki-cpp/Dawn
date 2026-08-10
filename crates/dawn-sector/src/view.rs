@@ -7,7 +7,7 @@
 //! this boundary.
 
 use dawn_core::{AbsolutePosition, ShipId};
-use dawn_wire::ShipStateWire;
+use dawn_protocol::ShipStateWire;
 
 /// Read-only committed Sector facts needed by AoI delivery.
 pub trait SectorView {

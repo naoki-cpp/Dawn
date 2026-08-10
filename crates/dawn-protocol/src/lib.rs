@@ -8,7 +8,7 @@
 //!
 //! ```
 //! use dawn_core::{ClientRequest, Position};
-//! use dawn_wire::ClientMessage;
+//! use dawn_protocol::ClientMessage;
 //!
 //! let message = ClientMessage::Command(ClientRequest::Move {
 //!     target: Position::new(10.0, 0.0, -5.0),

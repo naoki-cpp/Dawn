@@ -90,7 +90,7 @@ The complete freeze set is specified by ADR-0014 and is persisted by the #276 Sa
 | Operation type | Responsible party | Current / target implementation |
 |---|---|---|
 | Sector-local mutation | The Sector engine | `SimulationNode` today; storage-independent engine under #272 |
-| Crossing Sector boundary | Consensus + Transit lifecycle | `dawn-consensus` Raft + current handoff seam; durable Saga under #276 |
+| Crossing Sector boundary | Consensus + Transit lifecycle | `dawn-distributed` Raft + current handoff seam; durable Saga under #276 |
 | Exact restart/failover reconstruction | Recovery layer | ADR-0049 checkpoint + authoritative recovery tail |
 | Read (reference only) | No mutation check | read-only Sector view after #272 |
 

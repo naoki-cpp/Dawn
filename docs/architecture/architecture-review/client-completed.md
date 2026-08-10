@@ -105,5 +105,5 @@ empty stateとtyped activation recordの境界を固定した。
 Removed `ClientMessageDecoder`, `json_variant.rs`, JSON row constructors,
 `PlayerLoadout.apply_payload`, `PositionComponents`, and duplicate
 Dictionary/Vector3 coordinate helpers. GdUnit fixtures now use typed records or
-the real binary decoder; postcard command round trips live in `dawn-wire`
+the real binary decoder; postcard command round trips live in `dawn-protocol`
 tests. Absolute positions remain f64 components until rendering.

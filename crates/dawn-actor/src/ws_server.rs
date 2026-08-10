@@ -13,7 +13,7 @@
 //! Every server -> client message (Hello/Welcome/Redirect/ServerFact/
 //! ClientRequest/Market/InitialState/PlayerLoadout/AoiEnter/AoiLeave/
 //! PositionSnap) travels as a binary WebSocket frame, postcard-encoded via the
-//! [`ClientMessage`]/[`ServerMessage`] envelope in `dawn-wire` (ADR-0042
+//! [`ClientMessage`]/[`ServerMessage`] envelope in `dawn-protocol` (ADR-0042
 //! stages 1-2c). There is no more ad-hoc JSON text path. One WebSocket frame
 //! always carries exactly one message (no length-prefix framing needed;
 //! WebSocket already delimits frames).
@@ -29,7 +29,7 @@
 
 use crate::{ClientConnection, ClientRequest};
 use dawn_core::{PlayerId, ShipId};
-use dawn_wire::{
+use dawn_protocol::{
     ClientMessage, InitialStateWire, MarketCommandWire, PlayerLoadoutWire, ResumeTicket,
     ServerFact, ServerMessage,
 };

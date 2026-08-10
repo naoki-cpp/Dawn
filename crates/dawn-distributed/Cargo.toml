@@ -1,0 +1,22 @@
+[package]
+name = "dawn-distributed"
+version = "0.1.0"
+edition = "2021"
+description = "Raft, peer transport, and Sector replication for Dawn."
+repository.workspace = true
+publish.workspace = true
+
+# This is the single distributed-systems boundary. The feature modules keep
+# consensus, physical peer transport, and replication policies explicit while
+# sharing one package-level dependency boundary.
+[dependencies]
+dawn-core = { path = "../dawn-core" }
+dawn-storage = { path = "../dawn-storage" }
+serde = { workspace = true }
+rand = { workspace = true }
+tokio = { workspace = true }
+postcard = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

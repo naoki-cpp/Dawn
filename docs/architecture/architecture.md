@@ -68,7 +68,7 @@ Persistence      : FileEventStore remains the append-only public-fact mirror and
                     transitions use the runtime-owned DurableJournal boundary.
 ```
 
-See [ADR-0003](../adr/ADR-0003-local-first-development.md), [ADR-0027](../adr/ADR-0027-dawn-replication-crate.md), [ADR-0049](../adr/ADR-0049-sector-recovery-state-delta-wal.md), and [ADR-0051](../adr/ADR-0051-server-composition-boundary.md).
+See [ADR-0003](../adr/ADR-0003-local-first-development.md), [ADR-0027](../adr/ADR-0027-dawn-distributed-crate.md), [ADR-0049](../adr/ADR-0049-sector-recovery-state-delta-wal.md), and [ADR-0051](../adr/ADR-0051-server-composition-boundary.md).
 
 ### Future scope (direction only, not implemented)
 
@@ -91,45 +91,46 @@ See [ADR-0003](../adr/ADR-0003-local-first-development.md), [ADR-0027](../adr/AD
 | `dawn-core` | library | Pure domain model and stateless simulation policies (including the shared one-tick movement policy). Zero network/I/O dependencies |
 | `dawn-client-core` | library | Godot-independent client-side domain model (loadout, wire row types, pure WorldSession state, shared ship-motion prediction/dead-reckoning track). Depends only on `dawn-core` (ADR-0039, ADR-0043, ADR-0045, ADR-0046) |
 | `dawn-client-gdext` | library (cdylib) | GDExtension binding exposing `dawn-client-core` to the Godot client. Thin type-conversion adapter only (ADR-0040, ADR-0046) |
-| `dawn-wire` | library | Client<->server wire schema (`ClientRequest`/`ServerFact`, `ServerMessage`/`ClientMessage` binary envelope). `ServerFact` is an audience-scoped client projection distinct from durable `DomainEvent`; depends only on `dawn-core` + serde + postcard -- no transport/runtime dependency (ADR-0041, ADR-0042, #274) |
+| `dawn-protocol` | library | Client<->server wire schema (`ClientRequest`/`ServerFact`, `ServerMessage`/`ClientMessage` binary envelope). `ServerFact` is an audience-scoped client projection distinct from durable `DomainEvent`; depends only on `dawn-core` + serde + postcard -- no transport/runtime dependency (ADR-0041, ADR-0042, #274) |
 | `dawn-ecs` | library | ECS World wrapper. Component / System definitions |
-| `dawn-event-store` | library | Public EventLog plus fallible atomic `DurableJournal` mechanics capable of storing ADR-0049 recovery records; public-event archival remains logically distinct |
-| `dawn-consensus` | library | Raft implementation (leader election, log replication, RaftActor; ADR-0014); its network adapter depends on `dawn-peer-transport` |
-| `dawn-peer-transport` | library | Shared versioned peer identity handshake, framing/lifecycle, bounded queues, and separate control/bulk channels; opaque domain payloads (ADR-0050, #280) |
+| `dawn-storage` | library | Public EventLog plus fallible atomic `DurableJournal` mechanics capable of storing ADR-0049 recovery records; public-event archival remains logically distinct |
+| `dawn-distributed` | library | Raft, replication, and shared versioned peer transport. Raft and replication are separate modules over one transport boundary; opaque domain payloads keep the transport independent of policy (ADR-0027, ADR-0050, #280) |
 | `dawn-actor` | library | Client transport boundary (`ClientConnection` trait) |
-| `dawn-replication` | library | Replication/anti-entropy policy plus the `PeerReplicationTransport` adapter. It carries ADR-0049/#284 recovery bytes without redefining their authority |
-| `dawn-market` | library | Player-to-player Market: pure bid/ask, Currency, escrow, and durable `SettlementIntent` outbox policy. `MarketDb` is the SQLite adapter that atomically persists orders, balances, stable settlement IDs, and delivery state. Depends only on `dawn-core` + thiserror + rusqlite -- no transport/runtime dependency, same DAG position as `dawn-wire` (ADR-0034 §4/§5/§6, #279). It never imports Sector bridge commands; `dawn-server` translates intents and routes them to the owning Sector |
+| `dawn-market` | library | Player-to-player Market: pure bid/ask, Currency, escrow, and durable `SettlementIntent` outbox policy. `MarketDb` is the SQLite adapter that atomically persists orders, balances, stable settlement IDs, and delivery state. Depends only on `dawn-core` + thiserror + rusqlite -- no transport/runtime dependency, same DAG position as `dawn-protocol` (ADR-0034 §4/§5/§6, #279). It never imports Sector bridge commands; `dawn-server` translates intents and routes them to the owning Sector |
 | `dawn-sector` | library | Per-Sector game logic plus the shared durable runtime frame. `SimulationNode` composes explicit Simulation/Player/Station/Transit/Topology/GameData/FrameOutput owners and a separate Persistence adapter; `run_durable_runtime_tick_with_consensus` owns the prepare -> durable append -> live-apply -> reconciliation -> output boundary with injected consensus and durability-policy adapters. `aoi_frame::deliver_sector_sessions` owns the common rebuild -> session delivery -> stale-player cleanup loop; adapters inject only transport callbacks. AoI consumers read through the storage-free `SectorView` boundary while the owner split preserves ADR-0049 recovery semantics |
 | `dawn-server` | package with binaries | Single server composition boundary. `simulate` owns local benchmarks/demos/playtest modes; `sector-node` owns the production peer-connected process. Both select adapters around the shared Sector runtime frame and neither defines a second Tick ordering (ADR-0051) |
 
 ### Dependency DAG
 
-```text
+~~~text
 dawn-core
-    ^
-    ├── dawn-client-core   <- Godot-independent client domain model (ADR-0039)
-    │       ^
-    │       └── dawn-client-gdext   <- GDExtension binding to Godot (ADR-0040), cdylib
-    │               ^                  also depends on dawn-wire directly (ADR-0041)
-    ├── dawn-wire          <- client<->server wire schema, no transport dep (ADR-0041, ADR-0042)
-    │       ^
-    │       └── dawn-actor / dawn-sector (below) also depend on dawn-wire
-    ├── dawn-market        <- Market order book + Currency ledger, own SQLite, no transport dep (ADR-0034 §4)
-    │       ^
-    │       └── dawn-server (below) translates Market intents and routes bridge commands
-    ├── dawn-ecs
-    ├── dawn-consensus
-    ├── dawn-peer-transport
-    └── dawn-event-store
-            ^
-            ├── dawn-actor           <- also depends on dawn-wire
-            ├── dawn-replication     <- depends on dawn-peer-transport
-            └── dawn-sector          <- current game logic composition; #272 removes storage dependency from pure engine
-                    ^
-                    └── dawn-server (simulate + sector-node)
-```
+  +-- dawn-client-core
+  |   \-- dawn-client-gdext
+  +-- dawn-protocol
+  +-- dawn-ecs
+  +-- dawn-storage
+  +-- dawn-distributed
+  |   +-- Raft and replication policies
+  |   \-- shared versioned peer transport
+  +-- dawn-actor
+  +-- dawn-market
+  +-- dawn-sector
+  \-- dawn-server
+      +-- simulate
+      \-- sector-node
+~~~
 
-Dependencies flow **bottom-to-top only**; any reverse or circular dependency is a design failure. The pure Sector engine no longer owns `dawn-event-store`; runtime and application adapters own journal handles and persistence wiring.
+dawn-client-gdext also depends directly on dawn-protocol. dawn-actor and the
+current dawn-sector runtime package consume the same protocol authority.
+dawn-distributed consumes dawn-storage for recovery-range adapters; the
+physical peer transport itself remains policy-agnostic. dawn-server is the only
+composition root and depends on the runtime-facing packages above.
+
+Dependencies flow bottom-to-top only; any reverse or circular dependency is a
+design failure. dawn-server is the only composition root. SimulationNode and
+the transition engine do not own a journal or transport; the remaining
+protocol, recovery, and transit adapter modules in dawn-sector are invoked by
+server-owned orchestration and are not alternate persistence authorities.
 
 ### Rule for adding crate dependencies
 

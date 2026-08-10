@@ -25,11 +25,11 @@
 //! ## Extending client input
 //!
 //! Sector requests use the single `dawn_core::ClientRequest` protocol authority; Market
-//! requests remain `dawn_wire::MarketCommandWire` and never enter
+//! requests remain `dawn_protocol::MarketCommandWire` and never enter
 //! `SimulationNode::apply_client_request`.
 
 pub use dawn_core::ClientRequest;
-use dawn_wire::{MarketCommandWire, ServerFact};
+use dawn_protocol::{MarketCommandWire, ServerFact};
 use tokio::sync::mpsc;
 
 // ── Error ─────────────────────────────────────────────────────────────────────
@@ -146,7 +146,7 @@ mod tests {
     use dawn_core::{
         AbsolutePosition, DomainEvent, EntityId, NodeId, Position, SectorId, ShipId, Tick,
     };
-    use dawn_wire::project_domain_event;
+    use dawn_protocol::project_domain_event;
 
     fn make_ship_spawned() -> DomainEvent {
         DomainEvent::ShipSpawned(ShipSpawned {
@@ -158,7 +158,7 @@ mod tests {
         })
     }
 
-    fn make_ship_spawned_fact() -> dawn_wire::ServerFact {
+    fn make_ship_spawned_fact() -> dawn_protocol::ServerFact {
         project_domain_event(&make_ship_spawned()).expect("ShipSpawned is client-visible")
     }
 
@@ -273,7 +273,8 @@ mod tests {
     #[test]
     fn multiple_facts_are_delivered_in_order() {
         let (server, mut client) = InProcessConnection::pair();
-        let facts: Vec<dawn_wire::ServerFact> = (0..3).map(|_| make_ship_spawned_fact()).collect();
+        let facts: Vec<dawn_protocol::ServerFact> =
+            (0..3).map(|_| make_ship_spawned_fact()).collect();
         server.send_facts(&facts).unwrap();
         let mut count = 0;
         while client.fact_rx.try_recv().is_ok() {

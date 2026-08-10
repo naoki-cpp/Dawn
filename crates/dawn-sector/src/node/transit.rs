@@ -764,7 +764,7 @@ mod tests {
     use super::*;
     use crate::persistence::StateSnapshot;
     use dawn_core::{NodeId, SectorBounds, Tick, Velocity};
-    use dawn_event_store::{EventStore, FileEventStore, InMemoryEventStore};
+    use dawn_storage::{EventStore, FileEventStore, InMemoryEventStore};
 
     fn mem_node() -> SimulationNode {
         SimulationNode::new_test(

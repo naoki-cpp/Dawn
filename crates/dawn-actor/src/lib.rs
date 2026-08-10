@@ -18,16 +18,16 @@
 //! `ws_server` (`WsServer` / `WsClientConnection` / `PlayerSession`) is the
 //! production WebSocket transport, shared by both binaries (previously
 //! duplicated). Every message travels as a postcard-encoded binary frame
-//! (ADR-0042), using the `dawn-wire` schema (`ClientMessage`/`ServerMessage`,
+//! (ADR-0042), using the `dawn-protocol` schema (`ClientMessage`/`ServerMessage`,
 //! `project_domain_event`, `ClientRequest`) directly --
 //! this crate no longer re-exports it under its own `protocol` module
 //! (deleted: it was 28 lines of `pub use` and 900 lines of tests that
-//! belonged in `dawn-wire`, where they now live).
+//! belonged in `dawn-protocol`, where they now live).
 //!
 //! ## Example
 //!
 //! ```
-//! use dawn_wire::{ClientMessage, HelloMessage};
+//! use dawn_protocol::{ClientMessage, HelloMessage};
 //!
 //! let msg = ClientMessage::Hello(HelloMessage { resume: None });
 //! let bytes = msg.encode().unwrap();

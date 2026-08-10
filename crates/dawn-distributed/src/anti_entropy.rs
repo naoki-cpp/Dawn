@@ -6,7 +6,7 @@
 
 use crate::LogBatch;
 use dawn_core::SectorId;
-use dawn_event_store::EventStore;
+use dawn_storage::EventStore;
 
 /// A request for the suffix of one Sector's append-only log.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,7 +106,7 @@ impl AntiEntropy {
 mod tests {
     use super::*;
     use dawn_core::{events::VelocityChanged, DomainEvent, NodeId, ShipId, Tick, Velocity};
-    use dawn_event_store::{EventStore, InMemoryEventStore};
+    use dawn_storage::{EventStore, InMemoryEventStore};
 
     fn event(n: u64) -> DomainEvent {
         DomainEvent::VelocityChanged(VelocityChanged {

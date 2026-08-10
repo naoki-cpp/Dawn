@@ -145,7 +145,7 @@ authentication system.
 
 ## Implementation checklist
 
-- [x] Expose an opaque `ResumeTicket` type through `dawn-wire`.
+- [x] Expose an opaque `ResumeTicket` type through `dawn-protocol`.
 - [x] Replace `ResumeIdentity` in `HelloMessage` and remove raw-ID resume input.
 - [x] Carry the ticket in `Welcome` and `Redirect` where a retry is possible.
 - [x] Persist or replicate ticket binding through fresh admission and Transit.

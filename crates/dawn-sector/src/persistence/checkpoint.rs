@@ -6,7 +6,7 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
-use dawn_event_store::{DurableJournal, EventStore, FileEventStore, FileJournal, JournalIndex};
+use dawn_storage::{DurableJournal, EventStore, FileEventStore, FileJournal, JournalIndex};
 
 use super::snapshot::StateSnapshot;
 use crate::node::SimulationNode;
@@ -96,7 +96,7 @@ impl CheckpointScheduler {
 mod tests {
     use super::*;
     use dawn_core::{NodeId, SectorBounds, SectorId, ShipTypeId};
-    use dawn_event_store::{
+    use dawn_storage::{
         DurabilityContext, DurabilityMode, DurableJournal, JournalBatch, JournalEntry,
         JournalStream, TransitionId,
     };

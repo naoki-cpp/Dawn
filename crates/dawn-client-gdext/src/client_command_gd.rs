@@ -3,7 +3,7 @@ use dawn_core::{
     ApproachTarget, CelestialBodyId, ClientRequest, EntityId, ItemId, JumpGateId, ModuleId,
     Position, ShipId, ShipTypeId, SlotKind, StationId, TransferDirection, WarpTarget,
 };
-use dawn_wire::{
+use dawn_protocol::{
     ClientMessage, HelloMessage, ItemWire, MarketCommandWire, MarketOrderSide, ResumeTicket,
 };
 use godot::prelude::*;

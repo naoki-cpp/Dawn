@@ -44,7 +44,7 @@ Phase 10 を待たず、**GDExtensionなしで着手できる部分**（純粋Ru
 
 - 新規クレート `dawn-client-core` を追加する。**`dawn-core` にのみ依存**し、
   Godot（GDExtension含む）・`dawn-sector`・`dawn-actor` への実行時依存は持たない。
-- Dependency DAG 上の位置: `dawn-core` の直下（`dawn-ecs`/`dawn-event-store` と
+- Dependency DAG 上の位置: `dawn-core` の直下（`dawn-ecs`/`dawn-storage` と
   並列）。他のどのクレートにも依存されない葉ノードとして追加する
   （将来 `dawn-client-gdext` が依存する）。
 - Phase 1（本ADRのスコープ）は **Loadout モジュールのみ** を移植する:

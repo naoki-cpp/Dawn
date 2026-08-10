@@ -46,13 +46,13 @@ SQLite INTEGER境界を検証する。ownership・入力値・queue/snapshot上�
 | 経路 | ファイル | 内容 |
 |---|---|---|
 | WebSocketフレーム受信 | `crates/dawn-actor/src/ws_server.rs` | postcardバイナリフレーム（ADR-0042） |
-| コマンドデコード | `crates/dawn-wire/src/client_request.rs` + `dawn-core/src/commands.rs` | typed `ClientRequest` |
-| Marketデコード | `crates/dawn-wire/src/market.rs` | `MarketCommandWire`（Sector commandとは別queue） |
-| Hello/resumeハンドシェイク | `crates/dawn-wire/src/hello_resume.rs` | セッション識別（resume identity） |
+| コマンドデコード | `crates/dawn-protocol/src/client_request.rs` + `dawn-core/src/commands.rs` | typed `ClientRequest` |
+| Marketデコード | `crates/dawn-protocol/src/market.rs` | `MarketCommandWire`（Sector commandとは別queue） |
+| Hello/resumeハンドシェイク | `crates/dawn-protocol/src/hello_resume.rs` | セッション識別（resume identity） |
 | コマンドディスパッチ | `crates/dawn-sector/src/node/commands.rs` | one exhaustive typed `ClientRequest` admission seam calling family-local policy directly |
 | Market bridge | `crates/dawn-server/src/serve/market.rs` | 入力検証、所有船へのRemove/Return/Credit適用 |
 | Market SQL | `crates/dawn-market/src/repository.rs` | `MarketDb`の注文帳/Currency台帳、全値をparameter binding |
-| ノード間トランスポート | `crates/dawn-peer-transport`（control/bulk）とRaft/replication adapters | フレーム長上限・identity handshakeあり、無認証（LAN方針内） |
+| ノード間トランスポート | `crates/dawn-distributed`（control/bulk）とRaft/replication adapters | フレーム長上限・identity handshakeあり、無認証（LAN方針内） |
 
 ---
 
@@ -123,7 +123,7 @@ matching結果は`MarketDb`が計算し、client supplied balance/trade result�
 
 ### SEC-2（high・トリガー付き保留）: Hello resumeでの船の乗っ取り
 
-`crates/dawn-wire/src/hello_resume.rs` → `crates/dawn-server/src/bin/sector-node/client_admission.rs`
+`crates/dawn-protocol/src/hello_resume.rs` → `crates/dawn-server/src/bin/sector-node/client_admission.rs`
 (`select_handshake_identity`) → `crates/dawn-sector/src/node/spawner_logic.rs`
 (`adopt_player_ship`)。
 

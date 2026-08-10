@@ -7,7 +7,7 @@ use super::{
 };
 use crate::ws_server;
 use dawn_core::{DomainEvent, NodeId, Position, SectorBounds, SectorId, ShipId};
-use dawn_event_store::{DurabilityMode, InMemoryJournal};
+use dawn_protocol::ServerMessage;
 use dawn_sector::client_admission::{
     ClientAdmissionAttempt, ClientAdmissionIntent, ClientAdmissionRefusal, CommittedClientAdmission,
 };
@@ -20,7 +20,7 @@ use dawn_sector::transit::{
     run_durable_runtime_tick_with_consensus_and_health, runtime_transition_id,
     DurableRuntimeTickContext, LocalRuntimeConsensus, RuntimeDurabilityProfile, RuntimeHealth,
 };
-use dawn_wire::ServerMessage;
+use dawn_storage::{DurabilityMode, InMemoryJournal};
 use tokio::sync::mpsc;
 
 type HandshakeCompletion = (

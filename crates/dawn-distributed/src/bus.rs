@@ -12,7 +12,7 @@
 //! broadcast channel so it does not affect event ordering or `event_count()`.
 
 use crate::{CatchUpMessage, CatchUpTransport, LogBatch, ReplicationTransport};
-use dawn_event_store::{store::EventStore, InMemoryEventStore};
+use dawn_storage::{store::EventStore, InMemoryEventStore};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
 // ── Message type ──────────────────────────────────────────────────────────────

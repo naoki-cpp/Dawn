@@ -37,3 +37,5 @@ related  : ./README.md, ../roadmap-history.md, ../../adr/
 
 完了項目の詳細な経緯は、既存の [roadmap-history.md](../roadmap-history.md) とGit履歴を参照する。
 完了済み項目を再実装候補として扱わず、変更が必要な場合は新しいTODOまたはADRを起票する。
+
+- #282: Workspace boundaries consolidated. `dawn-protocol`, `dawn-storage`, and `dawn-distributed` are the final protocol/storage/distributed packages, obsolete package names are deleted, and `dawn-server` is the only server composition root.

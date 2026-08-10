@@ -1,6 +1,6 @@
 ---
 id      : ADR-0041
-title   : dawn-wire crate + GDExtension command-send — client -> server wire schema shared, not duplicated
+title   : dawn-protocol crate + GDExtension command-send — client -> server wire schema shared, not duplicated
 status  : accepted
 date    : 2026-07-11
 deciders: [human, ai-agent]
@@ -9,7 +9,7 @@ related : ADR-0004（クライアント技術選択・godot-rust既定路線）,
           docs/process/roadmap.md §13（Phase 10 タスク2）
 ---
 
-# ADR-0041 — dawn-wire クレート新設 + コマンド送信の GDExtension 化
+# ADR-0041 — dawn-protocol クレート新設 + コマンド送信の GDExtension 化
 
 ## 背景
 
@@ -27,23 +27,23 @@ DomainEvent 受信）は未着手」と明記してスコープ外にした。
 
 ## 決定
 
-### dawn-wire クレートの新設
+### dawn-protocol クレートの新設
 
 `crates/dawn-actor/src/protocol/client_command.rs`（`ClientCommandJson`/`PosJson`/
 `VelJson`/`WarpTargetJson`/`parse_client_command`/`client_command_json_schema`）を、
-新規クレート `dawn-wire`（`dawn-core` + `serde`/`serde_json`/`schemars` のみ依存、
+新規クレート `dawn-protocol`（`dawn-core` + `serde`/`serde_json`/`schemars` のみ依存、
 トランスポート/非同期ランタイム依存なし）へ丸ごと移動する。
 
 **理由**: 当初「`dawn-client-gdext` が `dawn-actor` を直接依存する」案を検討したが、
 `dawn-actor` は `tokio`（フルランタイム）・`tokio-tungstenite`・`anyhow`・`futures-util`
 という **WebSocket サーバー実装のための依存** を抱えている。クレート単位の依存になるため、
 「`ClientCommandJson` という型定義だけ」を取り出すことができず、Godot の GDExtension
-cdylib にサーバー用の非同期ランタイム一式が丸ごと付いてくることになる。`dawn-wire` を
+cdylib にサーバー用の非同期ランタイム一式が丸ごと付いてくることになる。`dawn-protocol` を
 `dawn-core` 直下の葉クレートとして切り出すことで、`dawn-actor`（サーバー、deserialize）と
 `dawn-client-gdext`（クライアント、construct + serialize）の両方が同じ型を、
 不要な依存を持ち込まずに使える。
 
-`dawn-actor::protocol` は `pub use dawn_wire::{...}` で同名再エクスポートし、
+`dawn-actor::protocol` は `pub use dawn_protocol::{...}` で同名再エクスポートし、
 `ws_server.rs`/`dawn-sector-node`/既存テスト等、呼び出し側の import パスは無変更で済む。
 
 `ClientCommandJson` に `Serialize` を追加する（従来は `Deserialize` のみ）。
@@ -54,7 +54,7 @@ cdylib にサーバー用の非同期ランタイム一式が丸ごと付いて�
 ### コマンド送信の GDExtension 化
 
 `crates/dawn-client-gdext/src/client_command_gd.rs` に新規 GDExtension クラス
-`ClientCommand`（`dawn-wire` にのみ依存、`dawn-client-core`とは独立）を追加する。
+`ClientCommand`（`dawn-protocol` にのみ依存、`dawn-client-core`とは独立）を追加する。
 `connection.gd`の26個の`send_*_command`関数それぞれに対応する静的メソッド
 （例: `ClientCommand.move_command(x, y, z) -> String`）を持ち、`ClientCommandJson`
 のバリアントを直接構築して `serde_json::to_string` した1行JSON文字列を返す
@@ -75,24 +75,24 @@ DomainEvent 受信（`connection.gd::_handle_message`のDictionaryディスパ�
   ADR-0039で「`dawn-core`にのみ依存」と決めた境界を持つ。`ClientCommandJson`は
   ワイヤ形式（`String`スロット名・`Option<T>`の`Some`/`None`によるバリアント選択等）
   であってドメインモデルではないため、`dawn-client-core`（Godot非依存の*ドメイン*
-  ロジック）よりも新設`dawn-wire`（ワイヤ*スキーマ*専用）の責務に合致する。
+  ロジック）よりも新設`dawn-protocol`（ワイヤ*スキーマ*専用）の責務に合致する。
 - **DomainEvent受信も同じADRでまとめて対応する**: 受信側は型の種類がコマンド側より
   多く、`main.gd`側のハンドラ変更量も大きい。8D最小化方針に従い、送信側だけの薄い
   スライスに留めた。
 
 ## 実装チェックリスト
 
-- [x] `crates/dawn-wire/Cargo.toml`新設（`dawn-core`+`serde`+`serde_json`+`schemars`のみ）
-- [x] `crates/dawn-actor/src/protocol/client_command.rs`を`dawn-wire/src/client_command.rs`
+- [x] `crates/dawn-protocol/Cargo.toml`新設（`dawn-core`+`serde`+`serde_json`+`schemars`のみ）
+- [x] `crates/dawn-actor/src/protocol/client_command.rs`を`dawn-protocol/src/client_command.rs`
       へ移動、`ClientCommandJson`に`Serialize`を追加
-- [x] `dawn-actor/src/protocol/mod.rs`: `pub use dawn_wire::{...}`で同名再エクスポート
-- [x] `dawn-actor/Cargo.toml`: `dawn-wire`依存追加
-- [x] ワークスペース`Cargo.toml`の`members`に`dawn-wire`追加
+- [x] `dawn-actor/src/protocol/mod.rs`: `pub use dawn_protocol::{...}`で同名再エクスポート
+- [x] `dawn-actor/Cargo.toml`: `dawn-protocol`依存追加
+- [x] ワークスペース`Cargo.toml`の`members`に`dawn-protocol`追加
 - [x] `cargo run -p dawn-actor --example gen_wire_schema`で schema 再生成
       （形状は不変、docコメントのみ差分）
 - [x] `crates/dawn-client-gdext/src/client_command_gd.rs`新設（`ClientCommand`
       GDExtensionクラス、26メソッド）
-- [x] `crates/dawn-client-gdext/Cargo.toml`: `dawn-wire`依存追加
+- [x] `crates/dawn-client-gdext/Cargo.toml`: `dawn-protocol`依存追加
 - [x] `client/scripts/connection.gd`: 全`send_*_command`を`ClientCommand.*`経由に置換、
       `_send_json`→`_send_line`に縮小
 - [x] GdUnit4: `client/test/client_command_gd_test.gd`新設（代表的なコマンドの送信JSON検証、
@@ -117,7 +117,7 @@ DomainEvent 受信（`connection.gd::_handle_message`のDictionaryディスパ�
 ## 追記（2026-07-11）: gdext ラッパーの3箇所複製を解消
 
 `/improve-codebase-architecture` によるレビューで、新規コマンド追加のたびに
-`client_command_gd.rs`（gdext `#[func]`ラッパー）・`dawn-wire`（`ClientCommandJson`
+`client_command_gd.rs`（gdext `#[func]`ラッパー）・`dawn-protocol`（`ClientCommandJson`
 バリアント）・`node/commands.rs`（`apply_client_command`のmatch arm）という
 3つの浅いモジュールを機械的に並行編集する必要がある、という編集面（edit-surface）
 の重複が指摘された。
@@ -129,7 +129,7 @@ ADR-0031/ADR-0035）やタグ付きナビゲーション target の構築とい�
 詰め替え）を `ClientCommand.build(kind: String, fields: Dictionary) -> String`
 という汎用メソッドに集約した。`build`は`fields`を`serde_json::Value`へ変換して
 `"type": kind`を注入し、`serde_json::from_value::<ClientCommandJson>`で
-デシリアライズを試みることで検証する（=dawn-wireの既存Deserialize実装を
+デシリアライズを試みることで検証する（=dawn-protocolの既存Deserialize実装を
 そのまま検証ロジックとして再利用）。フィールド名のtypoや必須フィールド欠落は
 デシリアライズ失敗として検出され、`push_error`を出し空文字列を返す
 （クラッシュせず、かつ黙って無視もしない）。
@@ -143,7 +143,7 @@ Warp の legacy `gate_id` fallback は削除され、必須のタグ付き targe
 置き換えられた。専用メソッドを維持する現在の理由は、この target enum を
 型安全に構築するためである。
 
-この結果、今後「単純な」新規コマンドを追加する場合は `dawn-wire` のバリアント追加
+この結果、今後「単純な」新規コマンドを追加する場合は `dawn-protocol` のバリアント追加
 と `node/commands.rs` のdispatch arm追加の2ファイルで済み、gdext側の編集は不要になる。
 `connection.gd`側の公開API（`send_*_command`関数のシグネチャ）は変更していない
 （内部実装だけが`_cmd.build(...)`呼び出しに変わった）。

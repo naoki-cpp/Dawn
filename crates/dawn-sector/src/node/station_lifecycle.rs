@@ -252,7 +252,7 @@ mod tests {
         DockCommand, NodeId, SectorBounds, SectorId, StationId, Tick, WarpTarget,
     };
     use dawn_ecs::components::{ThrustComp, VelocityComp};
-    use dawn_event_store::{store::EventStore, InMemoryEventStore};
+    use dawn_storage::{store::EventStore, InMemoryEventStore};
 
     use super::*;
 

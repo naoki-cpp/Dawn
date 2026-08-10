@@ -136,7 +136,7 @@ Bevy では「見た目」と「ロジック」が同一言語・同一フレー
                   ↕ gRPC（Phase 4〜）
 ┌──────────────────────────────────────────────┐
 │  Dawn サーバー（Rust）                         │
-│  dawn-core / dawn-ecs / dawn-event-store      │
+│  dawn-core / dawn-ecs / dawn-storage      │
 └──────────────────────────────────────────────┘
 ```
 

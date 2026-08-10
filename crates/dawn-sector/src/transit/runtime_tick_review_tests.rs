@@ -1,7 +1,7 @@
 use super::*;
-use dawn_consensus::RaftActorMessage;
 use dawn_core::{NodeId, SectorBounds};
-use dawn_event_store::{
+use dawn_distributed::RaftActorMessage;
+use dawn_storage::{
     AppendReceipt, DurabilityContext, DurabilityEvidence, DurabilityEvidenceSource, DurabilityMode,
     InMemoryJournal, JournalBatch, JournalError, JournalIndex, JournalRange, JournalRecord,
     JournalStream, TransitionId,
@@ -472,7 +472,7 @@ fn durable_runtime_tick_restores_pending_output_when_append_fails() {
 
 struct FailingJournal;
 
-impl dawn_event_store::DurableJournal for FailingJournal {
+impl dawn_storage::DurableJournal for FailingJournal {
     fn append_batch(&mut self, _batch: JournalBatch) -> Result<AppendReceipt, JournalError> {
         Err(JournalError::Io(std::io::Error::other(
             "injected append failure",

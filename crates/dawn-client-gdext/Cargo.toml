@@ -10,7 +10,7 @@ publish.workspace     = true
 crate-type = ["cdylib"]
 
 # This crate is a thin adapter: it converts between Godot values,
-# dawn-client-core's plain Rust types, and typed dawn-wire outcomes. No domain
+# dawn-client-core's plain Rust types, and typed dawn-protocol outcomes. No domain
 # logic lives here -- that stays in dawn-client-core so it's cargo-testable
 # without a Godot runtime.
 [dependencies]
@@ -18,7 +18,7 @@ dawn-core         = { path = "../dawn-core" }
 dawn-client-core = { path = "../dawn-client-core" }
 # Client->server wire schema only (ADR-0041) -- no transport/runtime
 # dependency, unlike dawn-actor which also depends on this crate.
-dawn-wire         = { path = "../dawn-wire" }
+dawn-protocol         = { path = "../dawn-protocol" }
 # api-4-6 pins the GDExtension API level to match the repo's pinned Godot
 # build (.godot-version: 4.6.3-stable).
 godot             = { version = "0.5", features = ["api-4-6"] }

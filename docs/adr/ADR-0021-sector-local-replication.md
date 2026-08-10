@@ -17,7 +17,7 @@ related : ADR-0001（Event Sourcing）, ADR-0002（Actor / ReplicationBus）, AD
 ## 背景
 
 AI_DEVELOPMENT_GUIDE.md「Event Workflow」は同期戦略を「**CRDT と Raft の責務分離**」と表現し、roadmap 8D-2 は
-`dawn-replication（Gossip + CRDT / LWW-Register）` を新規クレートとして予定している。
+`dawn-distributed（Gossip + CRDT / LWW-Register）` を新規クレートとして予定している。
 8D 着手前に「Sector-local 複製に CRDT（特に LWW-Register）は本当に要るか」を確定する。
 
 CRDT が価値を持つのは「**複数の複製が同じデータを同時並行に書き、後で調整役なしに収束させたい**」場面である
@@ -108,10 +108,10 @@ AI_DEVELOPMENT_GUIDE.md「Event Workflow」の意図（重要な排他は Raft �
 ただしその"安く速い"経路の実体は **追記ログを Raft に通さず非同期ゴシップで配る**ことであり、
 CRDT のマージ演算ではない。文言を機構名（CRDT/LWW）から仕組み（追記ログのゴシップ配布）へ正す。
 
-### 3. dawn-replication の責務を「ログ配布 + アンチエントロピー + スナップショット転送」に確定
+### 3. dawn-distributed の責務を「ログ配布 + アンチエントロピー + スナップショット転送」に確定
 
-roadmap 8D-2 の `dawn-replication（Gossip + CRDT / LWW-Register）` を
-`dawn-replication（追記ログのゴシップ配布 + アンチエントロピー + スナップショット転送）` に改める。
+roadmap 8D-2 の `dawn-distributed（Gossip + CRDT / LWW-Register）` を
+`dawn-distributed（追記ログのゴシップ配布 + アンチエントロピー + スナップショット転送）` に改める。
 CRDT ライブラリ・LWW レジスタは作らない。現行の `ReplicationBus`（In-Memory broadcast / ADR-0002）の
 ネットワーク版に相当する。
 
@@ -155,7 +155,7 @@ CRDT ライブラリ・LWW レジスタは作らない。現行の `ReplicationB
 
 ## スコープ外（本 ADR では決めない）
 
-- ゴシップの具体プロトコル（push/pull/push-pull、fanout、周期）— dawn-replication 実装時に決める。
+- ゴシップの具体プロトコル（push/pull/push-pull、fanout、周期）— dawn-distributed 実装時に決める。
 - ワイヤ形式（postcard 再利用か dawn-proto か）— 別途（dawn-proto の要否は未決・本 ADR とは独立）。
 - InstallSnapshot RPC の実装 — ADR-0017 圧縮と対の Raft 側ギャップ。別タスク。
 - 非権威ソフト状態への将来的な局所 CRDT 採用 — 要件が生じた時に個別 ADR。
@@ -167,7 +167,7 @@ CRDT ライブラリ・LWW レジスタは作らない。現行の `ReplicationB
 - [x] 本 ADR を人間が承認する（proposed → accepted・2026-06-15）
 - [x] CLAUDE.md §1 の「CRDT と Raft の責務分離」を「追記ログのゴシップ配布 と Raft の責務分離」へ
       文言修正（人間承認のうえ適用・2026-06-15）。§3/§8/§11 の CRDT 言及も整合のため更新。INV は不変
-- [x] roadmap 8D-2 を `dawn-replication（追記ログのゴシップ配布 + アンチエントロピー + スナップショット転送）`
+- [x] roadmap 8D-2 を `dawn-distributed（追記ログのゴシップ配布 + アンチエントロピー + スナップショット転送）`
       に改め、CRDT/LWW を外す（2026-06-15）
 - [x] architecture.md §5（将来スコープ）の「CRDT による最終一貫性」を「追記ログのゴシップ配布による
       最終一貫性（単一所有のため競合解決 CRDT は不要）」へ更新（2026-06-15）

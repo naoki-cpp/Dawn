@@ -43,9 +43,9 @@ Identifies the primary area changed.  Choose the most specific scope that applie
 |---|---|
 | `dawn-core` | `crates/dawn-core/` |
 | `dawn-ecs` | `crates/dawn-ecs/` |
-| `dawn-event-store` | `crates/dawn-event-store/` |
-| `dawn-consensus` | `crates/dawn-consensus/` |
-| `dawn-replication` | `crates/dawn-replication/` |
+| `dawn-storage` | `crates/dawn-storage/` |
+| `dawn-distributed` | `crates/dawn-distributed/` |
+| `dawn-distributed` | `crates/dawn-distributed/` |
 | `dawn-sector` | `crates/dawn-sector/` |
 | `dawn-actor` | `crates/dawn-actor/` |
 | `dawn-server` | `crates/dawn-server/` |

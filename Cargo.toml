@@ -1,15 +1,13 @@
 [workspace]
 members = [
     "crates/dawn-core",
-    "crates/dawn-wire",
+    "crates/dawn-protocol",
     "crates/dawn-client-core",
     "crates/dawn-client-gdext",
     "crates/dawn-ecs",
-    "crates/dawn-event-store",
+    "crates/dawn-storage",
     "crates/dawn-actor",
-    "crates/dawn-consensus",
-    "crates/dawn-peer-transport",
-    "crates/dawn-replication",
+    "crates/dawn-distributed",
     "crates/dawn-market",
     "crates/dawn-sector",
     "crates/dawn-server",

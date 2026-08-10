@@ -19,7 +19,7 @@ rows, including unrelated non-zero ID columns, never become an `ItemId`.
 
 ## Wire and client
 
-`dawn_wire::ItemWire` is the postcard-compatible externally tagged projection
+`dawn_protocol::ItemWire` is the postcard-compatible externally tagged projection
 of `ItemId`. Item-bearing commands, Market snapshots, and PlayerLoadout rows
 carry this variant directly. `dawn-client-core::ItemRow` stores `ItemId`.
 

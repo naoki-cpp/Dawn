@@ -21,7 +21,7 @@ isolation and leaving domain semantics in their owning crates.
 
 ## Decision
 
-Add `dawn-peer-transport` as a low-level DAG dependency. It owns:
+Add `dawn-distributed` as a low-level DAG dependency. It owns:
 
 - a versioned handshake carrying node identity, sector identity, channel, and
   capability bits;

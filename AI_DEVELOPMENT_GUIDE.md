@@ -60,7 +60,7 @@ cargo run -p dawn-server --bin simulate --release -- --aoi-bench
 loads `target/debug/dawn_client_gdext.dll` (or the platform equivalent), which
 is only rebuilt by an explicit `cargo build`/`cargo test` touching that crate
 -- starting the Godot editor does **not** rebuild it. After any change to
-`dawn-wire`, `dawn-client-core`, or `dawn-client-gdext`, run
+`dawn-protocol`, `dawn-client-core`, or `dawn-client-gdext`, run
 `cargo build -p dawn-client-gdext` before opening/reloading the Godot editor,
 or the client silently runs against a stale binary. The symptom is subtle:
 the server logs a normal handshake and then a disconnect, while the client
@@ -221,15 +221,15 @@ when deleting a deprecated one — they cover every public-event pipeline touchp
 ### Wire protocol (client<->server)
 
 `ServerFact` (the typed client projection) and the re-exported `ClientRequest` authority in
-`crates/dawn-wire/src/` are the schema-of-record for the wire format and
+`crates/dawn-protocol/src/` are the schema-of-record for the wire format and
 are generated into `docs/architecture/wire-protocol.schema.json` /
 `wire-protocol-commands.schema.json` (see `docs/architecture/wire-protocol.md`).
 After changing either enum (or a type either references), regenerate with
 `cargo run -p dawn-actor --example gen_wire_schema` and commit both updated
-`.schema.json` files in the same PR — `cargo test -p dawn-wire`
+`.schema.json` files in the same PR — `cargo test -p dawn-protocol`
 (`wire_schema_doc_is_up_to_date`) fails
 otherwise (`wire_schema_doc_is_up_to_date`). Never hand-edit the `.schema.json` files. `dawn-core` keeps `schemars`
-optional behind its `schema` feature; `dawn-wire` enables that feature only to
+optional behind its `schema` feature; `dawn-protocol` enables that feature only to
 generate the versioned Sector envelope schema containing the shared `ClientRequest` authority.
 
 The current `ClientRequest` envelope intentionally has no generic idempotency key.
@@ -240,7 +240,7 @@ retention as one designed protocol change; never infer identity from payload equ
 Since ADR-0042, the actual runtime transport for `Welcome`/`Redirect`/
 `Event`/`Hello`/`Command`/`InitialState`/`PlayerLoadout`/`AoiEnter`/
 `AoiLeave`/`PositionSnap`/`MotionCorrection` is postcard binary
-(`ServerMessage`/`ClientMessage` in `dawn-wire`), not JSON text. The two
+(`ServerMessage`/`ClientMessage` in `dawn-protocol`), not JSON text. The two
 schema enums are externally tagged (`{"VariantName": {...}}`), since postcard
 cannot deserialize `#[serde(tag = "type")]`.
 
@@ -256,37 +256,33 @@ workspace DAG and relevant ADR first.
   ADR-0046).
 - `dawn-client-gdext`: GDExtension binding (cdylib) exposing `dawn-client-core`
   to the Godot client. Thin type-conversion adapter only (ADR-0040, ADR-0046).
-- `dawn-wire`: client<->server wire schema (`ClientRequest`/`ServerFact`,
+- `dawn-protocol`: client<->server wire schema (`ClientRequest`/`ServerFact`,
   the `ServerMessage`/`ClientMessage` binary envelope). Depends only on
   `dawn-core` + serde + postcard -- no transport/runtime dependency, so
   `dawn-client-gdext` can depend on it directly (ADR-0041, ADR-0042).
 - `dawn-ecs`: components and systems. No event store or network ownership.
-- `dawn-event-store`: current public-event/recovery-storage substrate. #271 is
-  chartered to replace its infallible EventStore-era persistence contract with
-  the fallible/versioned atomic journal mechanics required by ADR-0049.
-- `dawn-consensus`: Raft and consensus transport/state. Sector ownership epochs/
-  fencing input consumed by #278 must ultimately come from the authoritative
-  consensus/runtime ownership path rather than ad-hoc local counters.
-- `dawn-peer-transport`: shared low-level peer lifecycle, versioned identity
-  handshake, framing, bounded queues, reconnects, and separate control/bulk
-  channels. It owns no domain message semantics and depends only on
-  `dawn-core` plus transport dependencies. Consensus and replication adapters
-  depend on it; it must not depend on either adapter (ADR-0050, #280).
-- `dawn-replication`: current sector-local replication and anti-entropy; #280
-  may change physical peer/snapshot/durability transport while preserving #284
-  recovery semantics and #278 quorum policy.
+- `dawn-storage`: public-fact storage plus the fallible/versioned atomic
+  journal mechanics required by ADR-0049. It owns append/recovery evidence;
+  Sector state and runtime orchestration consume that boundary but do not
+  define a second journal implementation.
+- `dawn-distributed`: one distributed-systems boundary containing Raft,
+  versioned peer lifecycle/transport, replication, and anti-entropy. Its
+  modules keep policy direction explicit: Raft and replication adapt the shared
+  peer transport, while the transport knows no domain message semantics. It
+  carries #278 ownership fencing and #284 recovery ranges without redefining
+  their authority (ADR-0027, ADR-0050, #280).
 - `dawn-market`: Market order book (bid/ask) + `PlayerId` Currency ledger,
   its own SQLite authority independent of Sector tick determinism. The SQLite
   layer is an adapter; the private matching policy owns crossing, price-time
   priority, partial fills, maker-price settlement, and Bid price-improvement
   refunds. Depends only on `dawn-core` + serde + rusqlite -- no
-  transport/runtime dependency, same DAG position as `dawn-wire` (ADR-0034
+  transport/runtime dependency, same DAG position as `dawn-protocol` (ADR-0034
   §4/§5/§6). Only constructs
   `RemoveItemCommand`/`ReturnItemCommand`/`CreditItemCommand`; never applies
   them to a `SimulationNode` itself, so `dawn-sector` never depends on it.
 - `dawn-sector`: current Sector game logic and broad `SimulationNode` composition.
   #272 removes persistence ownership from the pure engine; #275 splits state
-  owners. Depends on `dawn-wire` today to build typed wire messages it hands to
+  owners. Depends on `dawn-protocol` today to build typed wire messages it hands to
   `dawn-actor` (e.g. `PlayerLoadoutWire`).
 - `dawn-actor`: client/server protocol and connection boundary.
 - `dawn-server`: production/local server composition, runnable simulation
@@ -349,7 +345,7 @@ For hard bugs, follow the `diagnosing-bugs` skill:
   verification); the gaps worth closing are logic whose failure mode is
   invisible to manual play — recovery reducer/checkpoint-tail equivalence,
   public-event projection (`node/apply_event.rs`), and wire conversion
-  (`dawn-wire` conversion modules) first. New match arms in public replay/wire
+  (`dawn-protocol` conversion modules) first. New match arms in public replay/wire
   conversion need direct tests in the same PR. Deliberately uncovered code is
   named in the PR description with the reason, never silently skipped. See
   #112 for the audit pattern.

@@ -5,7 +5,7 @@
 
 use crate::{LogBatch, ReplicationTransport};
 use dawn_core::SectorId;
-use dawn_event_store::EventStore;
+use dawn_storage::EventStore;
 
 /// Publishes the newly appended suffix of one owner's event log.
 ///
@@ -86,7 +86,7 @@ impl<T: ReplicationTransport> OutboundLogPublisher<T> {
 mod tests {
     use super::*;
     use dawn_core::{events::VelocityChanged, DomainEvent, NodeId, ShipId, Tick, Velocity};
-    use dawn_event_store::{EventStore, InMemoryEventStore};
+    use dawn_storage::{EventStore, InMemoryEventStore};
 
     fn event(n: u64) -> DomainEvent {
         DomainEvent::VelocityChanged(VelocityChanged {

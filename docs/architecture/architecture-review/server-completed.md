@@ -30,7 +30,7 @@ snapshot + tail replay、Ack前帰還の回帰を確認した。
 **Phase 2〜8D（2026-06-19〜2026-06-30、アーカイブ済み）**: node.rs のサブモジュール化
 （commands/navigation/serialization/sector_map/ship_registry/tick/spawner_logic/tackle/
 snapshot_io/apply_event/transit_flow）、main.rs・serve.rs・data_loader.rs の分割、
-`SimWorld` クエリヘルパー追加、`dawn-sector`/`dawn-replication` 新設（ADR-0026/0027）、
+`SimWorld` クエリヘルパー追加、`dawn-sector`/`dawn-distributed` 新設（ADR-0026/0027）、
 Phase 8D 全項目（TCP replication/Raft transport/本番バイナリ `dawn-sector-node`/
 Raspberry Pi 実機検証 PASS）、命名整理（`navigation.rs`/`galaxy.rs`）、`CelestialBodyDef.sector`
 追加、M-4（WS境界集約）・M-5（replication消費側 `ReplicaSet`）解消、R-1（`navigation.rs`
@@ -67,8 +67,8 @@ deepening、production outbound replication publisher deepening、Client admissi
 | `dawn-client-gdext` クレート新設（ADR-0040） | 2026-07-10 | GDExtensionバインディング（cdylib）。`dawn-client-core`の薄いラッパーで、旧GDScript（`player_loadout.gd`/`module_row.gd`/`item_row.gd`）と同名・同APIのグローバルクラスとしてGodotへ公開。呼び出し側（`main.gd`等）は`preload()`行の削除のみで移行完了。 |
 | Disassemble のカーゴ消失バグ修正 | 2026-07-10 | `disassemble_ship_owned` が船を`PackagedShip`へ変換する際、`InventoryComp`（船カーゴ）を救済せず despawn しており未艤装モジュール/Scrap Metalが消滅していたのを、他のStation操作と同じ`credit_station_item`経路で salvage するよう修正。回帰テスト3件追加。 |
 | `dawn-client-gdext` の `apply_module_activation` を thin adapter 化（`/improve-codebase-architecture`、PR #129） | 2026-07-10 | ADR-0040 が定めた「adapter only」に反し `apply_module_activation` だけがモジュール状態を直接変更していた（sibling の `toggle_at` は既に `dawn-client-core` へ委譲済み）のを是正。`PlayerLoadoutMsg::apply_module_activation` を `dawn-client-core` に新設（ユニットテスト2件）、`loadout_gd.rs` は id 変換 + 委譲のみに縮小（271→267行、`loadout.rs` 337→373行）。 |
-| `dawn-wire` 新設 + ワイヤプロトコルのpostcardバイナリ化（ADR-0041/0042） | 2026-07-11 | `dawn-actor/src/protocol/{client_command,server_event,hello_resume}.rs` を `dawn-wire` へ全面移動。`ServerMessage`/`ClientMessage` 統合enumを新設し、Welcome/Redirect/Event/Hello/Commandをpostcardバイナリフレーム化。`ClientCommandJson`/`EventJson` は postcardが内部タグ付きenumをデシリアライズできないため外部タグ付きへ変更（実装中に実際のデコード失敗で発覚）。`dawn-client-gdext` に `ServerMessageDecoder`/`ClientMessageDecoder`/`json_variant.rs` を新設し、外部タグ付き形状を既存の `{"type":...}` Dictionary形状へ変換。`connection.gd` の改行バッファリングを撤去（374→344）。 |
-| M-10解消: postcard encode/decode を `dawn-wire` に集約 | 2026-07-11 | `ServerMessage::encode/decode`・`ClientMessage::encode/decode` を `dawn-wire` に新設し、`ws_server.rs`（2箇所）・`client_command_gd.rs`・`server_message_gd.rs` の直接 `postcard::` 呼び出しをそちらに置換。`dawn-actor`/`dawn-client-gdext` の `postcard` 依存を削除（`dawn-wire` 経由の間接利用のみになったため）。副次効果として `dawn-wire` 自体が実コードで `postcard` を使うようになり、cargo macheteの「未使用依存」誤検知（doctestでしか使われていなかった）も解消。 |
+| `dawn-protocol` 新設 + ワイヤプロトコルのpostcardバイナリ化（ADR-0041/0042） | 2026-07-11 | `dawn-actor/src/protocol/{client_command,server_event,hello_resume}.rs` を `dawn-protocol` へ全面移動。`ServerMessage`/`ClientMessage` 統合enumを新設し、Welcome/Redirect/Event/Hello/Commandをpostcardバイナリフレーム化。`ClientCommandJson`/`EventJson` は postcardが内部タグ付きenumをデシリアライズできないため外部タグ付きへ変更（実装中に実際のデコード失敗で発覚）。`dawn-client-gdext` に `ServerMessageDecoder`/`ClientMessageDecoder`/`json_variant.rs` を新設し、外部タグ付き形状を既存の `{"type":...}` Dictionary形状へ変換。`connection.gd` の改行バッファリングを撤去（374→344）。 |
+| M-10解消: postcard encode/decode を `dawn-protocol` に集約 | 2026-07-11 | `ServerMessage::encode/decode`・`ClientMessage::encode/decode` を `dawn-protocol` に新設し、`ws_server.rs`（2箇所）・`client_command_gd.rs`・`server_message_gd.rs` の直接 `postcard::` 呼び出しをそちらに置換。`dawn-actor`/`dawn-client-gdext` の `postcard` 依存を削除（`dawn-protocol` 経由の間接利用のみになったため）。副次効果として `dawn-protocol` 自体が実コードで `postcard` を使うようになり、cargo macheteの「未使用依存」誤検知（doctestでしか使われていなかった）も解消。 |
 | Station operation execution seam の deepening | 2026-07-17 | PR #149で `station_operation_execution.rs`（281行）を新設。Dock/undock/active ship/build/assemble/disassembleのaccepted-operation副作用をこのモジュールへ集約し、`station_lifecycle.rs` / `station_materialization.rs` は検証・計画に縮小。速度停止、event append、snapshot更新、station inventory連携の入口を一つに揃え、直接回帰テストを保持。 |
 | Ship cargo ownership module の deepening | 2026-07-17 | `inventory.rs` から船cargoの初期seed、1個/スタック変更、Station transfer、Market片側bridgeを `ship_cargo.rs`（573行）へ分離。`inventory.rs` はFit/Unfit/Reorderの検証とFittingComp変更に専念し、既存の`ShipFitted`イベント・ADR-0034の片側Command・crate境界は維持。`dawn-sector` 314テスト、ship cargo moduleの直接テストを確認。 |
 | Player movement command module の deepening（`/improve-codebase-architecture`） | 2026-07-24 | `commands.rs` から Move/Stop、docked/transit/warp gating、共有推進ヘルパーを `movement_commands.rs`（203行）へ分離。ルーター・所有権アクセサ・残りのcommand validationは `commands.rs` に保持し、anchor-frame回帰テストを新モジュールへ移動。挙動、イベント、wire schema、crate境界、bool/Option意味論は変更なし。`cargo test -p dawn-sector`、fmt、clippy（`-D warnings`）を確認。 |
@@ -138,7 +138,7 @@ deep moduleに移っている。
 
 #### Phase 8 — 物理ノード分散の配線（Phase 8D 完了）
 
-`dawn-replication`（ADR-0021/0027・Phase 8D）は8D-2〜8D-4を完了済み。
+`dawn-distributed`（ADR-0021/0027・Phase 8D）は8D-2〜8D-4を完了済み。
 8D-5（Raspberry Pi実機検証）も2026-07-01に完了。8D全項目が完了。
 
 #### Phase 9 — 評価の総点検（決着）
@@ -154,7 +154,7 @@ ADR-0029後の再肥大はR-1で解消済み。
 ### 2026-08-02 — client binary test boundary cleanup (#239)
 
 The client-side legacy JSON reconstruction decoder introduced during the
-postcard migration was removed. `dawn-wire` now owns client command/message
+postcard migration was removed. `dawn-protocol` now owns client command/message
 round-trip tests directly, without reproducing the deprecated Dictionary shape.
 
 ### 2026-08-09 — unified Sector runtime frame (#278)

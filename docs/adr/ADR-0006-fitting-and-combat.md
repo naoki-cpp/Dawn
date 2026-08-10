@@ -305,7 +305,7 @@ Phase 6 以降の Tick 処理:
      d. HP ≤ 0 なら ShipDestroyed を生成し destroyed リストに積む
   7. Bot System を実行する                 ← Phase 6 追加（Combat の後）
   8. 全イベントを EventStore に Append
-  9. dawn-replication transport に差分を転送
+  9. dawn-distributed transport に差分を転送
   10. TickSummary を返す
 ```
 

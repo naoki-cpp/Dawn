@@ -29,7 +29,7 @@ Phase 4 の仕様チェック（2026-06-05）で、現在の実装がシング�
 
 > **2026-07-11 追記（ADR-0042）**: 上記の再検討トリガー（分散ノード間通信）は
 > 既に発火し、解決済みである——ただし本ADRが指していたクライアント向け
-> WebSocket ではなく、`dawn-consensus`/`dawn-replication` の TCP+postcard
+> WebSocket ではなく、`dawn-distributed`/`dawn-distributed` の TCP+postcard
 > という別のプロトコルとして実装された。クライアント向け WebSocket は
 > トランスポートとして維持しつつ、ペイロードを JSON テキストから postcard
 > バイナリへ段階的に移行している（ADR-0042 段階1）。詳細は ADR-0042 参照。

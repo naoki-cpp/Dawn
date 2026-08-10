@@ -5,7 +5,7 @@
 //! before GDScript receives one of them.
 
 use dawn_core::ItemId;
-use dawn_wire::{MarketSnapshotWire, ShipStateWire};
+use dawn_protocol::{MarketSnapshotWire, ShipStateWire};
 use godot::prelude::*;
 
 use crate::item_identity_gd::ItemIdentity;
@@ -111,8 +111,8 @@ pub struct MotionCorrectionPresentation {
 impl MotionCorrectionPresentation {
     pub(crate) fn wrap(
         ship_id: u64,
-        position: dawn_wire::AbsPosWire,
-        velocity: dawn_wire::VelWire,
+        position: dawn_protocol::AbsPosWire,
+        velocity: dawn_protocol::VelWire,
         tick: u64,
     ) -> Gd<Self> {
         Gd::from_init_fn(|_base| Self {
@@ -191,10 +191,10 @@ pub(crate) fn godot_i64(value: u64) -> i64 {
     i64::try_from(value).expect("server message validation covers every Godot-facing u64")
 }
 
-pub(crate) fn position_components(position: dawn_wire::AbsPosWire) -> PackedFloat64Array {
+pub(crate) fn position_components(position: dawn_protocol::AbsPosWire) -> PackedFloat64Array {
     PackedFloat64Array::from([position.x, position.y, position.z])
 }
 
-pub(crate) fn velocity_components(velocity: dawn_wire::VelWire) -> PackedFloat64Array {
+pub(crate) fn velocity_components(velocity: dawn_protocol::VelWire) -> PackedFloat64Array {
     PackedFloat64Array::from([velocity.dx, velocity.dy, velocity.dz])
 }

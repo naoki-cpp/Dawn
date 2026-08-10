@@ -24,7 +24,7 @@ related  : docs/process/roadmap.md（互換入口）、docs/process/roadmap/READ
 |---|---|---|
 | Cargo Workspace 初期化 | ✅ 完了 | |
 | `dawn-core` 全型定義 + テスト | ✅ 完了 | 17 テスト |
-| `dawn-event-store` InMemoryEventStore | ✅ 完了 | 8 テスト |
+| `dawn-storage` InMemoryEventStore | ✅ 完了 | 8 テスト |
 | `dawn-ecs` SimWorld + MovementSystem | ✅ 完了 | 11 テスト |
 | `dawn-simulation` SimulationNode + Spawner | ✅ 完了 | 13 テスト |
 | CLAUDE.md 初版 | ✅ 完了 | |
@@ -71,7 +71,7 @@ total events      : 1,010,000（spawn 10,000 + move 1,000,000）
 
 | タスク | 状態 | 備考 |
 |---|---|---|
-| `dawn-actor` クレート作成（ClientConnection 境界） | ✅ 完了 | ReplicationBus は 8D-2a で dawn-replication へ移動 |
+| `dawn-actor` クレート作成（ClientConnection 境界） | ✅ 完了 | ReplicationBus は 8D-2a で dawn-distributed へ移動 |
 | `SectorRuntimeDriver` 実装 | ✅ 完了 | dawn-simulation 内 |
 | `EventStoreActor` 実装 | 🗑️ 削除 | wire されないまま残っていたため削除（`SimulationNode` が EventStore を直接所有） |
 | ノード間 In-Memory Channel 接続 | ✅ 完了 | 単一チャンネル設計で決定論的 |
@@ -143,7 +143,7 @@ Session 2: restore_from() で復元 → tick / ship count / positions ✓ PASS
 ```
 サーバー側                       クライアント側
 ────────────────────────         ─────────────────
-dawn-replication bus             Godot シーン
+dawn-distributed bus             Godot シーン
     ↓                                ↑
 ClientConnection trait  ─────────────
     ├── InProcessConnection  ← テスト用（チャンネル直結）
@@ -277,9 +277,9 @@ Godot 側のコードは変更しない。gRPC は Phase 9 以降で再検討す
 | # | タスク | クレート | 状態 |
 |---|---|---|---|
 | 1 | `SectorTransitRequested` / `Completed` / `Aborted` イベント + `TransitCommand` | dawn-core | ✅ |
-| 2 | 状態機械（Follower / Candidate / Leader）+ 単体テスト | dawn-consensus（新規） | ✅ |
-| 3 | RequestVote / AppendEntries 処理 + Tick 駆動タイマー | dawn-consensus | ✅ |
-| 4 | `RaftActor`（Mailbox 経由）+ `RaftTransport` / `PartitionableTransport` | dawn-consensus | ✅ |
+| 2 | 状態機械（Follower / Candidate / Leader）+ 単体テスト | dawn-distributed（新規） | ✅ |
+| 3 | RequestVote / AppendEntries 処理 + Tick 駆動タイマー | dawn-distributed | ✅ |
+| 4 | `RaftActor`（Mailbox 経由）+ `RaftTransport` / `PartitionableTransport` | dawn-distributed | ✅ |
 | 5 | `TransitState` コンポーネント + Transit 中の操作拒否 | dawn-ecs | ✅ |
 | 6 | `SimulationNode` の Transit 処理（Step 7.5 / Step 10 組み込み） | dawn-simulation | ✅ |
 | 7 | `MultiNodeCluster` への RaftActor 配線 | dawn-simulation | ✅ |
@@ -311,8 +311,8 @@ Godot 側のコードは変更しない。gRPC は Phase 9 以降で再検討す
 | # | タスク | クレート | 状態 |
 |---|---|---|---|
 | 1 | **スナップショット検証テスト**: ① round-trip（snapshot→restore→snapshot バイト一致）② snapshot + 末尾 Tick == live（cap/hull 含む） | dawn-simulation | ✅ take_snapshot 正準ソート + 2テスト |
-| 2 | ホットログのセグメント化（base_index ヘッダ）+ `compact()` 機構 | dawn-event-store | ✅ FileEventStore.compact + 4テスト |
-| 3 | コールドアーカイブ書き出し（append-only）+ 原子的 swap（write-new-then-swap） | dawn-event-store | ✅ compact() 内で実装（header に base を埋め rename 一発で原子的） |
+| 2 | ホットログのセグメント化（base_index ヘッダ）+ `compact()` 機構 | dawn-storage | ✅ FileEventStore.compact + 4テスト |
+| 3 | コールドアーカイブ書き出し（append-only）+ 原子的 swap（write-new-then-swap） | dawn-storage | ✅ compact() 内で実装（header に base を埋め rename 一発で原子的） |
 | 4 | failover / 再起動が創世記 replay を要求しないテスト（ADR-0014 連携） | dawn-simulation | ✅ 圧縮後 reopen + restore テスト |
 | 5 | snapshot.rs のドキュメントコメントを改訂後 INV-002 に更新 | dawn-simulation | ✅（228f244） |
 | 6 | event-catalog.md / architecture.md に2層ログを反映 | docs | ✅ §5-C 復旧モデル + §2 永続化モデル追記 |
@@ -379,8 +379,8 @@ Godot 側のコードは変更しない。gRPC は Phase 9 以降で再検討す
 | # | タスク | 備考 | 状態 |
 |---|---|---|---|
 | 1 | ~~dawn-proto（protobuf）~~ → **不採用**。ワイヤ = postcard+serde 再利用 + 最小の版付きフレーミング（長さ前置・種別タグ・版ハンドシェイク）を transport 層に置く | AI_DEVELOPMENT_GUIDE.md「Crate Boundaries」参照。理由: Rust↔Rust・多言語不要・スキーマ進化は event-schema-evolution.md で規律化済み。protobuf は型の二重定義のみ生む | ✅ 方針確定（不採用） |
-| 2 | dawn-replication（追記ログのゴシップ配布 + アンチエントロピー + スナップショット転送） | 新規クレート・ADR-0021/0027（単一所有のため競合解決 CRDT/LWW は不要）。8D-2a: `ReplicationBus` を dawn-replication の `InMemoryReplicationBus` へ移動し、`dawn-actor` は純粋なクライアント転送境界（`ClientConnection`）に縮小済み。送信側: `OutboundLogPublisher` が append-log cursor と `LogBatch` suffix 構築を保持し、production Node は `publish_new_events` を呼ぶだけに縮小済み。8D-2b: `AntiEntropy`（gap 検出・重複/overlap 判定・`iter_from` suffix 応答）実装済み。8D-2c: `TcpReplicationTransport`（4-byte length prefix + postcard / LAN plaintext）実装済み。8D-2d: `SnapshotTransfer`（`Serialize+DeserializeOwned` ジェネリック・u32 LE length prefix / 256 MiB cap）実装済み（2 テスト）。消費側: `ReplicaSet`（peer セクターごとに gap 検出・冪等・順序保持で複製ログを保持。ライブ world 適用と failover は別機能）実装済み（M-5・6 テスト） | ✅ |
-| 3 | ネットワーク `RaftTransport` 実装（`InProcessTransport` の差し替え。静的 config のピア表） | trait は既存（transport.rs）。TLS 可能な選択（TCP+rustls / QUIC）にし後付けを塞がない。`TcpRaftTransport`（4-byte LE + postcard / LAN plaintext / per-peer 自動再接続 / accept ループ）実装済み（dawn-consensus/src/tcp_transport.rs・8D-3） | ✅ |
+| 2 | dawn-distributed（追記ログのゴシップ配布 + アンチエントロピー + スナップショット転送） | 新規クレート・ADR-0021/0027（単一所有のため競合解決 CRDT/LWW は不要）。8D-2a: `ReplicationBus` を dawn-distributed の `InMemoryReplicationBus` へ移動し、`dawn-actor` は純粋なクライアント転送境界（`ClientConnection`）に縮小済み。送信側: `OutboundLogPublisher` が append-log cursor と `LogBatch` suffix 構築を保持し、production Node は `publish_new_events` を呼ぶだけに縮小済み。8D-2b: `AntiEntropy`（gap 検出・重複/overlap 判定・`iter_from` suffix 応答）実装済み。8D-2c: `TcpReplicationTransport`（4-byte length prefix + postcard / LAN plaintext）実装済み。8D-2d: `SnapshotTransfer`（`Serialize+DeserializeOwned` ジェネリック・u32 LE length prefix / 256 MiB cap）実装済み（2 テスト）。消費側: `ReplicaSet`（peer セクターごとに gap 検出・冪等・順序保持で複製ログを保持。ライブ world 適用と failover は別機能）実装済み（M-5・6 テスト） | ✅ |
+| 3 | ネットワーク `RaftTransport` 実装（`InProcessTransport` の差し替え。静的 config のピア表） | trait は既存（transport.rs）。TLS 可能な選択（TCP+rustls / QUIC）にし後付けを塞がない。`TcpRaftTransport`（4-byte LE + postcard / LAN plaintext / per-peer 自動再接続 / accept ループ）実装済み（dawn-distributed/src/tcp_transport.rs・8D-3） | ✅ |
 | 4 | dawn-sector-node（本番実行バイナリ・上記 transport + ゴシップの配線・静的 config 起動） | 新規クレート。`TcpRaftTransport` + `TcpReplicationTransport` を TOML 静的 config で配線。3 プロセスで 3 セクタクラスタ（ws/:787{8,9,80} raft/:790{0,1,2} repl/:791{0,1,2}）。プレイヤー Jump 時は `Redirect` JSON でクライアントを宛先 WS へ誘導し、`player_id` / `ship_id` 付き Hello で同じ player ship を resume（2026-06-29） | ✅ |
 | 5 | （任意・推奨）Raspberry Pi クラスタ実機検証 | 下記 ★ 参照 | ✅ 2026-07-01・3項目とも PASS（[8d5-hardware-notes.md](./8d5-hardware-notes.md) 実行ログ参照） |
 | 6 | `dawn-sector-node` への永続化配線（FileEventStore + checkpoint + 起動時リカバリ） | Phase 3 で `FileEventStore`/`checkpoint()`/`CheckpointScheduler`/`restore_from` は実装・テスト済みだったが、8D-4 で新設した本番バイナリには配線されておらず、本番は `InMemoryEventStore`（再起動で全消失）のまま稼働していたことが判明。`NodeConfig` に `event_log_path`/`snapshot_path`/`cold_path`/`checkpoint_interval_ticks` を追加し、起動時にスナップショットの有無で新規/復元を分岐、tickループに `CheckpointScheduler::maybe_checkpoint` を配線。実機起動→kill→再起動で tick・log_index が継続することを確認済み | ✅ 2026-07-01 |
@@ -389,7 +389,7 @@ Godot 側のコードは変更しない。gRPC は Phase 9 以降で再検討す
 
 | 項目 | トリガー（いつ着手するか） | 現状 |
 |---|---|---|
-| Raft ログ圧縮 + **InstallSnapshot RPC** | Raft ログ（transit 専用で小・成長は遅い）の無限成長が問題化、または圧縮導入で base_index 前を捨て遅延 follower が AppendEntries で追えなくなったら（ADR-0017 圧縮と対の completeness 項目） | 未発火。`dawn-consensus/src/lib.rs` のスコープ注記どおり未実装のまま。8D-5 実機検証（数百隻規模・短時間）でもログ成長は問題化せず |
+| Raft ログ圧縮 + **InstallSnapshot RPC** | Raft ログ（transit 専用で小・成長は遅い）の無限成長が問題化、または圧縮導入で base_index 前を捨て遅延 follower が AppendEntries で追えなくなったら（ADR-0017 圧縮と対の completeness 項目） | 未発火。`dawn-distributed/src/lib.rs` のスコープ注記どおり未実装のまま。8D-5 実機検証（数百隻規模・短時間）でもログ成長は問題化せず |
 | メンバーシップ変更（Raft ConfChange） | ノード入替・スケール・**8B-2 Fission（動的トポロジ）** が要るとき | 未発火。8B-2 Fission は roadmap 上も `⬜`・未着手のまま（要 ADR） |
 | 動的ノード発見 | 弾力クラスタにするとき（固定 3 ノードは静的 config で足りる） | 未発火。8D-4/8D-5 とも 3 ノード静的 config のまま運用・検証済み |
 | TLS / 認証 | インターネット公開時（LAN の Pi 検証は平文で可）。transport を TLS 可能にしておけば後付け可 | 未発火。8D-5 の実機検証も意図的に LAN 平文のまま実施（[8d5-hardware-notes.md](./8d5-hardware-notes.md) Out of scope 参照）。インターネット公開の計画はまだない |
