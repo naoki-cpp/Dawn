@@ -6,10 +6,15 @@ related  : .agents/skills/security-check/SKILL.md,
            .agents/skills/security-check/references/owasp-map.md,
            .agents/skills/security-check/references/baseline.md（初回レビューの凍結記録）,
            docs/architecture/security-review-completed.md（解消済みfindingの作業ログ）
-date     : 2026-08-09
+date     : 2026-08-10
 ---
 
 # Security Review — Dawn Server（OWASP観点）
+
+2026-08-10 update: Issue #281 changed the client-side construction boundary
+and made `MarketOrderSide` a closed wire enum. Server admission, ownership
+checks, SQL parameter binding, scalar limits, and bounded per-session command
+queues were re-verified; no new security finding was introduced.
 
 2026-08-09 update: #277の`dawn-sector` repository分割とStation projection APIを
 レビューした。SQLは引き続き全てparameter bindingで、projectionのtransition indexは

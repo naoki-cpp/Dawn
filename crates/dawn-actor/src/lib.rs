@@ -30,7 +30,7 @@
 //! use dawn_wire::{ClientMessage, HelloMessage};
 //!
 //! let msg = ClientMessage::Hello(HelloMessage { resume: None });
-//! let bytes = msg.encode();
+//! let bytes = msg.encode().unwrap();
 //! let decoded = ClientMessage::decode(&bytes).unwrap();
 //! assert!(matches!(decoded, ClientMessage::Hello(HelloMessage { resume: None })));
 //! ```

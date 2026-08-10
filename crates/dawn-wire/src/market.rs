@@ -12,12 +12,19 @@ pub enum MarketCommandWire {
     PlaceMarketOrderCommand {
         ship_id: u64,
         item_id: ItemWire,
-        side: String,
+        side: MarketOrderSide,
         price: u64,
         quantity: u64,
     },
     /// Cancel one of the caller's own open orders.
     CancelMarketOrderCommand { order_id: u64 },
+}
+
+/// The only valid directions for a Market order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub enum MarketOrderSide {
+    Bid,
+    Ask,
 }
 
 /// One open order shown by the Market UI.
@@ -58,7 +65,7 @@ mod tests {
             let command = MarketCommandWire::PlaceMarketOrderCommand {
                 ship_id: 42,
                 item_id,
-                side: "Ask".to_owned(),
+                side: MarketOrderSide::Ask,
                 price: 100,
                 quantity: 3,
             };

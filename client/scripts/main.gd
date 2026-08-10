@@ -228,63 +228,61 @@ func _input(event: InputEvent) -> void:
 			return
 		var key: InputEventKey = event as InputEventKey
 		var nearest_station_id: int = _nearby_station_ids[0] if not _nearby_station_ids.is_empty() else -1
-		var action: Dictionary = _interaction.resolve_key_action(
+		var intent: ClientIntent = _interaction.resolve_key_intent(
 			key.keycode,
 			_player_ship_id,
 			_nearby_gate_id,
 			nearest_station_id,
 			_session.docked_station_id())
-		match action.get("kind", "none") as String:
-			"toggle_module":
-				_toggle_module_by_index(action.module_index as int)
-			"stop":
-				_send_stop_command()
-			"jump":
-				var jump_gate: int = action.gate_id as int
-				_connection.send_jump_command(jump_gate)
-			"approach_gate":
-				_connection.send_approach_gate_command(action.gate_id as int)
-			"approach_ship":
-				_connection.send_approach_command(action.ship_id as int)
-			"warp_to_gate":
-				_connection.send_warp_command(action.gate_id as int)
-			"warp_to_body":
-				_connection.send_warp_to_body_command(action.body_id as int)
-			"orbit_gate":
-				_connection.send_orbit_gate_command(action.gate_id as int)
-			"orbit_ship":
-				_connection.send_orbit_command(action.ship_id as int)
-			"keep_at_range_gate":
-				_connection.send_keep_at_range_gate_command(
-					action.gate_id as int, _keep_at_range_km * 1000.0)
-			"keep_at_range_ship":
-				_connection.send_keep_at_range_command(
-					action.ship_id as int, _keep_at_range_km * 1000.0)
-			"adjust_keep_at_range":
-				_keep_at_range_km = clampf(
-					_keep_at_range_km + (action.delta_km as float),
-					KEEP_AT_RANGE_MIN_KM, KEEP_AT_RANGE_MAX_KM)
-				_update_hud()
-			"toggle_tactical_overlay":
-				_presentation.toggle_tactical_overlay()
-			"toggle_inventory_panel":
-				_hud_surface.toggle_inventory_panel()
-			"toggle_market_panel":
-				if _market_surface.toggle():
-					_connection.send_market_refresh_command()
-			"dock":
-				_connection.send_dock_command(action.station_id as int)
-			"undock":
-				_connection.send_undock_command()
-			"build_packaged_ship":
-				_connection.send_build_packaged_ship_command(
-					_player_ship_id,
-					action.station_id as int,
-					BUILDABLE_SHIP_TYPE_ID)
-			"disassemble_ship":
-				_connection.send_disassemble_ship_command(_player_ship_id, action.station_id as int)
-			"disembark":
-				_connection.send_disembark_command()
+		if intent.is_toggle_module():
+			_toggle_module_by_index(intent.module_index() as int)
+		elif intent.is_stop():
+			_send_stop_command()
+		elif intent.is_jump():
+			_connection.send_jump_command(intent.gate_id() as int)
+		elif intent.is_approach_gate():
+			_connection.send_approach_gate_command(intent.gate_id() as int)
+		elif intent.is_approach_ship():
+			_connection.send_approach_command(intent.ship_id() as int)
+		elif intent.is_warp_to_gate():
+			_connection.send_warp_command(intent.gate_id() as int)
+		elif intent.is_warp_to_body():
+			_connection.send_warp_to_body_command(intent.body_id() as int)
+		elif intent.is_orbit_gate():
+			_connection.send_orbit_gate_command(intent.gate_id() as int)
+		elif intent.is_orbit_ship():
+			_connection.send_orbit_command(intent.ship_id() as int)
+		elif intent.is_keep_at_range_gate():
+			_connection.send_keep_at_range_gate_command(
+				intent.gate_id() as int, _keep_at_range_km * 1000.0)
+		elif intent.is_keep_at_range_ship():
+			_connection.send_keep_at_range_command(
+				intent.ship_id() as int, _keep_at_range_km * 1000.0)
+		elif intent.is_adjust_keep_at_range():
+			_keep_at_range_km = clampf(
+				_keep_at_range_km + intent.delta_km(),
+				KEEP_AT_RANGE_MIN_KM, KEEP_AT_RANGE_MAX_KM)
+			_update_hud()
+		elif intent.is_toggle_tactical_overlay():
+			_presentation.toggle_tactical_overlay()
+		elif intent.is_toggle_inventory_panel():
+			_hud_surface.toggle_inventory_panel()
+		elif intent.is_toggle_market_panel():
+			if _market_surface.toggle():
+				_connection.send_market_refresh_command()
+		elif intent.is_dock():
+			_connection.send_dock_command(intent.station_id() as int)
+		elif intent.is_undock():
+			_connection.send_undock_command()
+		elif intent.is_build_packaged_ship():
+			_connection.send_build_packaged_ship_command(
+				_player_ship_id,
+				intent.station_id() as int,
+				BUILDABLE_SHIP_TYPE_ID)
+		elif intent.is_disassemble_ship():
+			_connection.send_disassemble_ship_command(_player_ship_id, intent.station_id() as int)
+		elif intent.is_disembark():
+			_connection.send_disembark_command()
 		return
 
 	if event is InputEventMouseMotion and _drag_row != null:
@@ -333,7 +331,7 @@ func _input(event: InputEvent) -> void:
 						hit_gate = _pick_gate_at(mb.position)
 						if hit_gate < 0:
 							hit_body = _pick_body_at(mb.position)
-					var click_action: Dictionary = _interaction.interpret_primary_click(
+					var click_intent: ClientIntent = _interaction.interpret_primary_click(
 						mb.position,
 						Time.get_ticks_msec() / 1000.0,
 						(_camera as Node).call("is_dragging") as bool,
@@ -341,17 +339,16 @@ func _input(event: InputEvent) -> void:
 						hit_ship,
 						hit_gate,
 						hit_body)
-					match click_action.get("kind", "none") as String:
-						"double_click_move":
-							_on_double_click(mb.position)
-						"selection_changed":
-							_update_hud()
+					if click_intent.is_double_click_move():
+						_on_double_click(mb.position)
+					elif click_intent.is_selection_changed():
+						_update_hud()
 				MOUSE_BUTTON_RIGHT:
-					var lock_action: Dictionary = _interaction.interpret_lock_click(
+					var lock_intent: ClientIntent = _interaction.interpret_lock_click(
 						_player_ship_id,
 						_pick_ship_at(mb.position))
-					if (lock_action.get("kind", "none") as String) == "lock_on":
-						_try_lock_on(lock_action.ship_id as int)
+					if lock_intent.is_lock_on():
+						_try_lock_on(lock_intent.ship_id() as int)
 
 # -- Ship picking (screen position -> nearest ship ID) ------------------------
 #

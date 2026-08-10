@@ -4,7 +4,7 @@ audience : AI Agent / Human Developer
 update   : /architecture-review が issue を解消済みへ移動するたびに追記
 related  : docs/architecture/architecture-review/client.md（構造評価）,
            docs/architecture/architecture-review/client-pending.md（未完項目）
-date     : 2026-07-30
+date     : 2026-08-10
 ---
 
 # Architecture Review — Dawn Client（完了済みログ）
@@ -30,6 +30,7 @@ date     : 2026-07-30
 | C-9 | `hud_manager.gd` が watch 帯（850行）に到達 | 2026-07-10、`/improve-codebase-architecture` 候補2。ヒットテスト4関数（`module_slot_at`/`inventory_panel_row_at`/`column_at`/`inventory_panel_consumes`）を新設 `hud_hit_test.gd`（`HudHitTest`）へ抽出し、`hud_manager.gd` は HUD構築・更新専任に戻した（850→789）。`fitted_header.clip_text` インシデントが「今は変えない」判断を覆すトリガーになった。テストは `hud_hit_test_test.gd` へ移動（新規追加なし、GdUnit4 186/186 維持）。 |
 | C-12 | `WorldInteraction` selection read API二重化（#202） | `selection_state() -> Dictionary` を削除し、`main.gd` とテストを `selected_target_id()` / `selected_gate_id()` / `selected_body_id()` のscalar accessorへ統一。選択の相互排他性を維持したままstring-keyed境界を除去。 |
 | C-13 | server outcomeのtyped stateをDictionary経由でRustへ戻す二重変換（#238） | `ServerMessageOutcome::dispatch` が `WorldSessionUpdate` を直接 `WorldSessionState` に適用してからtyped presentation recordをGDScriptへ通知する単一経路へ移行。navigation/ship lifecycle/AoI/health/lock/motion/dock/system/loadout/marketのDictionary再入力を削除し、pure Rust testとtyped fixture GdUnitを追加。 |
+| C-15 | Dictionary/string-tag intentとMarket JSON builder（#281） | `ClientIntent`/`ClientSelection` GDExtension型を追加し、`InputDecoder`/`WorldInteraction`/`main.gd`をsemantic predicateとtyped accessorへ移行。Marketの専用builder化、`MarketOrderSide` enum化、`ClientCommandResult`による明示的エラー、fallible `ClientMessage::encode`を導入し、JSON往復と空byte sentinelを削除。 |
 
 ### 2026-07-24: client WorldSpace の座標計算をRustへ移管
 
@@ -60,7 +61,7 @@ C-1 の抽出先（`ShipPicking` / `NavigationMarkerRenderer` / `InputDecoder` /
 | `main_test.gd` | main.gd 残存純粋関数 + モジュールdeactivate判定の回帰テスト | 38 |
 | `ship_picking_test.gd` | `ShipPicking`（画面空間ピッキング含む） | 12 |
 | `navigation_marker_renderer_test.gd` | `NavigationMarkerRenderer`（選択リング含む） | 12 |
-| `input_decoder_test.gd` | `InputDecoder`。2026-07-07、`KEY_X`（Disembark）判定のケースを追加（+2）。2026-07-10、`I`キーのshipless soft-lockケースを修正（既存ケースの動作を反転、件数は変わらず） | 33 |
+| `input_decoder_test.gd` | `InputDecoder` の型付き `ClientIntent` 生成とキー判定 | 9 |
 | `hud_manager_test.gd` | `HudManager`（2026-07-10、C-9解消でヒットテスト系4ケースを `hud_hit_test_test.gd` へ移動） | 26 |
 | `hud_hit_test_test.gd` | `HudHitTest`（2026-07-10新設、C-9解消。`module_slot_at`/`column_at` のヒットテストケース） | 7 |
 | `hud_surface_test.gd` | `HudSurface`（HUD render frame / fitting更新 / inventory hit-test 委譲 / パネル dirty-tracking 判定。C-4 で `ModuleRow` の `clone()`/`equals()` ベース差分判定のケースを追加）。2026-07-08、station roster / `source` タグ付けのケースを追加（+2） | 17 |
@@ -74,9 +75,10 @@ C-1 の抽出先（`ShipPicking` / `NavigationMarkerRenderer` / `InputDecoder` /
 | `player_loadout_test.gd` | `PlayerLoadout` typed GDExtension boundary | 3 |
 | `ship_controller_test.gd` | `ShipController` | 4 |
 | `world_session_test.gd` | `WorldSession`（InitialState / ship registry / HP / lock / tick-cap / destroy / dock state） | 13 |
-| `world_interaction_test.gd` | `WorldInteraction`（selection ownership / double-click / lock intent / key action 解釈） | 8 |
+| `world_interaction_test.gd` | `WorldInteraction`（typed selection / double-click / lock intent / key intent 解釈） | 9 |
+| `client_command_gd_test.gd` | `ClientCommandResult`、型付き Sector/Market builder、明示的な入力エラー | 5 |
 | `world_presentation_test.gd` | `WorldPresentation`（marker clamp / warp tunnel easing / sun state） | 9 |
-| **合計** | | **219**（`func test_` 実測、2026-08-02。削除した `client_command_gd_test.gd` の postcard コマンド往復は `dawn-wire` の Rust ユニットテストへ移行） |
+| **合計** | | **196**（`func test_` 実測、2026-08-10） |
 
 テスト導入で見つかった不具合・定着した手順（詳細: `docs/process/godot-client-testing.md`）:
 - `Node3D` をシーンツリーに追加せず `global_position` を読むと `(0,0,0)` 固定になる
