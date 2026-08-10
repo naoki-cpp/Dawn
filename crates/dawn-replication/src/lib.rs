@@ -18,13 +18,9 @@
 //! - `CatchUpManager`: owns gap detection, suffix requests, compacted-prefix
 //!   snapshot fallback, bounded retries, transient-failure classification,
 //!   logical-tick cooldowns, and restart from the current replica cursor.
-//! - `TcpReplicationTransport`: LAN plaintext transport using length-prefixed
-//!   postcard frames for both gossip and catch-up control messages.
-//!
-//! ## (8D-2d)
-//!
-//! - `SnapshotTransfer`: transfer raw snapshot bytes over a dedicated TCP
-//!   connection; callers handle snapshot serialization.
+//! - `PeerReplicationTransport`: adapter over `dawn-peer-transport`; recovery
+//!   ranges and catch-up control use its bounded control channel, while
+//!   snapshots and repository catch-up use its bounded bulk channel.
 //!
 //! ## Consumer side
 //!
@@ -64,9 +60,8 @@ pub mod anti_entropy;
 pub mod bus;
 pub mod catch_up;
 pub mod outbound;
+pub mod peer_transport;
 pub mod replica;
-pub mod snapshot;
-pub mod tcp;
 
 use dawn_core::{DomainEvent, SectorId};
 use serde::{Deserialize, Serialize};
@@ -80,9 +75,8 @@ pub use catch_up::{
     CatchUpUnavailable,
 };
 pub use outbound::OutboundLogPublisher;
+pub use peer_transport::{DurabilitySendError, PeerReplicationTransport};
 pub use replica::{Ingest, ReplicaSet, ReplicaSnapshot, SnapshotInstall};
-pub use snapshot::SnapshotTransfer;
-pub use tcp::{TcpReplicationError, TcpReplicationTransport};
 
 /// A single gossip payload from a Sector owner's append-only log.
 ///
@@ -112,9 +106,9 @@ impl LogBatch {
 
 /// Wire-format-agnostic ordinary log-gossip transport.
 ///
-/// TCP gossip implements this interface with length-prefixed postcard frames;
-/// the in-memory implementation keeps tests single-process. Catch-up control
-/// messages use the separate [`CatchUpTransport`] interface.
+/// The peer transport implements this interface with bounded, length-prefixed
+/// postcard frames; the in-memory implementation keeps tests single-process.
+/// Catch-up control messages use the separate [`CatchUpTransport`] interface.
 pub trait ReplicationTransport: Send + Sync {
     /// Send a batch of events to interested peers.
     fn broadcast(&self, batch: LogBatch);

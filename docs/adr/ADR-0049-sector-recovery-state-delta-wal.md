@@ -648,5 +648,8 @@ retry use explicit operation IDs.
 - [x] Implement the unified runtime durability-profile/quorum/fencing and
   reconciliation policy boundary under #278. #280 still owns remote receipt and
   catch-up transport, so production remains explicitly `LocalDurable`.
-- [ ] Implement final snapshot/catch-up/durability transport under #280.
+- [x] Implement the shared versioned peer transport, isolated control/bulk
+  channels, snapshot/catch-up adapters, repository byte channel, and validated
+  durability envelopes under #280. Production `ReplicatedDurable` activation
+  remains with the #278 runtime policy.
 - [x] Add checkpoint-plus-tail equivalence and malformed/missing-boundary rejection tests for the local recovery path; replica/Transit/admission crash matrices remain with #276/#277/#280.

@@ -54,7 +54,8 @@ The goal is to build a game that **surpasses EVE Online** (ADR-0016). The distri
 
 ```text
 Runtime          : multi-process (`dawn-sector-node` or `dawn-simulation`)
-Inter-node comms : TCP (TcpRaftTransport / TcpReplicationTransport, 8D-3/2c)
+Inter-node comms : shared versioned TCP peer transport with control/bulk
+                    channels (ADR-0050 / #280)
 Client comms     : WebSocket (Godot <-> WsServer, ADR-0007), postcard binary
                     for every ServerMessage/ClientMessage envelope, including
                     InitialState/PlayerLoadout/AoI/PositionSnap (ADR-0042)
@@ -72,7 +73,9 @@ See [ADR-0003](../adr/ADR-0003-local-first-development.md), [ADR-0027](../adr/AD
 
 - TLS / QUIC (8E+)
 - #275 remaining state-owner extraction from `SimulationNode`
-- #280 unified peer transport carrying the #284 checkpoint/catch-up representation
+- #280 transport migration is implemented: versioned peer identity handshake,
+  separate control/bulk channels, recovery ranges, snapshots, repository bytes,
+  and durability envelopes; deployment-specific benchmark/RTO remains
 - deployment-specific recovery benchmark and RTO selection after #280
 
 **Do not implement code ahead of the current phase or redefine a contract owned by another refactor issue.**
@@ -91,13 +94,14 @@ See [ADR-0003](../adr/ADR-0003-local-first-development.md), [ADR-0027](../adr/AD
 | `dawn-wire` | library | Client<->server wire schema (`ClientRequest`/`ServerFact`, `ServerMessage`/`ClientMessage` binary envelope). `ServerFact` is an audience-scoped client projection distinct from durable `DomainEvent`; depends only on `dawn-core` + serde + postcard -- no transport/runtime dependency (ADR-0041, ADR-0042, #274) |
 | `dawn-ecs` | library | ECS World wrapper. Component / System definitions |
 | `dawn-event-store` | library | Public EventLog plus fallible atomic `DurableJournal` mechanics capable of storing ADR-0049 recovery records; public-event archival remains logically distinct |
-| `dawn-consensus` | library | Raft implementation (leader election, log replication, RaftActor; ADR-0014) |
+| `dawn-consensus` | library | Raft implementation (leader election, log replication, RaftActor; ADR-0014); its network adapter depends on `dawn-peer-transport` |
+| `dawn-peer-transport` | library | Shared versioned peer identity handshake, framing/lifecycle, bounded queues, and separate control/bulk channels; opaque domain payloads (ADR-0050, #280) |
 | `dawn-actor` | library | Client transport boundary (`ClientConnection` trait) |
-| `dawn-replication` | library | Current replication/catch-up transport and anti-entropy implementation. #280 consolidates transport infrastructure and must carry the ADR-0049/#284 recovery representation without redefining it |
+| `dawn-replication` | library | Replication/anti-entropy policy plus the `PeerReplicationTransport` adapter. It carries ADR-0049/#284 recovery bytes without redefining their authority |
 | `dawn-market` | library | Player-to-player Market: bid/ask order book + `PlayerId` Currency ledger, its own SQLite authority independent of Sector tick determinism. The SQLite layer is an adapter around a private matching policy that owns crossing, price-time priority, partial fills, maker-price settlement, and Bid price-improvement refunds. Depends only on `dawn-core` + serde + rusqlite -- no transport/runtime dependency, same DAG position as `dawn-wire` (ADR-0034 §4/§5/§6). Constructs `RemoveItemCommand`/`ReturnItemCommand`/`CreditItemCommand` but never applies them; the caller (`dawn-simulation`) routes each to the Sector that owns the affected ship |
 | `dawn-sector` | library | Per-Sector game logic plus the shared durable runtime frame. `SimulationNode` owns Tick/Transit/Warp/Bot AI/AoI/Snapshot state preparation; `run_durable_runtime_tick_with_consensus` owns the prepare -> durable append -> live-apply -> reconciliation -> output boundary with injected consensus and durability-policy adapters. `aoi_frame::deliver_sector_sessions` owns the common rebuild -> session delivery -> stale-player cleanup loop; adapters inject only transport callbacks. AoI consumers read through the storage-free `SectorView` boundary; #275 continues migrating the remaining state owners while preserving ADR-0049 recovery semantics |
 | `dawn-simulation` | binary | Bootstrap and adapter wiring for local/single/cluster runs. WsServer, Raft cluster wiring, load generation, TOML loader, and the `dawn-market` bridge are deployment adapters around the shared Sector runtime frame; it must not define a second Tick ordering |
-| `dawn-sector-node` | binary | Production bootstrap and adapter wiring (8D-4). It supplies TCP consensus/replication, FileJournal, SQLite repositories, and static TOML config to the shared Sector runtime frame. 3 processes = 3-Sector cluster today |
+| `dawn-sector-node` | binary | Production bootstrap and adapter wiring (8D-4). It supplies shared peer control/bulk transport, FileJournal, SQLite repositories, and static TOML config to the shared Sector runtime frame. 3 processes = 3-Sector cluster today |
 
 ### Dependency DAG
 
@@ -116,10 +120,11 @@ dawn-core
     │       └── dawn-simulation (below) routes Market requests and bridge commands
     ├── dawn-ecs
     ├── dawn-consensus
+    ├── dawn-peer-transport
     └── dawn-event-store
             ^
             ├── dawn-actor           <- also depends on dawn-wire
-            ├── dawn-replication
+            ├── dawn-replication     <- depends on dawn-peer-transport
             └── dawn-sector          <- current game logic composition; #272 removes storage dependency from pure engine
                     ^
                     ├── dawn-simulation
@@ -213,7 +218,7 @@ Test:                             Production:
 ADR-0007 ruled out a move to gRPC for the client-facing transport; that
 holds (ADR-0042). The inter-node distributed-comms trigger it named
 already fired, but was resolved by a separate TCP+postcard transport
-(TcpRaftTransport/TcpReplicationTransport) — it never applied to this
+(the peer transport control/bulk adapters) — it never applied to this
 client<->server connection.
 ```
 

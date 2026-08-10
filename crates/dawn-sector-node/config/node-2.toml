@@ -4,8 +4,8 @@
 node_id    = 2
 sector_id  = 2
 ws_addr    = "0.0.0.0:7880"
-raft_addr  = "0.0.0.0:7902"
-repl_addr  = "0.0.0.0:7912"
+control_addr = "0.0.0.0:7902"
+bulk_addr    = "0.0.0.0:7912"
 npc_ships  = 0
 pop_cap    = 500
 
@@ -18,12 +18,14 @@ checkpoint_interval_ticks = 600
 
 [[peers]]
 node_id   = 0
-raft_addr = "127.0.0.1:7900"
-repl_addr = "127.0.0.1:7910"
+sector_id = 0
+control_addr = "127.0.0.1:7900"
+bulk_addr = "127.0.0.1:7910"
 ws_addr   = "127.0.0.1:7878"
 
 [[peers]]
 node_id   = 1
-raft_addr = "127.0.0.1:7901"
-repl_addr = "127.0.0.1:7911"
+sector_id = 1
+control_addr = "127.0.0.1:7901"
+bulk_addr = "127.0.0.1:7911"
 ws_addr   = "127.0.0.1:7879"

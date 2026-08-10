@@ -60,7 +60,7 @@ impl AntiEntropy {
     /// Returns `None` when the requester is already caught up. If the store has
     /// compacted away the requested prefix, the returned batch starts at the
     /// first retained `log_index`; the receiver will observe that as a gap and
-    /// the later SnapshotTransfer path can take over.
+    /// the shared peer bulk channel can take over.
     pub fn batch_from_store<S: EventStore>(
         store: &S,
         request: MissingLogRequest,

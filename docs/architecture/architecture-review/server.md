@@ -76,7 +76,7 @@ only as an async in-memory adapter; it is not a second Tick implementation.
 | `crates/dawn-core/src/commands.rs` | 644 | 🟢 domain command types/validation data・tests |
 | `crates/dawn-simulation/src/cluster.rs` | 632 | 🟢 cluster runtime wiring・tests |
 | `crates/dawn-sector/src/node/approach.rs` | 615 | 🟢 approach steering state machine・tests |
-| `crates/dawn-replication/src/tcp.rs` | 603 | 🟢 TCP replication transport framing・tests |
+| `crates/dawn-peer-transport/src/lib.rs` | 961 | 🟡 shared peer framing/lifecycle・control/bulk isolation・tests; split protocol/framing if the adapter surface grows further |
 | `crates/dawn-consensus/src/state.rs` | 593 | 🟢 Raft state transition/persistence boundary・tests |
 | `crates/dawn-ecs/src/systems/combat.rs` | 584 | 🟢 combat system・tests |
 | `crates/dawn-sector/src/transit/pipeline.rs` | 577 | 🟢 retry/idempotency/recovery policy |

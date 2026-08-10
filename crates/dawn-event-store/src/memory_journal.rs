@@ -129,7 +129,8 @@ mod tests {
     use super::*;
     use crate::journal::{
         encode_payload, DurabilityContext, DurabilityEvidence, DurabilityEvidenceSource,
-        DurabilityMode, JournalEntry, JournalStream, TransitionId,
+        DurabilityMode, DurabilityTransportContext, DurabilityTransportMessage, JournalEntry,
+        JournalStream, TransitionId,
     };
     use dawn_core::SectorId;
     use serde::ser::Error as _;
@@ -186,6 +187,42 @@ mod tests {
         assert_eq!(decoded, evidence);
         assert_eq!(JournalIndex(1).checked_next(), Some(JournalIndex(2)));
         assert_eq!(JournalIndex(u64::MAX).checked_next(), None);
+    }
+
+    #[test]
+    fn durability_transport_context_rejects_stale_receipt_evidence() {
+        let mut journal = InMemoryJournal::new();
+        let durable_batch = batch(&[b"state", b"event"]);
+        let receipt = journal.append_batch(durable_batch.clone()).unwrap();
+        let context = DurabilityTransportContext {
+            sector_id: receipt.context.sector_id,
+            owner_epoch: receipt.context.owner_epoch,
+            owner_term: 4,
+            fencing_token: 9,
+            transition_id: receipt.transition_id,
+            range: receipt.range,
+            content_hash: receipt.content_hash,
+        };
+        let stage = DurabilityTransportMessage::Stage {
+            context,
+            batch: durable_batch,
+        };
+        assert!(stage.validate().is_ok());
+
+        let stale = DurabilityTransportMessage::Receipt {
+            context: DurabilityTransportContext {
+                content_hash: context.content_hash.wrapping_add(1),
+                ..context
+            },
+            evidence: DurabilityEvidence {
+                receipt,
+                source: DurabilityEvidenceSource::Remote,
+            },
+        };
+        assert!(matches!(
+            stale.validate(),
+            Err(JournalError::ReceiptMismatch("transport receipt context"))
+        ));
     }
 
     #[test]

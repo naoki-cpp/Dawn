@@ -267,6 +267,11 @@ workspace DAG and relevant ADR first.
 - `dawn-consensus`: Raft and consensus transport/state. Sector ownership epochs/
   fencing input consumed by #278 must ultimately come from the authoritative
   consensus/runtime ownership path rather than ad-hoc local counters.
+- `dawn-peer-transport`: shared low-level peer lifecycle, versioned identity
+  handshake, framing, bounded queues, reconnects, and separate control/bulk
+  channels. It owns no domain message semantics and depends only on
+  `dawn-core` plus transport dependencies. Consensus and replication adapters
+  depend on it; it must not depend on either adapter (ADR-0050, #280).
 - `dawn-replication`: current sector-local replication and anti-entropy; #280
   may change physical peer/snapshot/durability transport while preserving #284
   recovery semantics and #278 quorum policy.

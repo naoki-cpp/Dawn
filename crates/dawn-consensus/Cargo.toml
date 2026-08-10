@@ -8,6 +8,7 @@ publish.workspace     = true
 
 [dependencies]
 dawn-core = { path = "../dawn-core" }
+dawn-peer-transport = { path = "../dawn-peer-transport" }
 serde     = { workspace = true }
 rand      = { workspace = true }
 tokio      = { workspace = true }

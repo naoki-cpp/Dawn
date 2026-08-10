@@ -2,7 +2,7 @@
 //!
 //! Each physical node reads its own config (e.g. `config/node-0.toml`) that
 //! describes which sector it owns, its own listen addresses, and how to reach
-//! every peer node for Raft consensus and log replication.
+//! every peer node for the shared control/bulk peer transport.
 
 use dawn_core::entity::MAX_GODOT_COMPATIBLE_NODE_ID;
 use serde::Deserialize;
@@ -17,10 +17,10 @@ pub struct NodeConfig {
     pub sector_id: u8,
     /// WebSocket address the Godot clients connect to.
     pub ws_addr: SocketAddr,
-    /// TCP address for incoming Raft RPC messages.
-    pub raft_addr: SocketAddr,
-    /// TCP address for incoming replication gossip frames.
-    pub repl_addr: SocketAddr,
+    /// Shared peer control channel (Raft, durability, and catch-up control).
+    pub control_addr: SocketAddr,
+    /// Shared peer bulk channel (snapshots and repository catch-up).
+    pub bulk_addr: SocketAddr,
     /// How many NPC ships to spawn at startup.
     #[serde(default = "default_npc_ships")]
     pub npc_ships: usize,
@@ -93,10 +93,12 @@ fn default_repository_path() -> String {
 #[derive(Debug, Deserialize, Clone)]
 pub struct PeerConfig {
     pub node_id: u8,
-    /// Raft TCP address of this peer.
-    pub raft_addr: SocketAddr,
-    /// Replication TCP address of this peer.
-    pub repl_addr: SocketAddr,
+    /// Sector identity presented by this peer during handshake.
+    pub sector_id: u8,
+    /// Shared control TCP address of this peer.
+    pub control_addr: SocketAddr,
+    /// Shared bulk TCP address of this peer.
+    pub bulk_addr: SocketAddr,
     /// WebSocket address — used for the client Redirect message when a player
     /// jumps to this peer's sector (see `serve.rs`).
     pub ws_addr: SocketAddr,
@@ -146,14 +148,15 @@ mod tests {
             node_id,
             sector_id: 0,
             ws_addr: "127.0.0.1:7878".parse().unwrap(),
-            raft_addr: "127.0.0.1:7879".parse().unwrap(),
-            repl_addr: "127.0.0.1:7880".parse().unwrap(),
+            control_addr: "127.0.0.1:7879".parse().unwrap(),
+            bulk_addr: "127.0.0.1:7880".parse().unwrap(),
             npc_ships: 0,
             pop_cap: 1,
             peers: vec![PeerConfig {
                 node_id: peer_node_id,
-                raft_addr: "127.0.0.1:7881".parse().unwrap(),
-                repl_addr: "127.0.0.1:7882".parse().unwrap(),
+                sector_id: peer_node_id,
+                control_addr: "127.0.0.1:7881".parse().unwrap(),
+                bulk_addr: "127.0.0.1:7882".parse().unwrap(),
                 ws_addr: "127.0.0.1:7883".parse().unwrap(),
             }],
             event_log_path: String::new(),
@@ -180,5 +183,22 @@ mod tests {
         let first_incompatible = MAX_GODOT_COMPATIBLE_NODE_ID + 1;
         assert!(validate_godot_node_ids(&config(first_incompatible, 1)).is_err());
         assert!(validate_godot_node_ids(&config(1, first_incompatible)).is_err());
+    }
+
+    #[test]
+    fn bundled_cluster_configs_parse_shared_peer_channels() {
+        for source in [
+            include_str!("../config/node-0.toml"),
+            include_str!("../config/node-1.toml"),
+            include_str!("../config/node-2.toml"),
+        ] {
+            let config: NodeConfig = toml::from_str(source).unwrap();
+            assert!(!config.peers.is_empty());
+            assert_ne!(config.control_addr, config.bulk_addr);
+            assert!(config
+                .peers
+                .iter()
+                .all(|peer| peer.control_addr != peer.bulk_addr));
+        }
     }
 }
