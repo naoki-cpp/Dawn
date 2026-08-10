@@ -20,9 +20,9 @@ benchmark and not a production-readiness gate.
 
 | Node | Sector | Config |
 |---|---:|---|
-| node-0 | 0 | `crates/dawn-sector-node/config/node-0.toml` |
-| node-1 | 1 | `crates/dawn-sector-node/config/node-1.toml` |
-| node-2 | 2 | `crates/dawn-sector-node/config/node-2.toml` |
+| node-0 | 0 | `crates/dawn-server/config/node-0.toml` |
+| node-1 | 1 | `crates/dawn-server/config/node-1.toml` |
+| node-2 | 2 | `crates/dawn-server/config/node-2.toml` |
 
 ## Procedure
 

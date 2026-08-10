@@ -48,12 +48,12 @@ cargo semver-checks check-release --baseline-rev main   # public API breakage vs
 Simulation:
 
 ```bash
-cargo run -p dawn-simulation --bin simulate
-cargo run -p dawn-simulation --bin simulate --release -- --serve
-cargo run -p dawn-simulation --bin simulate --release -- --serve --cluster
-cargo run -p dawn-simulation --bin simulate --release -- --serve --duel
-cargo run -p dawn-simulation --bin simulate --release -- --serve --duel --enemies 2
-cargo run -p dawn-simulation --bin simulate --release -- --aoi-bench
+cargo run -p dawn-server --bin simulate
+cargo run -p dawn-server --bin simulate --release -- --serve
+cargo run -p dawn-server --bin simulate --release -- --serve --cluster
+cargo run -p dawn-server --bin simulate --release -- --serve --duel
+cargo run -p dawn-server --bin simulate --release -- --serve --duel --enemies 2
+cargo run -p dawn-server --bin simulate --release -- --aoi-bench
 ```
 
 **Playing the Godot client against a live server**: `client/dawn_client_gdext.gdextension`
@@ -289,15 +289,15 @@ workspace DAG and relevant ADR first.
   owners. Depends on `dawn-wire` today to build typed wire messages it hands to
   `dawn-actor` (e.g. `PlayerLoadoutWire`).
 - `dawn-actor`: client/server protocol and connection boundary.
-- `dawn-simulation`: runnable simulation/runtime wiring and demos. #278 now
-  shares production runtime orchestration so durability profile, repository
-  reconciliation, ack, retry, and effect policy have one implementation.
+- `dawn-server`: production/local server composition, runnable simulation
+  modes, and demos. #278 now shares runtime orchestration so durability
+  profile, repository reconciliation, ack, retry, and effect policy have one
+  implementation.
   Depends on `dawn-market` to route Market-domain requests and bridge commands
   before they reach the owning `SimulationNode` (ADR-0034 §4, roadmap.md §12
   9D-4/5).
-- `dawn-sector-node`: real hardware node binary and TOML config loading; #278
-  leaves it as bootstrap/adapter composition rather than a second runtime policy
-  implementation.
+- `dawn-actor`: low-level WebSocket client transport used by `dawn-server`;
+  it owns no Sector or runtime policy.
 
 ## Change Workflow
 
@@ -432,4 +432,4 @@ this guide.
 
 ---
 
-Last updated: 2026-08-07 / Covers ADR-0001 through ADR-0049
+Last updated: 2026-08-10 / Covers ADR-0001 through ADR-0051

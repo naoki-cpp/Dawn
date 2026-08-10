@@ -6,7 +6,7 @@ description = "Client transport, protocol translation, and actor boundaries for 
 repository.workspace = true
 publish.workspace     = true
 
-# dawn-actor must not depend on dawn-ecs or dawn-simulation.
+# dawn-actor must not depend on dawn-ecs or dawn-server.
 # It provides Actor infrastructure used by upper layers, including the
 # production WebSocket transport (WsServer / WsClientConnection) and the wire
 # protocol (DomainEvent <-> JSON <-> ClientCommand) shared by all binaries.

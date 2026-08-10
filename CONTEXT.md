@@ -86,8 +86,8 @@ player stronger.
 - `dawn-replication` owns sector-local append-log replication.
 - `dawn-sector` owns sector game logic and writes committed facts.
 - `dawn-actor` owns the client/server protocol boundary.
-- `dawn-simulation` wires local simulations and demos.
-- `dawn-sector-node` is the real hardware node binary.
+- `dawn-server` owns the server composition boundary: `simulate` wires local
+  simulations/demos, and `sector-node` is the real hardware node binary.
 
 ## Vocabulary Preferences
 

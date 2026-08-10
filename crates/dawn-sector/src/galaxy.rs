@@ -79,8 +79,8 @@ impl Galaxy {
     }
 
     /// Read and parse a `Galaxy` from a TOML file on disk (the production
-    /// `data/galaxy.toml` path). Shared by `dawn-simulation` and
-    /// `dawn-sector-node`, which used to each hand-roll an identical
+    /// `data/galaxy.toml` path). Shared by both `dawn-server` binaries,
+    /// which used to live in separate packages and hand-roll an identical
     /// read-then-parse-then-panic helper.
     ///
     /// Returns `Err` rather than panicking (library code shouldn't decide to

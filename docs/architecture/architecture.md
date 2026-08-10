@@ -53,7 +53,8 @@ The goal is to build a game that **surpasses EVE Online** (ADR-0016). The distri
 ### Current scope (Phase 10 client integration / Phase 9 economy validation)
 
 ```text
-Runtime          : multi-process (`dawn-sector-node` or `dawn-simulation`)
+Runtime          : multi-process (`dawn-server --bin sector-node` or
+                    `dawn-server --bin simulate`)
 Inter-node comms : shared versioned TCP peer transport with control/bulk
                     channels (ADR-0050 / #280)
 Client comms     : WebSocket (Godot <-> WsServer, ADR-0007), postcard binary
@@ -67,7 +68,7 @@ Persistence      : FileEventStore remains the append-only public-fact mirror and
                     transitions use the runtime-owned DurableJournal boundary.
 ```
 
-See [ADR-0003](../adr/ADR-0003-local-first-development.md), [ADR-0027](../adr/ADR-0027-dawn-replication-crate.md), and [ADR-0049](../adr/ADR-0049-sector-recovery-state-delta-wal.md).
+See [ADR-0003](../adr/ADR-0003-local-first-development.md), [ADR-0027](../adr/ADR-0027-dawn-replication-crate.md), [ADR-0049](../adr/ADR-0049-sector-recovery-state-delta-wal.md), and [ADR-0051](../adr/ADR-0051-server-composition-boundary.md).
 
 ### Future scope (direction only, not implemented)
 
@@ -97,10 +98,9 @@ See [ADR-0003](../adr/ADR-0003-local-first-development.md), [ADR-0027](../adr/AD
 | `dawn-peer-transport` | library | Shared versioned peer identity handshake, framing/lifecycle, bounded queues, and separate control/bulk channels; opaque domain payloads (ADR-0050, #280) |
 | `dawn-actor` | library | Client transport boundary (`ClientConnection` trait) |
 | `dawn-replication` | library | Replication/anti-entropy policy plus the `PeerReplicationTransport` adapter. It carries ADR-0049/#284 recovery bytes without redefining their authority |
-| `dawn-market` | library | Player-to-player Market: pure bid/ask, Currency, escrow, and durable `SettlementIntent` outbox policy. `MarketDb` is the SQLite adapter that atomically persists orders, balances, stable settlement IDs, and delivery state. Depends only on `dawn-core` + thiserror + rusqlite -- no transport/runtime dependency, same DAG position as `dawn-wire` (ADR-0034 §4/§5/§6, #279). It never imports Sector bridge commands; `dawn-simulation` translates intents and routes them to the owning Sector |
+| `dawn-market` | library | Player-to-player Market: pure bid/ask, Currency, escrow, and durable `SettlementIntent` outbox policy. `MarketDb` is the SQLite adapter that atomically persists orders, balances, stable settlement IDs, and delivery state. Depends only on `dawn-core` + thiserror + rusqlite -- no transport/runtime dependency, same DAG position as `dawn-wire` (ADR-0034 §4/§5/§6, #279). It never imports Sector bridge commands; `dawn-server` translates intents and routes them to the owning Sector |
 | `dawn-sector` | library | Per-Sector game logic plus the shared durable runtime frame. `SimulationNode` composes explicit Simulation/Player/Station/Transit/Topology/GameData/FrameOutput owners and a separate Persistence adapter; `run_durable_runtime_tick_with_consensus` owns the prepare -> durable append -> live-apply -> reconciliation -> output boundary with injected consensus and durability-policy adapters. `aoi_frame::deliver_sector_sessions` owns the common rebuild -> session delivery -> stale-player cleanup loop; adapters inject only transport callbacks. AoI consumers read through the storage-free `SectorView` boundary while the owner split preserves ADR-0049 recovery semantics |
-| `dawn-simulation` | binary | Bootstrap and adapter wiring for local/single/cluster runs. WsServer, Raft cluster wiring, load generation, TOML loader, and the `dawn-market` bridge are deployment adapters around the shared Sector runtime frame; it must not define a second Tick ordering |
-| `dawn-sector-node` | binary | Production bootstrap and adapter wiring (8D-4). It supplies shared peer control/bulk transport, FileJournal, SQLite repositories, and static TOML config to the shared Sector runtime frame. 3 processes = 3-Sector cluster today |
+| `dawn-server` | package with binaries | Single server composition boundary. `simulate` owns local benchmarks/demos/playtest modes; `sector-node` owns the production peer-connected process. Both select adapters around the shared Sector runtime frame and neither defines a second Tick ordering (ADR-0051) |
 
 ### Dependency DAG
 
@@ -116,7 +116,7 @@ dawn-core
     │       └── dawn-actor / dawn-sector (below) also depend on dawn-wire
     ├── dawn-market        <- Market order book + Currency ledger, own SQLite, no transport dep (ADR-0034 §4)
     │       ^
-    │       └── dawn-simulation (below) translates Market intents and routes bridge commands
+    │       └── dawn-server (below) translates Market intents and routes bridge commands
     ├── dawn-ecs
     ├── dawn-consensus
     ├── dawn-peer-transport
@@ -126,8 +126,7 @@ dawn-core
             ├── dawn-replication     <- depends on dawn-peer-transport
             └── dawn-sector          <- current game logic composition; #272 removes storage dependency from pure engine
                     ^
-                    ├── dawn-simulation
-                    └── dawn-sector-node
+                    └── dawn-server (simulate + sector-node)
 ```
 
 Dependencies flow **bottom-to-top only**; any reverse or circular dependency is a design failure. The pure Sector engine no longer owns `dawn-event-store`; runtime and application adapters own journal handles and persistence wiring.

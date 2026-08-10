@@ -4,7 +4,7 @@ audience : AI Agent / Human Developer
 update   : /architecture-review で issue を起票・状態更新するたびに更新
 related  : docs/architecture/architecture-review/server.md（構造評価）,
            docs/architecture/architecture-review/server-completed.md（完了済みログ）
-date     : 2026-08-02
+date     : 2026-08-10
 ---
 
 # Architecture Review — Dawn Codebase（未完項目）
@@ -45,4 +45,9 @@ module間のdriftが実害になる場合。行数だけでは発火させない
 | R-3 | commands slice 完了、transit / warp 継続監視 |
 | M-9 | 保留・trigger付き |
 
-採らない方針: CRDT/LWW、protobuf、薄いadapterのための共有runtime crate、行数削減目的の網羅match・domain型の破壊、初回LAN検証でのTLS/認証。
+採らない方針: CRDT/LWW、protobuf、薄いadapterだけの追加crate、行数削減目的の網羅match・domain型の破壊、初回LAN検証でのTLS/認証。
+
+ADR-0051で、薄いadapterのためではなく二重のcomposition rootを統合する
+`dawn-server` packageを採用した。production `sector-node` と local
+`simulate` は同じpackage境界にあり、Sectorのtick/reducerは引き続き
+`dawn-sector`が所有する。

@@ -159,7 +159,7 @@ check_tick_sla() {
 
 		local overruns
 		overruns="$(ssh "$remote" "tail -n +$((before + 1)) '$log_path' 2>/dev/null | grep -c '\[Node\] tick overrun' || true")"
-		# TICK_MS is fixed at 100ms (dawn-sector-node/src/main.rs); the tick budget
+		# TICK_MS is fixed at 100ms (dawn-server/src/bin/sector-node.rs); the tick budget
 		# does not depend on whether any overrun lines were logged this window.
 		local total_ticks=$((window_seconds * 1000 / 100))
 		local rate
@@ -237,7 +237,7 @@ mkdir -p logs
 pkill -u "$USER" -f 'target/release/sector-node' || true
 sleep 2
 nohup env RUST_LOG=info \
-	./target/release/sector-node "crates/dawn-sector-node/config/${CONFIG_NAME}.toml" \
+	./target/release/sector-node "crates/dawn-server/config/${CONFIG_NAME}.toml" \
 	>"logs/${CONFIG_NAME}.out.log" \
 	2>"logs/${CONFIG_NAME}.err.log" \
 	</dev/null &

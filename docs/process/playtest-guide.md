@@ -61,7 +61,7 @@ Phase 6 の主目標は「ゲームが実際に面白いか」を人間から検
   同時に `data/session_duel_<unix秒>.json` へ同内容を書き出す
   （複数セッションを横断した集計・分析を可能にするため）。
   詳細集計（§6 のロックオン/モジュール/フィッティングメトリクス）は将来拡張予定。
-  → dawn-simulation/src/serve/mod.rs の DuelMetrics::write_json_summary() 参照
+→ dawn-server/src/serve/mod.rs の DuelMetrics::write_json_summary() 参照
 ```
 
 ---
@@ -276,7 +276,7 @@ NPC + プレイヤー全員が同じ空間に配置する。
 
 ## 6. 自動収集すべきメトリクス
 
-`dawn-simulation` に `MetricsCollector` を追加し、
+`dawn-server` に `MetricsCollector` を追加し、
 セッション終了時に `data/session_YYYYMMDD_HHMMSS.json` へ書き出す。
 
 ### 戦闘メトリクス

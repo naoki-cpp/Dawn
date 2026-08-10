@@ -225,7 +225,7 @@ impl SimulationNode {
             }
 
             // Jump Gate Navigation (ADR-0009): Sector/StarSystem transfer on
-            // Replay is added when the Jump pipeline is wired in dawn-simulation.
+            // Replay is added when the Jump pipeline is wired in dawn-server.
             DomainEvent::JumpGateUsed(_) | DomainEvent::StarSystemChanged(_) => {}
 
             // Tackle (ADR-0024): TackledComp is managed live; on replay, apply

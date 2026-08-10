@@ -443,7 +443,7 @@ be interpreted as the semantic commit boundary or numeric recovery RTO.
 ### Running the benchmark
 
 ```bash
-cargo run -p dawn-simulation --bin simulate --release
+cargo run -p dawn-server --bin simulate --release
 ```
 
 ---
@@ -451,7 +451,7 @@ cargo run -p dawn-simulation --bin simulate --release
 ## 7. Tick Loop Implementation Ownership
 
 `run_phase4_server()` (single node), `run_cluster_server()` (3-node Raft),
-and the production `dawn-sector-node` process drive their loops via a
+and the production `dawn-server --bin sector-node` process drive their loops via a
 fixed-interval `tokio::time::interval` (100 ms/tick). Every server path currently
 enters `transit::run_runtime_tick()` for the frame order;
 `SimulationNode::tick_with_lock_commands()` remains synchronous.

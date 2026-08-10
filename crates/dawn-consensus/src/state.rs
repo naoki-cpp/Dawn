@@ -29,7 +29,7 @@ impl Term {
 /// One entry in the Raft Log (ADR-0014 §3).
 ///
 /// The payload is an opaque byte string: `dawn-consensus` knows nothing
-/// about domain types. Callers (dawn-simulation) serialize their own
+/// about domain types. Callers (`dawn-server`) serialize their own
 /// proposal type (e.g. a Transit proposal) into it. The Raft Log holds
 /// Commands (proposals), never Events (INV-006) — committed proposals are
 /// turned into Events by the caller and appended to its EventStore.

@@ -10,8 +10,8 @@
 //!
 //! ## Crates that may depend on dawn-actor
 //!
-//! dawn-simulation and dawn-sector-node.
-//! dawn-actor must never depend on dawn-ecs or dawn-simulation.
+//! dawn-server.
+//! dawn-actor must never depend on dawn-ecs or dawn-server.
 //!
 //! ## Client transport
 //!

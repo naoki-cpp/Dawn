@@ -7,9 +7,9 @@ repository.workspace = true
 publish.workspace     = true
 
 # Dependency DAG (ADR-0027):
-#   dawn-core, dawn-event-store → dawn-replication → dawn-sector, dawn-simulation
+#   dawn-core, dawn-event-store → dawn-replication → dawn-sector, dawn-server
 #
-# Forbidden: dawn-ecs, dawn-sector, dawn-consensus, dawn-simulation
+# Forbidden: dawn-ecs, dawn-sector, dawn-consensus, dawn-server
 [dependencies]
 dawn-core        = { path = "../dawn-core" }
 dawn-event-store = { path = "../dawn-event-store" }

@@ -4,8 +4,8 @@
 //! Phase 2: multi-node demo        (3 nodes × 1,000 ships × 20 ticks)
 //!
 //! Usage:
-//!   cargo run -p dawn-simulation --bin simulate
-//!   cargo run -p dawn-simulation --bin simulate --release
+//!   cargo run -p dawn-server --bin simulate
+//!   cargo run -p dawn-server --bin simulate --release
 
 // Rust API Guidelines C-DEBUG: catch new pub types that forget to derive
 // Debug at compile time instead of relying on periodic audits (see #83).

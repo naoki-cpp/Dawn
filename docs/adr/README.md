@@ -31,6 +31,7 @@ When adding a new ADR, register it here too (the `/new-adr` skill does both).
 | [ADR-0044](ADR-0044-absolute-f64-coordinate-authority.md) | サーバー権威座標を絶対 f64 に統一する方針 | Accepted |
 | [ADR-0049](ADR-0049-sector-recovery-state-delta-wal.md) | Exact Sector recovery with a versioned state-delta journal | Accepted |
 | [ADR-0050](ADR-0050-peer-transport.md) | Shared Versioned Peer Transport | Proposed |
+| [ADR-0051](ADR-0051-server-composition-boundary.md) | One Server Composition Boundary for Production and Local Runs | Accepted |
 
 ### Client / Communication
 

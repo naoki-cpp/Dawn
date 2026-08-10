@@ -242,7 +242,7 @@ build_host_artifact() {
 			exit 1
 		fi
 
-		"$cargo_zigbuild_bin" zigbuild -p dawn-sector-node --release --target "$target_triple"
+		"$cargo_zigbuild_bin" zigbuild -p dawn-server --bin sector-node --release --target "$target_triple"
 	)
 }
 
@@ -274,7 +274,7 @@ verify_runtime_inputs() {
 }
 
 rewrite_cluster_configs() {
-	local config_dir="$stage_dir/crates/dawn-sector-node/config"
+	local config_dir="$stage_dir/crates/dawn-server/config"
 	local node0_ip="$1"
 	local node1_ip="$2"
 	local node2_ip="$3"
@@ -282,7 +282,7 @@ rewrite_cluster_configs() {
 	mkdir -p "$config_dir"
 
 	cat > "$config_dir/node-0.toml" <<EOF
-# dawn-sector-node configuration - Node 0 (Sector 0)
+# dawn-server sector-node configuration - Node 0 (Sector 0)
 # Usage: sector-node config/node-0.toml
 
 node_id    = 0
@@ -313,7 +313,7 @@ ws_addr   = "${node2_ip}:7880"
 EOF
 
 	cat > "$config_dir/node-1.toml" <<EOF
-# dawn-sector-node configuration - Node 1 (Sector 1)
+# dawn-server sector-node configuration - Node 1 (Sector 1)
 # Usage: sector-node config/node-1.toml
 
 node_id    = 1
@@ -344,7 +344,7 @@ ws_addr   = "${node2_ip}:7880"
 EOF
 
 	cat > "$config_dir/node-2.toml" <<EOF
-# dawn-sector-node configuration - Node 2 (Sector 2)
+# dawn-server sector-node configuration - Node 2 (Sector 2)
 # Usage: sector-node config/node-2.toml
 
 node_id    = 2

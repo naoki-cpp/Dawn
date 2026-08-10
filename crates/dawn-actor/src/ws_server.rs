@@ -1,7 +1,8 @@
 //! # WebSocket Server — production client transport (ADR-0005, ADR-0007)
 //!
 //! The single WebSocket server / session implementation shared by both
-//! binaries (`dawn-simulation`, `dawn-sector-node`). It owns:
+//! binaries (`dawn-server --bin simulate`, `dawn-server --bin sector-node`).
+//! It owns:
 //!   - Hello/Welcome handshake (assigns and announces a PlayerId)
 //!   - InitialState + PlayerLoadout on connect
 //!   - `PlayerSession` mapping a connection to its PlayerId / ShipId

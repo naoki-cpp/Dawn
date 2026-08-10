@@ -110,7 +110,8 @@ Durability replicas may retain committed recovery bytes without being active own
 ### Sector → Node mapping
 
 ```text
-Current:  production dawn-sector-node processes own configured Sectors through
+Current:  production `dawn-server --bin sector-node` processes own configured
+Sectors through
           static TOML composition.
 Future:   consensus/runtime control may manage Sector -> Node mapping dynamically.
 ```

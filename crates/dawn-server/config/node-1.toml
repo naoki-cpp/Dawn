@@ -1,4 +1,4 @@
-# dawn-sector-node configuration — Node 1 (Sector 1)
+# dawn-server sector-node configuration — Node 1 (Sector 1)
 # Usage: sector-node config/node-1.toml
 
 node_id    = 1
