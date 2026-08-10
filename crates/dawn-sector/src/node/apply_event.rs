@@ -131,6 +131,13 @@ impl SimulationNode {
                             ),
                         },
                     );
+                    if let Some(settlement_id) = e.market_settlement_id {
+                        if settlement_id > 0 {
+                            self.simulation
+                                .applied_market_settlements
+                                .insert(settlement_id);
+                        }
+                    }
                 }
             }
 

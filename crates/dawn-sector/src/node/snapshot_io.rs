@@ -44,6 +44,7 @@ impl SimulationNode {
             ships: ship_registry,
             base_stats: _,
             pending_bot_lock_commands,
+            applied_market_settlements,
         } = simulation;
         let PlayerState {
             player_id_counter,
@@ -73,6 +74,12 @@ impl SimulationNode {
             pending_auto_jumps,
             completed_warps: _,
         } = frame_outputs;
+
+        let mut applied_market_settlements = applied_market_settlements
+            .iter()
+            .copied()
+            .collect::<Vec<_>>();
+        applied_market_settlements.sort_unstable();
 
         let mut ships: Vec<ShipSnapshot> = ship_registry
             .index
@@ -149,6 +156,7 @@ impl SimulationNode {
                 .collect(),
             pending_bot_lock_commands: pending_bot_lock_commands.clone(),
             pending_auto_jumps: pending_auto_jumps.clone(),
+            applied_market_settlements,
         }
     }
 
@@ -180,6 +188,7 @@ impl SimulationNode {
             active_ships,
             pending_bot_lock_commands,
             pending_auto_jumps,
+            applied_market_settlements,
             // `ships` needs the module and ship-type registries in place first.
             // `covered_recovery_index` is external journal coverage, not a replay cursor for
             // this storage-independent restore operation.
@@ -210,6 +219,8 @@ impl SimulationNode {
         )
         .expect("checkpoint contains an invalid Transit Saga for this Sector");
         self.simulation.pending_bot_lock_commands = pending_bot_lock_commands.clone();
+        self.simulation.applied_market_settlements =
+            applied_market_settlements.iter().copied().collect();
         self.frame_outputs.pending_auto_jumps = pending_auto_jumps.clone();
     }
 }
@@ -370,6 +381,7 @@ mod tests {
             )]),
             pending_bot_lock_commands: Vec::new(),
             pending_auto_jumps: Vec::new(),
+            applied_market_settlements: vec![7, 11],
         }
     }
 
@@ -683,6 +695,7 @@ mod tests {
                     rig: vec![],
                 },
                 inventory: vec![],
+                market_settlement_id: None,
                 tick: Tick(1),
             }));
 

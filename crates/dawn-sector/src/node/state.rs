@@ -30,6 +30,10 @@ pub(super) struct SimulationState {
     pub(super) ships: ShipRegistry,
     pub(super) base_stats: HashMap<ShipId, ShipStatsComp>,
     pub(super) pending_bot_lock_commands: Vec<LockOnCommand>,
+    /// Market settlement identities already applied to authoritative cargo.
+    /// The set is checkpointed so a lost ACK cannot make a retry duplicate an
+    /// inventory mutation after restart.
+    pub(super) applied_market_settlements: HashSet<u64>,
 }
 
 /// Player ownership, active-ship admission, and allocation state.

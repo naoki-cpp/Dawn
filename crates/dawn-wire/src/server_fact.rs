@@ -718,6 +718,7 @@ mod tests {
                 ship_id: ship_id(1),
                 fitting: dawn_core::fitting::FittingSnapshot::empty(),
                 inventory: vec![],
+                market_settlement_id: None,
                 tick,
             }),
             DomainEvent::WeaponFired(dawn_core::events::WeaponFired {

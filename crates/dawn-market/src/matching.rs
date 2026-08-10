@@ -6,7 +6,7 @@
 
 use dawn_core::{ItemId, PlayerId, ShipId};
 
-use crate::order_book::OrderSide;
+use crate::order_book::{MarketRejection, OrderSide};
 
 /// The incoming order presented to the matching policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,8 +42,8 @@ pub(super) struct MatchFill {
     pub(super) buyer: PlayerId,
     pub(super) seller: PlayerId,
     pub(super) buyer_ship_id: ShipId,
+    pub(super) seller_ship_id: ShipId,
     pub(super) price: u64,
-    pub(super) seller_proceeds: u64,
 }
 
 /// All decisions needed to apply one incoming order to the book.
@@ -63,7 +63,7 @@ pub(super) struct MatchPlan {
 pub(super) fn plan_matches(
     incoming: IncomingOrder,
     candidates: impl IntoIterator<Item = RestingOrder>,
-) -> MatchPlan {
+) -> Result<MatchPlan, MarketRejection> {
     let mut candidates: Vec<_> = candidates
         .into_iter()
         .filter(|candidate| {
@@ -84,7 +84,7 @@ pub(super) fn plan_matches(
     });
 
     let mut remaining_quantity = incoming.quantity;
-    let mut buyer_refund = 0;
+    let mut buyer_refund: u64 = 0;
     let mut fills = Vec::new();
 
     for resting in candidates {
@@ -99,9 +99,17 @@ pub(super) fn plan_matches(
             OrderSide::Bid => (incoming.player_id, resting.player_id, incoming.ship_id),
             OrderSide::Ask => (resting.player_id, incoming.player_id, resting.ship_id),
         };
-        let seller_proceeds = resting.price * quantity;
         if incoming.side == OrderSide::Bid {
-            buyer_refund += (incoming.price - resting.price) * quantity;
+            buyer_refund = buyer_refund
+                .checked_add(
+                    incoming
+                        .price
+                        .checked_sub(resting.price)
+                        .ok_or(MarketRejection::ArithmeticOverflow)?
+                        .checked_mul(quantity)
+                        .ok_or(MarketRejection::ArithmeticOverflow)?,
+                )
+                .ok_or(MarketRejection::ArithmeticOverflow)?;
         }
 
         fills.push(MatchFill {
@@ -109,25 +117,31 @@ pub(super) fn plan_matches(
             quantity,
             resting_quantity_remaining: resting.quantity_remaining - quantity,
             resting_escrowed_currency: if resting.side == OrderSide::Bid {
-                resting
-                    .escrowed_currency
-                    .saturating_sub(resting.price * quantity)
+                let reserved = resting
+                    .price
+                    .checked_mul(quantity)
+                    .ok_or(MarketRejection::ArithmeticOverflow)?;
+                resting.escrowed_currency.saturating_sub(reserved)
             } else {
                 0
             },
             buyer,
             seller,
             buyer_ship_id,
+            seller_ship_id: if incoming.side == OrderSide::Ask {
+                incoming.ship_id
+            } else {
+                resting.ship_id
+            },
             price: resting.price,
-            seller_proceeds,
         });
     }
 
-    MatchPlan {
+    Ok(MatchPlan {
         fills,
         remaining_quantity,
         buyer_refund,
-    }
+    })
 }
 
 fn crosses(incoming: IncomingOrder, resting: RestingOrder) -> bool {
@@ -192,7 +206,8 @@ mod tests {
                 resting(1, 1, OrderSide::Ask, 110, 5),
                 resting(2, 2, OrderSide::Ask, 100, 5),
             ],
-        );
+        )
+        .unwrap();
 
         assert_eq!(plan.fills.len(), 1);
         assert_eq!(plan.fills[0].resting_order_id, 2);
@@ -207,7 +222,8 @@ mod tests {
                 resting(1, 1, OrderSide::Bid, 100, 5),
                 resting(2, 2, OrderSide::Bid, 110, 5),
             ],
-        );
+        )
+        .unwrap();
 
         assert_eq!(plan.fills.len(), 1);
         assert_eq!(plan.fills[0].resting_order_id, 2);
@@ -222,7 +238,8 @@ mod tests {
                 resting(2, 2, OrderSide::Ask, 100, 3),
                 resting(1, 1, OrderSide::Ask, 100, 3),
             ],
-        );
+        )
+        .unwrap();
 
         assert_eq!(plan.fills.len(), 2);
         assert_eq!(plan.fills[0].resting_order_id, 1);
@@ -236,15 +253,16 @@ mod tests {
         let plan = plan_matches(
             incoming(OrderSide::Bid, 120, 3),
             [resting(1, 1, OrderSide::Ask, 100, 3)],
-        );
+        )
+        .unwrap();
 
         assert_eq!(plan.buyer_refund, 60);
-        assert_eq!(plan.fills[0].seller_proceeds, 300);
 
         let plan = plan_matches(
             incoming(OrderSide::Ask, 90, 2),
             [resting(1, 1, OrderSide::Bid, 100, 3)],
-        );
+        )
+        .unwrap();
         assert_eq!(plan.fills[0].resting_escrowed_currency, 100);
         assert_eq!(plan.buyer_refund, 0);
     }
@@ -257,7 +275,8 @@ mod tests {
         let plan = plan_matches(
             incoming(OrderSide::Bid, 90, 5),
             [resting(1, 1, OrderSide::Ask, 100, 5), other_item],
-        );
+        )
+        .unwrap();
 
         assert!(plan.fills.is_empty());
         assert_eq!(plan.remaining_quantity, 5);

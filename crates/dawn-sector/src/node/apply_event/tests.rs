@@ -364,6 +364,7 @@ fn ship_fitted_event_replay_restores_inventory_snapshot() {
         ship_id,
         fitting: dawn_core::fitting::FittingSnapshot::empty(),
         inventory: vec![dawn_core::ItemId::ScrapMetal, dawn_core::ItemId::ScrapMetal],
+        market_settlement_id: None,
         tick: Tick(4),
     }));
 
@@ -374,6 +375,22 @@ fn ship_fitted_event_replay_restores_inventory_snapshot() {
         .get::<dawn_ecs::components::InventoryComp>(entity)
         .unwrap();
     assert_eq!(inventory.item_count(dawn_core::ItemId::ScrapMetal), 2);
+}
+
+#[test]
+fn ship_fitted_market_event_replay_restores_settlement_idempotency() {
+    let mut node = mem_node();
+    let ship_id = node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+
+    node.apply_event_pub(DomainEvent::ShipFitted(dawn_core::events::ShipFitted {
+        ship_id,
+        fitting: dawn_core::fitting::FittingSnapshot::empty(),
+        inventory: vec![dawn_core::ItemId::ScrapMetal],
+        market_settlement_id: Some(41),
+        tick: Tick(4),
+    }));
+
+    assert!(node.simulation.applied_market_settlements.contains(&41));
 }
 
 #[test]
