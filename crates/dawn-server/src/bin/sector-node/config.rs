@@ -188,9 +188,9 @@ mod tests {
     #[test]
     fn bundled_cluster_configs_parse_shared_peer_channels() {
         for source in [
-            include_str!("../config/node-0.toml"),
-            include_str!("../config/node-1.toml"),
-            include_str!("../config/node-2.toml"),
+            include_str!("../../../config/node-0.toml"),
+            include_str!("../../../config/node-1.toml"),
+            include_str!("../../../config/node-2.toml"),
         ] {
             let config: NodeConfig = toml::from_str(source).unwrap();
             assert!(!config.peers.is_empty());

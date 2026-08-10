@@ -90,7 +90,7 @@ if pgrep -u "$USER" -f 'target/release/sector-node' >/dev/null; then
 fi
 
 nohup env RUST_LOG="$RUST_LOG_VALUE" \
-	./target/release/sector-node "crates/dawn-sector-node/config/${CONFIG_NAME}.toml" \
+	./target/release/sector-node "crates/dawn-server/config/${CONFIG_NAME}.toml" \
 	>"logs/${CONFIG_NAME}.out.log" \
 	2>"logs/${CONFIG_NAME}.err.log" \
 	</dev/null &

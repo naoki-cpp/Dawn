@@ -1,4 +1,4 @@
-//! `dawn-sector-node` — production binary for one physical Sector node (8D-4).
+//! `sector-node` — production binary for one physical Sector node (8D-4).
 //!
 //! Each instance owns exactly one Sector and connects to its peers via TCP:
 //!   - **Shared peer transport** (`PeerTransport`, #280) with isolated control/bulk channels
@@ -16,8 +16,11 @@
 // Debug at compile time instead of relying on periodic audits (see #83).
 #![warn(missing_debug_implementations)]
 
+#[path = "sector-node/client_admission.rs"]
 mod client_admission;
+#[path = "sector-node/config.rs"]
 mod config;
+#[path = "sector-node/runtime.rs"]
 mod runtime;
 
 use dawn_actor::ws_server;
@@ -67,7 +70,7 @@ async fn main() -> anyhow::Result<()> {
 
     println!("════════════════════════════════════════════════");
     println!(
-        "  dawn-sector-node  node={} sector={}",
+        "  dawn-server sector-node  node={} sector={}",
         cfg.node_id, cfg.sector_id
     );
     println!(

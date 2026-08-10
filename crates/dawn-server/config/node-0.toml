@@ -1,4 +1,4 @@
-# dawn-sector-node configuration — Node 0 (Sector 0)
+# dawn-server sector-node configuration — Node 0 (Sector 0)
 # Usage: sector-node config/node-0.toml
 
 node_id    = 0

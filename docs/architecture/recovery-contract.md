@@ -139,7 +139,8 @@ drain committed consensus input through RuntimeConsensus
 ```
 
 `dawn-sector::transit::run_durable_runtime_tick_with_consensus` is the shared
-boundary. `dawn-sector-node` supplies the Raft/FileJournal production adapters;
+boundary. `dawn-server --bin sector-node` supplies the Raft/FileJournal
+production adapters;
 single-sector serve supplies `LocalRuntimeConsensus`/InMemoryJournal; clustered serve
 and `SectorRuntimeDriver` supply Raft/InMemoryJournal adapters. The latter are
 test/local durability adapters, not a claim that their in-memory journal

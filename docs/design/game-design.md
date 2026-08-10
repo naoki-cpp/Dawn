@@ -739,7 +739,7 @@ EVE Online が学んだ教訓は「絶対安全圏を作るとそこに経済と
 - 強制退去はしない（在席中の船は数えるだけ。INV-002 と無関係）
 ```
 
-**実装（`dawn-simulation/node.rs`）**: `at_population_cap()` は生の `ship_count()` を
+**実装（`dawn-sector/src/node`）**: `at_population_cap()` は生の `ship_count()` を
 `population_cap` と比較するだけ。`--pop-cap N` で Sector 毎に可変。
 
 > **却下した案: 「アクティブ船除外（実効人口）」**

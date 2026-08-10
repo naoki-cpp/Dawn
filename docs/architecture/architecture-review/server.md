@@ -5,7 +5,7 @@ update   : 大規模リファクタ実施後 / 新クレート追加時 / archit
 related  : AI_DEVELOPMENT_GUIDE.md「Crate Boundaries」, docs/architecture/architecture.md,
            docs/architecture/architecture-review/server-completed.md（完了済みログ）,
            docs/architecture/architecture-review/server-pending.md（未完項目・issue一覧）
-date     : 2026-08-09（#277 repository split、#278 shared runtime frame後の再計測）
+date     : 2026-08-10（#279 market settlement後、#282 workspace consolidationの再計測）
 ---
 
 # Architecture Review — Dawn Codebase（現行構造評価）
@@ -25,7 +25,7 @@ Transitについては、Raftの回復判断とShipの状態変更を別module�
 
 | 観点 | 評価 | 現在の判断 |
 |---|---|---|
-| クレート構成 | A− | `dawn-core` / `dawn-sector` / `dawn-wire` / client 2 crateのDAGは健全。共有runtime crateは不要 |
+| クレート構成 | A− | `dawn-server` が `simulate` と production `sector-node` の唯一のcomposition boundary。`dawn-core` / `dawn-sector` / `dawn-wire` / client 2 crateへの依存方向も維持 |
 | ファイルサイズ | B+ | 500行超のRustファイルは複数あるが、主な超過は同居テストまたは単一の状態機械。`commands.rs` はfamily policyを分離済み、`transit.rs` / `warp.rs` はR-3でtriggerを管理 |
 | 型設計 | A− | domain固有のResult/Outcomeを維持。dispatcher都合で共通型へ潰さない（ADR-0047） |
 | 重複 | A− | live/replayのShip materialization、Station runtime apply、SectorMap projectionを解消。Transit policy/state mutationも分離 |
@@ -75,7 +75,7 @@ only as an async in-memory adapter; it is not a second Tick implementation.
 | `crates/dawn-sector/src/aoi.rs` | 721 | 🟢 AoI index/delta delivery contract・tests |
 | `crates/dawn-sector/src/node/station_materialization.rs` | 644 | 🟢 station assemble/disassemble materialization・tests |
 | `crates/dawn-core/src/commands.rs` | 644 | 🟢 domain command types/validation data・tests |
-| `crates/dawn-simulation/src/cluster.rs` | 632 | 🟢 cluster runtime wiring・tests |
+| `crates/dawn-server/src/cluster.rs` | 632 | 🟢 cluster runtime wiring・tests |
 | `crates/dawn-sector/src/node/approach.rs` | 615 | 🟢 approach steering state machine・tests |
 | `crates/dawn-peer-transport/src/lib.rs` | 961 | 🟡 shared peer framing/lifecycle・control/bulk isolation・tests; split protocol/framing if the adapter surface grows further |
 | `crates/dawn-consensus/src/state.rs` | 593 | 🟢 Raft state transition/persistence boundary・tests |
@@ -84,13 +84,13 @@ only as an async in-memory adapter; it is not a second Tick implementation.
 | `crates/dawn-sector/src/node/ship_cargo.rs` | 577 | 🟢 ship cargo ownership/bridge boundary・tests |
 | `crates/dawn-sector/src/node/apply_event/tests.rs` | 539 | 🟢 event replay tests |
 | `crates/dawn-sector/src/node/serialization.rs` | 536 | 🟢 observer-scoped state projection |
-| `crates/dawn-sector-node/src/main.rs` | 508 | 🟢 production node bootstrap/config |
+| `crates/dawn-server/src/bin/sector-node.rs` | 573 | 🟢 production node bootstrap/config |
 | `crates/dawn-sector/src/transit/tests.rs` | 534 | 🟢 transit integration tests |
 | `crates/dawn-sector/src/node/tick.rs` | 531 | 🟢 authoritative tick ordering |
 | `crates/dawn-sector/src/node/station_operation_execution.rs` | 525 | 🟢 accepted station-operation effects |
-| `crates/dawn-simulation/src/serve/market_settlement.rs` | 508 | 🟢 Market result to sector bridge |
+| `crates/dawn-server/src/serve/market_settlement.rs` | 514 | 🟢 Market result to sector bridge |
 | `crates/dawn-sector/src/node/player_loadout_projection.rs` | 507 | 🟢 PlayerLoadout wire projection |
-| `crates/dawn-simulation/src/bench.rs` | 505 | 🟢 benchmark scenarios |
+| `crates/dawn-server/src/bench.rs` | 505 | 🟢 benchmark scenarios |
 | `crates/dawn-sector/src/node/station_lifecycle.rs` | 505 | 🟢 station operation validation/planning |
 
 全体の再計測ではテストコードが行数の大きな割合を占めるファイルが多かった。総行数だけでは

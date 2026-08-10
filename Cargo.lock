@@ -253,7 +253,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "dawn-sector-node"
+name = "dawn-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -261,35 +261,20 @@ dependencies = [
  "dawn-consensus",
  "dawn-core",
  "dawn-event-store",
+ "dawn-market",
  "dawn-peer-transport",
  "dawn-replication",
  "dawn-sector",
  "dawn-wire",
  "futures-util",
  "rand 0.8.6",
- "serde",
- "tokio",
- "tokio-tungstenite",
- "toml",
-]
-
-[[package]]
-name = "dawn-simulation"
-version = "0.1.0"
-dependencies = [
- "dawn-actor",
- "dawn-consensus",
- "dawn-core",
- "dawn-event-store",
- "dawn-market",
- "dawn-replication",
- "dawn-sector",
- "dawn-wire",
- "rand 0.8.6",
  "rusqlite",
+ "serde",
  "serde_json",
  "tempfile",
  "tokio",
+ "tokio-tungstenite",
+ "toml",
 ]
 
 [[package]]

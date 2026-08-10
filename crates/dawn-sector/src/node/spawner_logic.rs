@@ -254,7 +254,7 @@ impl SimulationNode {
 
     /// Spawn `count` NPC frigates, each fitted with a small railgun.
     ///
-    /// Shared by `dawn-simulation` and `dawn-sector-node`
+    /// Shared by both `dawn-server` binaries.
     /// (`/improve-codebase-architecture` deepening, 2026-07-05) — both binaries
     /// used to hand-roll an identical copy of this loop.
     pub fn spawn_npc_frigates(&mut self, count: usize) {
@@ -709,7 +709,7 @@ mod tests {
     fn spawn_npc_frigates_spawns_the_requested_count_each_fitted_with_a_railgun() {
         // `/improve-codebase-architecture` deepening (2026-07-05): this method
         // replaces what used to be two hand-rolled copies, one per binary
-        // (dawn-simulation and dawn-sector-node).
+        // (the `dawn-server` simulate and sector-node binaries).
         use crate::modules;
 
         let mut node = node_with_catalog();

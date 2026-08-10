@@ -9,7 +9,7 @@ related  : ../architecture/tick-model.md, roadmap.md
 
 Baseline values for quantifying the overhead introduced by Raft (Phase 7)
 and later work.
-Measurement command: `cargo run -p dawn-simulation --bin simulate --release`
+Measurement command: `cargo run -p dawn-server --bin simulate --release`
 
 ## As of Phase 6 completion (2026-06-11, commit 450aa8a)
 
@@ -46,7 +46,7 @@ completes.
 ## Phase 7 (ADR-0014 Raft Consensus)
 
 Measurement command:
-`cargo test -p dawn-simulation --release transit_latency_benchmark -- --ignored --nocapture`
+`cargo test -p dawn-server --release transit_latency_benchmark -- --ignored --nocapture`
 
 ### Sector Transit latency (local ECS operations only)
 

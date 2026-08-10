@@ -224,7 +224,7 @@ Sector inventoryへ送る片側の在庫操作は別authorityを跨ぐ。Postgre
 
 - `dawn-market`はSQLを知らない純粋な`MarketState` transitionから`SettlementIntent`を生成する。
 - `MarketDb`は注文・残高・escrow・outboxを一SQLite transactionでcommitし、`Pending` intentを保持する。
-- `dawn-simulation::serve::market_settlement`だけがintentを`RemoveItemCommand`/
+- `dawn-server::serve::market_settlement`だけがintentを`RemoveItemCommand`/
   `ReturnItemCommand`/`CreditItemCommand`へ変換する。
 - 各Sector commandには`SettlementId`を渡し、Sectorはcheckpointと`ShipFitted`イベント再生で復元する適用済みIDにより、重複配送をno-opにする。
 - 対象Sectorが利用できない間はintentをPendingのまま残し、失敗時は明示的なcompensationまたはTerminalへ遷移する。

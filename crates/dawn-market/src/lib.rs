@@ -33,7 +33,7 @@
 //! ledger, and Station-only runtime surface. #279 completes that boundary by
 //! keeping SQL in [`MarketDb`] and committing orders, balances, and settlement
 //! intents in one transaction. Sector command translation belongs to the
-//! `dawn-simulation` serve adapter.
+//! `dawn-server` serve adapter.
 
 mod matching;
 mod order_book;

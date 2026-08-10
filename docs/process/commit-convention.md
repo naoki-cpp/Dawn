@@ -48,8 +48,7 @@ Identifies the primary area changed.  Choose the most specific scope that applie
 | `dawn-replication` | `crates/dawn-replication/` |
 | `dawn-sector` | `crates/dawn-sector/` |
 | `dawn-actor` | `crates/dawn-actor/` |
-| `dawn-simulation` | `crates/dawn-simulation/` |
-| `dawn-sector-node` | `crates/dawn-sector-node/` |
+| `dawn-server` | `crates/dawn-server/` |
 | `godot` | `client/` (GDScript, scenes, assets) |
 | `docs` | `docs/` |
 | `data` | `data/*.toml` |
@@ -87,7 +86,7 @@ Cap shortage forces module OFF and emits ModuleDeactivated.
 ```
 
 ```
-fix(dawn-simulation): initialize CapacitorComp on player ship spawn
+fix(dawn-server): initialize CapacitorComp on player ship spawn
 
 Player ships were missing CapacitorComp after spawn_player_ship_at(),
 causing CapacitorSystem to skip them silently each tick.
@@ -136,7 +135,7 @@ feat(dawn-ecs): added CapacitorSystem
 fix(godot): correct cap bar percentage.
 
 # First line over 72 characters
-feat(dawn-simulation): implement client-side capacitor simulation with cycle tracking in Godot HUD
+feat(dawn-server): implement client-side capacitor simulation with cycle tracking in Godot HUD
 ```
 
 ---

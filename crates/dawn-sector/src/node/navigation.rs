@@ -126,7 +126,7 @@ mod tests {
     /// `apply_warp_command`'s own distance check. Before the fix, a
     /// `JumpCommand` issued from this band was silently dropped every tick
     /// with no fallback and no feedback -- this test pins the gap so the
-    /// dispatch sites (cluster.rs / dawn-sector-node/main.rs) know an Approach
+    /// dispatch sites (cluster.rs / dawn-server sector-node) know an Approach
     /// fallback is available and must use it.
     #[test]
     fn ship_between_activation_radius_and_min_warp_distance_can_neither_jump_nor_warp_but_can_approach(

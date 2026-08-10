@@ -1434,7 +1434,7 @@ mod tests {
     /// (propose + export + import), excluding Raft commit latency.
     ///
     /// Ignored by default (it's a benchmark, not a correctness check).
-    /// Run with: `cargo test -p dawn-simulation --release transit_latency_benchmark -- --ignored --nocapture`
+    /// Run with: `cargo test -p dawn-server --release transit_latency_benchmark -- --ignored --nocapture`
     #[test]
     #[ignore]
     fn transit_latency_benchmark() {
