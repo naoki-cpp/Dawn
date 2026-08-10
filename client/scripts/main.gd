@@ -852,19 +852,18 @@ func _toggle_module_by_index(f_index: int) -> void:
 	if _player_ship_id < 0:
 		return
 	## F1-F8 map to active module indices 0-7 (High/Mid slots)
-	var toggle: Dictionary = _loadout.toggle_at(f_index)
-	if toggle.is_empty():
+	var toggle: ModuleActivationIntent = _loadout.toggle_at(f_index)
+	if toggle.is_none():
 		return
-	var mid: int = toggle["module_id"] as int
-	var slot: String = toggle["slot"] as String
-	var kind: String = toggle.get("kind", "") as String
-	if toggle["is_active"] as bool:
+	var mid: int = toggle.module_id() as int
+	var slot: String = toggle.slot()
+	if toggle.is_active():
 		_apply_player_module_activation(mid, false, "")
 		_connection.send_deactivate_module(mid, slot)
 	else:
 		## Weapon/Tackle/Remote-repair require a Locked target (ADR-0035/0036);
 		## other kinds (self-only Active modules) must not carry one.
-		var requires_target: bool = toggle.get("requires_target", false) as bool
+		var requires_target: bool = toggle.requires_target()
 		if requires_target and _player_lock_target < 0:
 			## Sending this without a target is rejected server-side outright
 			## (ADR-0035: requires_target() vs target.is_some() mismatch),
@@ -896,11 +895,11 @@ func _toggle_module_by_index(f_index: int) -> void:
 			## range_gate.rs's effective_range_from_stats(), using the
 			## module's own contribution (not yet active) plus every
 			## already-active module of the same family.
-			var range: float = toggle.get("effective_range", -1.0) as float
-			if range >= 0.0:
+			if toggle.has_effective_range():
+				var effective_range: float = toggle.effective_range()
 				var dist_u: float = (_ships[_player_ship_id] as Node3D).global_position.distance_to(
 					(_ships[target_id] as Node3D).global_position) / _world.render_scale()
-				if dist_u > range:
+				if dist_u > effective_range:
 					_jump_notice = "Target out of range"
 					_jump_notice_timer = 2.0
 					return

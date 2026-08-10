@@ -94,8 +94,10 @@ C-1 の抽出先（`ShipPicking` / `NavigationMarkerRenderer` / `InputDecoder` /
 `hud_snapshot()`のpack→即unpackを削除し、modules / inventory / station inventoryは
 既存のtyped accessorを直接利用するようにした。owned ship rosterは`OwnedShipRow`、
 dock contextとweapon rangeはnarrow scalar accessorとしてGDExtension境界を越える。
-`toggle_at()`だけは即座にcommandへ変換される小さな閉じたintent境界としてDictionaryを維持した。
-新設`player_loadout_test.gd`の3件と、既存HUD fixtureのtyped row移行でsentinel互換と境界shapeを固定した。
+`toggle_at()`も`ModuleActivationIntent`としてGDExtensionへ公開し、module_id / slot /
+activation state / target requirement / effective rangeをtyped accessorで渡す。
+Dictionary action payloadとmagic key読み出しは残さない。`player_loadout_test.gd`で
+empty stateとtyped activation recordの境界を固定した。
 
 
 ### 2026-08-02 — legacy client adapter removal (#239)
