@@ -146,9 +146,24 @@ stable `ClientRequestRejectionCode` and a diagnostic message. Gameplay-policy
 rejections remain distinct from this decode/admission layer.
 
 The Godot `ClientCommand` GDExtension methods construct `ClientRequest`
-directly. Sector methods return a structured build result containing `ok`,
-`bytes`, `error_code`, and `error_message`; they do not use a Dictionary/JSON
-round trip or an empty-byte failure sentinel.
+directly. Sector and Market methods return a typed `ClientCommandResult`
+containing `ok`, `bytes`, `error_code`, and `error_message`; they do not use a
+Dictionary/JSON round trip or an empty-byte failure sentinel. Market requests
+use dedicated `market_refresh_command`, `market_place_order_command`, and
+`market_cancel_order_command` methods. `MarketOrderSide` is a closed wire enum,
+not a free-form string.
+
+`ClientMessage::encode` is fallible and returns the postcard error to the
+adapter. The GDExtension maps that error to `ClientCommandResult` so the
+Godot connection can report it without treating an empty frame as a valid
+outcome.
+
+The interaction boundary is typed as well. `InputDecoder` and
+`WorldInteraction` return a Rust-backed `ClientIntent` object, while the
+mutually exclusive ship/gate/body selection is held in `ClientSelection`.
+`main.gd` dispatches through semantic predicates such as `is_jump()` and
+typed accessors such as `gate_id()`; it does not switch on a string tag or
+read action payloads from magic keys.
 
 ## Market requests and snapshots
 

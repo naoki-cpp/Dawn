@@ -158,3 +158,25 @@ GDExtension method constructs the single typed `ClientRequest` and postcard
 encodes `ClientMessage::Command` directly. Builder failure is returned as a
 structured dictionary (`ok`, `bytes`, `error_code`, `error_message`) instead of
 an empty-byte sentinel. The generic schema-driven builder remains Market-only.
+
+## 2026-08-10 amendment: remove the remaining dynamic client builders (issue #281)
+
+The Market-only `ClientCommand.market_build(kind, fields)` helper is removed.
+Market requests now use dedicated typed methods for refresh, place, and cancel.
+The request side is no longer reconstructed through a Godot `Dictionary`,
+`serde_json::Value`, and a string variant name. `MarketOrderSide` is a closed
+wire enum, so an invalid side is rejected before postcard encoding.
+
+All Sector and Market builders return the typed GDExtension
+`ClientCommandResult`. It carries the encoded bytes or a structured error and
+never uses an empty byte array as a failure sentinel. `ClientMessage::encode`
+is fallible and its postcard error is propagated into that result.
+
+Keyboard and world-click interpretation now returns the Rust-backed
+`ClientIntent` object. The three mutually exclusive selection integers in
+`WorldInteraction` are replaced by one `ClientSelection` value. GDScript keeps
+scene ownership and side effects, while `main.gd` dispatches through typed
+predicates and accessors instead of string tags and magic dictionary keys.
+
+GdUnit4 covers every intent family, typed selection transitions, dedicated
+Market builders, invalid Market sides/IDs, and invalid resume tickets.

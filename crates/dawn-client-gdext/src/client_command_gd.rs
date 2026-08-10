@@ -3,12 +3,10 @@ use dawn_core::{
     ApproachTarget, CelestialBodyId, ClientRequest, EntityId, ItemId, JumpGateId, ModuleId,
     Position, ShipId, ShipTypeId, SlotKind, StationId, TransferDirection, WarpTarget,
 };
-use dawn_wire::{ClientMessage, HelloMessage, ItemWire, MarketCommandWire, ResumeTicket};
+use dawn_wire::{
+    ClientMessage, HelloMessage, ItemWire, MarketCommandWire, MarketOrderSide, ResumeTicket,
+};
 use godot::prelude::*;
-
-// Godot-facing result for Sector request construction:
-// { ok: bool, bytes: PackedByteArray, error_code: String, error_message: String }.
-type Dict = Dictionary<Variant, Variant>;
 
 #[derive(Debug)]
 struct RequestBuildError {
@@ -25,88 +23,74 @@ impl RequestBuildError {
     }
 }
 
-fn to_wire_bytes(message: &ClientMessage) -> Vec<u8> {
-    message.encode()
-}
-
-#[derive(Debug, PartialEq, Eq)]
-struct RequestBuildResult {
+/// Typed result for every client message builder. Construction and encoding
+/// failures remain observable without using an empty byte array sentinel.
+#[derive(Debug, GodotClass)]
+#[class(no_init, base=RefCounted)]
+pub struct ClientCommandResult {
+    #[var]
     ok: bool,
-    bytes: Vec<u8>,
-    error_code: String,
-    error_message: String,
+    #[var]
+    bytes: PackedByteArray,
+    #[var]
+    error_code: GString,
+    #[var]
+    error_message: GString,
 }
 
-fn request_build_result(request: Result<ClientRequest, RequestBuildError>) -> RequestBuildResult {
-    match request {
-        Ok(request) => match request.validate() {
-            Ok(()) => RequestBuildResult {
-                ok: true,
-                bytes: to_wire_bytes(&ClientMessage::Command(request)),
-                error_code: String::new(),
-                error_message: String::new(),
-            },
-            Err(error) => RequestBuildResult {
-                ok: false,
-                bytes: Vec::new(),
-                error_code: "request_validation".to_owned(),
-                error_message: error.to_string(),
-            },
-        },
-        Err(error) => RequestBuildResult {
+impl ClientCommandResult {
+    fn success(bytes: Vec<u8>) -> Gd<Self> {
+        Gd::from_init_fn(|_base| Self {
+            ok: true,
+            bytes: PackedByteArray::from(bytes.as_slice()),
+            error_code: GString::new(),
+            error_message: GString::new(),
+        })
+    }
+
+    fn failure(code: &str, message: impl Into<String>) -> Gd<Self> {
+        Gd::from_init_fn(|_base| Self {
             ok: false,
-            bytes: Vec::new(),
-            error_code: error.code.to_owned(),
-            error_message: error.message,
-        },
+            bytes: PackedByteArray::new(),
+            error_code: GString::from(code),
+            error_message: GString::from(message.into().as_str()),
+        })
     }
 }
 
-fn request_result(request: Result<ClientRequest, RequestBuildError>) -> Dict {
-    let result = request_build_result(request);
-    build_result(
-        result.ok,
-        PackedByteArray::from(result.bytes.as_slice()),
-        &result.error_code,
-        &result.error_message,
-    )
+#[godot_api]
+impl ClientCommandResult {}
+
+fn encode_message(message: ClientMessage) -> Result<Vec<u8>, RequestBuildError> {
+    message
+        .encode()
+        .map_err(|error| RequestBuildError::new("encode_failed", error.to_string()))
 }
 
-fn build_result(ok: bool, bytes: PackedByteArray, error_code: &str, error_message: &str) -> Dict {
-    let mut result = Dict::new();
-    result.set("ok", ok);
-    result.set("bytes", &bytes.to_variant());
-    result.set("error_code", &GString::from(error_code).to_variant());
-    result.set("error_message", &GString::from(error_message).to_variant());
-    result
-}
-
-fn market_command_bytes(command: MarketCommandWire) -> PackedByteArray {
-    PackedByteArray::from(to_wire_bytes(&ClientMessage::Market(command)).as_slice())
-}
-
-fn scalar_dict_to_json_object(fields: &Dict) -> Option<serde_json::Map<String, serde_json::Value>> {
-    let mut map = serde_json::Map::with_capacity(fields.len());
-    for (key, value) in fields.iter_shared() {
-        let key: String = key.to::<GString>().to_string();
-        let value = match value.get_type() {
-            VariantType::INT => serde_json::Value::from(value.to::<i64>()),
-            VariantType::FLOAT => serde_json::Value::from(value.to::<f64>()),
-            VariantType::STRING | VariantType::STRING_NAME => {
-                serde_json::Value::from(value.to::<GString>().to_string())
-            }
-            VariantType::BOOL => serde_json::Value::from(value.to::<bool>()),
-            _ => {
-                godot_error!(
-                    "ClientCommand.market_build: field '{key}' has unsupported type {:?}",
-                    value.get_type()
-                );
-                return None;
-            }
-        };
-        map.insert(key, value);
+fn request_build_bytes(
+    request: Result<ClientRequest, RequestBuildError>,
+) -> Result<Vec<u8>, RequestBuildError> {
+    match request {
+        Ok(request) => request
+            .validate()
+            .map_err(|error| RequestBuildError::new("request_validation", error.to_string()))
+            .and_then(|()| encode_message(ClientMessage::Command(request))),
+        Err(error) => Err(error),
     }
-    Some(map)
+}
+
+fn request_result(request: Result<ClientRequest, RequestBuildError>) -> Gd<ClientCommandResult> {
+    match request_build_bytes(request) {
+        Ok(bytes) => ClientCommandResult::success(bytes),
+        Err(error) => ClientCommandResult::failure(error.code, error.message),
+    }
+}
+
+fn market_result(command: Result<MarketCommandWire, RequestBuildError>) -> Gd<ClientCommandResult> {
+    match command.and_then(|command| encode_message(ClientMessage::Market(command))) {
+        Ok(bytes) => ClientCommandResult::success(bytes),
+        Err(error) => ClientCommandResult::failure(error.code, error.message),
+    }
 }
 
 fn optional_positive(value: f64, field: &str) -> Result<Option<f64>, RequestBuildError> {
@@ -158,16 +142,26 @@ fn slot_kind(value: &GString) -> Result<SlotKind, RequestBuildError> {
     }
 }
 
+fn market_side(value: &GString) -> Result<MarketOrderSide, RequestBuildError> {
+    match value.to_string().as_str() {
+        "Bid" => Ok(MarketOrderSide::Bid),
+        "Ask" => Ok(MarketOrderSide::Ask),
+        other => Err(RequestBuildError::new(
+            "invalid_market_side",
+            format!("unknown market side '{other}'"),
+        )),
+    }
+}
+
 fn item_wire(item_id: &Gd<ItemIdentity>) -> ItemWire {
     item_id.bind().get().into()
 }
 
 /// Typed builder for client -> server postcard messages.
 ///
-/// Sector methods construct [`ClientRequest`] directly and return a structured
-/// build result. There is no JSON builder, mirrored wire enum, or empty-byte
-/// sentinel for Sector requests. Market remains a separate envelope and
-/// retains its schema-driven helper.
+/// Sector and Market methods construct their protocol enums directly and
+/// return a typed build result. There is no JSON reconstruction path or
+/// empty-byte sentinel.
 #[derive(GodotClass)]
 #[class(init, base=RefCounted)]
 pub struct ClientCommand {}
@@ -175,14 +169,14 @@ pub struct ClientCommand {}
 #[godot_api]
 impl ClientCommand {
     #[func]
-    fn move_command(&self, x: f64, y: f64, z: f64) -> Dict {
+    fn move_command(&self, x: f64, y: f64, z: f64) -> Gd<ClientCommandResult> {
         request_result(Ok(ClientRequest::Move {
             target: Position::new(x, y, z),
         }))
     }
 
     #[func]
-    fn lock_on_command(&self, target_id: i64) -> Dict {
+    fn lock_on_command(&self, target_id: i64) -> Gd<ClientCommandResult> {
         request_result((|| {
             Ok(ClientRequest::LockOn {
                 target: ship_id(target_id, "target_id")?,
@@ -191,7 +185,7 @@ impl ClientCommand {
     }
 
     #[func]
-    fn attack_command(&self, target_id: i64) -> Dict {
+    fn attack_command(&self, target_id: i64) -> Gd<ClientCommandResult> {
         request_result((|| {
             Ok(ClientRequest::Attack {
                 target: ship_id(target_id, "target_id")?,
@@ -200,7 +194,12 @@ impl ClientCommand {
     }
 
     #[func]
-    fn activate_module_command(&self, module_id: i64, slot: GString, target_ship_id: i64) -> Dict {
+    fn activate_module_command(
+        &self,
+        module_id: i64,
+        slot: GString,
+        target_ship_id: i64,
+    ) -> Gd<ClientCommandResult> {
         request_result((|| {
             let target = if target_ship_id < 0 {
                 None
@@ -216,7 +215,7 @@ impl ClientCommand {
     }
 
     #[func]
-    fn deactivate_module_command(&self, module_id: i64, slot: GString) -> Dict {
+    fn deactivate_module_command(&self, module_id: i64, slot: GString) -> Gd<ClientCommandResult> {
         request_result((|| {
             Ok(ClientRequest::DeactivateModule {
                 module: ModuleId(nonzero_u32_id(module_id, "module_id")?),
@@ -226,12 +225,12 @@ impl ClientCommand {
     }
 
     #[func]
-    fn stop_command(&self) -> Dict {
+    fn stop_command(&self) -> Gd<ClientCommandResult> {
         request_result(Ok(ClientRequest::Stop))
     }
 
     #[func]
-    fn jump_command(&self, gate_id: i64) -> Dict {
+    fn jump_command(&self, gate_id: i64) -> Gd<ClientCommandResult> {
         request_result((|| {
             Ok(ClientRequest::Jump {
                 gate: JumpGateId(u32_id(gate_id, "gate_id")?),
@@ -240,7 +239,7 @@ impl ClientCommand {
     }
 
     #[func]
-    fn approach_command(&self, target_id: i64) -> Dict {
+    fn approach_command(&self, target_id: i64) -> Gd<ClientCommandResult> {
         request_result((|| {
             Ok(ClientRequest::Approach {
                 target: ApproachTarget::Ship(ship_id(target_id, "target_id")?),
@@ -249,7 +248,7 @@ impl ClientCommand {
     }
 
     #[func]
-    fn approach_gate_command(&self, gate_id: i64) -> Dict {
+    fn approach_gate_command(&self, gate_id: i64) -> Gd<ClientCommandResult> {
         request_result((|| {
             Ok(ClientRequest::Approach {
                 target: ApproachTarget::Gate(JumpGateId(u32_id(gate_id, "gate_id")?)),
@@ -258,7 +257,7 @@ impl ClientCommand {
     }
 
     #[func]
-    fn warp_command(&self, gate_id: i64) -> Dict {
+    fn warp_command(&self, gate_id: i64) -> Gd<ClientCommandResult> {
         request_result((|| {
             Ok(ClientRequest::Warp {
                 target: WarpTarget::Gate(JumpGateId(u32_id(gate_id, "gate_id")?)),
@@ -267,7 +266,7 @@ impl ClientCommand {
     }
 
     #[func]
-    fn warp_to_body_command(&self, body_id: i64) -> Dict {
+    fn warp_to_body_command(&self, body_id: i64) -> Gd<ClientCommandResult> {
         request_result((|| {
             Ok(ClientRequest::Warp {
                 target: WarpTarget::Body(CelestialBodyId(u32_id(body_id, "body_id")?)),
@@ -276,7 +275,7 @@ impl ClientCommand {
     }
 
     #[func]
-    fn orbit_command(&self, target_id: i64, radius: f64) -> Dict {
+    fn orbit_command(&self, target_id: i64, radius: f64) -> Gd<ClientCommandResult> {
         request_result((|| {
             Ok(ClientRequest::Orbit {
                 target: ApproachTarget::Ship(ship_id(target_id, "target_id")?),
@@ -286,7 +285,7 @@ impl ClientCommand {
     }
 
     #[func]
-    fn orbit_gate_command(&self, gate_id: i64, radius: f64) -> Dict {
+    fn orbit_gate_command(&self, gate_id: i64, radius: f64) -> Gd<ClientCommandResult> {
         request_result((|| {
             Ok(ClientRequest::Orbit {
                 target: ApproachTarget::Gate(JumpGateId(u32_id(gate_id, "gate_id")?)),
@@ -296,7 +295,7 @@ impl ClientCommand {
     }
 
     #[func]
-    fn keep_at_range_command(&self, target_id: i64, range: f64) -> Dict {
+    fn keep_at_range_command(&self, target_id: i64, range: f64) -> Gd<ClientCommandResult> {
         request_result((|| {
             Ok(ClientRequest::KeepAtRange {
                 target: ApproachTarget::Ship(ship_id(target_id, "target_id")?),
@@ -306,7 +305,7 @@ impl ClientCommand {
     }
 
     #[func]
-    fn keep_at_range_gate_command(&self, gate_id: i64, range: f64) -> Dict {
+    fn keep_at_range_gate_command(&self, gate_id: i64, range: f64) -> Gd<ClientCommandResult> {
         request_result((|| {
             Ok(ClientRequest::KeepAtRange {
                 target: ApproachTarget::Gate(JumpGateId(u32_id(gate_id, "gate_id")?)),
@@ -316,7 +315,7 @@ impl ClientCommand {
     }
 
     #[func]
-    fn fit_module_command(&self, ship: i64, module: i64, slot: GString) -> Dict {
+    fn fit_module_command(&self, ship: i64, module: i64, slot: GString) -> Gd<ClientCommandResult> {
         request_result((|| {
             Ok(ClientRequest::FitModule {
                 ship: ship_id(ship, "ship_id")?,
@@ -327,7 +326,12 @@ impl ClientCommand {
     }
 
     #[func]
-    fn unfit_module_command(&self, ship: i64, module: i64, slot: GString) -> Dict {
+    fn unfit_module_command(
+        &self,
+        ship: i64,
+        module: i64,
+        slot: GString,
+    ) -> Gd<ClientCommandResult> {
         request_result((|| {
             Ok(ClientRequest::UnfitModule {
                 ship: ship_id(ship, "ship_id")?,
@@ -344,7 +348,7 @@ impl ClientCommand {
         slot: GString,
         from_index: i64,
         to_index: i64,
-    ) -> Dict {
+    ) -> Gd<ClientCommandResult> {
         request_result((|| {
             Ok(ClientRequest::ReorderFittedModule {
                 ship: ship_id(ship, "ship_id")?,
@@ -356,7 +360,7 @@ impl ClientCommand {
     }
 
     #[func]
-    fn dock_command(&self, station: i64) -> Dict {
+    fn dock_command(&self, station: i64) -> Gd<ClientCommandResult> {
         request_result((|| {
             Ok(ClientRequest::Dock {
                 station: StationId(u32_id(station, "station_id")?),
@@ -365,12 +369,17 @@ impl ClientCommand {
     }
 
     #[func]
-    fn undock_command(&self) -> Dict {
+    fn undock_command(&self) -> Gd<ClientCommandResult> {
         request_result(Ok(ClientRequest::Undock))
     }
 
     #[func]
-    fn build_packaged_ship_command(&self, ship: i64, station: i64, ship_type: i64) -> Dict {
+    fn build_packaged_ship_command(
+        &self,
+        ship: i64,
+        station: i64,
+        ship_type: i64,
+    ) -> Gd<ClientCommandResult> {
         request_result((|| {
             Ok(ClientRequest::BuildPackagedShip {
                 ship: ship_id(ship, "ship_id")?,
@@ -381,7 +390,7 @@ impl ClientCommand {
     }
 
     #[func]
-    fn disassemble_ship_command(&self, ship: i64, station: i64) -> Dict {
+    fn disassemble_ship_command(&self, ship: i64, station: i64) -> Gd<ClientCommandResult> {
         request_result((|| {
             Ok(ClientRequest::DisassembleShip {
                 ship: ship_id(ship, "ship_id")?,
@@ -391,7 +400,7 @@ impl ClientCommand {
     }
 
     #[func]
-    fn select_active_ship_command(&self, ship: i64) -> Dict {
+    fn select_active_ship_command(&self, ship: i64) -> Gd<ClientCommandResult> {
         request_result((|| {
             Ok(ClientRequest::SelectActiveShip {
                 ship: ship_id(ship, "ship_id")?,
@@ -400,7 +409,7 @@ impl ClientCommand {
     }
 
     #[func]
-    fn assemble_command(&self, station: i64, ship_type: i64) -> Dict {
+    fn assemble_command(&self, station: i64, ship_type: i64) -> Gd<ClientCommandResult> {
         request_result((|| {
             Ok(ClientRequest::Assemble {
                 station: StationId(u32_id(station, "station_id")?),
@@ -410,7 +419,7 @@ impl ClientCommand {
     }
 
     #[func]
-    fn disembark_command(&self) -> Dict {
+    fn disembark_command(&self) -> Gd<ClientCommandResult> {
         request_result(Ok(ClientRequest::Disembark))
     }
 
@@ -420,7 +429,7 @@ impl ClientCommand {
         ship: i64,
         station: i64,
         item_id: Gd<ItemIdentity>,
-    ) -> Dict {
+    ) -> Gd<ClientCommandResult> {
         self.transfer_command(
             ship,
             station,
@@ -435,7 +444,7 @@ impl ClientCommand {
         ship: i64,
         station: i64,
         item_id: Gd<ItemIdentity>,
-    ) -> Dict {
+    ) -> Gd<ClientCommandResult> {
         self.transfer_command(
             ship,
             station,
@@ -444,22 +453,9 @@ impl ClientCommand {
         )
     }
 
-    /// Schema-driven builder for the Market-only request envelope. Sector
-    /// requests intentionally have no equivalent JSON builder.
     #[func]
-    fn market_build(&self, kind: GString, fields: Dict) -> PackedByteArray {
-        let Some(fields) = scalar_dict_to_json_object(&fields) else {
-            return PackedByteArray::new();
-        };
-        let mut wrapper = serde_json::Map::with_capacity(1);
-        wrapper.insert(kind.to_string(), serde_json::Value::Object(fields));
-        match serde_json::from_value::<MarketCommandWire>(serde_json::Value::Object(wrapper)) {
-            Ok(command) => market_command_bytes(command),
-            Err(error) => {
-                godot_error!("ClientCommand.market_build({kind}): {error}");
-                PackedByteArray::new()
-            }
-        }
+    fn market_refresh_command(&self) -> Gd<ClientCommandResult> {
+        market_result(Ok(MarketCommandWire::RefreshMarketCommand {}))
     }
 
     #[func]
@@ -470,39 +466,51 @@ impl ClientCommand {
         side: GString,
         price: i64,
         quantity: i64,
-    ) -> PackedByteArray {
-        let (Ok(ship_id), Ok(price), Ok(quantity)) = (
-            u64::try_from(ship_id),
-            u64::try_from(price),
-            u64::try_from(quantity),
-        ) else {
-            godot_error!(
-                "ClientCommand.market_place_order_command: ship, price, and quantity must be non-negative"
-            );
-            return PackedByteArray::new();
-        };
-        market_command_bytes(MarketCommandWire::PlaceMarketOrderCommand {
-            ship_id,
-            item_id: item_wire(&item_id),
-            side: side.to_string(),
-            price,
-            quantity,
-        })
+    ) -> Gd<ClientCommandResult> {
+        market_result((|| {
+            Ok(MarketCommandWire::PlaceMarketOrderCommand {
+                ship_id: u64::try_from(ship_id).map_err(|_| {
+                    RequestBuildError::new("invalid_id", "ship_id must be non-negative")
+                })?,
+                item_id: item_wire(&item_id),
+                side: market_side(&side)?,
+                price: u64::try_from(price).map_err(|_| {
+                    RequestBuildError::new("invalid_amount", "price must be non-negative")
+                })?,
+                quantity: u64::try_from(quantity).map_err(|_| {
+                    RequestBuildError::new("invalid_amount", "quantity must be non-negative")
+                })?,
+            })
+        })())
     }
 
     #[func]
-    fn hello_command(&self, resume_ticket: PackedByteArray) -> PackedByteArray {
+    fn market_cancel_order_command(&self, order_id: i64) -> Gd<ClientCommandResult> {
+        market_result((|| {
+            Ok(MarketCommandWire::CancelMarketOrderCommand {
+                order_id: u64::try_from(order_id).map_err(|_| {
+                    RequestBuildError::new("invalid_id", "order_id must be non-negative")
+                })?,
+            })
+        })())
+    }
+
+    #[func]
+    fn hello_command(&self, resume_ticket: PackedByteArray) -> Gd<ClientCommandResult> {
         let resume = match resume_ticket.to_vec().try_into() {
             Ok(bytes) => Some(ResumeTicket::from_bytes(bytes)),
             Err(bytes) if bytes.is_empty() => None,
             Err(_) => {
-                godot_error!(
-                    "ClientCommand.hello_command: resume ticket must be empty or 32 bytes"
+                return ClientCommandResult::failure(
+                    "invalid_resume_ticket",
+                    "resume ticket must be empty or 32 bytes",
                 );
-                return PackedByteArray::new();
             }
         };
-        to_wire_bytes(&ClientMessage::Hello(HelloMessage { resume })).into()
+        match encode_message(ClientMessage::Hello(HelloMessage { resume })) {
+            Ok(bytes) => ClientCommandResult::success(bytes),
+            Err(error) => ClientCommandResult::failure(error.code, error.message),
+        }
     }
 }
 
@@ -513,7 +521,7 @@ impl ClientCommand {
         station: i64,
         item: ItemId,
         direction: TransferDirection,
-    ) -> Dict {
+    ) -> Gd<ClientCommandResult> {
         request_result((|| {
             Ok(ClientRequest::TransferCargo {
                 ship: ship_id(ship, "ship_id")?,
@@ -531,21 +539,17 @@ mod tests {
 
     #[test]
     fn invalid_sector_builder_returns_structured_error_not_empty_bytes() {
-        let result = request_build_result(
+        let result = request_build_bytes(
             ship_id(-1, "ship_id").map(|ship| ClientRequest::SelectActiveShip { ship }),
         );
-        assert!(!result.ok);
-        assert_eq!(result.error_code, "invalid_id");
-        assert!(result.bytes.is_empty());
-        assert!(!result.error_message.is_empty());
+        let error = result.expect_err("negative IDs must be rejected");
+        assert_eq!(error.code, "invalid_id");
+        assert!(error.message.contains("ship_id"));
     }
 
     #[test]
     fn valid_sector_builder_returns_postcard_bytes() {
-        let result = request_build_result(Ok(ClientRequest::Stop));
-        assert!(result.ok);
-        assert!(!result.bytes.is_empty());
-        assert!(result.error_code.is_empty());
-        assert!(result.error_message.is_empty());
+        let bytes = request_build_bytes(Ok(ClientRequest::Stop)).expect("valid request");
+        assert!(!bytes.is_empty());
     }
 }

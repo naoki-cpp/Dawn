@@ -267,6 +267,7 @@ mod tests {
                 .send(Message::Binary(
                     dawn_wire::ClientMessage::Hello(dawn_wire::HelloMessage { resume: None })
                         .encode()
+                        .unwrap()
                         .into(),
                 ))
                 .await

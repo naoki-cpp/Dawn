@@ -37,10 +37,26 @@ func test_owned_ships_cross_the_boundary_as_typed_rows() -> void:
 	assert_bool(loadout.is_docked()).is_true()
 
 
-func test_dictionary_read_projections_are_removed_but_toggle_intent_remains_closed() -> void:
+func test_module_toggle_uses_a_typed_intent_record() -> void:
 	var loadout := PlayerLoadout.new()
 	assert_bool(loadout.has_method("hud_snapshot")).is_false()
 	assert_bool(loadout.has_method("dock_status")).is_false()
 	assert_bool(loadout.has_method("weapon_ranges")).is_false()
 	assert_bool(loadout.has_method("toggle_at")).is_true()
-	assert_dict(loadout.toggle_at(0)).is_empty()
+	assert_bool(loadout.toggle_at(0).is_none()).is_true()
+
+	var module := ModuleRow.test_fixture(
+		"High", 0, 42, "Test Laser", "Weapon", false, true, 10.0, 5)
+	assert_bool(loadout.test_fixture(
+		0, [module], -1, "", -1, [])
+	).is_true()
+
+	var intent: ModuleActivationIntent = loadout.toggle_at(0)
+	assert_bool(intent.is_none()).is_false()
+	assert_int(intent.module_id()).is_equal(42)
+	assert_str(intent.slot()).is_equal("High")
+	assert_bool(intent.is_active()).is_false()
+	assert_bool(intent.requires_target()).is_true()
+	assert_bool(intent.has_effective_range()).is_true()
+	assert_float(intent.effective_range()).is_equal_approx(0.0, 0.0001)
+	assert_bool(loadout.toggle_at(1).is_none()).is_true()

@@ -8,7 +8,9 @@
 use dawn_core::{EntityId, ItemId, PlayerId, ShipId};
 use dawn_market::{MarketDb, MarketOrderView, OrderId, OrderSide};
 use dawn_sector::node::SimulationNode;
-use dawn_wire::{ItemWire, MarketCommandWire, MarketOrderWire, MarketSnapshotWire};
+use dawn_wire::{
+    ItemWire, MarketCommandWire, MarketOrderSide, MarketOrderWire, MarketSnapshotWire,
+};
 
 use super::market_settlement::{MarketSettlement, ParsedOrder};
 
@@ -51,7 +53,7 @@ impl MarketRuntime {
                 side,
                 price,
                 quantity,
-            } => match parse_order(ship_id, item_id, &side, price, quantity) {
+            } => match parse_order(ship_id, item_id, side, price, quantity) {
                 Some(order) => self.place_single(player_id, order, node),
                 None => self.snapshot(player_id, "Market order rejected"),
             },
@@ -82,7 +84,7 @@ impl MarketRuntime {
                 side,
                 price,
                 quantity,
-            } => match parse_order(ship_id, item_id, &side, price, quantity) {
+            } => match parse_order(ship_id, item_id, side, price, quantity) {
                 Some(order) => self.place_cluster(player_id, order, nodes),
                 None => self.snapshot(player_id, "Market order rejected"),
             },
@@ -170,7 +172,7 @@ impl MarketRuntime {
 fn parse_order(
     raw_ship_id: u64,
     item_id: ItemWire,
-    side: &str,
+    side: MarketOrderSide,
     price: u64,
     quantity: u64,
 ) -> Option<ParsedOrder> {
@@ -179,9 +181,8 @@ fn parse_order(
     }
     let item_id = ItemId::try_from(item_id).ok()?;
     let order_side = match side {
-        "Bid" => OrderSide::Bid,
-        "Ask" => OrderSide::Ask,
-        _ => return None,
+        MarketOrderSide::Bid => OrderSide::Bid,
+        MarketOrderSide::Ask => OrderSide::Ask,
     };
     Some(ParsedOrder {
         ship_id: ShipId(EntityId::from_raw(raw_ship_id)),
@@ -218,10 +219,17 @@ mod tests {
 
     #[test]
     fn order_validation_rejects_zero_and_overflowing_values() {
-        assert!(parse_order(1, ItemWire::ScrapMetal, "Ask", 0, 1).is_none());
-        assert!(parse_order(1, ItemWire::ScrapMetal, "Ask", 1, 0).is_none());
-        assert!(parse_order(1, ItemWire::ScrapMetal, "Ask", u64::MAX, 2).is_none());
-        assert!(parse_order(1, ItemWire::Module { module_id: 0 }, "Ask", 1, 1).is_none());
+        assert!(parse_order(1, ItemWire::ScrapMetal, MarketOrderSide::Ask, 0, 1).is_none());
+        assert!(parse_order(1, ItemWire::ScrapMetal, MarketOrderSide::Ask, 1, 0).is_none());
+        assert!(parse_order(1, ItemWire::ScrapMetal, MarketOrderSide::Ask, u64::MAX, 2).is_none());
+        assert!(parse_order(
+            1,
+            ItemWire::Module { module_id: 0 },
+            MarketOrderSide::Ask,
+            1,
+            1
+        )
+        .is_none());
     }
 
     #[test]

@@ -4,6 +4,7 @@ use godot::prelude::*;
 #[cfg(test)]
 use crate::client_outcome::validate_player_loadout_godot_ranges;
 use crate::item_row_gd::ItemRow;
+use crate::module_activation_intent_gd::ModuleActivationIntent;
 use crate::module_row_gd::{parse_kind, ModuleRow};
 use crate::owned_ship_row_gd::OwnedShipRow;
 
@@ -86,8 +87,6 @@ fn wire_to_item_row(row: dawn_wire::ItemRowWire) -> dawn_client_core::ItemRow {
         count: row.count,
     }
 }
-
-type Dict = Dictionary<Variant, Variant>;
 
 #[derive(GodotClass)]
 #[class(init, base=RefCounted)]
@@ -252,24 +251,13 @@ impl PlayerLoadout {
     }
 
     #[func]
-    fn toggle_at(&self, active_index: i64) -> Dict {
-        let mut result = Dict::new();
-        let Some(loadout) = &self.loadout else {
-            return result;
-        };
-        let Ok(index) = usize::try_from(active_index) else {
-            return result;
-        };
-        let Some(intent) = loadout.toggle_at(index) else {
-            return result;
-        };
-        result.set("module_id", intent.module_id as i64);
-        result.set("slot", intent.slot);
-        result.set("kind", crate::module_row_gd::kind_str(intent.kind));
-        result.set("is_active", intent.is_active);
-        result.set("requires_target", intent.requires_target);
-        result.set("effective_range", intent.effective_range.unwrap_or(-1.0));
-        result
+    fn toggle_at(&self, active_index: i64) -> Gd<ModuleActivationIntent> {
+        let intent = self.loadout.as_ref().and_then(|loadout| {
+            usize::try_from(active_index)
+                .ok()
+                .and_then(|index| loadout.toggle_at(index))
+        });
+        ModuleActivationIntent::from_core(intent)
     }
 
     #[func]

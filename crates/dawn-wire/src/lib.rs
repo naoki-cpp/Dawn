@@ -13,7 +13,7 @@
 //! let message = ClientMessage::Command(ClientRequest::Move {
 //!     target: Position::new(10.0, 0.0, -5.0),
 //! });
-//! let decoded = ClientMessage::decode(&message.encode()).unwrap();
+//! let decoded = ClientMessage::decode(&message.encode().unwrap()).unwrap();
 //! assert!(matches!(decoded, ClientMessage::Command(ClientRequest::Move { .. })));
 //! ```
 //!
@@ -39,7 +39,8 @@ pub use initial_state::{
 };
 pub use item::{ItemWire, ItemWireError};
 pub use market::{
-    market_command_wire_json_schema, MarketCommandWire, MarketOrderWire, MarketSnapshotWire,
+    market_command_wire_json_schema, MarketCommandWire, MarketOrderSide, MarketOrderWire,
+    MarketSnapshotWire,
 };
 pub use motion::VelWire;
 pub use player_loadout::{
@@ -288,7 +289,7 @@ impl ClientMessageDecodeError {
 }
 
 impl ClientMessage {
-    pub fn encode(&self) -> Vec<u8> {
+    pub fn encode(&self) -> Result<Vec<u8>, postcard::Error> {
         let wire = match self {
             Self::Hello(hello) => ClientMessageWireRef::Hello(hello),
             Self::Command(request) => {
@@ -296,7 +297,7 @@ impl ClientMessage {
             }
             Self::Market(command) => ClientMessageWireRef::Market(command),
         };
-        postcard::to_stdvec(&wire).expect("typed wire message serialization")
+        postcard::to_stdvec(&wire)
     }
 
     /// Decode and validate an untrusted client frame before queueing it for
@@ -334,7 +335,8 @@ mod tests {
     }
 
     fn roundtrip(message: &ClientMessage) -> ClientMessage {
-        ClientMessage::decode(&message.encode()).expect("postcard ClientMessage round trip")
+        ClientMessage::decode(&message.encode().expect("postcard ClientMessage round trip"))
+            .expect("decode ClientMessage round trip")
     }
 
     #[allow(dead_code)]
@@ -463,7 +465,12 @@ mod tests {
         let message = ClientMessage::Command(ClientRequest::Move {
             target: Position::new(f64::NAN, 0.0, 0.0),
         });
-        let error = ClientMessage::decode(&message.encode()).expect_err("NaN must be rejected");
+        let error = ClientMessage::decode(
+            &message
+                .encode()
+                .expect("encode invalid request for validation test"),
+        )
+        .expect_err("NaN must be rejected");
         assert!(matches!(
             error,
             ClientMessageDecodeError::RequestValidation(
@@ -481,7 +488,7 @@ mod tests {
         let message = ClientMessage::Market(MarketCommandWire::PlaceMarketOrderCommand {
             ship_id: 42,
             item_id: ItemWire::Module { module_id: 5 },
-            side: "Ask".to_owned(),
+            side: MarketOrderSide::Ask,
             price: 100,
             quantity: 3,
         });
@@ -493,7 +500,7 @@ mod tests {
                 side,
                 price: 100,
                 quantity: 3,
-            }) if side == "Ask"
+            }) if side == MarketOrderSide::Ask
         ));
     }
 

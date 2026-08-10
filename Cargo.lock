@@ -156,7 +156,6 @@ dependencies = [
  "dawn-sector",
  "dawn-wire",
  "godot",
- "serde_json",
 ]
 
 [[package]]

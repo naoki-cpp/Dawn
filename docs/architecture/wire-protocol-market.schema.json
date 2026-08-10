@@ -42,7 +42,7 @@
               "minimum": 0
             },
             "side": {
-              "type": "string"
+              "$ref": "#/$defs/MarketOrderSide"
             }
           },
           "required": [
@@ -137,6 +137,14 @@
             "PackagedShip"
           ]
         }
+      ]
+    },
+    "MarketOrderSide": {
+      "description": "The only valid directions for a Market order.",
+      "type": "string",
+      "enum": [
+        "Bid",
+        "Ask"
       ]
     }
   }

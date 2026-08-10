@@ -118,7 +118,7 @@ func _process(delta: float) -> void:
 ## typed Rust `ClientRequest` authority through a dedicated GDExtension method.
 ## No Sector request is assembled through a Dictionary/JSON round-trip, and
 ## acting active-ship identity is supplied only by the admitted server session.
-## Market remains a separate schema-driven request envelope.
+## Market remains a separate typed request envelope.
 func send_move_command(target: Vector3) -> void:
 	_send_request(_cmd.move_command(target.x, target.y, target.z))
 
@@ -241,7 +241,7 @@ func send_transfer_from_station_command(
 ## Market requests use a separate wire envelope from Sector commands
 ## (ADR-0034). The server answers each request with MarketSnapshot.
 func send_market_refresh_command() -> void:
-	_send_bytes(_cmd.market_build("RefreshMarketCommand", {}))
+	_send_market_request(_cmd.market_refresh_command())
 
 func send_market_place_order_command(
 	p_ship_id: int,
@@ -250,13 +250,11 @@ func send_market_place_order_command(
 	p_price: int,
 	p_quantity: int
 ) -> void:
-	_send_bytes(_cmd.market_place_order_command(
+	_send_market_request(_cmd.market_place_order_command(
 		p_ship_id, p_item_id, p_side, p_price, p_quantity))
 
 func send_market_cancel_order_command(p_order_id: int) -> void:
-	_send_bytes(_cmd.market_build("CancelMarketOrderCommand", {
-		"order_id": p_order_id,
-	}))
+	_send_market_request(_cmd.market_cancel_order_command(p_order_id))
 
 
 func _accept_client_request_rejected(code: String, message: String) -> void:
@@ -267,25 +265,27 @@ func is_connected_to_server() -> bool:
 
 # ── 内部処理 ──────────────────────────────────────────────────────────────────
 
-## welcomed ガードを一元化する send_* 系の共通ヘルパー。bytes は
-## _cmd.*_command() が返す、すでに `ClientMessage::Command`
-## envelope 済みの postcard バイト列（ADR-0042）。Hello（welcomed 前に送る
-## 必要がある）はこのガードの対象外なので _send_hello は使わない。
-func _send_request(result: Dictionary) -> void:
-	if not bool(result.get("ok", false)):
-		var code := str(result.get("error_code", "request_build_failed"))
-		var message := str(result.get("error_message", "unable to build client request"))
-		_accept_client_request_rejected(code, message)
-		return
-	_send_bytes(result.get("bytes", PackedByteArray()))
+## All builders return a typed ClientCommandResult. A failed construction or
+## encoding is reported directly; no empty byte array is interpreted as an
+## error sentinel.
+func _send_request(result: ClientCommandResult) -> void:
+	_send_result(result, true)
 
-func _send_bytes(bytes: PackedByteArray) -> void:
-	if not _welcomed or bytes.is_empty():
+
+func _send_market_request(result: ClientCommandResult) -> void:
+	_send_result(result, true)
+
+
+func _send_result(result: ClientCommandResult, require_welcome: bool) -> void:
+	if not result.ok:
+		_accept_client_request_rejected(result.error_code, result.error_message)
 		return
-	_ws.send(bytes, WebSocketPeer.WRITE_MODE_BINARY)
+	if require_welcome and not _welcomed:
+		return
+	_ws.send(result.bytes, WebSocketPeer.WRITE_MODE_BINARY)
 
 func _send_hello() -> void:
-	_ws.send(_cmd.hello_command(_resume_ticket), WebSocketPeer.WRITE_MODE_BINARY)
+	_send_result(_cmd.hello_command(_resume_ticket), false)
 	print("[Connection] Hello sent")
 
 func _connect_to_server() -> void:
