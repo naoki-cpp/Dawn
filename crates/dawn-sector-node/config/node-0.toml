@@ -4,8 +4,8 @@
 node_id    = 0
 sector_id  = 0
 ws_addr    = "0.0.0.0:7878"    # Godot clients connect here
-raft_addr  = "0.0.0.0:7900"    # Raft RPC (TcpRaftTransport)
-repl_addr  = "0.0.0.0:7910"    # Log replication gossip (TcpReplicationTransport)
+control_addr = "0.0.0.0:7900"  # Shared peer control channel
+bulk_addr    = "0.0.0.0:7910"  # Shared peer bulk channel
 npc_ships  = 20
 pop_cap    = 500
 
@@ -21,12 +21,14 @@ checkpoint_interval_ticks = 600
 
 [[peers]]
 node_id   = 1
-raft_addr = "127.0.0.1:7901"
-repl_addr = "127.0.0.1:7911"
+sector_id = 1
+control_addr = "127.0.0.1:7901"
+bulk_addr = "127.0.0.1:7911"
 ws_addr   = "127.0.0.1:7879"
 
 [[peers]]
 node_id   = 2
-raft_addr = "127.0.0.1:7902"
-repl_addr = "127.0.0.1:7912"
+sector_id = 2
+control_addr = "127.0.0.1:7902"
+bulk_addr = "127.0.0.1:7912"
 ws_addr   = "127.0.0.1:7880"

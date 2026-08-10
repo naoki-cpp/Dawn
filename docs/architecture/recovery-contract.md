@@ -148,9 +148,10 @@ survives process loss.
 The frame now exposes a `RuntimeDurabilityPolicy` port. Its replicated policy
 validates distinct replica membership, current owner epoch, transition/range/
 content equality, remote evidence source, and the configured quorum before
-live apply. #280 still owns delivery of those remote receipts and catch-up
-transport; until that adapter is wired, production continues to use the local
-`Synced` profile and must not advertise remote-loss RPO 0.
+live apply. #280 now provides the shared delivery adapter and framing for those
+remote receipts and catch-up messages; until #278 wires that adapter into the
+runtime quorum policy, production continues to use the local `Synced` profile
+and must not advertise remote-loss RPO 0.
 
 The same frame also exposes a required reconciliation hook and an adapter-owned
 `RuntimeHealth` gate. It runs after live apply but before presentation or

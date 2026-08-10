@@ -17,6 +17,7 @@ dawn-wire        = { path = "../dawn-wire" }
 dawn-event-store = { path = "../dawn-event-store" }
 dawn-sector      = { path = "../dawn-sector" }
 dawn-consensus   = { path = "../dawn-consensus" }
+dawn-peer-transport = { path = "../dawn-peer-transport" }
 dawn-replication = { path = "../dawn-replication" }
 serde            = { workspace = true }
 rand             = { workspace = true }

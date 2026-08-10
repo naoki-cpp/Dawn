@@ -22,15 +22,15 @@
 #![warn(missing_debug_implementations)]
 
 pub mod actor;
+pub mod peer_transport;
 pub mod rpc;
 pub mod state;
-pub mod tcp_transport;
 pub mod transport;
 
 pub use actor::{RaftActor, RaftActorHandle, RaftActorMessage};
+pub use peer_transport::PeerRaftTransport;
 pub use rpc::{
     AppendEntries, AppendEntriesResponse, RaftMessage, RequestVote, RequestVoteResponse,
 };
 pub use state::{LogEntry, RaftState, Role, Term, TickEffect};
-pub use tcp_transport::{TcpRaftError, TcpRaftTransport};
 pub use transport::{InProcessTransport, PartitionableTransport, RaftTransport};

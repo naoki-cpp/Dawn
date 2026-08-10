@@ -288,8 +288,8 @@ rewrite_cluster_configs() {
 node_id    = 0
 sector_id  = 0
 ws_addr    = "0.0.0.0:7878"
-raft_addr  = "0.0.0.0:7900"
-repl_addr  = "0.0.0.0:7910"
+control_addr = "0.0.0.0:7900"
+bulk_addr    = "0.0.0.0:7910"
 npc_ships  = 0
 pop_cap    = 50
 event_log_path           = "data/node-0/events.log"
@@ -299,14 +299,16 @@ checkpoint_interval_ticks = 600
 
 [[peers]]
 node_id   = 1
-raft_addr = "${node1_ip}:7901"
-repl_addr = "${node1_ip}:7911"
+sector_id = 1
+control_addr = "${node1_ip}:7901"
+bulk_addr = "${node1_ip}:7911"
 ws_addr   = "${node1_ip}:7879"
 
 [[peers]]
 node_id   = 2
-raft_addr = "${node2_ip}:7902"
-repl_addr = "${node2_ip}:7912"
+sector_id = 2
+control_addr = "${node2_ip}:7902"
+bulk_addr = "${node2_ip}:7912"
 ws_addr   = "${node2_ip}:7880"
 EOF
 
@@ -317,8 +319,8 @@ EOF
 node_id    = 1
 sector_id  = 1
 ws_addr    = "0.0.0.0:7879"
-raft_addr  = "0.0.0.0:7901"
-repl_addr  = "0.0.0.0:7911"
+control_addr = "0.0.0.0:7901"
+bulk_addr    = "0.0.0.0:7911"
 npc_ships  = 0
 pop_cap    = 50
 event_log_path           = "data/node-1/events.log"
@@ -328,14 +330,16 @@ checkpoint_interval_ticks = 600
 
 [[peers]]
 node_id   = 0
-raft_addr = "${node0_ip}:7900"
-repl_addr = "${node0_ip}:7910"
+sector_id = 0
+control_addr = "${node0_ip}:7900"
+bulk_addr = "${node0_ip}:7910"
 ws_addr   = "${node0_ip}:7878"
 
 [[peers]]
 node_id   = 2
-raft_addr = "${node2_ip}:7902"
-repl_addr = "${node2_ip}:7912"
+sector_id = 2
+control_addr = "${node2_ip}:7902"
+bulk_addr = "${node2_ip}:7912"
 ws_addr   = "${node2_ip}:7880"
 EOF
 
@@ -346,8 +350,8 @@ EOF
 node_id    = 2
 sector_id  = 2
 ws_addr    = "0.0.0.0:7880"
-raft_addr  = "0.0.0.0:7902"
-repl_addr  = "0.0.0.0:7912"
+control_addr = "0.0.0.0:7902"
+bulk_addr    = "0.0.0.0:7912"
 npc_ships  = 0
 pop_cap    = 50
 event_log_path           = "data/node-2/events.log"
@@ -357,14 +361,16 @@ checkpoint_interval_ticks = 600
 
 [[peers]]
 node_id   = 0
-raft_addr = "${node0_ip}:7900"
-repl_addr = "${node0_ip}:7910"
+sector_id = 0
+control_addr = "${node0_ip}:7900"
+bulk_addr = "${node0_ip}:7910"
 ws_addr   = "${node0_ip}:7878"
 
 [[peers]]
 node_id   = 1
-raft_addr = "${node1_ip}:7901"
-repl_addr = "${node1_ip}:7911"
+sector_id = 1
+control_addr = "${node1_ip}:7901"
+bulk_addr = "${node1_ip}:7911"
 ws_addr   = "${node1_ip}:7879"
 EOF
 }

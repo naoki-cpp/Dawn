@@ -8,6 +8,7 @@ members = [
     "crates/dawn-event-store",
     "crates/dawn-actor",
     "crates/dawn-consensus",
+    "crates/dawn-peer-transport",
     "crates/dawn-replication",
     "crates/dawn-market",
     "crates/dawn-sector",

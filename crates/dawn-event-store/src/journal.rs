@@ -191,6 +191,78 @@ pub enum DurabilityEvidenceSource {
     Remote,
 }
 
+/// Identity and position metadata carried with durability peer traffic. The
+/// journal owns the transition/range/hash fields; the runtime supplies term
+/// and fencing values from the current ownership decision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DurabilityTransportContext {
+    pub sector_id: SectorId,
+    pub owner_epoch: u64,
+    pub owner_term: u64,
+    pub fencing_token: u128,
+    pub transition_id: TransitionId,
+    pub range: JournalRange,
+    pub content_hash: u64,
+}
+
+/// Opaque peer traffic for a staged durable append and its content-bound
+/// receipt. A receiver may validate the receipt, but it must not treat remote
+/// evidence as locally applied or promotable without the runtime's fencing and
+/// quorum policy.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DurabilityTransportMessage {
+    Stage {
+        context: DurabilityTransportContext,
+        batch: JournalBatch,
+    },
+    Receipt {
+        context: DurabilityTransportContext,
+        evidence: DurabilityEvidence,
+    },
+}
+
+impl DurabilityTransportMessage {
+    /// Reject malformed or stale-internally-bound transport evidence before a
+    /// runtime considers its owner/fencing policy.
+    pub fn validate(&self) -> Result<(), JournalError> {
+        match self {
+            Self::Stage { context, batch } => {
+                if context.sector_id != batch.context.sector_id {
+                    return Err(JournalError::ReceiptMismatch("transport sector"));
+                }
+                if context.owner_epoch != batch.context.owner_epoch {
+                    return Err(JournalError::ReceiptMismatch("transport owner epoch"));
+                }
+                if context.transition_id != batch.transition_id {
+                    return Err(JournalError::ReceiptMismatch(
+                        "transport transition identity",
+                    ));
+                }
+                if context.range.len as usize != batch.entries.len() {
+                    return Err(JournalError::ReceiptMismatch("transport journal range"));
+                }
+                if context.content_hash != content_hash(context.range.first, batch) {
+                    return Err(JournalError::ReceiptMismatch("transport content hash"));
+                }
+                validate_batch(batch)?;
+                Ok(())
+            }
+            Self::Receipt { context, evidence } => {
+                let receipt = evidence.receipt;
+                if context.sector_id != receipt.context.sector_id
+                    || context.owner_epoch != receipt.context.owner_epoch
+                    || context.transition_id != receipt.transition_id
+                    || context.range != receipt.range
+                    || context.content_hash != receipt.content_hash
+                {
+                    return Err(JournalError::ReceiptMismatch("transport receipt context"));
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
 impl DurabilityEvidence {
     pub fn validate_batch(
         &self,

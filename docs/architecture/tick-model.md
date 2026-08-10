@@ -464,8 +464,9 @@ This is current implementation topology, not a permanent storage/API constraint:
   to be switched to the runtime-owned recovery journal;
 - #275 splits heterogeneous `SimulationNode` state authority;
 - #276 replaces current Transit scan/retry state with a durable Saga;
-- #280 may replace replication/snapshot transport wiring while preserving the Tick/
-  recovery ordering defined here.
+- #280 now provides the shared control/bulk replication and snapshot transport
+  wiring while preserving the Tick/recovery ordering defined here; #278 still
+  owns production quorum-policy activation.
 
 ---
 

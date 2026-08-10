@@ -9,7 +9,7 @@ use dawn_actor::ws_server;
 use dawn_consensus::RaftActorHandle;
 use dawn_core::{DomainEvent, SectorId, ShipId};
 use dawn_event_store::DurableJournal;
-use dawn_replication::{OutboundLogPublisher, TcpReplicationTransport};
+use dawn_replication::{OutboundLogPublisher, PeerReplicationTransport};
 use dawn_sector::aoi::{AoiMessage, AoiSink, Observer};
 use dawn_sector::aoi_frame::{deliver_sector_sessions, AoiFrame, AoiSessionCallbacks};
 use dawn_sector::node::{
@@ -44,7 +44,7 @@ pub(crate) struct SectorNodeRuntime {
     peer_ws: HashMap<SectorId, SocketAddr>,
     sessions: Vec<ws_server::PlayerSession>,
     aoi_frame: AoiFrame,
-    outbound_replication: OutboundLogPublisher<TcpReplicationTransport>,
+    outbound_replication: OutboundLogPublisher<PeerReplicationTransport>,
     runtime_health: RuntimeHealth,
 }
 
@@ -53,7 +53,7 @@ impl SectorNodeRuntime {
         sector_id: SectorId,
         aoi_cell_size: f64,
         peer_ws: HashMap<SectorId, SocketAddr>,
-        repl_transport: TcpReplicationTransport,
+        repl_transport: PeerReplicationTransport,
         event_store: &impl dawn_event_store::store::EventStore,
     ) -> Self {
         Self {

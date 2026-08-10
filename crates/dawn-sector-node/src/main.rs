@@ -1,8 +1,8 @@
 //! `dawn-sector-node` — production binary for one physical Sector node (8D-4).
 //!
 //! Each instance owns exactly one Sector and connects to its peers via TCP:
-//!   - **Raft RPC** (`TcpRaftTransport`, 8D-3) for Sector-Transit consensus (ADR-0014)
-//!   - **Log replication gossip** (`TcpReplicationTransport`, 8D-2c) for event-log distribution
+//!   - **Shared peer transport** (`PeerTransport`, #280) with isolated control/bulk channels
+//!     for Raft, recovery ranges, catch-up, and snapshots
 //!   - **WebSocket** for Godot client connections
 //!
 //! Usage:
@@ -21,12 +21,15 @@ mod config;
 mod runtime;
 
 use dawn_actor::ws_server;
-use dawn_consensus::{RaftActor, RaftActorHandle, RaftActorMessage, RaftState, TcpRaftTransport};
+use dawn_consensus::{PeerRaftTransport, RaftActor, RaftActorHandle, RaftActorMessage, RaftState};
 use dawn_core::{NodeId, SectorBounds, SectorId};
 use dawn_event_store::{DurabilityMode, DurableJournal, EventStore, FileEventStore, FileJournal};
+use dawn_peer_transport::{
+    PeerCapabilities, PeerEndpoint, PeerIdentity, PeerTransport, PeerTransportConfig,
+};
 use dawn_replication::{
-    CatchUpConfig, CatchUpEvent, CatchUpManager, CatchUpStep, CatchUpTransport, ReplicaSnapshot,
-    ReplicationTransport, TcpReplicationTransport,
+    CatchUpConfig, CatchUpEvent, CatchUpManager, CatchUpStep, CatchUpTransport,
+    PeerReplicationTransport, ReplicaSnapshot, ReplicationTransport,
 };
 use dawn_sector::node::SimulationNode;
 use dawn_sector::persistence::{
@@ -68,8 +71,8 @@ async fn main() -> anyhow::Result<()> {
         cfg.node_id, cfg.sector_id
     );
     println!(
-        "  ws={}  raft={}  repl={}",
-        cfg.ws_addr, cfg.raft_addr, cfg.repl_addr
+        "  ws={}  control={}  bulk={}",
+        cfg.ws_addr, cfg.control_addr, cfg.bulk_addr
     );
     println!("  peers: {}", cfg.peers.len());
     println!("════════════════════════════════════════════════");
@@ -87,30 +90,48 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Lookup: SectorId → peer WS address (for client Redirect on jump).
-    let peer_ws: HashMap<SectorId, SocketAddr> = cfg
-        .peers
-        .iter()
-        .map(|p| (SectorId(p.node_id), p.ws_addr))
-        .collect();
+    let peer_ws = peer_ws_addresses(&cfg.peers);
 
-    // ── TCP Raft transport ────────────────────────────────────────────────────
-    // Pattern: create one (tx, rx) pair.  tx goes to both TcpRaftTransport
+    // ── Shared peer transport: Raft adapter ───────────────────────────────────
+    // Pattern: create one (tx, rx) pair. The shared peer adapter
     // (for incoming network messages) and RaftActorHandle (for TickElapsed /
     // Propose / GetRole).  rx goes to RaftActor.
 
     let (actor_tx, actor_rx) = mpsc::unbounded_channel::<RaftActorMessage>();
 
-    let raft_peer_addrs: HashMap<NodeId, SocketAddr> = cfg
+    let peer_endpoints: Vec<PeerEndpoint> = cfg
         .peers
         .iter()
-        .map(|p| (NodeId(p.node_id), p.raft_addr))
+        .map(|p| PeerEndpoint {
+            identity: PeerIdentity {
+                node_id: NodeId(p.node_id),
+                sector_id: SectorId(p.sector_id),
+            },
+            control_addr: p.control_addr,
+            bulk_addr: p.bulk_addr,
+        })
         .collect();
 
-    let raft_transport = TcpRaftTransport::bind(cfg.raft_addr, raft_peer_addrs, actor_tx.clone())
-        .await
-        .map_err(|e| {
-            anyhow::anyhow!("failed to bind Raft transport on {}: {}", cfg.raft_addr, e)
-        })?;
+    let peer_transport = PeerTransport::bind(PeerTransportConfig {
+        local_identity: PeerIdentity { node_id, sector_id },
+        control_addr: cfg.control_addr,
+        bulk_addr: cfg.bulk_addr,
+        capabilities: PeerCapabilities::DURABILITY_STAGING
+            | PeerCapabilities::RECOVERY_CATCH_UP
+            | PeerCapabilities::REPOSITORY_CATCH_UP,
+        peers: peer_endpoints,
+    })
+    .await
+    .map_err(|e| {
+        anyhow::anyhow!(
+            "failed to bind shared peer transport on control={} bulk={}: {}",
+            cfg.control_addr,
+            cfg.bulk_addr,
+            e
+        )
+    })?;
+    let raft_transport =
+        PeerRaftTransport::from_peer_transport(peer_transport.clone(), actor_tx.clone());
 
     let peer_ids: Vec<NodeId> = cfg.peers.iter().map(|p| NodeId(p.node_id)).collect();
     let raft_state = RaftState::new_randomized(
@@ -135,29 +156,9 @@ async fn main() -> anyhow::Result<()> {
     );
     let raft = RaftActorHandle::new(actor_tx);
 
-    // ── TCP Replication transport ─────────────────────────────────────────────
+    // ── Shared peer transport: replication adapter ────────────────────────────
 
-    let repl_transport = TcpReplicationTransport::bind(cfg.repl_addr)
-        .await
-        .map_err(|e| {
-            anyhow::anyhow!(
-                "failed to bind replication transport on {}: {}",
-                cfg.repl_addr,
-                e
-            )
-        })?;
-
-    for peer in &cfg.peers {
-        if let Err(e) = repl_transport
-            .connect_peer(SectorId(peer.node_id), peer.repl_addr)
-            .await
-        {
-            eprintln!(
-                "[Node] warning: could not connect to peer replication at {}: {}",
-                peer.repl_addr, e
-            );
-        }
-    }
+    let repl_transport = PeerReplicationTransport::from_peer_transport(peer_transport);
     let mut repl_rx = repl_transport.subscribe();
     let mut catch_up_rx = repl_transport.subscribe_catch_up();
     // The manager owns all foreign recovery state. It never applies foreign
@@ -541,4 +542,32 @@ fn build_node(
             )
         });
     (node, store, recovery_journal, is_fresh)
+}
+
+fn peer_ws_addresses(peers: &[config::PeerConfig]) -> HashMap<SectorId, SocketAddr> {
+    peers
+        .iter()
+        .map(|peer| (SectorId(peer.sector_id), peer.ws_addr))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn peer_redirects_are_indexed_by_sector_identity() {
+        let peers = vec![config::PeerConfig {
+            node_id: 7,
+            sector_id: 42,
+            control_addr: "127.0.0.1:7907".parse().unwrap(),
+            bulk_addr: "127.0.0.1:7917".parse().unwrap(),
+            ws_addr: "127.0.0.1:7877".parse().unwrap(),
+        }];
+
+        let addresses = peer_ws_addresses(&peers);
+
+        assert_eq!(addresses.get(&SectorId(42)), Some(&peers[0].ws_addr));
+        assert!(!addresses.contains_key(&SectorId(7)));
+    }
 }

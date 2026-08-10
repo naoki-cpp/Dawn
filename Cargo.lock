@@ -164,10 +164,10 @@ name = "dawn-consensus"
 version = "0.1.0"
 dependencies = [
  "dawn-core",
+ "dawn-peer-transport",
  "postcard",
  "rand 0.8.6",
  "serde",
- "thiserror",
  "tokio",
 ]
 
@@ -210,11 +210,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "dawn-peer-transport"
+version = "0.1.0"
+dependencies = [
+ "dawn-core",
+ "postcard",
+ "serde",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "dawn-replication"
 version = "0.1.0"
 dependencies = [
  "dawn-core",
  "dawn-event-store",
+ "dawn-peer-transport",
  "postcard",
  "serde",
  "tempfile",
@@ -250,6 +262,7 @@ dependencies = [
  "dawn-consensus",
  "dawn-core",
  "dawn-event-store",
+ "dawn-peer-transport",
  "dawn-replication",
  "dawn-sector",
  "dawn-wire",

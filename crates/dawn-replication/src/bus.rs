@@ -7,7 +7,7 @@
 //! `event_count()` reflects every `Batch` message sent before it — no
 //! sleep or explicit flush needed in tests.
 //!
-//! TCP gossip callers can switch to `TcpReplicationTransport` behind the same
+//! TCP gossip callers can switch to `PeerReplicationTransport` behind the same
 //! logical interface. Catch-up control traffic uses a separate bounded
 //! broadcast channel so it does not affect event ordering or `event_count()`.
 
