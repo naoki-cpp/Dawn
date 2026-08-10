@@ -168,7 +168,6 @@ dependencies = [
  "postcard",
  "rand 0.8.6",
  "serde",
- "thiserror",
  "tokio",
 ]
 

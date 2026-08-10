@@ -880,19 +880,21 @@ mod tests {
         let mut rx = b.subscribe();
         send_when_connected(&a, PeerMessageKind::RaftControl, vec![], vec![1, 2, 3]).await;
         send_when_connected(&a, PeerMessageKind::Snapshot, vec![9, 8], vec![7; 4096]).await;
-        let first = timeout(Duration::from_secs(2), rx.recv())
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(first.kind, PeerMessageKind::RaftControl);
-        assert_eq!(first.payload, vec![1, 2, 3]);
-        let second = timeout(Duration::from_secs(2), rx.recv())
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(second.kind, PeerMessageKind::Snapshot);
-        assert_eq!(second.metadata, vec![9, 8]);
-        assert_eq!(second.payload.len(), 4096);
+        let mut raft_payload = None;
+        let mut snapshot = None;
+        for _ in 0..2 {
+            let frame = timeout(Duration::from_secs(2), rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            match frame.kind {
+                PeerMessageKind::RaftControl => raft_payload = Some(frame.payload),
+                PeerMessageKind::Snapshot => snapshot = Some((frame.metadata, frame.payload.len())),
+                other => panic!("unexpected frame kind: {other:?}"),
+            }
+        }
+        assert_eq!(raft_payload, Some(vec![1, 2, 3]));
+        assert_eq!(snapshot, Some((vec![9, 8], 4096)));
         assert_ne!(a.control_addr(), a.bulk_addr());
     }
 
