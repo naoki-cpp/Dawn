@@ -101,16 +101,16 @@ impl SimulationNode {
                 station_id,
             } => {
                 self.settle_ship_into_station(ship_id, station_id);
-                self.docked_ships.insert(ship_id, station_id);
-                if let Some(player_id) = self.ships.owners.get(&ship_id).copied() {
-                    self.docked_players.insert(player_id, station_id);
+                self.stations.dock_ship(ship_id, station_id);
+                if let Some(player_id) = self.players.owners.get(&ship_id).copied() {
+                    self.stations.dock_player(player_id, station_id);
                 }
             }
             StationRuntimeState::Undock { ship_id } => {
-                if let Some(player_id) = self.ships.owners.get(&ship_id).copied() {
-                    self.docked_players.remove(&player_id);
+                if let Some(player_id) = self.players.owners.get(&ship_id).copied() {
+                    self.stations.undock_player(player_id);
                 }
-                self.docked_ships.remove(&ship_id);
+                self.stations.undock_ship(ship_id);
             }
             StationRuntimeState::Disassemble { ship_id } => {
                 self.remove_ship(ship_id);
@@ -121,23 +121,23 @@ impl SimulationNode {
                 station_id,
                 ship_type_id,
             } => {
-                if !self.ships.index.contains_key(&ship_id) {
+                if !self.simulation.ships.index.contains_key(&ship_id) {
                     self.insert_ship_entity(
                         ship_id,
                         ship_type_id,
                         dawn_core::Position::ORIGIN,
                         Velocity::ZERO,
                     );
-                    if let Some(&entity) = self.ships.index.get(&ship_id) {
-                        let _ = self.world.remove_one::<IsNpcComp>(entity);
+                    if let Some(&entity) = self.simulation.ships.index.get(&ship_id) {
+                        let _ = self.simulation.world.remove_one::<IsNpcComp>(entity);
                     }
                     self.settle_ship_into_station(ship_id, station_id);
                 }
-                self.docked_ships.insert(ship_id, station_id);
-                self.ships.owners.insert(ship_id, player_id);
+                self.stations.dock_ship(ship_id, station_id);
+                self.players.owners.insert(ship_id, player_id);
                 let counter = ship_id.0.counter();
-                if counter >= self.id_counter {
-                    self.id_counter = counter + 1;
+                if counter >= self.simulation.id_counter {
+                    self.simulation.id_counter = counter + 1;
                 }
             }
         }
@@ -160,7 +160,7 @@ impl SimulationNode {
                 ship_id,
                 station_id,
             } => {
-                debug_assert_eq!(self.ships.owners.get(&ship_id).copied(), Some(player_id));
+                debug_assert_eq!(self.players.owners.get(&ship_id).copied(), Some(player_id));
                 self.apply_station_runtime_state(StationRuntimeState::Dock {
                     ship_id,
                     station_id,
@@ -168,7 +168,7 @@ impl SimulationNode {
                 self.append_station_event(DomainEvent::ShipDocked(ShipDocked {
                     ship_id,
                     station_id,
-                    tick: self.current_tick,
+                    tick: self.simulation.current_tick,
                 }));
                 Ok(StationOperationExecution::Outcome(
                     StationOperationOutcome::Accepted { ship_id },
@@ -179,12 +179,12 @@ impl SimulationNode {
                 ship_id,
                 station_id,
             } => {
-                debug_assert_eq!(self.ships.owners.get(&ship_id).copied(), Some(player_id));
+                debug_assert_eq!(self.players.owners.get(&ship_id).copied(), Some(player_id));
                 self.apply_station_runtime_state(StationRuntimeState::Undock { ship_id });
                 self.append_station_event(DomainEvent::ShipUndocked(ShipUndocked {
                     ship_id,
                     station_id,
-                    tick: self.current_tick,
+                    tick: self.simulation.current_tick,
                 }));
                 Ok(StationOperationExecution::Outcome(
                     StationOperationOutcome::Accepted { ship_id },
@@ -210,7 +210,7 @@ impl SimulationNode {
                     station_id,
                     ship_type_id,
                     scrap_cost,
-                    tick: self.current_tick,
+                    tick: self.simulation.current_tick,
                 }));
                 Ok(StationOperationExecution::Outcome(
                     StationOperationOutcome::Accepted { ship_id },
@@ -222,11 +222,12 @@ impl SimulationNode {
                 station_id,
                 ship_type_id,
             } => {
-                let Some(&entity) = self.ships.index.get(&ship_id) else {
+                let Some(&entity) = self.simulation.ships.index.get(&ship_id) else {
                     return Err(StationOperationRejection::ShipNotFound);
                 };
 
                 let salvaged_cargo: Vec<(ItemId, u64)> = self
+                    .simulation
                     .world
                     .get_mut::<InventoryComp>(entity)
                     .map(|mut inventory| std::mem::take(&mut inventory.items).into_iter().collect())
@@ -246,7 +247,7 @@ impl SimulationNode {
                     player_id,
                     station_id,
                     ship_type_id,
-                    tick: self.current_tick,
+                    tick: self.simulation.current_tick,
                 }));
                 Ok(StationOperationExecution::Outcome(
                     StationOperationOutcome::Accepted { ship_id },
@@ -264,7 +265,7 @@ impl SimulationNode {
                     1,
                 )?;
 
-                let ship_id = ShipId::new(self.node_id, self.id_counter);
+                let ship_id = ShipId::new(self.node_id, self.simulation.id_counter);
                 self.apply_station_runtime_state(StationRuntimeState::Assemble {
                     player_id,
                     ship_id,
@@ -277,7 +278,7 @@ impl SimulationNode {
                     player_id,
                     station_id,
                     ship_type_id,
-                    tick: self.current_tick,
+                    tick: self.simulation.current_tick,
                 }));
                 Ok(StationOperationExecution::Assembled(ship_id))
             }
@@ -329,9 +330,12 @@ mod tests {
             postcard::to_stdvec(&live_snapshot).unwrap(),
             postcard::to_stdvec(&replay_snapshot).unwrap()
         );
-        assert_eq!(live.ships.type_ids, replay.ships.type_ids);
-        assert_eq!(live.ships.owners, replay.ships.owners);
-        assert_eq!(live.ships.active_ship, replay.ships.active_ship);
+        assert_eq!(
+            live.simulation.ships.type_ids,
+            replay.simulation.ships.type_ids
+        );
+        assert_eq!(live.players.owners, replay.players.owners);
+        assert_eq!(live.players.active_ship, replay.players.active_ship);
     }
 
     #[test]
@@ -450,7 +454,7 @@ mod tests {
     fn disassemble_live_and_replay_apply_identical_runtime_state_without_sqlite_replay() {
         let (mut live, mut replay, player_id, ship_id) = paired_player_nodes();
         let station_id = StationId(0);
-        let ship_type_id = live.ships.type_ids[&ship_id];
+        let ship_type_id = live.simulation.ships.type_ids[&ship_id];
         let replay_packaged_before =
             replay.station_item_count(player_id, station_id, ItemId::PackagedShip(ship_type_id));
 

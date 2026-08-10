@@ -45,32 +45,38 @@ pub(crate) struct TransitCommitData {
 
 impl SimulationNode {
     pub(crate) fn transit_saga_snapshot(&self) -> TransitSagaSnapshot {
-        self.transit_journal.snapshot()
+        self.transit.transit_journal.snapshot()
     }
 
     /// Return derived counts for active, retrying, terminal, and incoming
     /// Transit Saga records. The counters are diagnostic output, not recovery
     /// state separate from the Saga snapshot.
     pub fn transit_saga_diagnostics(&self) -> TransitSagaDiagnostics {
-        self.transit_journal.diagnostics()
+        self.transit.transit_journal.diagnostics()
     }
 
     pub(crate) fn restore_transit_saga(
         &mut self,
         snapshot: TransitSagaSnapshot,
     ) -> Result<(), String> {
-        self.transit_journal =
+        self.transit.transit_journal =
             crate::transit::handoff::TransitJournal::from_snapshot(self.sector_id, snapshot)?;
-        let pending: Vec<_> = self.transit_journal.pending_outgoing().cloned().collect();
+        let pending: Vec<_> = self
+            .transit
+            .transit_journal
+            .pending_outgoing()
+            .cloned()
+            .collect();
         for attempt in pending {
-            let Some(&entity) = self.ships.index.get(&attempt.ship_id) else {
-                self.transit_journal.quarantine(
+            let Some(&entity) = self.simulation.ships.index.get(&attempt.ship_id) else {
+                self.transit.transit_journal.quarantine(
                     attempt.attempt_id,
                     "outgoing Saga references a missing source Ship".to_owned(),
                 );
                 continue;
             };
-            self.world
+            self.simulation
+                .world
                 .set_transit_state(entity, dawn_ecs::TransitState::InTransit { to: attempt.to });
         }
         Ok(())
@@ -80,11 +86,12 @@ impl SimulationNode {
         &mut self,
         receipt: IncomingTransitReceipt,
     ) -> bool {
-        self.transit_journal.register_incoming(receipt)
+        self.transit.transit_journal.register_incoming(receipt)
     }
 
     pub(crate) fn transit_attempt_acknowledged(&self, attempt_id: TransitAttemptId) -> bool {
-        self.transit_journal
+        self.transit
+            .transit_journal
             .outgoing(attempt_id)
             .is_some_and(|attempt| matches!(attempt.state, TransitAttemptState::Acknowledged))
     }
@@ -94,26 +101,27 @@ impl SimulationNode {
         attempt_id: TransitAttemptId,
         reason: String,
     ) {
-        self.transit_journal.quarantine(attempt_id, reason);
+        self.transit.transit_journal.quarantine(attempt_id, reason);
     }
 
     fn allocate_transit_attempt(&mut self, ship_id: ShipId) -> Result<TransitAttemptId, DawnError> {
         loop {
-            let sequence = self.transit_attempt_counter;
+            let sequence = self.transit.transit_attempt_counter;
             let next_sequence = sequence
                 .checked_add(1)
                 .ok_or(DawnError::TransitAttemptCounterOverflow(self.sector_id))?;
-            self.transit_attempt_counter = next_sequence;
+            self.transit.transit_attempt_counter = next_sequence;
             let attempt_id = TransitAttemptId::new(self.sector_id, ship_id, sequence);
-            if self.transit_journal.outgoing(attempt_id).is_none() {
+            if self.transit.transit_journal.outgoing(attempt_id).is_none() {
                 return Ok(attempt_id);
             }
         }
     }
 
     pub(crate) fn note_transit_commit_proposed(&mut self, attempt_id: TransitAttemptId) -> bool {
-        self.transit_journal
-            .mark_commit_proposed(attempt_id, self.current_tick)
+        self.transit
+            .transit_journal
+            .mark_commit_proposed(attempt_id, self.simulation.current_tick)
     }
 
     /// Validate and begin a Sector Transit (CLAUDE.md §4 Step 2).
@@ -139,18 +147,20 @@ impl SimulationNode {
         entry_pos: dawn_core::AbsolutePosition,
     ) -> Result<(Tick, DomainEvent), DawnError> {
         let &entity = self
+            .simulation
             .ships
             .index
             .get(&cmd.ship_id)
             .ok_or(DawnError::ShipNotFound(cmd.ship_id))?;
 
-        if self.world.transit_state(entity).is_in_transit() {
+        if self.simulation.world.transit_state(entity).is_in_transit() {
             return Err(DawnError::ShipInTransit(cmd.ship_id));
         }
 
-        self.world
+        self.simulation
+            .world
             .set_transit_state(entity, TransitState::InTransit { to: cmd.to });
-        let request_tick = self.current_tick;
+        let request_tick = self.simulation.current_tick;
         let event = DomainEvent::SectorTransitRequested(SectorTransitRequested {
             ship_id: cmd.ship_id,
             from: self.sector_id,
@@ -158,7 +168,7 @@ impl SimulationNode {
             request_tick,
             gate_id,
             entry_pos,
-            tick: self.current_tick,
+            tick: self.simulation.current_tick,
         });
         Ok((request_tick, event))
     }
@@ -173,21 +183,26 @@ impl SimulationNode {
         let ship_id = cmd.ship_id;
         let (request_tick, event) = self.begin_transit_with_route(cmd, gate_id, entry_pos)?;
         let Some(handoff) = self.handoff_for_transit(ship_id) else {
-            if let Some(&entity) = self.ships.index.get(&ship_id) {
-                self.world.set_transit_state(entity, TransitState::None);
+            if let Some(&entity) = self.simulation.ships.index.get(&ship_id) {
+                self.simulation
+                    .world
+                    .set_transit_state(entity, TransitState::None);
             }
             return Err(DawnError::ShipNotFound(ship_id));
         };
         let attempt_id = match self.allocate_transit_attempt(ship_id) {
             Ok(attempt_id) => attempt_id,
             Err(error) => {
-                if let Some(&entity) = self.ships.index.get(&ship_id) {
-                    self.world.set_transit_state(entity, TransitState::None);
+                if let Some(&entity) = self.simulation.ships.index.get(&ship_id) {
+                    self.simulation
+                        .world
+                        .set_transit_state(entity, TransitState::None);
                 }
                 return Err(error);
             }
         };
-        self.transit_journal
+        self.transit
+            .transit_journal
             .register_outgoing(OutgoingTransitAttempt {
                 attempt_id,
                 ship_id,
@@ -207,31 +222,35 @@ impl SimulationNode {
     }
 
     pub(crate) fn is_ship_in_transit(&self, ship_id: ShipId) -> bool {
-        self.ships
+        self.simulation
+            .ships
             .index
             .get(&ship_id)
-            .is_some_and(|&entity| self.world.transit_state(entity).is_in_transit())
+            .is_some_and(|&entity| self.simulation.world.transit_state(entity).is_in_transit())
     }
 
     /// Whether a `TransitCommand` for `ship_id` would currently be accepted
     /// (Ship exists and is not already in transit). Used to reject commands
     /// up front, before proposing to the Raft Log (INV-006).
     pub fn can_propose_transit(&self, ship_id: ShipId) -> bool {
-        self.ships
+        self.simulation
+            .ships
             .index
             .get(&ship_id)
-            .is_some_and(|&entity| !self.world.transit_state(entity).is_in_transit())
+            .is_some_and(|&entity| !self.simulation.world.transit_state(entity).is_in_transit())
     }
 
     #[cfg(test)]
     pub(crate) fn set_tackled_by_for_test(&mut self, ship_id: ShipId, tacklers: Vec<ShipId>) {
-        let Some(&entity) = self.ships.index.get(&ship_id) else {
+        let Some(&entity) = self.simulation.ships.index.get(&ship_id) else {
             return;
         };
         let _ = self
+            .simulation
             .world
             .remove_one::<dawn_ecs::components::TackledComp>(entity);
         let _ = self
+            .simulation
             .world
             .insert_one(entity, dawn_ecs::components::TackledComp { tacklers });
     }
@@ -274,18 +293,23 @@ impl SimulationNode {
             .begin_transit_with_route(TransitCommand { ship_id, to }, gate_id, entry_pos)
             .ok()?;
         let Some(handoff) = self.handoff_for_transit(ship_id) else {
-            if let Some(&entity) = self.ships.index.get(&ship_id) {
-                self.world.set_transit_state(entity, TransitState::None);
+            if let Some(&entity) = self.simulation.ships.index.get(&ship_id) {
+                self.simulation
+                    .world
+                    .set_transit_state(entity, TransitState::None);
             }
             return None;
         };
         let Ok(attempt_id) = self.allocate_transit_attempt(ship_id) else {
-            if let Some(&entity) = self.ships.index.get(&ship_id) {
-                self.world.set_transit_state(entity, TransitState::None);
+            if let Some(&entity) = self.simulation.ships.index.get(&ship_id) {
+                self.simulation
+                    .world
+                    .set_transit_state(entity, TransitState::None);
             }
             return None;
         };
-        self.transit_journal
+        self.transit
+            .transit_journal
             .register_outgoing(OutgoingTransitAttempt {
                 attempt_id,
                 ship_id,
@@ -343,17 +367,17 @@ impl SimulationNode {
             from_sector: from,
             to_sector: to,
             entry_pos,
-            tick: self.current_tick,
+            tick: self.simulation.current_tick,
         })];
 
-        let from_system = self.sector_map.galaxy.system_for_sector(from);
-        let to_system = self.sector_map.galaxy.system_for_sector(to);
+        let from_system = self.topology.sector_map.galaxy.system_for_sector(from);
+        let to_system = self.topology.sector_map.galaxy.system_for_sector(to);
         if from_system != to_system {
             events.push(DomainEvent::StarSystemChanged(StarSystemChanged {
                 ship_id,
                 from_system,
                 to_system,
-                tick: self.current_tick,
+                tick: self.simulation.current_tick,
             }));
         }
         events
@@ -366,13 +390,13 @@ impl SimulationNode {
     }
 
     pub(crate) fn handoff_for_transit(&self, ship_id: ShipId) -> Option<TransitHandoffState> {
-        let &entity = self.ships.index.get(&ship_id)?;
-        if !self.world.transit_state(entity).is_in_transit() {
+        let &entity = self.simulation.ships.index.get(&ship_id)?;
+        if !self.simulation.world.transit_state(entity).is_in_transit() {
             return None;
         }
-        let velocity = self.world.get::<VelocityComp>(entity)?.0;
+        let velocity = self.simulation.world.get::<VelocityComp>(entity)?.0;
         let (current_shield, current_armor, current_hull, is_destroyed) = {
-            let hull = self.world.get::<HullComp>(entity)?;
+            let hull = self.simulation.world.get::<HullComp>(entity)?;
             (
                 hull.shield(),
                 hull.armor(),
@@ -380,24 +404,31 @@ impl SimulationNode {
                 hull.is_destroyed(),
             )
         };
-        let capacitor = self.world.get::<CapacitorComp>(entity).map(|c| c.current);
+        let capacitor = self
+            .simulation
+            .world
+            .get::<CapacitorComp>(entity)
+            .map(|c| c.current);
         let fitting = self
+            .simulation
             .world
             .get::<FittingComp>(entity)
             .map(|f| f.to_snapshot())
             .unwrap_or_else(FittingSnapshot::empty);
         let ship_type_id = self
+            .simulation
             .ships
             .type_ids
             .get(&ship_id)
             .copied()
             .unwrap_or(ShipTypeId(0));
         let inventory = self
+            .simulation
             .world
             .get::<InventoryComp>(entity)
             .map(|inv| inv.items.clone())
             .unwrap_or_default();
-        let owner_player_id = self.ships.owners.get(&ship_id).copied();
+        let owner_player_id = self.players.owners.get(&ship_id).copied();
         let (resume_ticket, pending_resume_ticket) = if owner_player_id.is_some() {
             self.client_resume_tickets(ship_id)
                 .map(|(current, pending)| (Some(current), pending))
@@ -447,6 +478,7 @@ impl SimulationNode {
         request_tick: Tick,
     ) {
         let Some(attempt_id) = self
+            .transit
             .transit_journal
             .outgoing_for_ship(ship_id)
             .map(|attempt| attempt.attempt_id)
@@ -464,6 +496,7 @@ impl SimulationNode {
         request_tick: Tick,
     ) {
         let Some(handoff) = self
+            .transit
             .transit_journal
             .outgoing(attempt_id)
             .map(|attempt| attempt.handoff.clone())
@@ -472,14 +505,14 @@ impl SimulationNode {
         };
         let Some(event) = self.complete_outgoing_state(&handoff, to, entry_pos, request_tick)
         else {
-            self.transit_journal.quarantine(
+            self.transit.transit_journal.quarantine(
                 attempt_id,
                 "pending Transit source Ship is missing during Ack cleanup".to_owned(),
             );
             return;
         };
         self.emit_event(event);
-        let _ = self.transit_journal.mark_acknowledged(attempt_id);
+        let _ = self.transit.transit_journal.mark_acknowledged(attempt_id);
     }
 
     fn complete_outgoing_state(
@@ -489,7 +522,7 @@ impl SimulationNode {
         entry_pos: dawn_core::AbsolutePosition,
         request_tick: Tick,
     ) -> Option<DomainEvent> {
-        if !self.ships.index.contains_key(&handoff.ship_id) {
+        if !self.simulation.ships.index.contains_key(&handoff.ship_id) {
             return None;
         }
         self.remove_ship(handoff.ship_id);
@@ -500,7 +533,7 @@ impl SimulationNode {
                 to,
                 request_tick,
                 entry_pos,
-                tick: self.current_tick,
+                tick: self.simulation.current_tick,
             },
         ))
     }
@@ -518,7 +551,7 @@ impl SimulationNode {
             from,
             entry_pos,
             request_tick,
-            self.current_tick,
+            self.simulation.current_tick,
         ) {
             self.emit_event(event);
         }
@@ -534,35 +567,40 @@ impl SimulationNode {
     ) -> (dawn_core::AnchorId, Position) {
         self.insert_to_world(handoff.ship_id, Position::ORIGIN, handoff.velocity);
         let entity = *self
+            .simulation
             .ships
             .index
             .get(&handoff.ship_id)
             .expect("inserted Transit handoff must have an ECS entity");
         self.place_entity_at_absolute(entity, entry_pos);
         let anchor = self
+            .simulation
             .world
             .ship_anchor(entity)
             .expect("Transit ships always carry AnchorComp");
         let offset = self
+            .simulation
             .world
             .get::<PositionComp>(entity)
             .expect("Transit ships always carry PositionComp")
             .0;
 
-        self.ships
+        self.simulation
+            .ships
             .type_ids
             .insert(handoff.ship_id, handoff.ship_type_id);
         let base = self
+            .game_data
             .ship_type_registry
             .get(&handoff.ship_type_id)
             .map(|def| ShipStatsComp::from_base(&def.base_stats))
             .unwrap_or(ShipStatsComp::NPC);
-        self.base_stats.insert(handoff.ship_id, base);
-        self.world.set_ship_stats(entity, base);
-        let fitting = FittingComp::from_snapshot(&handoff.fitting, &self.module_registry);
-        let _ = self.world.insert_one(entity, fitting);
+        self.simulation.base_stats.insert(handoff.ship_id, base);
+        self.simulation.world.set_ship_stats(entity, base);
+        let fitting = FittingComp::from_snapshot(&handoff.fitting, &self.game_data.module_registry);
+        let _ = self.simulation.world.insert_one(entity, fitting);
         self.reapply_fitting(handoff.ship_id);
-        if let Some(mut hull) = self.world.get_mut::<HullComp>(entity) {
+        if let Some(mut hull) = self.simulation.world.get_mut::<HullComp>(entity) {
             hull.set_hp(
                 handoff.current_shield,
                 handoff.current_armor,
@@ -571,7 +609,7 @@ impl SimulationNode {
         }
         if let Some(player_id) = handoff.owner_player_id {
             if let Some(resume_ticket) = handoff.resume_ticket {
-                self.repositories
+                self.persistence
                     .record_client_ownership_with_pending(
                         handoff.ship_id,
                         player_id,
@@ -583,9 +621,12 @@ impl SimulationNode {
             debug_assert!(self.adopt_player_ship(handoff.ship_id, player_id));
         }
         if let Some(current) = handoff.capacitor {
-            let _ = self.world.insert_one(entity, CapacitorComp { current });
+            let _ = self
+                .simulation
+                .world
+                .insert_one(entity, CapacitorComp { current });
         }
-        let _ = self.world.insert_one(
+        let _ = self.simulation.world.insert_one(
             entity,
             InventoryComp {
                 items: handoff.inventory.clone(),
@@ -648,14 +689,15 @@ impl SimulationNode {
         e: &dawn_core::events::SectorTransitRequested,
     ) {
         if e.from == self.sector_id {
-            if let Some(&entity) = self.ships.index.get(&e.ship_id) {
-                self.world
+            if let Some(&entity) = self.simulation.ships.index.get(&e.ship_id) {
+                self.simulation
+                    .world
                     .set_transit_state(entity, dawn_ecs::TransitState::InTransit { to: e.to });
             }
         }
 
-        if e.tick > self.current_tick {
-            self.current_tick = e.tick;
+        if e.tick > self.simulation.current_tick {
+            self.simulation.current_tick = e.tick;
         }
     }
 
@@ -669,14 +711,18 @@ impl SimulationNode {
         e: &dawn_core::events::SectorTransitAborted,
     ) {
         if e.from == self.sector_id {
-            if let Some(&entity) = self.ships.index.get(&e.ship_id) {
-                if self.world.transit_state(entity) == (TransitState::InTransit { to: e.to }) {
-                    self.world.set_transit_state(entity, TransitState::None);
+            if let Some(&entity) = self.simulation.ships.index.get(&e.ship_id) {
+                if self.simulation.world.transit_state(entity)
+                    == (TransitState::InTransit { to: e.to })
+                {
+                    self.simulation
+                        .world
+                        .set_transit_state(entity, TransitState::None);
                 }
             }
         }
-        if e.tick > self.current_tick {
-            self.current_tick = e.tick;
+        if e.tick > self.simulation.current_tick {
+            self.simulation.current_tick = e.tick;
         }
     }
 
@@ -693,9 +739,9 @@ impl SimulationNode {
         if self.sector_id == e.from {
             self.remove_ship(e.handoff.ship_id);
         } else if self.sector_id == e.to {
-            if self.ships.index.contains_key(&e.handoff.ship_id) {
-                if e.tick > self.current_tick {
-                    self.current_tick = e.tick;
+            if self.simulation.ships.index.contains_key(&e.handoff.ship_id) {
+                if e.tick > self.simulation.current_tick {
+                    self.simulation.current_tick = e.tick;
                 }
                 return;
             }
@@ -707,8 +753,8 @@ impl SimulationNode {
                 e.tick,
             );
         }
-        if e.tick > self.current_tick {
-            self.current_tick = e.tick;
+        if e.tick > self.simulation.current_tick {
+            self.simulation.current_tick = e.tick;
         }
     }
 }
@@ -740,9 +786,9 @@ mod tests {
         })
         .unwrap();
 
-        let entity = *node.ships.index.get(&ship_id).unwrap();
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
         assert_eq!(
-            node.world.transit_state(entity),
+            node.simulation.world.transit_state(entity),
             TransitState::InTransit { to: SectorId(1) }
         );
 
@@ -761,14 +807,21 @@ mod tests {
     fn prepare_transit_commit_rolls_back_when_handoff_snapshot_is_incomplete() {
         let mut node = mem_node();
         let ship_id = node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
-        let entity = *node.ships.index.get(&ship_id).unwrap();
-        let _ = node.world.remove_one::<VelocityComp>(entity).unwrap();
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
+        let _ = node
+            .simulation
+            .world
+            .remove_one::<VelocityComp>(entity)
+            .unwrap();
         let event_count = node.total_event_count();
 
         assert!(node
             .prepare_transit_commit(ship_id, SectorId(1), None)
             .is_none());
-        assert_eq!(node.world.transit_state(entity), TransitState::None);
+        assert_eq!(
+            node.simulation.world.transit_state(entity),
+            TransitState::None
+        );
         assert_eq!(node.total_event_count(), event_count);
         assert!(node.can_propose_transit(ship_id));
         assert!(!node
@@ -781,14 +834,17 @@ mod tests {
     fn transit_attempt_counter_exhaustion_does_not_freeze_the_ship() {
         let mut node = mem_node();
         let ship_id = node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
-        let entity = *node.ships.index.get(&ship_id).unwrap();
-        node.transit_attempt_counter = u64::MAX;
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
+        node.transit.transit_attempt_counter = u64::MAX;
         let event_count = node.total_event_count();
 
         assert!(node
             .prepare_transit_commit(ship_id, SectorId(1), None)
             .is_none());
-        assert_eq!(node.world.transit_state(entity), TransitState::None);
+        assert_eq!(
+            node.simulation.world.transit_state(entity),
+            TransitState::None
+        );
         assert_eq!(node.total_event_count(), event_count);
         assert!(node.can_propose_transit(ship_id));
     }
@@ -850,7 +906,7 @@ mod tests {
         assert_eq!(snapshot.ship_id, ship_id);
 
         assert!(
-            node.ships.index.contains_key(&ship_id),
+            node.simulation.ships.index.contains_key(&ship_id),
             "the ship must stay in this Sector's ECS until complete_outgoing_transit"
         );
         assert!(
@@ -876,8 +932,9 @@ mod tests {
         })
         .unwrap();
         let snapshot = node.export_transit(ship_id).unwrap();
-        let entity = *node.ships.index.get(&ship_id).unwrap();
-        node.world
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
+        node.simulation
+            .world
             .get_mut::<VelocityComp>(entity)
             .expect("transit ship must retain its velocity component")
             .0 = Velocity::new(99.0, 0.0, 0.0);
@@ -886,7 +943,7 @@ mod tests {
         node.complete_outgoing_transit(snapshot.ship_id, SectorId(1), entry_pos, Tick::ZERO);
 
         assert!(
-            !node.ships.index.contains_key(&ship_id),
+            !node.simulation.ships.index.contains_key(&ship_id),
             "ship must leave the from-sector ECS"
         );
         assert_eq!(node.ship_count(), 0);
@@ -960,11 +1017,11 @@ mod tests {
             "owners map must not retain a dangling entry after transit"
         );
         assert!(
-            !node.ships.owners.contains_key(&ship_id),
+            !node.players.owners.contains_key(&ship_id),
             "owners map must be cleared"
         );
         assert!(
-            !node.ships.active_ship.contains_key(&player_id),
+            !node.players.active_ship.contains_key(&player_id),
             "active_ship map must be cleared"
         );
     }
@@ -1167,8 +1224,9 @@ mod tests {
 
         let player_id = from_node.next_player_id();
         let ship_id = from_node.spawn_player_ship_at_pub(player_id, Position::ORIGIN);
-        let before_entity = *from_node.ships.index.get(&ship_id).unwrap();
+        let before_entity = *from_node.simulation.ships.index.get(&ship_id).unwrap();
         let before_len = from_node
+            .simulation
             .world
             .get::<dawn_ecs::components::InventoryComp>(before_entity)
             .unwrap()
@@ -1188,8 +1246,9 @@ mod tests {
         let snapshot = from_node.export_transit(ship_id).unwrap();
         to_node.import_transit(&snapshot, SectorId(0), entry_pos.into(), Tick::ZERO);
 
-        let after_entity = *to_node.ships.index.get(&ship_id).unwrap();
+        let after_entity = *to_node.simulation.ships.index.get(&ship_id).unwrap();
         let after = to_node
+            .simulation
             .world
             .get::<dawn_ecs::components::InventoryComp>(after_entity)
             .unwrap();
@@ -1441,9 +1500,9 @@ mod tests {
             },
         ));
 
-        let entity = *node.ships.index.get(&ship_id).unwrap();
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
         assert_eq!(
-            node.world.transit_state(entity),
+            node.simulation.world.transit_state(entity),
             TransitState::InTransit { to: SectorId(1) }
         );
     }
@@ -1497,8 +1556,11 @@ mod tests {
             },
         ));
 
-        let entity = *node.ships.index.get(&ship_id).unwrap();
-        assert_eq!(node.world.transit_state(entity), TransitState::None);
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
+        assert_eq!(
+            node.simulation.world.transit_state(entity),
+            TransitState::None
+        );
     }
 
     #[test]
@@ -1534,9 +1596,9 @@ mod tests {
             node.apply_event_pub(event);
         }
 
-        let entity = *node.ships.index.get(&ship_id).unwrap();
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
         assert_eq!(
-            node.world.transit_state(entity),
+            node.simulation.world.transit_state(entity),
             TransitState::InTransit { to: SectorId(2) }
         );
     }
@@ -1558,7 +1620,7 @@ mod tests {
         ));
 
         assert!(
-            !node.ships.index.contains_key(&ship_id),
+            !node.simulation.ships.index.contains_key(&ship_id),
             "a Sector replaying its own SectorTransitCompleted as the source \
              must not resurrect the ship it exported"
         );
@@ -1586,13 +1648,13 @@ mod tests {
         ));
 
         assert!(
-            node.ships.index.contains_key(&ship_id),
+            node.simulation.ships.index.contains_key(&ship_id),
             "a Sector replaying SectorTransitCompleted as the destination \
              must materialize the imported ship from the event alone"
         );
-        let entity = *node.ships.index.get(&ship_id).unwrap();
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
         assert_eq!(
-            node.world.get::<VelocityComp>(entity).unwrap().0,
+            node.simulation.world.get::<VelocityComp>(entity).unwrap().0,
             Velocity::new(1.0, 0.0, 0.0)
         );
     }
@@ -1718,8 +1780,8 @@ mod tests {
             &[],
         );
 
-        let owned_by_source = restored_from.ships.index.contains_key(&ship_id);
-        let owned_by_destination = restored_to.ships.index.contains_key(&ship_id);
+        let owned_by_source = restored_from.simulation.ships.index.contains_key(&ship_id);
+        let owned_by_destination = restored_to.simulation.ships.index.contains_key(&ship_id);
         assert!(
             !owned_by_source,
             "the source Sector must not resurrect a ship it transferred away"
@@ -1735,9 +1797,14 @@ mod tests {
              both and never neither"
         );
 
-        let entity = *restored_to.ships.index.get(&ship_id).unwrap();
+        let entity = *restored_to.simulation.ships.index.get(&ship_id).unwrap();
         assert_eq!(
-            restored_to.world.get::<VelocityComp>(entity).unwrap().0,
+            restored_to
+                .simulation
+                .world
+                .get::<VelocityComp>(entity)
+                .unwrap()
+                .0,
             Velocity::new(1.0, 0.0, 0.0),
             "velocity"
         );
@@ -1820,13 +1887,13 @@ mod tests {
         );
 
         assert!(
-            restored.ships.index.contains_key(&ship_id),
+            restored.simulation.ships.index.contains_key(&ship_id),
             "a restart before the Commit lands must not lose the ship -- it \
              is still owned by the source Sector, just pending"
         );
-        let entity = *restored.ships.index.get(&ship_id).unwrap();
+        let entity = *restored.simulation.ships.index.get(&ship_id).unwrap();
         assert_eq!(
-            restored.world.transit_state(entity),
+            restored.simulation.world.transit_state(entity),
             TransitState::InTransit { to: SectorId(1) },
             "the ship must still be marked InTransit, so it stays frozen \
              (Movement/Combat) and a retried Commit is still meaningful"

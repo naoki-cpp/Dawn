@@ -33,27 +33,28 @@ impl SimulationNode {
         }
 
         let mut bots: Vec<BotState> = Vec::new();
-        for (&ship_id, &entity) in &self.ships.index {
-            if self.world.get::<IsBotComp>(entity).is_none() {
+        for (&ship_id, &entity) in &self.simulation.ships.index {
+            if self.simulation.world.get::<IsBotComp>(entity).is_none() {
                 continue;
             }
             if self
+                .simulation
                 .world
                 .get::<HullComp>(entity)
                 .is_some_and(|hull| hull.is_destroyed())
             {
                 continue;
             }
-            let Some(&player_id) = self.ships.owners.get(&ship_id) else {
+            let Some(&player_id) = self.players.owners.get(&ship_id) else {
                 continue;
             };
-            let Some(pos) = self.world.get::<PositionComp>(entity) else {
+            let Some(pos) = self.simulation.world.get::<PositionComp>(entity) else {
                 continue;
             };
-            let Some(stats) = self.world.get::<ShipStatsComp>(entity) else {
+            let Some(stats) = self.simulation.world.get::<ShipStatsComp>(entity) else {
                 continue;
             };
-            let Some(lock) = self.world.get::<LockComp>(entity) else {
+            let Some(lock) = self.simulation.world.get::<LockComp>(entity) else {
                 continue;
             };
             let locked: Vec<ShipId> = lock
@@ -66,6 +67,7 @@ impl SimulationNode {
             // (e.g. Afterburner) would drain the capacitor pointlessly while
             // the bot is braking to hold its firing position.
             let weapon_modules = self
+                .simulation
                 .world
                 .get::<FittingComp>(entity)
                 .map(|f| {
@@ -75,7 +77,7 @@ impl SimulationNode {
                         .collect()
                 })
                 .unwrap_or_default();
-            let hp_fraction = if let Some(hull) = self.world.get::<HullComp>(entity) {
+            let hp_fraction = if let Some(hull) = self.simulation.world.get::<HullComp>(entity) {
                 let max_hp = stats.max_shield + stats.max_armor + stats.max_hull;
                 let cur_hp = hull.total_hp();
                 if max_hp > 0.0 {
@@ -86,7 +88,7 @@ impl SimulationNode {
             } else {
                 1.0
             };
-            let is_warping = self.world.get::<WarpComp>(entity).is_some();
+            let is_warping = self.simulation.world.get::<WarpComp>(entity).is_some();
             bots.push(BotState {
                 player_id,
                 ship_id,
@@ -107,24 +109,25 @@ impl SimulationNode {
             position: Position,
         }
         let mut targets: Vec<TargetInfo> = Vec::new();
-        for (&ship_id, &entity) in &self.ships.index {
-            if self.world.get::<IsBotComp>(entity).is_some() {
+        for (&ship_id, &entity) in &self.simulation.ships.index {
+            if self.simulation.world.get::<IsBotComp>(entity).is_some() {
                 continue;
             }
             if self
+                .simulation
                 .world
                 .get::<HullComp>(entity)
                 .is_some_and(|hull| hull.is_destroyed())
             {
                 continue;
             }
-            if self.world.get::<IsNpcComp>(entity).is_some() {
+            if self.simulation.world.get::<IsNpcComp>(entity).is_some() {
                 continue;
             }
-            if !self.ships.owners.contains_key(&ship_id) {
+            if !self.players.owners.contains_key(&ship_id) {
                 continue;
             }
-            let Some(pos) = self.world.get::<PositionComp>(entity) else {
+            let Some(pos) = self.simulation.world.get::<PositionComp>(entity) else {
                 continue;
             };
             let abs = self.entity_absolute(entity, pos.0);
@@ -141,6 +144,7 @@ impl SimulationNode {
         // ── 3. Issue commands (same pipeline as human player) ─────────────────
         // Collect gate list once — shared by all bots this tick.
         let gates: Vec<(dawn_core::JumpGateId, Position)> = self
+            .topology
             .sector_map
             .gates
             .iter()
@@ -194,7 +198,8 @@ impl SimulationNode {
             if !already_targeting {
                 // Queue lock command for the NEXT tick's LockSystem.
                 // (LockSystem already ran this tick before process_bots.)
-                self.pending_bot_lock_commands
+                self.simulation
+                    .pending_bot_lock_commands
                     .push(dawn_core::LockOnCommand {
                         ship_id: bot.ship_id,
                         target_id: target.ship_id,
@@ -327,7 +332,14 @@ mod tests {
             node.tick_with_lock_commands(std::slice::from_ref(&lock_cmd));
         }
 
-        let gate_id = node.sector_map.gates.keys().next().copied().unwrap();
+        let gate_id = node
+            .topology
+            .sector_map
+            .gates
+            .keys()
+            .next()
+            .copied()
+            .unwrap();
         assert!(
             !node.can_propose_warp(bot_ship_id, dawn_core::WarpTarget::Gate(gate_id)),
             "bot should be tackled"

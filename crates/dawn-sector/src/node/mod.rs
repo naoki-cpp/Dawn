@@ -1,4 +1,4 @@
-//! `SimulationNode` — the current broad simulation/composition unit for one Sector.
+//! `SimulationNode` — the composition root for one Sector's state owners.
 //!
 //! The authoritative engine is storage-independent. Every normal construction
 //! and restore path requires a complete validated [`GameDataCatalog`].
@@ -20,8 +20,10 @@
 //! authority and reconciliation; #275 splits this broad aggregate into explicit
 //! state owners.
 //!
-//! Until those migrations land, comments below distinguish current in-memory or
-//! SQLite adapter mechanics from the authority selected by ADR-0049.
+//! The composition root still wires the current SQLite adapter for compatibility
+//! with existing station/admission APIs. That adapter is isolated in
+//! `PersistenceBoundary`, outside the domain state owners and outside the durable
+//! recovery authority selected by ADR-0049.
 
 mod admission_provisional;
 mod apply_event;
@@ -45,6 +47,7 @@ mod ship_command;
 mod ship_registry;
 mod snapshot_io;
 mod spawner_logic;
+mod state;
 mod station;
 mod station_inventory;
 mod station_lifecycle;
@@ -73,21 +76,25 @@ use coordinates::debug_assert_missing_anchor;
 
 use sector_map::SectorMap;
 use ship_registry::ShipRegistry;
+use state::{
+    FrameOutputs, GameData, PersistenceBoundary, PlayerState, SectorTopology, SimulationState,
+    StationState, TransitState,
+};
 
-use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use dawn_core::MIN_WARP_DISTANCE;
 use dawn_core::{
-    ship_type::{ShipTypeDefinition, ShipTypeId},
-    DomainEvent, JumpGateDef, JumpGateId, ModuleDefinition, ModuleId, NodeId, PlayerId, Position,
-    SectorBounds, SectorId, ShipId, StationDef, StationId, Tick,
+    DomainEvent, JumpGateDef, JumpGateId, NodeId, Position, SectorBounds, SectorId, ShipId,
+    StationDef, StationId, Tick,
 };
 use dawn_ecs::{
     components::{PositionComp, ShipStatsComp, WarpComp},
     Entity, SimWorld,
 };
 
+#[cfg(test)]
+use dawn_core::{ship_type::ShipTypeDefinition, ModuleDefinition, ModuleId};
 #[cfg(test)]
 use dawn_ecs::components::{CapacitorComp, FittingComp, HullComp};
 
@@ -173,91 +180,32 @@ pub struct FittedModuleStatus {
 
 // -- SimulationNode ----------------------------------------------------------
 
-/// Current single-Sector authoritative simulation engine.
+/// Single-Sector composition root for the authoritative simulation engine.
 ///
-/// Persistence is owned by the runtime boundary. The engine only prepares and
-/// exposes public outputs; it never appends them to a journal itself.
+/// The recovery journal is owned by the runtime boundary. The engine only
+/// prepares and exposes public outputs; it never appends them to a journal
+/// itself. The compatibility SQLite adapter is isolated in `PersistenceBoundary`
+/// until the runtime-owned repository ports replace the legacy API.
 pub struct SimulationNode {
     node_id: NodeId,
     sector_id: SectorId,
     bounds: SectorBounds,
-    world: SimWorld,
-    /// Public events produced by state-changing operations since the last
-    /// runtime drain.
-    pending_events: Vec<DomainEvent>,
-    current_tick: Tick,
-    id_counter: u64,
-    /// Ship identity and ownership maps (entity index, type ids, player ownership).
-    ships: ShipRegistry,
-    /// Immutable module definitions shared from the validated catalog.
-    module_registry: Arc<BTreeMap<ModuleId, ModuleDefinition>>,
-    /// Immutable ship-type definitions shared from the validated catalog.
-    ship_type_registry: Arc<BTreeMap<ShipTypeId, ShipTypeDefinition>>,
-    /// Content identity of the catalog used to materialize this world.
-    catalog_fingerprint: u64,
-    /// Next source-local sequence used to allocate opaque Transit attempts.
-    /// Persisted with the recovery state; it is independent of logical Tick.
-    transit_attempt_counter: u64,
-    /// Bare ShipStats without fitting. Used as the base for fitting aggregation.
-    base_stats: HashMap<ShipId, ShipStatsComp>,
-    /// Current in-memory PlayerId allocation counter. ADR-0049/#277 requires
-    /// recovery to advance allocation beyond every materialized or durably
-    /// reserved identity; this field alone is not the final allocator authority.
-    player_id_counter: u64,
-    /// In-memory claim set for fresh admissions currently being processed.
-    ///
-    /// The **claim set itself** is non-durable and intentionally omitted from
-    /// snapshots. The reserved `PlayerId` / `ShipId` is different: once exposed
-    /// by a durable #277 reservation it is permanently consumed and may not be
-    /// reused after crash, abort, or expiry.
-    pending_fresh_admissions: HashSet<ShipId>,
-    /// Ship-level lock held by an in-flight resume handshake.
-    /// Non-durable concurrency guard: losing this lock on crash does not change
-    /// durable ownership/ticket authority, which #277 must recover/reconcile.
-    pending_resume_admissions: HashMap<ShipId, PlayerId>,
-    /// Lock-on commands queued by the bot AI during `process_bots()`.
-    ///
-    /// Bot AI runs after the LockSystem each tick. These commands are held here
-    /// and injected into the LockSystem at the start of the NEXT tick. Because
-    /// they affect a later authoritative Tick, ADR-0049 classifies this queue as
-    /// recovery authority until same-Tick consumption or another redesign removes
-    /// the cross-Tick state. Checkpoints and full Tick RecoveryDeltas persist it.
-    pending_bot_lock_commands: Vec<dawn_core::LockOnCommand>,
-    /// Static navigation topology for this Sector (gates, bodies, star map).
-    sector_map: SectorMap,
-    /// Per-body coordinate anchors (ADR-0029): absolute Sector-local positions
-    /// in f64, derived from the topology supplied at construction.
-    anchor_table: crate::anchor::AnchorTable,
-    /// Per-Sector population backstop (ADR-0018). Defaults to [`POPULATION_CAP`];
-    /// tunable via [`Self::set_population_cap`].
-    population_cap: usize,
-    /// Runtime persistence boundary for admission/identity protocol state and
-    /// the Station projection. The database adapter is kept behind explicit
-    /// repository views; these rows are not Sector recovery authority.
-    repositories: repositories::SectorRepository,
-    /// Current docked station per ship. Docking is authoritative state, so
-    /// station operations must consult this rather than raw spatial proximity.
-    docked_ships: BTreeMap<ShipId, StationId>,
-    /// Current docked station context per player. This is separate from the
-    /// active ship map so station access can survive ship-specific actions.
-    docked_players: BTreeMap<PlayerId, StationId>,
-    /// Current in-memory auto-jump work queue populated by `process_warp()` and
-    /// drained by the runtime to propose a Raft handoff.
-    ///
-    /// ADR-0049 explicitly forbids this queue from being the sole durable source
-    /// after an auto-jump Warp arrival commits. The committed transition must
-    /// also create durable replayable/idempotent continuation state; #276 may
-    /// represent that as a Transit Saga attempt.
-    pending_auto_jumps: Vec<(ShipId, JumpGateId)>,
-    /// Ships that finished a warp this tick (ADR-0029 warp-arrival authority).
-    /// This is deliberately lossy presentation output: the serve loop drains it
-    /// and sends an authoritative `PositionSnap`; reconnect/current-state sync can
-    /// repair a missed presentation correction. It is not the durable auto-jump
-    /// obligation described above.
-    completed_warps: Vec<ShipId>,
-    /// In-memory transit policy projection maintained from the engine's own
-    /// durable Saga member. Public events are not scanned to reconstruct it.
-    transit_journal: TransitJournal,
+    /// ECS, ship identity, tick, and bot cross-tick state.
+    simulation: SimulationState,
+    /// Player ownership and admission state.
+    players: PlayerState,
+    /// Station projection and docking state.
+    stations: StationState,
+    /// Composition-wired persistence adapter, kept outside all domain state owners.
+    persistence: PersistenceBoundary,
+    /// Transit attempts and receipts, restored from the #276 Saga snapshot.
+    transit: TransitState,
+    /// Static topology and anchor calculations.
+    topology: SectorTopology,
+    /// Validated immutable game data.
+    game_data: GameData,
+    /// Runtime-drained public and presentation outputs.
+    frame_outputs: FrameOutputs,
 }
 
 impl std::fmt::Debug for SimulationNode {
@@ -265,12 +213,12 @@ impl std::fmt::Debug for SimulationNode {
         f.debug_struct("SimulationNode")
             .field("node_id", &self.node_id)
             .field("sector_id", &self.sector_id)
-            .field("current_tick", &self.current_tick)
+            .field("current_tick", &self.simulation.current_tick)
             .field("ship_count", &self.ship_count())
             .field("total_event_count", &self.total_event_count())
-            .field("population_cap", &self.population_cap)
-            .field("pending_auto_jumps", &self.pending_auto_jumps)
-            .field("completed_warps", &self.completed_warps)
+            .field("population_cap", &self.players.population_cap)
+            .field("pending_auto_jumps", &self.frame_outputs.pending_auto_jumps)
+            .field("completed_warps", &self.frame_outputs.completed_warps)
             .finish_non_exhaustive()
     }
 }
@@ -352,7 +300,7 @@ impl SimulationNode {
         for event in &events {
             node.apply_event(event);
         }
-        node.pending_events = store
+        node.frame_outputs.pending_events = store
             .iter_from(0)
             .map(|record| record.event.clone())
             .collect();
@@ -375,30 +323,42 @@ impl SimulationNode {
             node_id,
             sector_id,
             bounds,
-            world: SimWorld::new(sector_id),
-            pending_events: Vec::new(),
-            current_tick: Tick::ZERO,
-            id_counter: 0,
-            ships: ShipRegistry::new(),
-            module_registry: catalog.module_index(),
-            ship_type_registry: catalog.ship_type_index(),
-            catalog_fingerprint: catalog.fingerprint(),
-            transit_attempt_counter: 0,
-            base_stats: HashMap::new(),
-            player_id_counter: 0,
-            pending_fresh_admissions: HashSet::new(),
-            pending_resume_admissions: HashMap::new(),
-            pending_bot_lock_commands: Vec::new(),
-            sector_map,
-            anchor_table,
-            population_cap: POPULATION_CAP,
-            repositories: repositories::SectorRepository::open_in_memory()
-                .expect("in-memory repository never fails to open"),
-            docked_ships: BTreeMap::new(),
-            docked_players: BTreeMap::new(),
-            pending_auto_jumps: Vec::new(),
-            completed_warps: Vec::new(),
-            transit_journal: TransitJournal::new(sector_id),
+            simulation: SimulationState {
+                world: SimWorld::new(sector_id),
+                current_tick: Tick::ZERO,
+                id_counter: 0,
+                ships: ShipRegistry::new(),
+                base_stats: std::collections::HashMap::new(),
+                pending_bot_lock_commands: Vec::new(),
+            },
+            players: PlayerState {
+                player_id_counter: 0,
+                active_ship: std::collections::HashMap::new(),
+                owners: std::collections::HashMap::new(),
+                pending_fresh_admissions: std::collections::HashSet::new(),
+                pending_resume_admissions: std::collections::HashMap::new(),
+                population_cap: POPULATION_CAP,
+            },
+            stations: StationState::empty(),
+            persistence: PersistenceBoundary::in_memory(),
+            transit: TransitState {
+                transit_attempt_counter: 0,
+                transit_journal: TransitJournal::new(sector_id),
+            },
+            topology: SectorTopology {
+                sector_map,
+                anchor_table,
+            },
+            game_data: GameData {
+                module_registry: catalog.module_index(),
+                ship_type_registry: catalog.ship_type_index(),
+                catalog_fingerprint: catalog.fingerprint(),
+            },
+            frame_outputs: FrameOutputs {
+                pending_events: Vec::new(),
+                pending_auto_jumps: Vec::new(),
+                completed_warps: Vec::new(),
+            },
         }
     }
 
@@ -486,13 +446,13 @@ impl SimulationNode {
     /// absent.
     pub fn at_population_cap(&self) -> bool {
         self.ship_count()
-            .saturating_add(self.pending_fresh_admissions.len())
-            >= self.population_cap
+            .saturating_add(self.players.pending_fresh_admissions.len())
+            >= self.players.population_cap
     }
 
     /// Override the per-Sector population backstop (default [`POPULATION_CAP`]).
     pub fn set_population_cap(&mut self, cap: usize) {
-        self.population_cap = cap;
+        self.players.population_cap = cap;
     }
 
     /// Point the current repository port at a real on-disk adapter instead of
@@ -504,8 +464,7 @@ impl SimulationNode {
     /// durable protocol authority with explicit reconciliation. #272 removes the
     /// repository object from the pure engine.
     pub fn open_repositories(&mut self, path: &str) -> Result<(), String> {
-        self.repositories =
-            repositories::SectorRepository::open(path).map_err(|error| error.to_string())?;
+        self.persistence = PersistenceBoundary::open(path)?;
         self.reconcile_runtime_repositories()?;
         Ok(())
     }
@@ -522,22 +481,22 @@ impl SimulationNode {
     }
 
     fn observe_materialized_identities(&self) -> Result<(), String> {
-        self.repositories
+        self.persistence
             .observe_materialized_identities(
-                self.ships.index.keys().copied(),
-                self.ships
+                self.simulation.ships.index.keys().copied(),
+                self.players
                     .owners
                     .values()
                     .copied()
-                    .chain(self.ships.active_ship.keys().copied())
-                    .chain(self.docked_players.keys().copied()),
+                    .chain(self.players.active_ship.keys().copied())
+                    .chain(self.stations.docked_player_ids()),
             )
             .map_err(|error| error.to_string())
     }
 
     /// Read access to the navigation topology.
     pub fn galaxy(&self) -> &crate::galaxy::Galaxy {
-        &self.sector_map.galaxy
+        &self.topology.sector_map.galaxy
     }
 
     // -- Identity ------------------------------------------------------------
@@ -553,55 +512,55 @@ impl SimulationNode {
 
     /// Look up a Jump Gate originating in this Sector by `gate_id`.
     pub fn jump_gate(&self, gate_id: JumpGateId) -> Option<&JumpGateDef> {
-        self.sector_map.gates.get(&gate_id)
+        self.topology.sector_map.gates.get(&gate_id)
     }
 
     /// Look up an NPC station in this Sector by `station_id`.
     pub fn station(&self, station_id: StationId) -> Option<&StationDef> {
-        self.sector_map.stations.get(&station_id)
+        self.topology.sector_map.stations.get(&station_id)
     }
 
     // -- Observation ---------------------------------------------------------
 
     pub fn current_tick(&self) -> Tick {
-        self.current_tick
+        self.simulation.current_tick
     }
     pub fn ship_count(&self) -> usize {
-        self.world.ship_count()
+        self.simulation.world.ship_count()
     }
     pub fn total_event_count(&self) -> usize {
-        self.pending_events.len()
+        self.frame_outputs.pending_events.len()
     }
 
     /// Drain public events produced by the authoritative engine since the
     /// previous runtime boundary. This is the transition-output seam used by
     /// application adapters; it does not expose the legacy event log.
     pub fn drain_pending_events(&mut self) -> Vec<DomainEvent> {
-        std::mem::take(&mut self.pending_events)
+        std::mem::take(&mut self.frame_outputs.pending_events)
     }
 
     pub fn pending_events(&self) -> &[DomainEvent] {
-        &self.pending_events
+        &self.frame_outputs.pending_events
     }
 
     /// Put an output batch back at the front when an external durable append
     /// fails. This is a runtime rollback of the output buffer only; the
     /// authoritative ECS rollback is owned by the prepared transition.
     pub(crate) fn restore_pending_events(&mut self, mut events: Vec<DomainEvent>) {
-        events.append(&mut self.pending_events);
-        self.pending_events = events;
+        events.append(&mut self.frame_outputs.pending_events);
+        self.frame_outputs.pending_events = events;
     }
 
     pub fn pending_event_count(&self) -> usize {
-        self.pending_events.len()
+        self.frame_outputs.pending_events.len()
     }
 
     pub(crate) fn transit_journal(&self) -> &TransitJournal {
-        &self.transit_journal
+        &self.transit.transit_journal
     }
 
     fn emit_event(&mut self, event: DomainEvent) {
-        self.pending_events.push(event);
+        self.frame_outputs.pending_events.push(event);
     }
 
     fn emit_events<I>(&mut self, events: I)
@@ -616,8 +575,9 @@ impl SimulationNode {
     /// The Ship's current approach target, if any (ADR-0015).
     #[cfg(test)]
     pub fn approach_target(&self, ship_id: ShipId) -> Option<dawn_core::ApproachTarget> {
-        let entity = self.ships.index.get(&ship_id)?;
-        self.world
+        let entity = self.simulation.ships.index.get(&ship_id)?;
+        self.simulation
+            .world
             .get::<dawn_ecs::components::ApproachComp>(*entity)
             .map(|a| a.target)
     }
@@ -625,25 +585,31 @@ impl SimulationNode {
     /// The Ship's current warp phase, if it is warping (ADR-0022).
     #[cfg(test)]
     pub fn warp_phase(&self, ship_id: ShipId) -> Option<dawn_ecs::components::WarpPhase> {
-        let entity = self.ships.index.get(&ship_id)?;
-        self.world.get::<WarpComp>(*entity).map(|w| w.phase)
+        let entity = self.simulation.ships.index.get(&ship_id)?;
+        self.simulation
+            .world
+            .get::<WarpComp>(*entity)
+            .map(|w| w.phase)
     }
 
     /// Look up the current position of a Ship by its ID.
     pub fn get_ship_position(&self, ship_id: ShipId) -> Option<Position> {
-        let entity = self.ships.index.get(&ship_id)?;
-        self.world.get::<PositionComp>(*entity).map(|c| c.0)
+        let entity = self.simulation.ships.index.get(&ship_id)?;
+        self.simulation
+            .world
+            .get::<PositionComp>(*entity)
+            .map(|c| c.0)
     }
 
     /// The coordinate anchor a Ship's position is relative to (ADR-0029).
     pub fn get_ship_anchor(&self, ship_id: ShipId) -> Option<dawn_core::AnchorId> {
-        let entity = self.ships.index.get(&ship_id)?;
-        self.world.ship_anchor(*entity)
+        let entity = self.simulation.ships.index.get(&ship_id)?;
+        self.simulation.world.ship_anchor(*entity)
     }
 
     /// Read access to this node's per-body anchor table (ADR-0029).
     pub fn anchor_table(&self) -> &crate::anchor::AnchorTable {
-        &self.anchor_table
+        &self.topology.anchor_table
     }
 
     /// A Ship's absolute position in the Sector-local frame (metres, f64),
@@ -651,31 +617,42 @@ impl SimulationNode {
     /// Falls back to treating the raw offset as absolute if the anchor is
     /// unknown (pre-anchor data / tests).
     pub fn ship_absolute(&self, ship_id: ShipId) -> Option<dawn_core::AbsolutePosition> {
-        let entity = *self.ships.index.get(&ship_id)?;
-        let offset = self.world.get::<PositionComp>(entity)?.0;
+        let entity = *self.simulation.ships.index.get(&ship_id)?;
+        let offset = self.simulation.world.get::<PositionComp>(entity)?.0;
         Some(self.entity_absolute_f64(entity, offset))
     }
 
     /// Whether a ship is in committed warp. AoI delivery uses this to keep
     /// normal-flight prediction corrections separate from warp authority.
     pub(crate) fn ship_is_warping(&self, ship_id: ShipId) -> bool {
-        let Some(entity) = self.ships.index.get(&ship_id) else {
+        let Some(entity) = self.simulation.ships.index.get(&ship_id) else {
             return false;
         };
-        self.world
+        self.simulation
+            .world
             .get::<WarpComp>(*entity)
             .is_some_and(|warp| warp.is_warping())
     }
 
-    /// Removes a ship entirely: despawns its ECS entity, clears it from every
-    /// `ShipRegistry` map (`ShipRegistry::remove`), and drops its `base_stats`
-    /// entry. The single removal path for combat death, `ShipDespawned`
-    /// replay, and Sector Transit departure — each used to hand-roll this
-    /// sequence, and one (Transit) forgot the ownership maps entirely.
+    /// Removes a ship entirely: despawns its ECS entity, clears identity and
+    /// PlayerState ownership maps, and drops its `base_stats` entry. The single
+    /// removal path is shared by combat death, `ShipDespawned` replay, and
+    /// Sector Transit departure.
     pub(super) fn remove_ship(&mut self, ship_id: ShipId) {
-        self.ships.remove(ship_id, &mut self.world);
-        self.base_stats.remove(&ship_id);
-        self.docked_ships.remove(&ship_id);
+        if self
+            .simulation
+            .ships
+            .remove(ship_id, &mut self.simulation.world)
+            .is_some()
+        {
+            if let Some(player_id) = self.players.owners.remove(&ship_id) {
+                if self.players.active_ship.get(&player_id) == Some(&ship_id) {
+                    self.players.active_ship.remove(&player_id);
+                }
+            }
+        }
+        self.simulation.base_stats.remove(&ship_id);
+        self.stations.undock_ship(ship_id);
     }
 
     /// Recomputes `ShipStatsComp` from `ship_id`'s current `FittingComp`
@@ -686,11 +663,12 @@ impl SimulationNode {
     /// not emit one, so that stays their own call.
     pub(super) fn reapply_fitting(&mut self, ship_id: ShipId) {
         let base = self
+            .simulation
             .base_stats
             .get(&ship_id)
             .copied()
             .unwrap_or(ShipStatsComp::NPC);
-        dawn_ecs::systems::apply_fitting(&mut self.world, ship_id, base);
+        dawn_ecs::systems::apply_fitting(&mut self.simulation.world, ship_id, base);
     }
 
     /// Snapshots `entity`'s current `FittingComp`/`InventoryComp` and appends
@@ -704,11 +682,13 @@ impl SimulationNode {
     /// (ownership/inventory checks vs. none, M-8) — only the tail is shared.
     pub(super) fn emit_ship_fitted(&mut self, ship_id: ShipId, entity: Entity) {
         let fitting = self
+            .simulation
             .world
             .get::<dawn_ecs::components::FittingComp>(entity)
             .map(|f| f.to_snapshot())
             .unwrap_or_else(dawn_core::FittingSnapshot::empty);
         let inventory = self
+            .simulation
             .world
             .get::<dawn_ecs::components::InventoryComp>(entity)
             .map(|inv| inv.items.clone())
@@ -723,39 +703,49 @@ impl SimulationNode {
             ship_id,
             fitting,
             inventory,
-            tick: self.current_tick,
+            tick: self.simulation.current_tick,
         }));
     }
 
     /// Look up the current `ShipStatsComp` of a Ship by its ID. Test-only.
     #[cfg(test)]
     pub fn get_ship_stats(&self, ship_id: ShipId) -> Option<ShipStatsComp> {
-        let entity = self.ships.index.get(&ship_id)?;
-        self.world.get::<ShipStatsComp>(*entity).map(|c| *c)
+        let entity = self.simulation.ships.index.get(&ship_id)?;
+        self.simulation
+            .world
+            .get::<ShipStatsComp>(*entity)
+            .map(|c| *c)
     }
 
     /// Look up the current HP of a Ship by its ID. Test-only.
     #[cfg(test)]
     pub fn get_ship_hp(&self, ship_id: ShipId) -> Option<f32> {
-        let entity = self.ships.index.get(&ship_id)?;
-        self.world.get::<HullComp>(*entity).map(|c| c.total_hp())
+        let entity = self.simulation.ships.index.get(&ship_id)?;
+        self.simulation
+            .world
+            .get::<HullComp>(*entity)
+            .map(|c| c.total_hp())
     }
 
     /// Look up the current `CapacitorComp.current` of a Ship by its ID.
     #[cfg(test)]
     pub fn get_ship_capacitor(&self, ship_id: ShipId) -> Option<f32> {
-        let entity = self.ships.index.get(&ship_id)?;
-        self.world.get::<CapacitorComp>(*entity).map(|c| c.current)
+        let entity = self.simulation.ships.index.get(&ship_id)?;
+        self.simulation
+            .world
+            .get::<CapacitorComp>(*entity)
+            .map(|c| c.current)
     }
 
     /// Module identity and activation state for every fitted module on a Ship.
     #[cfg(test)]
     pub fn get_fitted_module_ids(&self, ship_id: ShipId) -> Vec<FittedModuleStatus> {
-        let entity = match self.ships.index.get(&ship_id) {
+        let entity = match self.simulation.ships.index.get(&ship_id) {
             Some(&e) => e,
             None => return Vec::new(),
         };
-        self.world
+        self.simulation
+            .world
             .get::<FittingComp>(entity)
             .map(|f| {
                 f.iter_slots()
@@ -862,9 +852,9 @@ mod tests {
             Arc::clone(&galaxy),
         );
 
-        assert!(Arc::ptr_eq(&node.sector_map.galaxy, &galaxy));
+        assert!(Arc::ptr_eq(&node.topology.sector_map.galaxy, &galaxy));
         assert_eq!(
-            node.sector_map.gates,
+            node.topology.sector_map.gates,
             galaxy
                 .gates_in_sector(sector_id)
                 .into_iter()
@@ -872,7 +862,7 @@ mod tests {
                 .collect()
         );
         assert_eq!(
-            node.sector_map.bodies,
+            node.topology.sector_map.bodies,
             galaxy
                 .bodies_in_sector(sector_id)
                 .into_iter()
@@ -880,7 +870,7 @@ mod tests {
                 .collect()
         );
         assert_eq!(
-            node.sector_map.stations,
+            node.topology.sector_map.stations,
             galaxy
                 .stations_in_sector(sector_id)
                 .into_iter()
@@ -890,11 +880,17 @@ mod tests {
 
         for body in &galaxy.bodies {
             assert_eq!(
-                node.anchor_table.abs(dawn_core::AnchorId::from(body.id)),
+                node.topology
+                    .anchor_table
+                    .abs(dawn_core::AnchorId::from(body.id)),
                 Some(body.abs_m)
             );
         }
-        assert!(node.anchor_table.abs(dawn_core::AnchorId(0)).is_none());
+        assert!(node
+            .topology
+            .anchor_table
+            .abs(dawn_core::AnchorId(0))
+            .is_none());
 
         let snapshot = node.take_snapshot();
         let restored = SimulationNode::restore_from_test(
@@ -904,13 +900,23 @@ mod tests {
             &[],
             &[],
         );
-        assert!(Arc::ptr_eq(&restored.sector_map.galaxy, &galaxy));
-        assert_eq!(restored.sector_map.gates, node.sector_map.gates);
-        assert_eq!(restored.sector_map.bodies, node.sector_map.bodies);
-        assert_eq!(restored.sector_map.stations, node.sector_map.stations);
+        assert!(Arc::ptr_eq(&restored.topology.sector_map.galaxy, &galaxy));
+        assert_eq!(
+            restored.topology.sector_map.gates,
+            node.topology.sector_map.gates
+        );
+        assert_eq!(
+            restored.topology.sector_map.bodies,
+            node.topology.sector_map.bodies
+        );
+        assert_eq!(
+            restored.topology.sector_map.stations,
+            node.topology.sector_map.stations
+        );
         for body in &galaxy.bodies {
             assert_eq!(
                 restored
+                    .topology
                     .anchor_table
                     .abs(dawn_core::AnchorId::from(body.id)),
                 Some(body.abs_m)
@@ -954,14 +960,14 @@ mod tests {
         let ship_id = node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
         node.set_player_ship(ship_id);
 
-        let entity = *node.ships.index.get(&ship_id).unwrap();
-        node.world.set_transit_state(
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
+        node.simulation.world.set_transit_state(
             entity,
             dawn_ecs::TransitState::InTransit { to: SectorId(1) },
         );
 
         node.apply_move_command(ship_id, Position::new(10000.0, 0.0, 0.0));
-        let thrust = node.world.get::<ThrustComp>(entity).unwrap();
+        let thrust = node.simulation.world.get::<ThrustComp>(entity).unwrap();
         assert_eq!(
             thrust.direction,
             Velocity::ZERO,
@@ -980,16 +986,21 @@ mod tests {
         node.set_player_ship(ship_id);
         node.apply_move_command(ship_id, Position::new(10000.0, 0.0, 0.0));
 
-        let entity = *node.ships.index.get(&ship_id).unwrap();
-        let direction_before = node.world.get::<ThrustComp>(entity).unwrap().direction;
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
+        let direction_before = node
+            .simulation
+            .world
+            .get::<ThrustComp>(entity)
+            .unwrap()
+            .direction;
 
-        node.world.set_transit_state(
+        node.simulation.world.set_transit_state(
             entity,
             dawn_ecs::TransitState::InTransit { to: SectorId(1) },
         );
         node.apply_stop_command(ship_id);
 
-        let thrust = node.world.get::<ThrustComp>(entity).unwrap();
+        let thrust = node.simulation.world.get::<ThrustComp>(entity).unwrap();
         assert_eq!(
             thrust.direction, direction_before,
             "stop command must be rejected while in transit"

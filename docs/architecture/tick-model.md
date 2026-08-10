@@ -462,7 +462,9 @@ This is current implementation topology, not a permanent storage/API constraint:
   explicit prepared transition boundary. Its current vertical slices cover AoI,
   Stop, and a bounded full ECS Tick; the default production frame still needs
   to be switched to the runtime-owned recovery journal;
-- #275 splits heterogeneous `SimulationNode` state authority;
+- #275 splits heterogeneous `SimulationNode` state authority into explicit
+  Simulation/Player/Station/Transit/Topology/GameData/FrameOutput owners plus a
+  separate Persistence adapter;
 - #276 replaces current Transit scan/retry state with a durable Saga;
 - #280 now provides the shared control/bulk replication and snapshot transport
   wiring while preserving the Tick/recovery ordering defined here; #278 still

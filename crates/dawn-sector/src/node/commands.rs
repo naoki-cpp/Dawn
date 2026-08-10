@@ -128,11 +128,11 @@ where
 
 impl SimulationNode {
     pub fn owns_ship(&self, player_id: PlayerId, ship_id: ShipId) -> bool {
-        self.ships.owners.get(&ship_id) == Some(&player_id)
+        self.players.owners.get(&ship_id) == Some(&player_id)
     }
 
     pub fn is_active_ship(&self, player_id: PlayerId, ship_id: ShipId) -> bool {
-        self.ships.active_ship.get(&player_id) == Some(&ship_id)
+        self.players.active_ship.get(&player_id) == Some(&ship_id)
     }
 
     /// Validate and admit one external request on behalf of the authenticated
@@ -145,7 +145,7 @@ impl SimulationNode {
         lock_commands: &mut Vec<LockOnCommand>,
     ) -> Result<Option<ClientCommandFollowup>, ClientRequestAdmissionError> {
         request.validate()?;
-        let active_ship = self.ships.active_ship.get(&player_id).copied();
+        let active_ship = self.players.active_ship.get(&player_id).copied();
 
         let followup = match request {
             ClientRequest::Move { target } => {
@@ -888,8 +888,9 @@ mod tests {
             ),
             "Activate must return RefreshPlayerLoadout for the caller's player_id"
         );
-        let entity = *node.ships.index.get(&ship_id).unwrap();
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
         let is_active = node
+            .simulation
             .world
             .get::<FittingComp>(entity)
             .unwrap()
@@ -943,8 +944,9 @@ mod tests {
             ),
             "Deactivate must return RefreshPlayerLoadout for the caller's player_id"
         );
-        let entity = *node.ships.index.get(&ship_id).unwrap();
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
         let is_active = node
+            .simulation
             .world
             .get::<FittingComp>(entity)
             .unwrap()
@@ -963,14 +965,14 @@ mod tests {
         use dawn_core::ClientRequest;
         let mut node = mem_node();
         let (player_id, ship_id) = spawn_owned_player_at(&mut node, Position::ORIGIN);
-        let entity = *node.ships.index.get(&ship_id).unwrap();
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
         node.apply_move_command_owned(player_id, ship_id, Position::new(1_000.0, 0.0, 0.0));
 
         let mut locks = Vec::new();
         let result =
             node.apply_client_request_unchecked(player_id, ClientRequest::Stop, &mut locks);
         assert!(result.is_none(), "Stop must not produce a followup");
-        let thrust = node.world.get::<ThrustComp>(entity).unwrap();
+        let thrust = node.simulation.world.get::<ThrustComp>(entity).unwrap();
         assert!(
             thrust.is_braking,
             "Stop dispatch must brake the ship's thrust"
@@ -999,9 +1001,9 @@ mod tests {
             &mut locks,
         );
         assert!(result.is_none(), "Approach must not produce a followup");
-        let entity = *node.ships.index.get(&ship_id).unwrap();
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
         assert!(
-            node.world.get::<ApproachComp>(entity).is_some(),
+            node.simulation.world.get::<ApproachComp>(entity).is_some(),
             "Approach dispatch must attach ApproachComp to the caller's active ship"
         );
     }
@@ -1023,9 +1025,9 @@ mod tests {
             &mut locks,
         );
         assert!(result.is_none(), "Warp must not produce a followup");
-        let entity = *node.ships.index.get(&ship_id).unwrap();
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
         assert!(
-            node.world.get::<WarpComp>(entity).is_some(),
+            node.simulation.world.get::<WarpComp>(entity).is_some(),
             "Warp dispatch must attach WarpComp to the caller's active ship"
         );
     }
@@ -1053,9 +1055,9 @@ mod tests {
             &mut locks,
         );
         assert!(result.is_none(), "Orbit must not produce a followup");
-        let entity = *node.ships.index.get(&ship_id).unwrap();
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
         assert!(
-            node.world.get::<OrbitComp>(entity).is_some(),
+            node.simulation.world.get::<OrbitComp>(entity).is_some(),
             "Orbit dispatch must attach OrbitComp to the caller's active ship"
         );
     }
@@ -1083,9 +1085,12 @@ mod tests {
             &mut locks,
         );
         assert!(result.is_none(), "KeepAtRange must not produce a followup");
-        let entity = *node.ships.index.get(&ship_id).unwrap();
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
         assert!(
-            node.world.get::<KeepAtRangeComp>(entity).is_some(),
+            node.simulation
+                .world
+                .get::<KeepAtRangeComp>(entity)
+                .is_some(),
             "KeepAtRange dispatch must attach KeepAtRangeComp to the caller's active ship"
         );
     }
@@ -1237,7 +1242,7 @@ mod tests {
             ),
             StationOperationOutcome::Accepted { .. }
         ));
-        node.ships.active_ship.insert(player_id, first_ship_id);
+        node.players.active_ship.insert(player_id, first_ship_id);
 
         let mut locks = Vec::new();
         let result = node.apply_client_request_unchecked(
@@ -1286,8 +1291,9 @@ mod tests {
         use dawn_core::{ClientRequest, ItemId, StationId, TransferDirection};
         let mut node = node_with_catalog();
         let (player_id, ship_id) = docked_owned_player(&mut node);
-        let entity = *node.ships.index.get(&ship_id).unwrap();
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
         if let Some(mut inv) = node
+            .simulation
             .world
             .get_mut::<dawn_ecs::components::InventoryComp>(entity)
         {

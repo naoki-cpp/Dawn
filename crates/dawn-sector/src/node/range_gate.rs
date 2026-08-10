@@ -56,7 +56,7 @@ impl SimulationNode {
         entity: Entity,
         kind: dawn_core::fitting::ModuleKind,
     ) -> Option<f32> {
-        let stats = self.world.get::<ShipStatsComp>(entity)?;
+        let stats = self.simulation.world.get::<ShipStatsComp>(entity)?;
         Some(effective_range_from_stats(kind.range_gate_kind()?, &stats))
     }
 
@@ -78,11 +78,11 @@ impl SimulationNode {
     pub fn process_range_gate(&mut self, tick: Tick) -> Vec<DomainEvent> {
         // ── 1. Snapshot Active, targeted slots + their ship's absolute position ──
         let mut candidates: Vec<TargetedSlot> = Vec::new();
-        for (&ship_id, &entity) in self.ships.index.iter() {
-            let Some(stats) = self.world.get::<ShipStatsComp>(entity) else {
+        for (&ship_id, &entity) in self.simulation.ships.index.iter() {
+            let Some(stats) = self.simulation.world.get::<ShipStatsComp>(entity) else {
                 continue;
             };
-            let Some(fitting) = self.world.get::<FittingComp>(entity) else {
+            let Some(fitting) = self.simulation.world.get::<FittingComp>(entity) else {
                 continue;
             };
             for (flat_idx, slot) in fitting.iter_slots().enumerate() {
@@ -119,7 +119,7 @@ impl SimulationNode {
                 continue;
             }
 
-            if let Some(mut fitting) = self.world.get_mut::<FittingComp>(c.entity) {
+            if let Some(mut fitting) = self.simulation.world.get_mut::<FittingComp>(c.entity) {
                 if let Some(slot) = fitting.slot_at_flat_mut(c.flat_idx) {
                     if slot.is_active {
                         slot.force_off();

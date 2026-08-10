@@ -24,6 +24,7 @@ impl SimulationNode {
     /// for cross-anchor geometry.
     pub(super) fn entity_abs_pos(&self, entity: Entity) -> Position {
         let off = self
+            .simulation
             .world
             .get::<PositionComp>(entity)
             .map(|p| p.0)
@@ -37,6 +38,7 @@ impl SimulationNode {
     /// precise at true-AU distances (R2).
     pub(super) fn entity_abs_pos_f64(&self, entity: Entity) -> AbsolutePosition {
         let off = self
+            .simulation
             .world
             .get::<PositionComp>(entity)
             .map(|p| p.0)
@@ -48,10 +50,10 @@ impl SimulationNode {
     /// raw offset, composing its anchor (ADR-0029). Used by warp arrival math
     /// that must stay precise at true-AU distances.
     pub(super) fn entity_absolute_f64(&self, entity: Entity, offset: Position) -> AbsolutePosition {
-        let Some(anchor) = self.world.ship_anchor(entity) else {
+        let Some(anchor) = self.simulation.world.ship_anchor(entity) else {
             return offset.into();
         };
-        let Some(abs) = self.anchor_table.absolute(anchor, offset) else {
+        let Some(abs) = self.topology.anchor_table.absolute(anchor, offset) else {
             debug_assert_missing_anchor(anchor, "entity_absolute_f64");
             return offset.into();
         };
@@ -70,10 +72,10 @@ impl SimulationNode {
         entity: Entity,
         dest_abs: AbsolutePosition,
     ) -> Position {
-        let Some(anchor) = self.world.ship_anchor(entity) else {
+        let Some(anchor) = self.simulation.world.ship_anchor(entity) else {
             return Position::new(dest_abs[0], dest_abs[1], dest_abs[2]);
         };
-        let Some(rel) = self.anchor_table.to_relative(anchor, dest_abs) else {
+        let Some(rel) = self.topology.anchor_table.to_relative(anchor, dest_abs) else {
             debug_assert_missing_anchor(anchor, "dest_in_ship_frame_abs");
             return Position::new(dest_abs[0], dest_abs[1], dest_abs[2]);
         };
@@ -84,7 +86,7 @@ impl SimulationNode {
     /// composing the ship's anchor (ADR-0029). The accessor gameplay/tests use
     /// instead of comparing a raw offset to absolute data.
     pub fn ship_distance_to_point(&self, ship_id: ShipId, point: Position) -> Option<f64> {
-        let entity = *self.ships.index.get(&ship_id)?;
+        let entity = *self.simulation.ships.index.get(&ship_id)?;
         Some(self.entity_abs_pos(entity).distance(point))
     }
 
@@ -96,16 +98,17 @@ impl SimulationNode {
     pub fn ship_distance(&self, a: ShipId, b: ShipId) -> Option<f64> {
         let (anchor_a, off_a) = self.ship_anchor_and_offset(a)?;
         let (anchor_b, off_b) = self.ship_anchor_and_offset(b)?;
-        self.anchor_table
+        self.topology
+            .anchor_table
             .distance((anchor_a, off_a), (anchor_b, off_b))
     }
 
     /// A ship's `AnchorId` and raw (anchor-relative) `PositionComp` offset —
     /// the pair `AnchorTable`'s composition methods take.
     fn ship_anchor_and_offset(&self, ship_id: ShipId) -> Option<(dawn_core::AnchorId, Position)> {
-        let entity = *self.ships.index.get(&ship_id)?;
-        let anchor = self.world.ship_anchor(entity)?;
-        let offset = self.world.get::<PositionComp>(entity)?.0;
+        let entity = *self.simulation.ships.index.get(&ship_id)?;
+        let anchor = self.simulation.world.ship_anchor(entity)?;
+        let offset = self.simulation.world.get::<PositionComp>(entity)?.0;
         Some((anchor, offset))
     }
 }

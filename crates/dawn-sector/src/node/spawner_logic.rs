@@ -48,20 +48,21 @@ impl SimulationNode {
         unregistered_fallback: ShipStatsComp,
     ) {
         let base = self
+            .game_data
             .ship_type_registry
             .get(&ship_type_id)
             .map(|def| ShipStatsComp::from_base(&def.base_stats))
             .unwrap_or(unregistered_fallback);
 
-        self.base_stats.insert(ship_id, base);
-        self.ships.type_ids.insert(ship_id, ship_type_id);
+        self.simulation.base_stats.insert(ship_id, base);
+        self.simulation.ships.type_ids.insert(ship_id, ship_type_id);
 
-        if let Some(&entity) = self.ships.index.get(&ship_id) {
-            self.world.set_ship_stats(entity, base);
-            if let Some(mut hull) = self.world.get_mut::<HullComp>(entity) {
+        if let Some(&entity) = self.simulation.ships.index.get(&ship_id) {
+            self.simulation.world.set_ship_stats(entity, base);
+            if let Some(mut hull) = self.simulation.world.get_mut::<HullComp>(entity) {
                 *hull = HullComp::new(base.max_shield, base.max_armor, base.max_hull);
             }
-            let _ = self.world.insert_one(
+            let _ = self.simulation.world.insert_one(
                 entity,
                 CapacitorComp {
                     current: base.cap_max,
@@ -99,8 +100,8 @@ impl SimulationNode {
         position: Position,
         velocity: Velocity,
     ) -> ShipId {
-        let ship_id = ShipId::new(self.node_id, self.id_counter);
-        self.id_counter += 1;
+        let ship_id = ShipId::new(self.node_id, self.simulation.id_counter);
+        self.simulation.id_counter += 1;
 
         self.insert_ship_entity(ship_id, ship_type_id, position, velocity);
 
@@ -109,7 +110,7 @@ impl SimulationNode {
             sector_id: self.sector_id,
             initial_position: position.into(),
             ship_type_id,
-            tick: self.current_tick,
+            tick: self.simulation.current_tick,
         }));
 
         ship_id
@@ -118,12 +119,13 @@ impl SimulationNode {
     // ── Phase 5: PlayerId / ownership management ─────────────────────────────
 
     pub fn next_player_id(&mut self) -> PlayerId {
-        let id = PlayerId(self.player_id_counter);
-        self.player_id_counter = self
+        let id = PlayerId(self.players.player_id_counter);
+        self.players.player_id_counter = self
+            .players
             .player_id_counter
             .checked_add(1)
             .expect("PlayerId allocator exhausted");
-        self.repositories
+        self.persistence
             .observe_materialized_identities(std::iter::empty(), [id])
             .expect("repository identity watermark update");
         id
@@ -151,20 +153,20 @@ impl SimulationNode {
 
     pub(super) fn spawn_player_ship_at(&mut self, player_id: PlayerId, pos: Position) -> ShipId {
         use crate::ship_types::SHIP_TYPE_MAGPIE;
-        let ship_id = ShipId::new(self.node_id, self.id_counter);
-        self.id_counter += 1;
+        let ship_id = ShipId::new(self.node_id, self.simulation.id_counter);
+        self.simulation.id_counter += 1;
 
         self.insert_to_world(ship_id, pos, Velocity::ZERO);
         self.set_spawn_anchor(ship_id, pos);
         self.materialize_ship_stats(ship_id, SHIP_TYPE_MAGPIE, ShipStatsComp::PLAYER);
 
-        if let Some(&entity) = self.ships.index.get(&ship_id) {
-            let _ = self.world.remove_one::<IsNpcComp>(entity);
+        if let Some(&entity) = self.simulation.ships.index.get(&ship_id) {
+            let _ = self.simulation.world.remove_one::<IsNpcComp>(entity);
         }
 
         // Record ownership before fit_module (needed for is_npc check).
-        self.ships.active_ship.insert(player_id, ship_id);
-        self.ships.owners.insert(ship_id, player_id);
+        self.players.active_ship.insert(player_id, ship_id);
+        self.players.owners.insert(ship_id, player_id);
         let resume_ticket = self.issue_resume_ticket();
         self.record_client_resume_ownership(ship_id, player_id, resume_ticket);
 
@@ -173,7 +175,7 @@ impl SimulationNode {
         // path and don't consume from it, so seeding first vs. after makes no
         // functional difference -- but it reads naturally as "the player owns
         // everything, some of it happens to already be fitted."
-        if let Some(&entity) = self.ships.index.get(&ship_id) {
+        if let Some(&entity) = self.simulation.ships.index.get(&ship_id) {
             self.seed_player_inventory(entity);
         }
         // Starter Packaged Ship (ADR-0034/0037 round trip): every new player
@@ -211,7 +213,7 @@ impl SimulationNode {
             sector_id: self.sector_id,
             initial_position: pos.into(),
             ship_type_id: SHIP_TYPE_MAGPIE,
-            tick: self.current_tick,
+            tick: self.simulation.current_tick,
         }));
 
         ship_id
@@ -224,11 +226,11 @@ impl SimulationNode {
     /// Returns `false` (and registers nothing) if the ship is not in this
     /// node's ECS.
     pub fn adopt_player_ship(&mut self, ship_id: ShipId, player_id: PlayerId) -> bool {
-        if !self.ships.index.contains_key(&ship_id) {
+        if !self.simulation.ships.index.contains_key(&ship_id) {
             return false;
         }
-        self.ships.active_ship.insert(player_id, ship_id);
-        self.ships.owners.insert(ship_id, player_id);
+        self.players.active_ship.insert(player_id, ship_id);
+        self.players.owners.insert(ship_id, player_id);
         true
     }
 
@@ -239,8 +241,8 @@ impl SimulationNode {
     pub fn spawn_bot_ship(&mut self, spawn_pos: Position) -> (PlayerId, ShipId) {
         let player_id = self.next_player_id();
         let ship_id = self.spawn_player_ship_at(player_id, spawn_pos);
-        if let Some(&entity) = self.ships.index.get(&ship_id) {
-            let _ = self.world.insert_one(entity, IsBotComp);
+        if let Some(&entity) = self.simulation.ships.index.get(&ship_id) {
+            let _ = self.simulation.world.insert_one(entity, IsBotComp);
         }
         (player_id, ship_id)
     }
@@ -277,19 +279,23 @@ impl SimulationNode {
         position: Position,
         velocity: Velocity,
     ) {
-        let entity = self.world.spawn_ship(ship_id, position, velocity);
-        self.ships.index.insert(ship_id, entity);
-        self.repositories
+        let entity = self
+            .simulation
+            .world
+            .spawn_ship(ship_id, position, velocity);
+        self.simulation.ships.index.insert(ship_id, entity);
+        self.persistence
             .observe_materialized_identities([ship_id], std::iter::empty())
             .expect("repository identity watermark update");
         // Default to the Sector origin anchor (the star). Spawn paths override
         // this with the nearest body via `set_spawn_anchor`; restore overrides it
         // with the persisted anchor. `position` here is treated as the offset.
         let anchor = self
+            .topology
             .anchor_table
             .sector_origin_anchor(self.sector_id)
             .unwrap_or(dawn_core::AnchorId(0));
-        self.world.set_ship_anchor(entity, anchor);
+        self.simulation.world.set_ship_anchor(entity, anchor);
     }
 
     /// Anchor a freshly-spawned ship on the NEAREST celestial body and store its
@@ -306,23 +312,24 @@ impl SimulationNode {
     /// `initial_position`, reproducing the same anchor (later `AnchorRebased`
     /// events replay the warp rebases on top).
     pub(super) fn set_spawn_anchor(&mut self, ship_id: ShipId, abs_pos: Position) {
-        let Some(&entity) = self.ships.index.get(&ship_id) else {
+        let Some(&entity) = self.simulation.ships.index.get(&ship_id) else {
             return;
         };
         let world = [abs_pos.x, abs_pos.y, abs_pos.z];
         let anchor = self
+            .topology
             .anchor_table
             .nearest_anchor(self.sector_id, world.into())
             .unwrap_or(dawn_core::AnchorId(0));
-        let offset = match self.anchor_table.abs(anchor) {
+        let offset = match self.topology.anchor_table.abs(anchor) {
             Some(a) => Position::new(world[0] - a[0], world[1] - a[1], world[2] - a[2]),
             None => {
                 super::debug_assert_missing_anchor(anchor, "set_spawn_anchor");
                 abs_pos
             }
         };
-        self.world.set_ship_anchor(entity, anchor);
-        if let Some(mut p) = self.world.get_mut::<PositionComp>(entity) {
+        self.simulation.world.set_ship_anchor(entity, anchor);
+        if let Some(mut p) = self.simulation.world.get_mut::<PositionComp>(entity) {
             p.0 = offset;
         }
     }
@@ -336,7 +343,7 @@ impl SimulationNode {
     /// arrival and `AnchorTable` composition.
     #[cfg(test)]
     pub(crate) fn set_spawn_anchor_abs<P: Into<[f64; 3]>>(&mut self, ship_id: ShipId, world: P) {
-        let Some(&entity) = self.ships.index.get(&ship_id) else {
+        let Some(&entity) = self.simulation.ships.index.get(&ship_id) else {
             return;
         };
         self.place_entity_at_absolute(entity, world.into());
@@ -347,15 +354,16 @@ impl SimulationNode {
     pub(super) fn place_entity_at_absolute<P: Into<[f64; 3]>>(&mut self, entity: Entity, world: P) {
         let world = world.into();
         let anchor = self
+            .topology
             .anchor_table
             .nearest_anchor(self.sector_id, world.into())
             .unwrap_or(dawn_core::AnchorId(0));
-        let offset = match self.anchor_table.abs(anchor) {
+        let offset = match self.topology.anchor_table.abs(anchor) {
             Some(a) => Position::new(world[0] - a[0], world[1] - a[1], world[2] - a[2]),
             None => Position::new(world[0], world[1], world[2]),
         };
-        self.world.set_ship_anchor(entity, anchor);
-        if let Some(mut p) = self.world.get_mut::<PositionComp>(entity) {
+        self.simulation.world.set_ship_anchor(entity, anchor);
+        if let Some(mut p) = self.simulation.world.get_mut::<PositionComp>(entity) {
             p.0 = offset;
         }
     }
@@ -366,21 +374,27 @@ impl SimulationNode {
     pub(super) fn restore_ship_from_snapshot(&mut self, ship: &ShipSnapshot) {
         use dawn_ecs::components::{FittingComp, TackledComp};
         self.insert_to_world(ship.ship_id, ship.position, ship.velocity);
-        self.ships.type_ids.insert(ship.ship_id, ship.ship_type_id);
+        self.simulation
+            .ships
+            .type_ids
+            .insert(ship.ship_id, ship.ship_type_id);
         // Restore the coordinate anchor (ADR-0029): insert_to_world defaults to
         // the Sector-origin anchor, but a rebased ship's `position` offset is
         // relative to its saved anchor, so restore that to keep absolute position.
-        if let Some(&entity) = self.ships.index.get(&ship.ship_id) {
+        if let Some(&entity) = self.simulation.ships.index.get(&ship.ship_id) {
             if let Some(absolute_position) = ship.absolute_position {
                 // New snapshots preserve the f64 authority. Keep the saved
                 // anchor when it is still known so restore does not silently
                 // change the representation of an anchored ship.
                 if let Some(offset) = self
+                    .topology
                     .anchor_table
                     .to_relative(ship.anchor, absolute_position)
                 {
-                    self.world.set_ship_anchor(entity, ship.anchor);
-                    if let Some(mut position) = self.world.get_mut::<PositionComp>(entity) {
+                    self.simulation.world.set_ship_anchor(entity, ship.anchor);
+                    if let Some(mut position) =
+                        self.simulation.world.get_mut::<PositionComp>(entity)
+                    {
                         position.0 = offset;
                     }
                 } else {
@@ -388,44 +402,47 @@ impl SimulationNode {
                 }
             } else {
                 // Pre-ADR-0044 snapshots only contain the local offset.
-                self.world.set_ship_anchor(entity, ship.anchor);
+                self.simulation.world.set_ship_anchor(entity, ship.anchor);
             }
         }
 
-        let base = if self.ships.owners.contains_key(&ship.ship_id) {
+        let base = if self.players.owners.contains_key(&ship.ship_id) {
             // Ownership is the persisted discriminator for the player profile.
             // Rebuilding an owned ship with NPC base stats changes thrust,
             // capacitor, and every subsequent tick after restart.
             ShipStatsComp::PLAYER
         } else {
-            self.ship_type_registry
+            self.game_data
+                .ship_type_registry
                 .get(&ship.ship_type_id)
                 .map(|def| ShipStatsComp::from_base(&def.base_stats))
                 .unwrap_or(ShipStatsComp::NPC)
         };
-        self.base_stats.insert(ship.ship_id, base);
+        self.simulation.base_stats.insert(ship.ship_id, base);
 
-        if let Some(&entity) = self.ships.index.get(&ship.ship_id) {
-            self.world.set_ship_stats(entity, base);
+        if let Some(&entity) = self.simulation.ships.index.get(&ship.ship_id) {
+            self.simulation.world.set_ship_stats(entity, base);
 
-            let fitting = FittingComp::from_snapshot(&ship.fitting, &self.module_registry);
-            let _ = self.world.insert_one(entity, fitting);
+            let fitting =
+                FittingComp::from_snapshot(&ship.fitting, &self.game_data.module_registry);
+            let _ = self.simulation.world.insert_one(entity, fitting);
 
             // apply_fitting recomputes ShipStatsComp and rescales HullComp;
             // restore the exact HP layers from the snapshot afterwards.
             self.reapply_fitting(ship.ship_id);
-            if let Some(mut hull) = self.world.get_mut::<HullComp>(entity) {
+            if let Some(mut hull) = self.simulation.world.get_mut::<HullComp>(entity) {
                 hull.set_hp(ship.current_shield, ship.current_armor, ship.current_hull);
             }
 
             if let Some(cap) = ship.capacitor {
                 let _ = self
+                    .simulation
                     .world
                     .insert_one(entity, CapacitorComp { current: cap });
             }
 
             if !ship.tackled_by.is_empty() {
-                let _ = self.world.insert_one(
+                let _ = self.simulation.world.insert_one(
                     entity,
                     TackledComp {
                         tacklers: ship.tackled_by.clone(),
@@ -436,7 +453,7 @@ impl SimulationNode {
             // Inventory (ADR-0032): restore exactly what was persisted,
             // regardless of ship type -- post-spawn Fit/Unfit could have
             // emptied or refilled it differently from the deterministic seed.
-            let _ = self.world.insert_one(
+            let _ = self.simulation.world.insert_one(
                 entity,
                 dawn_ecs::components::InventoryComp {
                     items: ship.inventory.clone(),
@@ -451,10 +468,14 @@ impl SimulationNode {
     /// `adopt_player_ship`.
     #[cfg(test)]
     pub fn set_player_ship(&mut self, ship_id: ShipId) {
-        if let Some(&entity) = self.ships.index.get(&ship_id) {
-            self.base_stats.insert(ship_id, ShipStatsComp::PLAYER);
-            self.world.set_ship_stats(entity, ShipStatsComp::PLAYER);
-            if let Some(mut hull) = self.world.get_mut::<HullComp>(entity) {
+        if let Some(&entity) = self.simulation.ships.index.get(&ship_id) {
+            self.simulation
+                .base_stats
+                .insert(ship_id, ShipStatsComp::PLAYER);
+            self.simulation
+                .world
+                .set_ship_stats(entity, ShipStatsComp::PLAYER);
+            if let Some(mut hull) = self.simulation.world.get_mut::<HullComp>(entity) {
                 *hull = HullComp::new(
                     ShipStatsComp::PLAYER.max_shield,
                     ShipStatsComp::PLAYER.max_armor,
@@ -695,7 +716,7 @@ mod tests {
         node.spawn_npc_frigates(3);
         assert_eq!(node.ship_count(), 3);
 
-        for &ship_id in node.ships.index.keys() {
+        for &ship_id in node.simulation.ships.index.keys() {
             let loadout = node
                 .build_player_loadout_json(ship_id)
                 .expect("every spawned ship has a loadout");

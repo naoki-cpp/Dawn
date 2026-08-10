@@ -13,7 +13,7 @@ related  : entity-model.md, event-catalog.md, recovery-contract.md, ../adr/ADR-0
 > | §2 Sector Transit / §3 Node failure | Cross-Sector move exclusion, Raft failover | Implemented baseline; Transit recovery persistence implemented under ADR-0049/#276 |
 > | §4 Actor ownership | Data isolation between Actors | Implemented baseline; storage ownership migrates under #272 |
 > | §5 ID generation | NodeId + monotonic counter | Implemented |
-> | §7-8 | Player ownership / active-ship routing | Implemented behavior; recovery persistence gap scheduled by #284/#275 |
+> | §7-8 | Player ownership / active-ship routing | Implemented behavior; recovery persistence implemented under #284/#275 |
 >
 > Sector Transit must always go through Raft (FBD-006).
 >
@@ -138,15 +138,38 @@ The Actor model lives in `dawn-actor` (ADR-0002).
 
 ### Current baseline
 
-Today the concrete `SimulationNode` still combines ECS/domain authority with
-the legacy Station/repository adapter in places. `SectorRuntimeDriver` and
-production adapters call into that broad object, but the node no longer owns an
+Today the concrete `SimulationNode` remains the composition façade used by
+`SectorRuntimeDriver` and production adapters, but its mutable state is split
+into explicit owners. The SQLite adapter is held by a separate persistence
+boundary rather than by `StationState`, and the node no longer owns an
 `EventStore`. The derived AoI consumers use the read-only
 `dawn_sector::view::SectorView` boundary. Stop and the full Tick now expose
 #272 prepare -> durable -> live-apply APIs, including a bounded ship-level Tick
 write set; #278 now supplies the shared durable frame and explicit health gate.
-Remaining state-owner decomposition belongs to #275. No new persistence
-authority should be added to the legacy adapter.
+No new persistence authority should be added to the legacy adapter.
+
+### #275 state-owner decomposition
+
+The `SimulationNode` composition root now stores mutable state through explicit
+crate-private owners. This is an ownership boundary, not a new public API or a
+new crate. The root remains a composition façade, while persistence access is
+exposed to domain code only through typed repository views.
+
+| Owner | State | Recovery class / authority | Allowed responsibility |
+|---|---|---|---|
+| `SimulationState` | ECS world, ship registry, tick and ship allocators, fitting base stats, cross-Tick bot lock queue | ECS and exact Tick recovery state; bot queue is checkpoint/`RecoveryDelta` state while it survives to the next Tick | Ship simulation, movement, combat, and authoritative ship images |
+| `PlayerState` | Player allocator, fresh-admission claims, resume locks, population backstop | Allocator and active/admission state follows `recovery-contract.md`; live claims/locks are process-local guards | Admission lifecycle and player-to-ship routing |
+| `StationState` | Docked ship/player context | Docking is Sector recovery state | Docking and station operations only |
+| `PersistenceBoundary` | Composition-wired SQLite repository boundary and its typed admission, identity, and Station projection views | Repository-owned protocol/projection state follows #277; it is not Sector ECS authority | Persistence adapter access only; never a second simulation cache |
+| `TransitState` | Transit attempt allocator and #276 `TransitJournal` | Checkpoint/`RecoveryDelta` Transit Saga authority | Transit attempt, receipt, retry, and terminal transitions |
+| `SectorTopology` | Galaxy-derived gates, bodies, stations, and anchor table | Immutable dependency; rebuilt from the validated topology | Navigation and coordinate conversion |
+| `GameData` | Validated module/ship catalogs and fingerprint | Immutable dependency; checkpoint identity is validated against the fingerprint | Materialization and fitting rules |
+| `FrameOutputs` | Pending public events, auto-jump proposals, and completed-warp corrections | Runtime-drained output; only the documented cross-Tick queue is recovery state | Publishing the current frame without becoming a second authority |
+
+The root's `node_id`, `sector_id`, and bounds remain composition identity. SQL
+and repository ownership is explicitly marked as an adapter, separate from the
+Station owner. This keeps the repository replaceable without creating a second
+hidden Station cache or moving persistence authority into the ECS state.
 
 ### Target boundary (#272 / #275)
 
@@ -161,7 +184,7 @@ runtime receives input
     -> runtime publishes replication/client/effect outputs
 ```
 
-Repositories, SQL connections, journal handles, sockets, and replication transports must not become hidden fields of the final pure engine merely to preserve the old generic node shape. `SectorView` is read-only and exposes only committed state needed by AoI delivery; it is not a second mutation or persistence authority.
+Repositories, SQL connections, journal handles, sockets, and replication transports must not become hidden fields of a domain state owner merely to preserve the old generic node shape. `PersistenceBoundary` is the explicit composition adapter for the still-compatible repository API; `SectorView` is read-only and exposes only committed state needed by AoI delivery. Neither is a second Sector mutation authority.
 
 ### Inter-Actor data-sharing rules
 
@@ -200,7 +223,7 @@ Node(0), Counter(100) -> EntityId: 0x00_00000000000064
 Node(1), Counter(100) -> EntityId: 0x01_00000000000064
 ```
 
-ADR-0049 adds a recovery requirement: allocation counters/consumed identity state are authoritative and must be restored exactly enough that a crash cannot reissue an already-consumed ID. #275 may move counters into a Player/Simulation owner, but cannot downgrade them to a derived cache.
+ADR-0049 adds a recovery requirement: allocation counters/consumed identity state are authoritative and must be restored exactly enough that a crash cannot reissue an already-consumed ID. #275 places the in-memory counters in the Player/Simulation owners; durable reservation watermarks remain repository authority and cannot be downgraded to a derived cache.
 
 ---
 
@@ -219,7 +242,7 @@ ADR-0049 adds a recovery requirement: allocation counters/consumed identity stat
 
 ## 7. Player-level ship ownership and routing (ADR-0037, amended by ADR-0049)
 
-`ShipRegistry` splits the "which player controls which ship" question into three independently tracked concerns:
+`PlayerState` splits the "which player controls which ship" question into three independently tracked concerns:
 
 - **Owned ship** (`owners: ShipId -> PlayerId`): every Ship a Player owns. A Player may own more than one.
 - **Active ship** (`active_ship: PlayerId -> ShipId`): the one owned Ship currently routable for helm/module commands and Undock.
@@ -256,7 +279,9 @@ Therefore:
 - removal/Transit/admission operations that clear or set active routing update the same authority; and
 - socket identity, open UI panel, selected inventory row, and other presentation/session transport state remain non-authoritative unless separately promoted.
 
-`ShipRegistry::remove()` only clears a Player's `active_ship` entry if the removed Ship was active. Removing another owned Ship must not silently clear the pointer to the Ship the Player is still flying.
+Ship removal only clears a Player's `active_ship` entry if the removed Ship was
+active. Removing another owned Ship must not silently clear the pointer to the
+Ship the Player is still flying; both maps are owned by `PlayerState`.
 
 ---
 
@@ -274,5 +299,6 @@ Flight/steering commands and Undock require `is_active_ship`. A Player can be do
 `TransferToStationCommand { ship_id, station_id, item_id, direction }` moves an item stack between a docked Ship's cargo and the caller's Station inventory according to the Station rules. Exact Station durability follows ADR-0049/ADR-0038 as amended; #277 owns repository APIs.
 
 The local `StateSnapshot` and Tick `RecoveryDelta` now persist the ownership and
-active-ship maps required to restore this routing state exactly. #275 may still
-extract the PlayerState aggregate, but it must preserve this recovery contract.
+active-ship maps required to restore this routing state exactly. The maps are
+materialized by `PlayerState`; extraction does not weaken this recovery
+contract.

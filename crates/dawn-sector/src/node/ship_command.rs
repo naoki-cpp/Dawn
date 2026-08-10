@@ -74,6 +74,7 @@ impl SimulationNode {
             return Err(ShipCommandRejection::MustBeUndocked);
         }
         let &entity = self
+            .simulation
             .ships
             .index
             .get(&ship_id)
@@ -97,6 +98,7 @@ impl SimulationNode {
             return Err(ShipCommandRejection::MustBeDocked);
         }
         let &entity = self
+            .simulation
             .ships
             .index
             .get(&ship_id)

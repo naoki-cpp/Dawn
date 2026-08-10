@@ -18,7 +18,7 @@ impl SimulationNode {
     /// `RecoveryDelta`; it is intentionally persisted with the projection so
     /// restart and replay preserve the same contiguous-prefix contract.
     pub fn station_projection_applied_through(&self) -> Result<u64, super::ProjectionReadError> {
-        self.repositories
+        self.persistence
             .station_inventory()
             .projection_applied_through()
             .map_err(|error| super::ProjectionReadError::Storage {
@@ -37,7 +37,7 @@ impl SimulationNode {
         journal_index: u64,
         mutation: Option<super::StationProjectionMutation>,
     ) -> Result<super::ProjectionApplyResult, super::ProjectionApplyError> {
-        self.repositories.station_inventory().apply_projection(
+        self.persistence.station_inventory().apply_projection(
             transition_id,
             journal_index,
             mutation,
@@ -51,7 +51,7 @@ impl SimulationNode {
         station_id: StationId,
     ) -> Option<BTreeMap<ItemId, u64>> {
         let inventory = self
-            .repositories
+            .persistence
             .station_inventory()
             .get_all(player_id, station_id);
         (!inventory.is_empty()).then_some(inventory)
@@ -77,14 +77,14 @@ impl SimulationNode {
         inventory: BTreeMap<ItemId, u64>,
     ) {
         for (item_id, count) in inventory {
-            self.repositories
+            self.persistence
                 .station_inventory()
                 .credit(player_id, station_id, item_id, count);
         }
     }
 
     pub(super) fn ensure_client_admission_grant(&mut self, event: &ClientAdmissionCommitted) {
-        self.repositories
+        self.persistence
             .transaction()
             .expect("client admission Station grant transaction")
             .ensure_client_admission_grant(
@@ -99,7 +99,7 @@ impl SimulationNode {
     }
 
     pub(super) fn reconcile_client_admission_identities(&mut self) -> Result<(), String> {
-        self.repositories
+        self.persistence
             .reconcile_admission_identity_watermarks()
             .map_err(|error| error.to_string())
     }
@@ -118,7 +118,7 @@ impl SimulationNode {
         if count == 0 {
             return;
         }
-        self.repositories
+        self.persistence
             .station_inventory()
             .credit(player_id, station_id, item_id, count);
     }
@@ -133,7 +133,7 @@ impl SimulationNode {
         if count == 0 {
             return Ok(());
         }
-        self.repositories
+        self.persistence
             .station_inventory()
             .try_debit(player_id, station_id, item_id, count)
     }

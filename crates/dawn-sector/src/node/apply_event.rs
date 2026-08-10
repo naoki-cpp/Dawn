@@ -34,8 +34,10 @@ impl SimulationNode {
 
         match event {
             DomainEvent::ClientAdmissionIdentityReserved(e) => {
-                self.player_id_counter = self.player_id_counter.max(e.player_id.0 + 1);
-                self.id_counter = self.id_counter.max(e.ship_id.0.counter() + 1);
+                self.players.player_id_counter =
+                    self.players.player_id_counter.max(e.player_id.0 + 1);
+                self.simulation.id_counter =
+                    self.simulation.id_counter.max(e.ship_id.0.counter() + 1);
             }
 
             DomainEvent::ClientAdmissionCommitted(e) => {
@@ -43,7 +45,7 @@ impl SimulationNode {
             }
 
             DomainEvent::ShipSpawned(e) => {
-                if !self.ships.index.contains_key(&e.ship_id) {
+                if !self.simulation.ships.index.contains_key(&e.ship_id) {
                     self.insert_to_world(e.ship_id, dawn_core::Position::ORIGIN, Velocity::ZERO);
                     // ADR-0029 review #1: anchor on the nearest body (deterministic
                     // — same initial_position reproduces the same anchor on replay).
@@ -60,7 +62,7 @@ impl SimulationNode {
                         e.ship_type_id,
                         dawn_ecs::components::ShipStatsComp::NPC,
                     );
-                    if let Some(&entity) = self.ships.index.get(&e.ship_id) {
+                    if let Some(&entity) = self.simulation.ships.index.get(&e.ship_id) {
                         // Starting inventory (ADR-0032) is a pure function of
                         // module_registry, loaded identically before replay
                         // starts -- reproduce it here exactly like the live
@@ -72,35 +74,36 @@ impl SimulationNode {
                     }
                 }
                 let counter = e.ship_id.0.counter();
-                if counter >= self.id_counter {
-                    self.id_counter = counter + 1;
+                if counter >= self.simulation.id_counter {
+                    self.simulation.id_counter = counter + 1;
                 }
             }
 
             DomainEvent::VelocityChanged(e) => {
-                if let Some(&entity) = self.ships.index.get(&e.ship_id) {
+                if let Some(&entity) = self.simulation.ships.index.get(&e.ship_id) {
                     let gap_ticks = e
                         .tick
                         .value()
-                        .saturating_sub(self.current_tick.value())
+                        .saturating_sub(self.simulation.current_tick.value())
                         .saturating_sub(1);
                     let old_vel = self
+                        .simulation
                         .world
                         .get::<VelocityComp>(entity)
                         .map(|v| v.0)
                         .unwrap_or(Velocity::ZERO);
-                    if let Some(mut pos) = self.world.get_mut::<PositionComp>(entity) {
+                    if let Some(mut pos) = self.simulation.world.get_mut::<PositionComp>(entity) {
                         let gap_ticks = gap_ticks as f64;
                         pos.0.x += old_vel.dx * gap_ticks + e.velocity.dx;
                         pos.0.y += old_vel.dy * gap_ticks + e.velocity.dy;
                         pos.0.z += old_vel.dz * gap_ticks + e.velocity.dz;
                     }
-                    if let Some(mut vel) = self.world.get_mut::<VelocityComp>(entity) {
+                    if let Some(mut vel) = self.simulation.world.get_mut::<VelocityComp>(entity) {
                         vel.0 = e.velocity;
                     }
                 }
-                if e.tick > self.current_tick {
-                    self.current_tick = e.tick;
+                if e.tick > self.simulation.current_tick {
+                    self.simulation.current_tick = e.tick;
                 }
             }
 
@@ -109,13 +112,14 @@ impl SimulationNode {
             }
 
             DomainEvent::ShipFitted(e) => {
-                if let Some(&entity) = self.ships.index.get(&e.ship_id) {
-                    let fitting = FittingComp::from_snapshot(&e.fitting, &self.module_registry);
-                    let _ = self.world.insert_one(entity, fitting);
+                if let Some(&entity) = self.simulation.ships.index.get(&e.ship_id) {
+                    let fitting =
+                        FittingComp::from_snapshot(&e.fitting, &self.game_data.module_registry);
+                    let _ = self.simulation.world.insert_one(entity, fitting);
                     self.reapply_fitting(e.ship_id);
                     // Inventory snapshot (ADR-0032): always present alongside
                     // the fitting it changed together with.
-                    let _ = self.world.insert_one(
+                    let _ = self.simulation.world.insert_one(
                         entity,
                         dawn_ecs::components::InventoryComp {
                             items: e.inventory.iter().copied().fold(
@@ -131,8 +135,9 @@ impl SimulationNode {
             }
 
             DomainEvent::ModuleActivated(e) => {
-                if let Some(&entity) = self.ships.index.get(&e.ship_id) {
-                    if let Some(mut fitting) = self.world.get_mut::<FittingComp>(entity) {
+                if let Some(&entity) = self.simulation.ships.index.get(&e.ship_id) {
+                    if let Some(mut fitting) = self.simulation.world.get_mut::<FittingComp>(entity)
+                    {
                         if let Some(slot) = fitting.find_slot_mut(e.module_id, e.slot) {
                             slot.is_active = true;
                             slot.target_ship_id = e.target_ship_id;
@@ -143,8 +148,9 @@ impl SimulationNode {
             }
 
             DomainEvent::ModuleDeactivated(e) => {
-                if let Some(&entity) = self.ships.index.get(&e.ship_id) {
-                    if let Some(mut fitting) = self.world.get_mut::<FittingComp>(entity) {
+                if let Some(&entity) = self.simulation.ships.index.get(&e.ship_id) {
+                    if let Some(mut fitting) = self.simulation.world.get_mut::<FittingComp>(entity)
+                    {
                         if let Some(slot) = fitting.find_slot_mut(e.module_id, e.slot) {
                             slot.force_off();
                         }
@@ -156,8 +162,8 @@ impl SimulationNode {
             // TargetLocked: set the LockComp entry to the Locked state
             DomainEvent::TargetLocked(e) => {
                 use dawn_ecs::components::{LockEntry, LockState};
-                if let Some(&entity) = self.ships.index.get(&e.locker_id) {
-                    if let Some(mut lock) = self.world.get_mut::<LockComp>(entity) {
+                if let Some(&entity) = self.simulation.ships.index.get(&e.locker_id) {
+                    if let Some(mut lock) = self.simulation.world.get_mut::<LockComp>(entity) {
                         if let Some(entry) = lock
                             .entries
                             .iter_mut()
@@ -176,8 +182,8 @@ impl SimulationNode {
 
             // LockLost: remove the entry from LockComp
             DomainEvent::LockLost(e) => {
-                if let Some(&entity) = self.ships.index.get(&e.locker_id) {
-                    if let Some(mut lock) = self.world.get_mut::<LockComp>(entity) {
+                if let Some(&entity) = self.simulation.ships.index.get(&e.locker_id) {
+                    if let Some(mut lock) = self.simulation.world.get_mut::<LockComp>(entity) {
                         lock.entries.retain(|en| en.target_id != e.target_id);
                     }
                 }
@@ -186,16 +192,16 @@ impl SimulationNode {
             DomainEvent::WeaponFired(_) => {}
 
             DomainEvent::DamageTaken(e) => {
-                if let Some(&entity) = self.ships.index.get(&e.ship_id) {
-                    if let Some(mut hull) = self.world.get_mut::<HullComp>(entity) {
+                if let Some(&entity) = self.simulation.ships.index.get(&e.ship_id) {
+                    if let Some(mut hull) = self.simulation.world.get_mut::<HullComp>(entity) {
                         hull.set_hp(e.current_shield, e.current_armor, e.current_hull);
                     }
                 }
             }
 
             DomainEvent::RepairApplied(e) => {
-                if let Some(&entity) = self.ships.index.get(&e.ship_id) {
-                    if let Some(mut hull) = self.world.get_mut::<HullComp>(entity) {
+                if let Some(&entity) = self.simulation.ships.index.get(&e.ship_id) {
+                    if let Some(mut hull) = self.simulation.world.get_mut::<HullComp>(entity) {
                         hull.set_hp(e.current_shield, e.current_armor, e.current_hull);
                     }
                 }
@@ -218,9 +224,11 @@ impl SimulationNode {
             // Tackle (ADR-0024): TackledComp is managed live; on replay, apply
             // the same add/remove logic to keep the component consistent.
             DomainEvent::TackleApplied(e) => {
-                if let Some(&entity) = self.ships.index.get(&e.ship_id) {
+                if let Some(&entity) = self.simulation.ships.index.get(&e.ship_id) {
                     let has_comp = {
-                        if let Some(mut tackled) = self.world.get_mut::<TackledComp>(entity) {
+                        if let Some(mut tackled) =
+                            self.simulation.world.get_mut::<TackledComp>(entity)
+                        {
                             if !tackled.tacklers.contains(&e.by) {
                                 tackled.tacklers.push(e.by);
                             }
@@ -230,7 +238,7 @@ impl SimulationNode {
                         }
                     };
                     if !has_comp {
-                        let _ = self.world.insert_one(
+                        let _ = self.simulation.world.insert_one(
                             entity,
                             TackledComp {
                                 tacklers: vec![e.by],
@@ -241,9 +249,11 @@ impl SimulationNode {
             }
 
             DomainEvent::TackleReleased(e) => {
-                if let Some(&entity) = self.ships.index.get(&e.ship_id) {
+                if let Some(&entity) = self.simulation.ships.index.get(&e.ship_id) {
                     let should_remove = {
-                        if let Some(mut tackled) = self.world.get_mut::<TackledComp>(entity) {
+                        if let Some(mut tackled) =
+                            self.simulation.world.get_mut::<TackledComp>(entity)
+                        {
                             tackled.tacklers.retain(|&id| id != e.by);
                             tackled.tacklers.is_empty()
                         } else {
@@ -251,7 +261,7 @@ impl SimulationNode {
                         }
                     };
                     if should_remove {
-                        let _ = self.world.remove_one::<TackledComp>(entity);
+                        let _ = self.simulation.world.remove_one::<TackledComp>(entity);
                     }
                 }
             }
@@ -260,14 +270,14 @@ impl SimulationNode {
                 // Frame rebase (ADR-0029): set anchor + position offset directly.
                 // Absolute position is unchanged; this only updates the
                 // (anchor, offset) representation so replay stays consistent.
-                if let Some(&entity) = self.ships.index.get(&e.ship_id) {
-                    self.world.set_ship_anchor(entity, e.anchor);
-                    if let Some(mut pos) = self.world.get_mut::<PositionComp>(entity) {
+                if let Some(&entity) = self.simulation.ships.index.get(&e.ship_id) {
+                    self.simulation.world.set_ship_anchor(entity, e.anchor);
+                    if let Some(mut pos) = self.simulation.world.get_mut::<PositionComp>(entity) {
                         pos.0 = e.offset;
                     }
                 }
-                if e.tick > self.current_tick {
-                    self.current_tick = e.tick;
+                if e.tick > self.simulation.current_tick {
+                    self.simulation.current_tick = e.tick;
                 }
             }
 
@@ -276,8 +286,8 @@ impl SimulationNode {
                     ship_id: e.ship_id,
                     station_id: e.station_id,
                 });
-                if e.tick > self.current_tick {
-                    self.current_tick = e.tick;
+                if e.tick > self.simulation.current_tick {
+                    self.simulation.current_tick = e.tick;
                 }
             }
 
@@ -285,8 +295,8 @@ impl SimulationNode {
                 self.apply_station_runtime_state(StationRuntimeState::Undock {
                     ship_id: e.ship_id,
                 });
-                if e.tick > self.current_tick {
-                    self.current_tick = e.tick;
+                if e.tick > self.simulation.current_tick {
+                    self.simulation.current_tick = e.tick;
                 }
             }
 
@@ -296,8 +306,8 @@ impl SimulationNode {
                 // (`station_operation_execution.rs`) before this event
                 // was even appended. Replaying the credit/debit here would
                 // double-apply it.
-                if e.tick > self.current_tick {
-                    self.current_tick = e.tick;
+                if e.tick > self.simulation.current_tick {
+                    self.simulation.current_tick = e.tick;
                 }
             }
 
@@ -308,8 +318,8 @@ impl SimulationNode {
                 self.apply_station_runtime_state(StationRuntimeState::Disassemble {
                     ship_id: e.ship_id,
                 });
-                if e.tick > self.current_tick {
-                    self.current_tick = e.tick;
+                if e.tick > self.simulation.current_tick {
+                    self.simulation.current_tick = e.tick;
                 }
             }
 
@@ -323,8 +333,8 @@ impl SimulationNode {
                     station_id: e.station_id,
                     ship_type_id: e.ship_type_id,
                 });
-                if e.tick > self.current_tick {
-                    self.current_tick = e.tick;
+                if e.tick > self.simulation.current_tick {
+                    self.simulation.current_tick = e.tick;
                 }
             }
         }

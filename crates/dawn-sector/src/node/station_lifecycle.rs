@@ -12,7 +12,7 @@ use super::{
 impl SimulationNode {
     /// True when `player_id`'s ship is currently docked at `station_id`.
     pub fn can_use_station(&self, player_id: PlayerId, station_id: StationId) -> bool {
-        self.docked_players.get(&player_id).copied() == Some(station_id)
+        self.stations.docked_station_for_player(player_id) == Some(station_id)
     }
 
     /// True when `ship_id` is spatially eligible to dock at `station_id`.
@@ -29,15 +29,15 @@ impl SimulationNode {
     }
 
     pub fn docked_station(&self, ship_id: ShipId) -> Option<StationId> {
-        self.docked_ships.get(&ship_id).copied()
+        self.stations.docked_station_for_ship(ship_id)
     }
 
     pub fn is_ship_docked(&self, ship_id: ShipId) -> bool {
-        self.docked_ships.contains_key(&ship_id)
+        self.stations.is_ship_docked(ship_id)
     }
 
     pub fn player_docked_station(&self, player_id: PlayerId) -> Option<StationId> {
-        self.docked_players.get(&player_id).copied()
+        self.stations.docked_station_for_player(player_id)
     }
 
     /// Re-adopt a restored ship for a resumed player and reconcile Station access.
@@ -51,10 +51,10 @@ impl SimulationNode {
             return false;
         }
 
-        if let Some(station_id) = self.docked_ships.get(&ship_id).copied() {
-            self.docked_players.insert(player_id, station_id);
+        if let Some(station_id) = self.stations.docked_station_for_ship(ship_id) {
+            self.stations.dock_player(player_id, station_id);
         } else {
-            self.docked_players.remove(&player_id);
+            self.stations.undock_player(player_id);
         }
         true
     }
@@ -63,15 +63,15 @@ impl SimulationNode {
         let Some(station_abs) = self.station(station_id).map(|station| station.abs_m) else {
             return;
         };
-        let Some(&entity) = self.ships.index.get(&ship_id) else {
+        let Some(&entity) = self.simulation.ships.index.get(&ship_id) else {
             return;
         };
-        let _ = self.world.remove_one::<WarpComp>(entity);
+        let _ = self.simulation.world.remove_one::<WarpComp>(entity);
         self.clear_steering_modes(entity);
-        if let Some(mut thrust) = self.world.get_mut::<ThrustComp>(entity) {
+        if let Some(mut thrust) = self.simulation.world.get_mut::<ThrustComp>(entity) {
             *thrust = ThrustComp::ZERO;
         }
-        if let Some(mut velocity) = self.world.get_mut::<VelocityComp>(entity) {
+        if let Some(mut velocity) = self.simulation.world.get_mut::<VelocityComp>(entity) {
             velocity.0 = dawn_core::Velocity::ZERO;
         }
         self.place_entity_at_absolute(entity, station_abs);
@@ -92,7 +92,7 @@ impl SimulationNode {
                 reason: StationOperationRejection::NotOwned,
             };
         }
-        if self.docked_ships.contains_key(&ship_id) {
+        if self.stations.is_ship_docked(ship_id) {
             return StationOperationOutcome::Rejected {
                 ship_id,
                 reason: StationOperationRejection::AlreadyDocked,
@@ -130,7 +130,7 @@ impl SimulationNode {
                 reason: StationOperationRejection::NotOwned,
             };
         }
-        let Some(station_id) = self.docked_ships.get(&ship_id).copied() else {
+        let Some(station_id) = self.stations.docked_station_for_ship(ship_id) else {
             return StationOperationOutcome::Rejected {
                 ship_id,
                 reason: StationOperationRejection::ShipNotDocked,
@@ -163,22 +163,22 @@ impl SimulationNode {
                 reason: StationOperationRejection::NotOwned,
             };
         }
-        if self.ships.active_ship.get(&player_id) == Some(&cmd.ship_id) {
+        if self.players.active_ship.get(&player_id) == Some(&cmd.ship_id) {
             return StationOperationOutcome::Rejected {
                 ship_id: cmd.ship_id,
                 reason: StationOperationRejection::AlreadyActive,
             };
         }
-        let target_station = self.docked_ships.get(&cmd.ship_id).copied();
+        let target_station = self.stations.docked_station_for_ship(cmd.ship_id);
         if target_station.is_none()
-            || target_station != self.docked_players.get(&player_id).copied()
+            || target_station != self.stations.docked_station_for_player(player_id)
         {
             return StationOperationOutcome::Rejected {
                 ship_id: cmd.ship_id,
                 reason: StationOperationRejection::ShipNotDockedHere,
             };
         }
-        self.ships.active_ship.insert(player_id, cmd.ship_id);
+        self.players.active_ship.insert(player_id, cmd.ship_id);
         StationOperationOutcome::Accepted {
             ship_id: cmd.ship_id,
         }
@@ -194,25 +194,25 @@ impl SimulationNode {
         &mut self,
         player_id: PlayerId,
     ) -> Result<ShipId, StationOperationRejection> {
-        let Some(ship_id) = self.ships.active_ship.get(&player_id).copied() else {
+        let Some(ship_id) = self.players.active_ship.get(&player_id).copied() else {
             return Err(StationOperationRejection::NotOwned);
         };
         if !self.is_ship_docked(ship_id) {
             return Err(StationOperationRejection::ShipNotDocked);
         }
-        self.ships.active_ship.remove(&player_id);
+        self.players.active_ship.remove(&player_id);
         Ok(ship_id)
     }
 
     pub fn clear_docked_lock_targets(&mut self, tick: dawn_core::Tick) -> Vec<DomainEvent> {
         let mut events: Vec<DomainEvent> = Vec::new();
-        let ship_ids: Vec<ShipId> = self.ships.index.keys().copied().collect();
+        let ship_ids: Vec<ShipId> = self.simulation.ships.index.keys().copied().collect();
         for ship_id in ship_ids {
-            let Some(&entity) = self.ships.index.get(&ship_id) else {
+            let Some(&entity) = self.simulation.ships.index.get(&ship_id) else {
                 continue;
             };
             let locker_docked = self.is_ship_docked(ship_id);
-            let lost_targets: Vec<ShipId> = match self.world.get::<LockComp>(entity) {
+            let lost_targets: Vec<ShipId> = match self.simulation.world.get::<LockComp>(entity) {
                 Some(lock) => lock
                     .entries
                     .iter()
@@ -229,7 +229,7 @@ impl SimulationNode {
             if lost_targets.is_empty() {
                 continue;
             }
-            if let Some(mut lock) = self.world.get_mut::<LockComp>(entity) {
+            if let Some(mut lock) = self.simulation.world.get_mut::<LockComp>(entity) {
                 lock.entries
                     .retain(|entry| !lost_targets.contains(&entry.target_id));
             }
@@ -405,15 +405,20 @@ mod tests {
         let ship_id = node.spawn_player_ship(player_id);
         let station = node.station(StationId(0)).expect("demo station exists");
         node.set_spawn_anchor_abs(ship_id, station.abs_m);
-        let entity = *node.ships.index.get(&ship_id).expect("ship entity");
-        if let Some(mut velocity) = node.world.get_mut::<VelocityComp>(entity) {
+        let entity = *node
+            .simulation
+            .ships
+            .index
+            .get(&ship_id)
+            .expect("ship entity");
+        if let Some(mut velocity) = node.simulation.world.get_mut::<VelocityComp>(entity) {
             velocity.0 = dawn_core::Velocity {
                 dx: 10.0,
                 dy: 0.0,
                 dz: 0.0,
             };
         }
-        if let Some(mut thrust) = node.world.get_mut::<ThrustComp>(entity) {
+        if let Some(mut thrust) = node.simulation.world.get_mut::<ThrustComp>(entity) {
             thrust.direction = dawn_core::Velocity {
                 dx: 1.0,
                 dy: 0.0,
@@ -430,8 +435,8 @@ mod tests {
             }
         )));
 
-        let velocity = node.world.get::<VelocityComp>(entity).unwrap().0;
-        let thrust = *node.world.get::<ThrustComp>(entity).unwrap();
+        let velocity = node.simulation.world.get::<VelocityComp>(entity).unwrap().0;
+        let thrust = *node.simulation.world.get::<ThrustComp>(entity).unwrap();
         assert_eq!(velocity, dawn_core::Velocity::ZERO);
         assert_eq!(thrust.direction, ThrustComp::ZERO.direction);
         assert_eq!(thrust.is_braking, ThrustComp::ZERO.is_braking);
@@ -444,7 +449,12 @@ mod tests {
         let ship_id = node.spawn_player_ship(player_id);
         let station = node.station(StationId(0)).expect("demo station exists");
         node.set_spawn_anchor_abs(ship_id, station.abs_m);
-        let entity = *node.ships.index.get(&ship_id).expect("ship entity");
+        let entity = *node
+            .simulation
+            .ships
+            .index
+            .get(&ship_id)
+            .expect("ship entity");
         assert!(accepted(node.dock_owned(
             player_id,
             ship_id,
@@ -453,13 +463,13 @@ mod tests {
             }
         )));
 
-        let before = *node.world.get::<ThrustComp>(entity).unwrap();
+        let before = *node.simulation.world.get::<ThrustComp>(entity).unwrap();
         assert!(node.apply_move_command_owned(
             player_id,
             ship_id,
             dawn_core::Position::new(5000.0, 0.0, 0.0)
         ));
-        let after = *node.world.get::<ThrustComp>(entity).unwrap();
+        let after = *node.simulation.world.get::<ThrustComp>(entity).unwrap();
         assert_eq!(
             before.direction, after.direction,
             "docked ships should ignore manual piloting"

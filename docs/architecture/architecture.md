@@ -72,7 +72,6 @@ See [ADR-0003](../adr/ADR-0003-local-first-development.md), [ADR-0027](../adr/AD
 ### Future scope (direction only, not implemented)
 
 - TLS / QUIC (8E+)
-- #275 remaining state-owner extraction from `SimulationNode`
 - #280 transport migration is implemented: versioned peer identity handshake,
   separate control/bulk channels, recovery ranges, snapshots, repository bytes,
   and durability envelopes; deployment-specific benchmark/RTO remains
@@ -99,7 +98,7 @@ See [ADR-0003](../adr/ADR-0003-local-first-development.md), [ADR-0027](../adr/AD
 | `dawn-actor` | library | Client transport boundary (`ClientConnection` trait) |
 | `dawn-replication` | library | Replication/anti-entropy policy plus the `PeerReplicationTransport` adapter. It carries ADR-0049/#284 recovery bytes without redefining their authority |
 | `dawn-market` | library | Player-to-player Market: bid/ask order book + `PlayerId` Currency ledger, its own SQLite authority independent of Sector tick determinism. The SQLite layer is an adapter around a private matching policy that owns crossing, price-time priority, partial fills, maker-price settlement, and Bid price-improvement refunds. Depends only on `dawn-core` + serde + rusqlite -- no transport/runtime dependency, same DAG position as `dawn-wire` (ADR-0034 §4/§5/§6). Constructs `RemoveItemCommand`/`ReturnItemCommand`/`CreditItemCommand` but never applies them; the caller (`dawn-simulation`) routes each to the Sector that owns the affected ship |
-| `dawn-sector` | library | Per-Sector game logic plus the shared durable runtime frame. `SimulationNode` owns Tick/Transit/Warp/Bot AI/AoI/Snapshot state preparation; `run_durable_runtime_tick_with_consensus` owns the prepare -> durable append -> live-apply -> reconciliation -> output boundary with injected consensus and durability-policy adapters. `aoi_frame::deliver_sector_sessions` owns the common rebuild -> session delivery -> stale-player cleanup loop; adapters inject only transport callbacks. AoI consumers read through the storage-free `SectorView` boundary; #275 continues migrating the remaining state owners while preserving ADR-0049 recovery semantics |
+| `dawn-sector` | library | Per-Sector game logic plus the shared durable runtime frame. `SimulationNode` composes explicit Simulation/Player/Station/Transit/Topology/GameData/FrameOutput owners and a separate Persistence adapter; `run_durable_runtime_tick_with_consensus` owns the prepare -> durable append -> live-apply -> reconciliation -> output boundary with injected consensus and durability-policy adapters. `aoi_frame::deliver_sector_sessions` owns the common rebuild -> session delivery -> stale-player cleanup loop; adapters inject only transport callbacks. AoI consumers read through the storage-free `SectorView` boundary while the owner split preserves ADR-0049 recovery semantics |
 | `dawn-simulation` | binary | Bootstrap and adapter wiring for local/single/cluster runs. WsServer, Raft cluster wiring, load generation, TOML loader, and the `dawn-market` bridge are deployment adapters around the shared Sector runtime frame; it must not define a second Tick ordering |
 | `dawn-sector-node` | binary | Production bootstrap and adapter wiring (8D-4). It supplies shared peer control/bulk transport, FileJournal, SQLite repositories, and static TOML config to the shared Sector runtime frame. 3 processes = 3-Sector cluster today |
 
@@ -196,8 +195,9 @@ Acknowledge after the selected durability + local-apply conditions
 The concrete `SimulationNode` no longer owns an `EventStore`. The shared runtime
 frame owns bounded prepare -> durable append -> live apply -> reconciliation ->
 output ordering; local and production adapters select their consensus, journal,
-durability policy, and repository ports. Remaining state-owner extraction belongs
-to #275, while remote replicated durability and catch-up transport belong to #280.
+durability policy, and repository ports. #275 now makes the remaining mutable
+state owners explicit, while remote replicated durability and catch-up transport
+belong to #280.
 
 Command and `DomainEvent` remain separate types (INV-006), and neither is an accidental substitute for `RecoveryDelta`. See [recovery-contract.md](./recovery-contract.md), [tick-model.md](./tick-model.md), and [event-catalog.md](./event-catalog.md).
 

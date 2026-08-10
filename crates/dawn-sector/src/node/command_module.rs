@@ -127,21 +127,25 @@ impl SimulationNode {
     ) -> Result<(), ModuleActivationRejection> {
         use dawn_core::events::{ModuleActivated, ModuleDeactivated};
         use ModuleActivationRejection::*;
-        let entity = match self.ships.index.get(&ship_id).copied() {
+        let entity = match self.simulation.ships.index.get(&ship_id).copied() {
             Some(e) => e,
             None => return Err(ShipNotFound),
         };
-        if self.world.transit_state(entity).is_in_transit() {
+        if self.simulation.world.transit_state(entity).is_in_transit() {
             return Err(ShipInTransit);
         }
 
         // Snapshot the slot's current state before mutating anything.
 
-        let current = self.world.get::<FittingComp>(entity).and_then(|f| {
-            f.iter_slots()
-                .find(|s| s.def.id == module_id && s.def.slot == slot)
-                .map(|s| (s.def.kind, s.is_active, s.target_ship_id))
-        });
+        let current = self
+            .simulation
+            .world
+            .get::<FittingComp>(entity)
+            .and_then(|f| {
+                f.iter_slots()
+                    .find(|s| s.def.id == module_id && s.def.slot == slot)
+                    .map(|s| (s.def.kind, s.is_active, s.target_ship_id))
+            });
         let (kind, prev_active, prev_target) = match current {
             Some(c) => c,
             None => return Err(SlotNotFound),
@@ -153,6 +157,7 @@ impl SimulationNode {
             }
             if let Some(target_id) = target {
                 let locked = self
+                    .simulation
                     .world
                     .get::<LockComp>(entity)
                     .map(|lock| {
@@ -209,7 +214,7 @@ impl SimulationNode {
                 module_id,
                 slot,
                 target_ship_id: target,
-                tick: self.current_tick,
+                tick: self.simulation.current_tick,
             })
         } else {
             DomainEvent::ModuleDeactivated(ModuleDeactivated {
@@ -222,7 +227,7 @@ impl SimulationNode {
                 // forced deactivations (Capacitor/Range Gate) write to
                 // FittingComp directly and emit their own events instead.
                 forced_reason: None,
-                tick: self.current_tick,
+                tick: self.simulation.current_tick,
             })
         };
         self.emit_event(event);
@@ -242,7 +247,8 @@ impl SimulationNode {
         is_active: bool,
         target: Option<ShipId>,
     ) -> bool {
-        self.world
+        self.simulation
+            .world
             .get_mut::<FittingComp>(entity)
             .and_then(|mut f| {
                 f.find_slot_mut(module_id, slot).map(|s| {
@@ -262,22 +268,22 @@ impl SimulationNode {
 
     /// Returns `true` if successful, `false` if the ship or module is unknown.
     pub fn fit_module(&mut self, cmd: FitModuleCommand) -> bool {
-        let def = match self.module_registry.get(&cmd.module_id).cloned() {
+        let def = match self.game_data.module_registry.get(&cmd.module_id).cloned() {
             Some(d) => d,
             None => return false,
         };
-        let entity = match self.ships.index.get(&cmd.ship_id).copied() {
+        let entity = match self.simulation.ships.index.get(&cmd.ship_id).copied() {
             Some(e) => e,
             None => return false,
         };
 
         use dawn_core::fitting::ActivationMode;
-        let is_npc = !self.ships.owners.contains_key(&cmd.ship_id);
+        let is_npc = !self.players.owners.contains_key(&cmd.ship_id);
         let is_active = match def.activation_mode {
             ActivationMode::Passive => true,
             ActivationMode::Active => is_npc,
         };
-        if let Some(mut fitting) = self.world.get_mut::<FittingComp>(entity) {
+        if let Some(mut fitting) = self.simulation.world.get_mut::<FittingComp>(entity) {
             fitting.slot_mut(cmd.slot).push(FittedSlot {
                 def,
                 is_active,
