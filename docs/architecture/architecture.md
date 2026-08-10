@@ -97,7 +97,7 @@ See [ADR-0003](../adr/ADR-0003-local-first-development.md), [ADR-0027](../adr/AD
 | `dawn-peer-transport` | library | Shared versioned peer identity handshake, framing/lifecycle, bounded queues, and separate control/bulk channels; opaque domain payloads (ADR-0050, #280) |
 | `dawn-actor` | library | Client transport boundary (`ClientConnection` trait) |
 | `dawn-replication` | library | Replication/anti-entropy policy plus the `PeerReplicationTransport` adapter. It carries ADR-0049/#284 recovery bytes without redefining their authority |
-| `dawn-market` | library | Player-to-player Market: bid/ask order book + `PlayerId` Currency ledger, its own SQLite authority independent of Sector tick determinism. The SQLite layer is an adapter around a private matching policy that owns crossing, price-time priority, partial fills, maker-price settlement, and Bid price-improvement refunds. Depends only on `dawn-core` + serde + rusqlite -- no transport/runtime dependency, same DAG position as `dawn-wire` (ADR-0034 §4/§5/§6). Constructs `RemoveItemCommand`/`ReturnItemCommand`/`CreditItemCommand` but never applies them; the caller (`dawn-simulation`) routes each to the Sector that owns the affected ship |
+| `dawn-market` | library | Player-to-player Market: pure bid/ask, Currency, escrow, and durable `SettlementIntent` outbox policy. `MarketDb` is the SQLite adapter that atomically persists orders, balances, stable settlement IDs, and delivery state. Depends only on `dawn-core` + thiserror + rusqlite -- no transport/runtime dependency, same DAG position as `dawn-wire` (ADR-0034 §4/§5/§6, #279). It never imports Sector bridge commands; `dawn-simulation` translates intents and routes them to the owning Sector |
 | `dawn-sector` | library | Per-Sector game logic plus the shared durable runtime frame. `SimulationNode` composes explicit Simulation/Player/Station/Transit/Topology/GameData/FrameOutput owners and a separate Persistence adapter; `run_durable_runtime_tick_with_consensus` owns the prepare -> durable append -> live-apply -> reconciliation -> output boundary with injected consensus and durability-policy adapters. `aoi_frame::deliver_sector_sessions` owns the common rebuild -> session delivery -> stale-player cleanup loop; adapters inject only transport callbacks. AoI consumers read through the storage-free `SectorView` boundary while the owner split preserves ADR-0049 recovery semantics |
 | `dawn-simulation` | binary | Bootstrap and adapter wiring for local/single/cluster runs. WsServer, Raft cluster wiring, load generation, TOML loader, and the `dawn-market` bridge are deployment adapters around the shared Sector runtime frame; it must not define a second Tick ordering |
 | `dawn-sector-node` | binary | Production bootstrap and adapter wiring (8D-4). It supplies shared peer control/bulk transport, FileJournal, SQLite repositories, and static TOML config to the shared Sector runtime frame. 3 processes = 3-Sector cluster today |
@@ -116,7 +116,7 @@ dawn-core
     │       └── dawn-actor / dawn-sector (below) also depend on dawn-wire
     ├── dawn-market        <- Market order book + Currency ledger, own SQLite, no transport dep (ADR-0034 §4)
     │       ^
-    │       └── dawn-simulation (below) routes Market requests and bridge commands
+    │       └── dawn-simulation (below) translates Market intents and routes bridge commands
     ├── dawn-ecs
     ├── dawn-consensus
     ├── dawn-peer-transport

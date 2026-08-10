@@ -254,6 +254,7 @@ mod tests {
             ship_id,
             item_id: dawn_core::ItemId::ScrapMetal,
             quantity: 2,
+            settlement_id: 1,
         }));
         assert_eq!(
             node.simulation
@@ -289,12 +290,14 @@ mod tests {
             ship_id,
             item_id: dawn_core::ItemId::ScrapMetal,
             quantity: 2,
+            settlement_id: 2,
         }));
         assert!(node.credit_item_owned(CreditItemCommand {
             player_id: player,
             ship_id,
             item_id: dawn_core::ItemId::ScrapMetal,
             quantity: 3,
+            settlement_id: 3,
         }));
 
         let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
@@ -325,6 +328,7 @@ mod tests {
             ship_id,
             item_id: dawn_core::ItemId::ScrapMetal,
             quantity,
+            settlement_id: 4,
         };
         assert!(!node.remove_item_owned(command(stranger, 1)));
         assert!(!node.remove_item_owned(command(player, 0)));
@@ -349,6 +353,7 @@ mod tests {
             ship_id,
             item_id: dawn_core::ItemId::ScrapMetal,
             quantity: 1,
+            settlement_id: 5,
         }));
         assert_eq!(
             node.simulation
@@ -369,6 +374,7 @@ mod tests {
             ship_id,
             item_id: dawn_core::ItemId::ScrapMetal,
             quantity: 4,
+            settlement_id: 6,
         }));
         let event = node.pending_events().last().unwrap().clone();
 

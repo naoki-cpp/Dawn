@@ -11,6 +11,11 @@ date     : 2026-08-10
 
 # Security Review — Dawn Server（OWASP観点）
 
+2026-08-10 update: Issue #279 added the SQLite-backed Market repository and
+the settlement adapter. SQL remains parameterized, Market order destinations
+are ownership-checked before state mutation, and the new settlement IDs are
+validated before Sector delivery; no new security finding was introduced.
+
 2026-08-10 update: Issue #281 changed the client-side construction boundary
 and made `MarketOrderSide` a closed wire enum. Server admission, ownership
 checks, SQL parameter binding, scalar limits, and bounded per-session command
@@ -46,7 +51,7 @@ SQLite INTEGER境界を検証する。ownership・入力値・queue/snapshot上�
 | Hello/resumeハンドシェイク | `crates/dawn-wire/src/hello_resume.rs` | セッション識別（resume identity） |
 | コマンドディスパッチ | `crates/dawn-sector/src/node/commands.rs` | one exhaustive typed `ClientRequest` admission seam calling family-local policy directly |
 | Market bridge | `crates/dawn-simulation/src/serve/market.rs` | 入力検証、所有船へのRemove/Return/Credit適用 |
-| Market SQL | `crates/dawn-market/src/order_book.rs` | `MarketDb`の注文帳/Currency台帳、全値をparameter binding |
+| Market SQL | `crates/dawn-market/src/repository.rs` | `MarketDb`の注文帳/Currency台帳、全値をparameter binding |
 | ノード間トランスポート | `crates/dawn-peer-transport`（control/bulk）とRaft/replication adapters | フレーム長上限・identity handshakeあり、無認証（LAN方針内） |
 
 ---
@@ -64,7 +69,7 @@ Repository queryは`params![]`によるパラメータ化済み。テーブル/�
 クライアント文字列は全てclosedなmatchでenum化され、パス・シェル・フォーマット文字列への
 埋め込みなし。
 
-`dawn-market/src/order_book.rs`のmatching SQLも、`OrderSide`からサーバー内部で組み立てる
+`dawn-market/src/repository.rs`のSQLも、Marketの閉じたenum変換からサーバー内部で組み立てる
 比較・並び順以外の値は全て`params![]`で束縛する。クライアント文字列をSQL識別子へ
 通さず、Market item/sideもruntimeのclosed matchで変換する。
 
@@ -74,9 +79,10 @@ Repository queryは`params![]`によるパラメータ化済み。テーブル/�
 状態変更前に`owns_ship`+ドック状態を検証済み。`dock_owned`等は`active_ship`解決経由でそもそも
 クライアント供給IDを信頼しない設計。
 
-MarketのPlaceは`MarketRuntime`で`owns_ship(player_id, ship_id)`をRemove前に確認し、
+MarketのPlaceは`MarketRuntime`で`owns_ship(player_id, ship_id)`とプレイヤーと同じStationへの
+ドック状態をRemove前に確認し、
 Cancelは`MarketDb`が注文所有者を確認した後、保存済みの船IDを`return_item_owned`へ渡す。
-single/clusterともCreditの宛先は`owns_ship`で検索したノードに限定される。
+single/clusterともCreditの宛先は、所有かつドック済みの船を持つノードに限定される。
 
 ### A04 コマンド層のアロケーション
 

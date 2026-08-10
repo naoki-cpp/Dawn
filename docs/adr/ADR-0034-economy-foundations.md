@@ -132,13 +132,17 @@ Assemble/Disassemble のループ自体には追加コストがかからない�
   相性が良い）を**それ自身の権威**として持つ。Tickの決定論制約
   （INV-001/002/005）には縛られない、遅延許容の別ドメインとして切り離す。
 - Item の実体増減（プレイヤーが所有するShip/PlayerのInventoryComp書き換え）
-  だけは Sector 側の権威状態なので、既存の Event Workflow
-  （AI_DEVELOPMENT_GUIDE.md「Event Workflow」Command→検証→Event→EventStore）
-  を通す。Market から Sector へは、**片側だけの独立した3つのCommand**で
-  橋渡しする:
+  だけは Sector 側の権威状態である。Marketはその操作を直接実行せず、
+  `SettlementIntent`をtransactional outboxへ保存する。`dawn-simulation`のadapterだけが
+  intentを**片側だけの独立した3つのCommand**へ変換して橋渡しする:
   - `RemoveItemCommand`（出品/List時、売り手のSectorへ）
   - `ReturnItemCommand`（キャンセル時、売り手のSectorへ）
   - `CreditItemCommand`（成立/Settle時、買い手のSectorへ）
+
+  すべてのCommandはstableな`SettlementId`を持つ。Sectorは適用済みIDをcheckpointと
+  `ShipFitted`イベント再生へ記録するため、ACK喪失後の再配送は在庫を二重に増減させない。対象Sectorが使えない場合は
+  outboxをPendingのまま再試行し、拒否時はCurrency refund・Item compensationまたは
+  Terminal状態をMarket側に記録する。
 
   「Aから消してBへ移す」という単一のTransferではなく、常に片側1SectorだけへComamndを
   発行する設計にすることで、売り手/買い手が別Sectorに所属していても
@@ -242,17 +246,15 @@ Market は固定価格やアルゴリズム式（AMM/Bonding curve）で価格�
 - [x] 新規クレート `dawn-market` の Dependency DAG 上の位置を確定（2026-07-13、`dawn-wire`と同じ葉クレート。`dawn-simulation`にのみ組み込み、`dawn-sector-node`への配線は別タスク。詳細は roadmap.md §12 9D-1）
 - [x] `dawn-market`: SQLite バックエンドの指値注文帳（bid/ask マッチング、2026-07-13。roadmap.md §12 9D-2）
 - [x] `dawn-market`: `PlayerId` 単位の Currency 台帳（Bid時エスクロー・約定時決済・Cancel時払い戻し、2026-07-13。roadmap.md §12 9D-3）
-- [x] `dawn-market`: `RemoveItemCommand`/`ReturnItemCommand`/`CreditItemCommand` 発行経路（2026-07-17。Ask出品/キャンセル/約定の結果に対象`ShipId`付きで生成。MarketはSectorへ直接アクセスせず、呼び出し側が片側ずつ適用する。roadmap.md §12 9D-4）
+- [x] `dawn-market`: `SettlementIntent` transactional outbox、stable `SettlementId`、SQLite atomic commit、Sector側重複配送防止（2026-08-10。#279）
 - [x] client: Dock/Undock + Station操作UI（入港状態の表示と `D` / `U` / `B` / `Y` 操作、Packaged Ship のインベントリ表示、Assemble/Disassemble/建造UI すべて実装済み。`main.gd` の `ACTION_ASSEMBLE`/`ACTION_DISASSEMBLE`、`connection.gd` の `send_assemble_command`/`send_disassemble_ship_command`/`send_build_packaged_ship_command`）
 - [x] client: Market閲覧UI（指値注文の発注・Currency残高表示、2026-07-17。Market専用postcard envelope、single/cluster runtime bridge、Godot `market_surface.gd` の板・Bid/Ask・発注・Cancel・Currency表示を実装。snapshotは最大200件）
 
-9D-4 の Sector 側適用も実装済み。`SimulationNode` が3つの bridge commandを
-所有権・数量検証の後に適用し、既存の `ShipFitted` インベントリスナップショットへ
-記録する。Marketのorders schemaでは`ship_id`を必須とし、全注文がbridge commandの
-対象船を保持する。pre-9D-4 SQLite schemaは非対応であり、pre-release DBは削除して
-current schemaで作り直す。9D-5では`dawn-simulation::serve::market`がwire入力を検証し、
-single/cluster両方で所有船を検索してbridge commandを適用する。新しいwire eventは
-追加せず、Market専用のpostcard envelopeと`MarketSnapshot`を使う。`dawn-sector`は
-引き続き`dawn-market`を知らない。
+#279後のSector側適用は`dawn-simulation::serve::market_settlement`に限定する。
+`SimulationNode`はstable IDを受け取り、所有権・数量検証と重複排除を行った後、既存の
+`ShipFitted`インベントリスナップショットへ記録する。Marketのorders schemaでは`ship_id`
+を必須とし、outbox schemaはsettlement effect/status/compensationを保持する。
+pre-release SQLite schemaは非対応で、clean schemaへ作り直す。9D-5のwire envelopeと
+`MarketSnapshot`は維持し、`dawn-sector`は引き続き`dawn-market`を知らない。
 - [x] CONTEXT.md: `Item`/`Packaged Ship`/`Station`/`Scrap Metal`/`Currency` を追記済み（本セッション中）
 - [x] `cargo test --workspace` / `fmt` / `clippy -D warnings` 全緑

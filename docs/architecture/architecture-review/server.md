@@ -53,7 +53,7 @@ only as an async in-memory adapter; it is not a second Tick implementation.
 `ClientCommand`外側matchと`StationDispatchCommand`、domain固有の戻り値、process model固有の薄いadapterは
 意図的に維持する。
 
-## ファイルサイズ（2026-08-09再計測、500行以上）
+## ファイルサイズ（2026-08-10再計測、500行以上）
 
 | ファイル | 行数 | 判定 |
 |---|---:|---|
@@ -61,7 +61,8 @@ only as an async in-memory adapter; it is not a second Tick implementation.
 | `crates/dawn-sector/src/node/transit.rs` | 1694 | 🟡 Transit state mutation・live/replay tests。実装とテストの責務は凝集しておりR-3で監視 |
 | `crates/dawn-sector/src/node/commands.rs` | 1286 | 🟢 網羅的family選択・共通runtime command collection・follow-up射影・統合tests。family policyは専用moduleへ分離済み（issue #264、ADR-0047 amendment） |
 | `crates/dawn-sector/src/node/warp.rs` | 1190 | 🟢 warp state machine・geometry kernel・tests |
-| `crates/dawn-market/src/order_book.rs` | 1139 | 🟡 SQLite authority・Currency escrow・order boundary。matching policyは`matching.rs`へ分離済み |
+| `crates/dawn-market/src/order_book.rs` | 1044 | 🟢 pure order/matching/SettlementIntent policy。SQLは`repository.rs`へ分離済み（#279） |
+| `crates/dawn-market/src/repository.rs` | 623 | 🟡 SQLite transaction・order/Currency/outbox persistence。bounded-memory streamingはfollow-up |
 | `crates/dawn-sector/src/node/orbit.rs` | 950 | 🟢 Orbit / Keep-at-Range steering kernel・tests |
 | `crates/dawn-sector/src/node/snapshot_io.rs` | 934 | 🟢 snapshot/checkpoint/restore seam・tests |
 | `crates/dawn-sector/src/node/mod.rs` | 980 | 🟢 node state・identity/accessor・population/repository composition boundary・tests |

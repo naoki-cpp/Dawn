@@ -354,8 +354,8 @@ EVE の**グローバル** TiDi は大規模戦でゲームが 10 倍スロー�
   （Y キー）、Packaged Ship から新しい稼働船を作る Assemble（ADR-0037、複数所有船
   ロスターの SHIPS 列から選択）まで機能する。プレイヤー間 Market は基盤実装済み
   （`dawn-market` クレート、SQLite 指値注文帳、`PlayerId` 単位の Currency 台帳、
-  List/Cancel/Settle の Item bridge command 生成）。クライアントの発注UIとSector側の
-  bridge command適用runtime wiringも実装済み
+  List/Cancel/Settle の `SettlementIntent` outboxと、runtime adapterによるItem bridge
+  command配送）。クライアントの発注UIとSector側の重複排除つきbridge command適用runtime wiringも実装済み
   （`docs/process/roadmap.md` §12 9D-4/5、Market専用wire envelope）。
 
 ### 4.2 将来検討する機能（優先順位付き・すべて未実装）

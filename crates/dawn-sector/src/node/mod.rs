@@ -330,6 +330,7 @@ impl SimulationNode {
                 ships: ShipRegistry::new(),
                 base_stats: std::collections::HashMap::new(),
                 pending_bot_lock_commands: Vec::new(),
+                applied_market_settlements: std::collections::HashSet::new(),
             },
             players: PlayerState {
                 player_id_counter: 0,
@@ -681,6 +682,15 @@ impl SimulationNode {
     /// covers both sides of the move). Their *validation* still differs
     /// (ownership/inventory checks vs. none, M-8) — only the tail is shared.
     pub(super) fn emit_ship_fitted(&mut self, ship_id: ShipId, entity: Entity) {
+        self.emit_ship_fitted_with_settlement(ship_id, entity, None);
+    }
+
+    pub(super) fn emit_ship_fitted_with_settlement(
+        &mut self,
+        ship_id: ShipId,
+        entity: Entity,
+        market_settlement_id: Option<u64>,
+    ) {
         let fitting = self
             .simulation
             .world
@@ -703,6 +713,7 @@ impl SimulationNode {
             ship_id,
             fitting,
             inventory,
+            market_settlement_id,
             tick: self.simulation.current_tick,
         }));
     }

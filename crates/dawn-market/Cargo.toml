@@ -7,21 +7,11 @@ repository.workspace = true
 publish.workspace     = true
 
 # dawn-market is a leaf crate, same DAG position as dawn-wire: dawn-core (for
-# PlayerId/ItemId/ShipId and the RemoveItemCommand/ReturnItemCommand/
-# CreditItemCommand data shapes) + serde + rusqlite only. It must NOT depend
-# on dawn-ecs/dawn-event-store/dawn-sector -- ADR-0034 §4 deliberately keeps
-# Market's own state (order book, Currency ledger) outside the Sector tick's
-# determinism constraints (INV-001/002/005). dawn-market only *constructs*
-# the three bridging Commands; applying them to a SimulationNode is the
-# caller's job (dawn-simulation), so dawn-sector never needs to depend on
-# dawn-market either (ADR-0034 §4 implementation notes).
+# PlayerId/ItemId/ShipId) + thiserror + rusqlite only. It must NOT depend on
+# dawn-ecs/dawn-event-store/dawn-sector -- ADR-0034 §4 deliberately keeps
+# Market's own state (order book, Currency ledger, and settlement outbox)
+# outside the Sector tick's determinism constraints (INV-001/002/005).
 [dependencies]
 dawn-core = { path = "../dawn-core" }
-serde     = { workspace = true }
+thiserror = { workspace = true }
 rusqlite  = { workspace = true }
-
-# dawn-core/rusqlite are used by the order book (9D-2, order_book.rs).
-# serde is still unused -- reserved for the Currency ledger / trade history
-# serialization landing in 9D-3 -- so cargo-machete would otherwise flag it.
-[package.metadata.cargo-machete]
-ignored = ["serde"]

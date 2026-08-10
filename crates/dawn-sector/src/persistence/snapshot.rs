@@ -313,6 +313,9 @@ pub struct StateSnapshot {
     /// Auto-jump obligations produced by a committed warp and awaiting the
     /// runtime's transit proposal.
     pub pending_auto_jumps: Vec<(ShipId, JumpGateId)>,
+    /// Market settlement identities already applied to ship cargo. Keeping
+    /// these in the checkpoint makes a lost settlement ACK safe to retry.
+    pub applied_market_settlements: Vec<u64>,
 }
 
 impl StateSnapshot {
@@ -1008,6 +1011,7 @@ mod tests {
             active_ships: BTreeMap::from([(dawn_core::PlayerId(9), ShipId::new(NodeId(0), 0))]),
             pending_bot_lock_commands: Vec::new(),
             pending_auto_jumps: Vec::new(),
+            applied_market_settlements: vec![7, 11],
         }
     }
 

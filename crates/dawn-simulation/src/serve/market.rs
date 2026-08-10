@@ -6,6 +6,8 @@
 //! this module validates wire input and sends bounded snapshots to the client.
 
 use dawn_core::{EntityId, ItemId, PlayerId, ShipId};
+#[cfg(test)]
+use dawn_market::MarketCommand;
 use dawn_market::{MarketDb, MarketOrderView, OrderId, OrderSide};
 use dawn_sector::node::SimulationNode;
 use dawn_wire::{
@@ -85,7 +87,7 @@ impl MarketRuntime {
                 price,
                 quantity,
             } => match parse_order(ship_id, item_id, side, price, quantity) {
-                Some(order) => self.place_cluster(player_id, order, nodes),
+                Some(order) => self.place_cluster(player_id, order, player_sector, nodes),
                 None => self.snapshot(player_id, "Market order rejected"),
             },
             MarketCommandWire::CancelMarketOrderCommand { order_id } => {
@@ -100,6 +102,9 @@ impl MarketRuntime {
         order: ParsedOrder,
         node: &mut SimulationNode,
     ) -> MarketSnapshotWire {
+        if !can_place_order(node, player_id, order.ship_id) {
+            return self.snapshot(player_id, "Market order rejected");
+        }
         let result = MarketSettlement::place_single(&mut self.db, player_id, order, node);
         self.snapshot(player_id, result.notice())
     }
@@ -108,8 +113,15 @@ impl MarketRuntime {
         &mut self,
         player_id: PlayerId,
         order: ParsedOrder,
+        player_sector: usize,
         nodes: &mut [SimulationNode],
     ) -> MarketSnapshotWire {
+        if !nodes
+            .get(player_sector)
+            .is_some_and(|node| can_place_order(node, player_id, order.ship_id))
+        {
+            return self.snapshot(player_id, "Market order rejected");
+        }
         let result = MarketSettlement::place_cluster(&mut self.db, player_id, order, nodes);
         self.snapshot(player_id, result.notice())
     }
@@ -193,6 +205,13 @@ fn parse_order(
     })
 }
 
+fn can_place_order(node: &SimulationNode, player_id: PlayerId, ship_id: ShipId) -> bool {
+    let Some(player_station) = node.player_docked_station(player_id) else {
+        return false;
+    };
+    node.owns_ship(player_id, ship_id) && node.docked_station(ship_id) == Some(player_station)
+}
+
 fn order_id_from_wire(raw_order_id: u64) -> Option<OrderId> {
     i64::try_from(raw_order_id).ok().map(OrderId)
 }
@@ -235,17 +254,17 @@ mod tests {
     #[test]
     fn snapshot_is_bounded_and_marks_the_callers_orders() {
         let mut runtime = MarketRuntime::open_in_memory();
+        runtime.db.credit_currency(PlayerId(1), 1000).unwrap();
         runtime
             .db
-            .place_order(
-                PlayerId(1),
-                ShipId(EntityId::from_raw(1)),
-                ItemId::ScrapMetal,
-                OrderSide::Ask,
-                100,
-                2,
-            )
-            .unwrap()
+            .execute(MarketCommand::PlaceOrder {
+                player_id: PlayerId(1),
+                ship_id: ShipId(EntityId::from_raw(1)),
+                item_id: ItemId::ScrapMetal,
+                side: OrderSide::Bid,
+                price: 100,
+                quantity: 2,
+            })
             .unwrap();
 
         let snapshot = runtime.snapshot(PlayerId(1), "");
@@ -273,5 +292,78 @@ mod tests {
         assert_eq!(snapshot.notice, MARKET_DOCK_REQUIRED_NOTICE);
         assert_eq!(snapshot.balance, 0);
         assert!(snapshot.orders.is_empty());
+    }
+
+    #[test]
+    fn market_order_rejects_a_ship_not_owned_by_the_player() {
+        let mut runtime = MarketRuntime::open_in_memory();
+        runtime.db.credit_currency(PlayerId(1), 100).unwrap();
+        let mut node = SimulationNode::new(
+            dawn_core::NodeId(0),
+            dawn_core::SectorId(0),
+            dawn_core::SectorBounds::centered(dawn_core::SectorBounds::DEFAULT_HALF),
+            std::sync::Arc::new(dawn_sector::galaxy::Galaxy::demo()),
+            crate::test_catalog(),
+        );
+        let foreign_ship = node.spawn_player_ship_at_pub(PlayerId(2), dawn_core::Position::ORIGIN);
+
+        let result = runtime.place_single(
+            PlayerId(1),
+            ParsedOrder {
+                ship_id: foreign_ship,
+                item_id: ItemId::ScrapMetal,
+                side: OrderSide::Bid,
+                price: 100,
+                quantity: 1,
+            },
+            &mut node,
+        );
+
+        assert_eq!(result.notice, "Market order rejected");
+        assert!(runtime.db.open_orders_for(PlayerId(1)).unwrap().is_empty());
+        assert_eq!(runtime.db.currency_balance(PlayerId(1)).unwrap(), 100);
+    }
+
+    #[test]
+    fn market_order_rejects_an_undocked_owned_ship() {
+        let mut runtime = MarketRuntime::open_in_memory();
+        runtime.db.credit_currency(PlayerId(1), 100).unwrap();
+        let mut node = SimulationNode::new(
+            dawn_core::NodeId(0),
+            dawn_core::SectorId(0),
+            dawn_core::SectorBounds::centered(dawn_core::SectorBounds::DEFAULT_HALF),
+            std::sync::Arc::new(dawn_sector::galaxy::Galaxy::demo()),
+            crate::test_catalog(),
+        );
+        let station_position = node
+            .station(dawn_core::StationId(0))
+            .expect("demo station exists")
+            .position;
+        let _docked_ship = node.spawn_player_ship_at_pub(PlayerId(1), station_position);
+        node.apply_client_request(
+            PlayerId(1),
+            dawn_core::ClientRequest::Dock {
+                station: dawn_core::StationId(0),
+            },
+            &mut Vec::new(),
+        )
+        .unwrap();
+        let ship_id = node.spawn_player_ship_at_pub(PlayerId(1), dawn_core::Position::ORIGIN);
+
+        let result = runtime.place_single(
+            PlayerId(1),
+            ParsedOrder {
+                ship_id,
+                item_id: ItemId::ScrapMetal,
+                side: OrderSide::Bid,
+                price: 100,
+                quantity: 1,
+            },
+            &mut node,
+        );
+
+        assert_eq!(result.notice, "Market order rejected");
+        assert!(runtime.db.open_orders_for(PlayerId(1)).unwrap().is_empty());
+        assert_eq!(runtime.db.currency_balance(PlayerId(1)).unwrap(), 100);
     }
 }

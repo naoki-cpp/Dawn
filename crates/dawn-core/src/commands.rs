@@ -181,33 +181,40 @@ pub struct TransferToStationCommand {
 ///
 /// This is an internal bridge command, not a client-facing `ClientRequest`.
 /// The caller routes it to the Sector that owns `ship_id` and applies the
-/// normal ownership and inventory validation there.
+/// normal ownership and inventory validation there. `settlement_id` makes a
+/// retry after an ambiguous ACK idempotent at the Sector boundary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RemoveItemCommand {
     pub player_id: PlayerId,
     pub ship_id: ShipId,
     pub item_id: ItemId,
     pub quantity: u64,
+    /// Stable Market settlement identity used for duplicate delivery safety.
+    pub settlement_id: u64,
 }
 
 /// Request to return the remaining Item quantity from a cancelled Market Ask
-/// to the seller's ship cargo (ADR-0034 §4, roadmap 9D-4).
+/// to the seller's ship cargo (ADR-0034 §4, roadmap 9D-4/#279).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReturnItemCommand {
     pub player_id: PlayerId,
     pub ship_id: ShipId,
     pub item_id: ItemId,
     pub quantity: u64,
+    /// Stable Market settlement identity used for duplicate delivery safety.
+    pub settlement_id: u64,
 }
 
 /// Request to credit purchased Items to the buyer's ship cargo after Market
-/// settlement (ADR-0034 §4, roadmap 9D-4).
+/// settlement (ADR-0034 §4, roadmap 9D-4/#279).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CreditItemCommand {
     pub player_id: PlayerId,
     pub ship_id: ShipId,
     pub item_id: ItemId,
     pub quantity: u64,
+    /// Stable Market settlement identity used for duplicate delivery safety.
+    pub settlement_id: u64,
 }
 
 /// Which way `TransferToStationCommand` moves the stack.
@@ -738,18 +745,21 @@ mod tests {
             ship_id: ship_id(3),
             item_id: ItemId::ScrapMetal,
             quantity: 2,
+            settlement_id: 1,
         };
         let returned = ReturnItemCommand {
             player_id: remove.player_id,
             ship_id: remove.ship_id,
             item_id: remove.item_id,
             quantity: remove.quantity,
+            settlement_id: remove.settlement_id,
         };
         let credited = CreditItemCommand {
             player_id: PlayerId(8),
             ship_id: ship_id(4),
             item_id: remove.item_id,
             quantity: remove.quantity,
+            settlement_id: 2,
         };
 
         assert_eq!(returned.player_id, remove.player_id);

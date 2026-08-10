@@ -168,6 +168,9 @@ Runtimeは、どのreplica setを使うか、quorumが何台か、どのowner ep
 `dawn-market::MarketDb` は注文帳、Currency、Bid escrowを一つのSQLite DBに置く。発注とキャンセルは
 DB transaction内で処理されるため、**Market DB内部**の原子性を持つ。
 
+#279で、同じtransactionにsettlement outboxも含める。各intentは単調増加する
+`SettlementId`と配送状態を持ち、注文・Currency・escrowと同時にcommitされる。
+
 現在は一つの`MarketRuntime`が一つのconnectionを所有し、SQLiteのsingle-writer特性は実用上の制約に
 なっていない。`dawn-market`はSector recovery journalの一部ではなく独立bounded contextである。
 
@@ -213,19 +216,21 @@ stateまでprojection扱いするものではない。
 
 ## 7. Market と Sector settlement
 
-Market DB内部のorder/Currency/escrowは一transactionにできるが、MarketからSector inventoryへ送る
-`RemoveItemCommand` / `ReturnItemCommand` / `CreditItemCommand` は別authorityを跨ぐ。
-PostgreSQLへ移行してもこの跨ぎが自動的にatomicになるわけではない。
+Market DB内部のorder/Currency/escrowとsettlement outboxは一transactionにできるが、Marketから
+Sector inventoryへ送る片側の在庫操作は別authorityを跨ぐ。PostgreSQLへ移行してもこの跨ぎが
+自動的にatomicになるわけではない。
 
-Market独立process化までに必要なdirection:
+#279の現在の境界は次の通りである:
 
-- Market transactionと同時にsettlement intentを保存するtransactional outbox
-- 各settlementへstable identity (`SettlementId`, #279) を付ける
-- Sector側でduplicate settlement適用を無害にする
-- 未配送intentを再送できるdelivery stateを持つ
+- `dawn-market`はSQLを知らない純粋な`MarketState` transitionから`SettlementIntent`を生成する。
+- `MarketDb`は注文・残高・escrow・outboxを一SQLite transactionでcommitし、`Pending` intentを保持する。
+- `dawn-simulation::serve::market_settlement`だけがintentを`RemoveItemCommand`/
+  `ReturnItemCommand`/`CreditItemCommand`へ変換する。
+- 各Sector commandには`SettlementId`を渡し、Sectorはcheckpointと`ShipFitted`イベント再生で復元する適用済みIDにより、重複配送をno-opにする。
+- 対象Sectorが利用できない間はintentをPendingのまま残し、失敗時は明示的なcompensationまたはTerminalへ遷移する。
 
 これはSector recovery journalの一般outboxと概念的には似るが、Market bounded contextのtransaction
-ownershipを保つ。具体設計は#279で行う。
+ownershipを保つ。Marketを独立process化する場合も、このoutboxを配送worker/leaseへ拡張する。
 
 ## 8. PostgreSQL を将来候補とする理由
 

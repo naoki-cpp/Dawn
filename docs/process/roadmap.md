@@ -57,7 +57,7 @@ ADR-0034の実装順を示す互換性用索引。
 - 9B: Station / Packaged Ship / Assemble / Disassemble — completed
 - 9C: Player-built infrastructure — TODO（[pending.md](./roadmap/pending.md)）
 - 9D-1〜9D-3: Market crate、order book、Currency ledger — completed
-- 9D-4: Sector bridge commands — completed
+- 9D-4: Market `SettlementIntent` outbox、stable ID、Sector bridge delivery — completed (#279)
 - 9D-5: Station限定Market UIとwire/runtime bridge — completed
 - 9E: Economy loop validation — 9E-1 in progress, 9E-2 deferred
 

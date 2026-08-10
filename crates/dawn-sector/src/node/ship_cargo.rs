@@ -62,6 +62,7 @@ impl SimulationNode {
             cmd.ship_id,
             cmd.item_id,
             cmd.quantity,
+            cmd.settlement_id,
             MarketItemMutation::Remove,
         )
     }
@@ -73,6 +74,7 @@ impl SimulationNode {
             cmd.ship_id,
             cmd.item_id,
             cmd.quantity,
+            cmd.settlement_id,
             MarketItemMutation::Add,
         )
     }
@@ -84,6 +86,7 @@ impl SimulationNode {
             cmd.ship_id,
             cmd.item_id,
             cmd.quantity,
+            cmd.settlement_id,
             MarketItemMutation::Add,
         )
     }
@@ -94,10 +97,18 @@ impl SimulationNode {
         ship_id: dawn_core::ShipId,
         item_id: ItemId,
         quantity: u64,
+        settlement_id: u64,
         mutation: MarketItemMutation,
     ) -> bool {
-        if quantity == 0 || !self.owns_ship(player_id, ship_id) {
+        if quantity == 0 || settlement_id == 0 || !self.owns_ship(player_id, ship_id) {
             return false;
+        }
+        if self
+            .simulation
+            .applied_market_settlements
+            .contains(&settlement_id)
+        {
+            return true;
         }
         let Some(&entity) = self.simulation.ships.index.get(&ship_id) else {
             return false;
@@ -137,10 +148,14 @@ impl SimulationNode {
             return false;
         }
 
+        self.simulation
+            .applied_market_settlements
+            .insert(settlement_id);
+
         // ShipFitted is the existing full fitting/inventory snapshot event.
         // Reuse it so Market settlement remains replayable without a second
         // partial inventory source of truth.
-        self.emit_ship_fitted(ship_id, entity);
+        self.emit_ship_fitted_with_settlement(ship_id, entity, Some(settlement_id));
         true
     }
 
@@ -297,6 +312,7 @@ mod tests {
             ship_id,
             item_id: ItemId::ScrapMetal,
             quantity: 2,
+            settlement_id: 1,
         }));
 
         let event = node.pending_events().last().unwrap();
@@ -311,6 +327,7 @@ mod tests {
                 .count(),
             1
         );
+        assert_eq!(event.market_settlement_id, Some(1));
     }
 
     #[test]
@@ -323,12 +340,14 @@ mod tests {
             ship_id,
             item_id: ItemId::ScrapMetal,
             quantity: 2,
+            settlement_id: 2,
         }));
         assert!(node.credit_item_owned(CreditItemCommand {
             player_id: player,
             ship_id,
             item_id: ItemId::ScrapMetal,
             quantity: 3,
+            settlement_id: 3,
         }));
 
         let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
@@ -355,9 +374,14 @@ mod tests {
             ship_id,
             item_id: ItemId::ScrapMetal,
             quantity,
+            settlement_id: 4,
         };
         assert!(!node.remove_item_owned(command(stranger, 1)));
         assert!(!node.remove_item_owned(command(player, 0)));
+        assert!(!node.remove_item_owned(RemoveItemCommand {
+            settlement_id: 0,
+            ..command(player, 1)
+        }));
         assert!(!node.remove_item_owned(command(player, 3)));
         assert_eq!(
             node.simulation
@@ -379,6 +403,7 @@ mod tests {
             ship_id,
             item_id: ItemId::ScrapMetal,
             quantity: 1,
+            settlement_id: 5,
         }));
         assert_eq!(
             node.simulation
@@ -399,6 +424,7 @@ mod tests {
             ship_id,
             item_id: ItemId::ScrapMetal,
             quantity: 4,
+            settlement_id: 6,
         }));
         let event = node.pending_events().last().unwrap().clone();
 
@@ -419,6 +445,34 @@ mod tests {
                 .item_count(ItemId::ScrapMetal),
             4
         );
+    }
+
+    #[test]
+    fn duplicate_market_settlement_does_not_repeat_the_cargo_mutation() {
+        let mut node = node_with_modules();
+        let (player, ship_id) = spawn_owned_player(&mut node);
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
+        node.add_ship_item(entity, ItemId::ScrapMetal, 5);
+        let command = RemoveItemCommand {
+            player_id: player,
+            ship_id,
+            item_id: ItemId::ScrapMetal,
+            quantity: 2,
+            settlement_id: 99,
+        };
+        let events_before = node.pending_events().len();
+
+        assert!(node.remove_item_owned(command));
+        assert!(node.remove_item_owned(command));
+        assert_eq!(
+            node.simulation
+                .world
+                .get::<InventoryComp>(entity)
+                .unwrap()
+                .item_count(ItemId::ScrapMetal),
+            3
+        );
+        assert_eq!(node.pending_events().len(), events_before + 1);
     }
 
     #[test]

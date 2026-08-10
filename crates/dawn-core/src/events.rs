@@ -398,6 +398,10 @@ pub struct ShipFitted {
     #[serde(default)]
     pub inventory: Vec<ItemId>,
     pub tick: Tick,
+    /// Market settlement delivery that caused this cargo snapshot, if any.
+    /// This lets event replay restore Sector-side duplicate-delivery protection.
+    #[serde(default)]
+    pub market_settlement_id: Option<u64>,
 }
 
 // ── WeaponFired ───────────────────────────────────────────────────────────────
