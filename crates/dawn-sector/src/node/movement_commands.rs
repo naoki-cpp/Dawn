@@ -225,7 +225,7 @@ mod tests {
     use super::*;
     use dawn_core::{AbsolutePosition, AnchorId, ApproachTarget, NodeId, SectorBounds, SectorId};
     use dawn_ecs::components::{ApproachComp, KeepAtRangeComp, OrbitComp, WarpPhase};
-    use dawn_event_store::{
+    use dawn_storage::{
         AppendReceipt, DurabilityMode, DurableJournal, InMemoryJournal, JournalBatch, JournalError,
         JournalIndex, JournalRecord, JournalStream,
     };

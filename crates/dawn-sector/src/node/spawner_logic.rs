@@ -611,7 +611,7 @@ mod tests {
     #[test]
     fn snapshot_restore_preserves_a_rebased_ships_anchor_and_absolute_position() {
         use dawn_core::{events::AnchorRebased, AnchorId};
-        use dawn_event_store::InMemoryEventStore;
+        use dawn_storage::InMemoryEventStore;
         let mut node = node_with_catalog();
         let ship = node.spawn_ship(
             dawn_core::ShipTypeId(1),

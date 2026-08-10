@@ -11,7 +11,7 @@ use dawn_client_core::{
     PositionInput, ShipInput, ShipLeaveReason, ShipRegistration, StationInput, SystemNameInput,
     WorldSessionEffect,
 };
-use dawn_wire::{InitialStateWire, ServerFact, ServerMessage, ShipStateWire};
+use dawn_protocol::{InitialStateWire, ServerFact, ServerMessage, ShipStateWire};
 use godot::prelude::*;
 
 #[derive(GodotClass)]
@@ -35,7 +35,7 @@ impl ServerMessageDecoder {
     #[func]
     fn test_outcome(&self, kind: GString) -> Option<Gd<ServerMessageOutcome>> {
         use dawn_core::CelestialBodyKind;
-        use dawn_wire::{
+        use dawn_protocol::{
             AbsPosWire, BuildableShipTypeWire, CelestialBodyWire, JumpGateWire, MarketOrderWire,
             MarketSnapshotWire, PlayerLoadoutWire, SlotCapacityWire, StationWire, SystemWire,
             VelWire,
@@ -110,11 +110,11 @@ impl ServerMessageDecoder {
             "Welcome" => ServerMessage::Welcome {
                 player_id: 5,
                 ship_id: 11,
-                resume_ticket: dawn_wire::ResumeTicket::from_bytes([5; 32]),
+                resume_ticket: dawn_protocol::ResumeTicket::from_bytes([5; 32]),
             },
             "Redirect" => ServerMessage::Redirect {
                 ws_addr: "127.0.0.1:7880".to_owned(),
-                resume_ticket: dawn_wire::ResumeTicket::from_bytes([5; 32]),
+                resume_ticket: dawn_protocol::ResumeTicket::from_bytes([5; 32]),
             },
             "AoiLeave" => ServerMessage::AoiLeave { ship_id: 19 },
             "AoiEnterPending" => ServerMessage::AoiEnter(pending_ship.clone()),
@@ -181,7 +181,7 @@ impl ServerMessageDecoder {
                 orders: vec![
                     MarketOrderWire {
                         order_id: 1,
-                        item_id: dawn_wire::ItemWire::ScrapMetal,
+                        item_id: dawn_protocol::ItemWire::ScrapMetal,
                         side: "Ask".to_owned(),
                         price: 10,
                         quantity: 2,
@@ -189,7 +189,7 @@ impl ServerMessageDecoder {
                     },
                     MarketOrderWire {
                         order_id: 2,
-                        item_id: dawn_wire::ItemWire::Module { module_id: 3 },
+                        item_id: dawn_protocol::ItemWire::Module { module_id: 3 },
                         side: "Bid".to_owned(),
                         price: 20,
                         quantity: 1,
@@ -197,7 +197,7 @@ impl ServerMessageDecoder {
                     },
                     MarketOrderWire {
                         order_id: 3,
-                        item_id: dawn_wire::ItemWire::PackagedShip { ship_type_id: 7 },
+                        item_id: dawn_protocol::ItemWire::PackagedShip { ship_type_id: 7 },
                         side: "Ask".to_owned(),
                         price: 30,
                         quantity: 1,
@@ -916,7 +916,7 @@ fn ship_registration(ship: &ShipStateWire) -> ShipRegistration {
     }
 }
 
-fn position_input(position: dawn_wire::AbsPosWire) -> PositionInput {
+fn position_input(position: dawn_protocol::AbsPosWire) -> PositionInput {
     PositionInput {
         x: position.x,
         y: position.y,

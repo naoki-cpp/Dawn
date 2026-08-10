@@ -265,10 +265,12 @@ mod tests {
             let (mut socket, _) = connect_async(format!("ws://{address}")).await.unwrap();
             socket
                 .send(Message::Binary(
-                    dawn_wire::ClientMessage::Hello(dawn_wire::HelloMessage { resume: None })
-                        .encode()
-                        .unwrap()
-                        .into(),
+                    dawn_protocol::ClientMessage::Hello(dawn_protocol::HelloMessage {
+                        resume: None,
+                    })
+                    .encode()
+                    .unwrap()
+                    .into(),
                 ))
                 .await
                 .unwrap();

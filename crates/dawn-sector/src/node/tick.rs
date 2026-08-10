@@ -1011,7 +1011,7 @@ mod tests {
         commands::TransitCommand, NodeId, Position, SectorBounds, SectorId, Tick, Velocity,
     };
     use dawn_ecs::components::{LockEntry, LockState};
-    use dawn_event_store::{
+    use dawn_storage::{
         AppendReceipt, DurabilityMode, DurableJournal, InMemoryJournal, JournalBatch, JournalError,
         JournalIndex, JournalRecord,
     };
@@ -1054,7 +1054,7 @@ mod tests {
         assert_eq!(journal.records().len(), 1);
         assert!(matches!(
             journal.records()[0].stream,
-            dawn_event_store::JournalStream::RecoveryDelta
+            dawn_storage::JournalStream::RecoveryDelta
         ));
     }
 

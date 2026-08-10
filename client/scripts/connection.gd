@@ -52,7 +52,7 @@ var _reconnect_attempts : int       = 0
 var _server_url      : String        = SERVER_URL
 ## Opaque server-issued capability used for reconnect/resume (ADR-0048).
 var _resume_ticket   : PackedByteArray = PackedByteArray()
-## ClientCommand/ServerMessageDecoder are GDExtension classes (dawn-wire/
+## ClientCommand/ServerMessageDecoder are GDExtension classes (dawn-protocol/
 ## dawn-client-gdext, ADR-0041/ADR-0042) -- globally registered, no preload
 ## needed. The decoder returns a typed ServerMessageOutcome that owns all
 ## Rust-side variant projection.

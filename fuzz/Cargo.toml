@@ -9,7 +9,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
-dawn-wire = { path = "../crates/dawn-wire" }
+dawn-protocol = { path = "../crates/dawn-protocol" }
 
 [[bin]]
 name = "decode_client_message"

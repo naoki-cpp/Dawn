@@ -348,7 +348,7 @@ mod tests {
             "snapshot must record the tackler"
         );
 
-        let store2 = dawn_event_store::InMemoryEventStore::new();
+        let store2 = dawn_storage::InMemoryEventStore::new();
         let modules: Vec<_> = crate::game_data::test_catalog().modules().to_vec();
         let ship_types: Vec<_> = crate::game_data::test_catalog().ship_types().to_vec();
         let node2 = SimulationNode::restore_from_test(

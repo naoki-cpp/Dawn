@@ -1,6 +1,6 @@
 ---
 id      : ADR-0027
-title   : dawn-replication クレートの新設（ゴシップ配布 + アンチエントロピー + スナップショット転送）
+title   : dawn-distributed クレートの新設（ゴシップ配布 + アンチエントロピー + スナップショット転送）
 status  : accepted
 date    : 2026-06-19
 deciders: [human, ai-agent]
@@ -10,7 +10,7 @@ related : ADR-0001（Event Sourcing）, ADR-0002（Actor）, ADR-0017（Snapshot
           .agents/commands/ai-change-checklist.md（新クレート手順）
 ---
 
-# ADR-0027 — dawn-replication クレートの新設
+# ADR-0027 — dawn-distributed クレートの新設
 
 ## 背景
 
@@ -20,13 +20,13 @@ ADR-0021 は Sector-local 複製の戦略を「追記ログのゴシップ配布
 
 現在 `dawn-actor` に存在する `ReplicationBus`（In-Memory broadcast チャネル）は
 "シングルプロセス内テスト用スタンドイン"であり、ネットワーク越しの実装ではない。
-本 ADR は `dawn-replication` クレートを新設し、ADR-0021 が定めた 3 責務を実装する。
+本 ADR は `dawn-distributed` クレートを新設し、ADR-0021 が定めた 3 責務を実装する。
 
 ## 決定
 
 ### 1. クレートの新設と責務
 
-`crates/dawn-replication/` を新設する。責務（ADR-0021 §決定 3 を再確認）:
+`crates/dawn-distributed/` を新設する。責務（ADR-0021 §決定 3 を再確認）:
 
 ```
 1. 追記ログのゴシップ配布（push-pull, log index ベース差分）
@@ -50,29 +50,29 @@ In-Memory（テスト用・`ReplicationBus` の後継）と TCP（本番用）�
 dawn-core
     ↑
     ├── dawn-ecs
-    ├── dawn-consensus
-    └── dawn-event-store
+    ├── dawn-distributed
+    └── dawn-storage
             ↑
             ├── dawn-actor          ← ClientConnection trait は残留
-            ├── dawn-replication    ← 新設（ReplicationBus の後継 + ゴシップ実装）
+            ├── dawn-distributed    ← 新設（ReplicationBus の後継 + ゴシップ実装）
             └── dawn-sector
                     ↑
                     └── dawn-simulation
 ```
 
-`dawn-replication` は `dawn-event-store`（`EventStore` trait + `iter_from`）に
+`dawn-distributed` は `dawn-storage`（`EventStore` trait + `iter_from`）に
 依存し、`dawn-sector` からは依存しない（矢印の方向に従う）。
 
 ### 3. dawn-actor の ReplicationBus の扱い
 
-`dawn-actor::ReplicationBus`（In-Memory broadcast）は `dawn-replication` の
+`dawn-actor::ReplicationBus`（In-Memory broadcast）は `dawn-distributed` の
 `InMemoryReplicationBus` へ置き換える。移行後、`dawn-actor` から削除する。
 `dawn-actor` は `ClientConnection` trait と実装（In-Process / WebSocket）のみを保持する。
 
 ### 4. 公開インターフェース（最小 MVP）
 
 ```rust
-// dawn-replication/src/lib.rs
+// dawn-distributed/src/lib.rs
 
 /// A single gossip message: one or more events from a source node's log.
 pub struct LogBatch {
@@ -106,7 +106,7 @@ pub struct SnapshotTransfer { ... }
 ### 5. Phase 8D の実装順序
 
 ```
-8D-2a: dawn-replication クレート新設
+8D-2a: dawn-distributed クレート新設
         - InMemoryReplicationBus（dawn-actor::ReplicationBus の移植）
         - ReplicationTransport trait
         - dawn-actor から ReplicationBus を削除
@@ -127,19 +127,19 @@ pub struct SnapshotTransfer { ... }
 
 ---
 
-## Dependency DAG 上の許可依存（dawn-replication/Cargo.toml）
+## Dependency DAG 上の許可依存（dawn-distributed/Cargo.toml）
 
 ```toml
 [dependencies]
 dawn-core        = { path = "../dawn-core" }
-dawn-event-store = { path = "../dawn-event-store" }
+dawn-storage = { path = "../dawn-storage" }
 serde            = { version = "1", features = ["derive"] }
 postcard         = { version = "1", features = ["alloc"] }
 tokio            = { version = "1", features = ["sync", "net", "io-util"] }
 thiserror        = "1"
 ```
 
-禁止: `dawn-ecs`, `dawn-sector`, `dawn-consensus`, `dawn-simulation`
+禁止: `dawn-ecs`, `dawn-sector`, `dawn-distributed`, `dawn-simulation`
 
 ---
 
@@ -167,7 +167,7 @@ thiserror        = "1"
 ## 実装チェックリスト
 
 - [x] 人間が本 ADR を承認する（proposed → accepted）
-- [x] `crates/dawn-replication/` を新設（Cargo.toml + src/lib.rs）
+- [x] `crates/dawn-distributed/` を新設（Cargo.toml + src/lib.rs）
 - [x] `ReplicationTransport` trait + `InMemoryReplicationBus` を実装
 - [x] `OutboundLogPublisher` で送信側 cursor と `LogBatch` suffix 構築を集約
 - [x] `dawn-actor` から `ReplicationBus` を削除し、`dawn-simulation` を差し替え

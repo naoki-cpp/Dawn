@@ -194,7 +194,7 @@ CLAUDE.md §10 には「圧縮はセグメント移送として ADR-0017 が規�
 |---|---|
 | CLAUDE.md §2 INV-002 | 「index 0 から完全再現」→「検証済みスナップショット + 末尾」に改訂（**要人間承認**） |
 | CLAUDE.md §10 FBD-001 | 文言維持。「圧縮はセグメント移送として ADR-0017 が規定／trait メソッド化は禁止のまま」を注記 |
-| crates/dawn-event-store | セグメント化 + コールドアーカイブ追記 + 原子的 swap（trait シグネチャは不変） |
+| crates/dawn-storage | セグメント化 + コールドアーカイブ追記 + 原子的 swap（trait シグネチャは不変） |
 | crates/dawn-simulation/snapshot.rs | コメントの「always recover by replaying from log index 0」を改訂後 INV-002 に合わせて更新 |
 | ADR-0001 | 「再評価トリガー: ログが膨大化した場合」を本 ADR が引き取る（supersede ではなく拡張） |
 | ADR-0014 | failover をスナップショット + 末尾 replay 前提に明確化（別途追記） |

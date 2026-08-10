@@ -83,7 +83,7 @@ EVE Online のサーバーアーキテクチャを参考に、以下を分離す
 
 Dependency DAG:
 ```
-dawn-core ← dawn-event-store ← dawn-actor ← dawn-simulation
+dawn-core ← dawn-storage ← dawn-actor ← dawn-simulation
 ```
 
 `ClientConnection` は `DomainEvent` と `MoveCommand` を扱うため

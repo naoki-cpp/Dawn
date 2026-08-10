@@ -13,18 +13,18 @@ fn node(node_id: u8, sector_id: u8) -> SimulationNode {
 
 fn raft_handle() -> (
     RaftActorHandle,
-    mpsc::UnboundedReceiver<dawn_consensus::RaftActorMessage>,
+    mpsc::UnboundedReceiver<dawn_distributed::RaftActorMessage>,
 ) {
     let (tx, rx) = mpsc::unbounded_channel();
     (RaftActorHandle::new(tx), rx)
 }
 
 fn decode_proposed_transit(
-    rx: &mut mpsc::UnboundedReceiver<dawn_consensus::RaftActorMessage>,
+    rx: &mut mpsc::UnboundedReceiver<dawn_distributed::RaftActorMessage>,
 ) -> TransitOp {
     let msg = rx.try_recv().expect("a proposal must have been sent");
     let payload = match msg {
-        dawn_consensus::RaftActorMessage::Propose(payload) => payload,
+        dawn_distributed::RaftActorMessage::Propose(payload) => payload,
         other => panic!("expected Propose, got {other:?}"),
     };
     TransitOp::decode(&payload).expect("payload must decode as a TransitOp")

@@ -196,7 +196,7 @@ mod tests {
                 .find_map(|(id, position)| (*id == ship_id).then_some(*position))
         }
 
-        fn ship_state(&self, _ship_id: ShipId) -> Option<dawn_wire::ShipStateWire> {
+        fn ship_state(&self, _ship_id: ShipId) -> Option<dawn_protocol::ShipStateWire> {
             None
         }
 

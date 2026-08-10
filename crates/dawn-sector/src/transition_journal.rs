@@ -4,7 +4,7 @@
 //! latter is storage-independent; this file is the runtime boundary that
 //! encodes its typed transition into the generic journal envelope.
 
-use dawn_event_store::{
+use dawn_storage::{
     encode_payload, AppendReceipt, DurabilityContext, DurabilityMode, DurableJournal, JournalBatch,
     JournalEntry, JournalError, JournalStream, TransitionId,
 };
@@ -82,7 +82,7 @@ mod tests {
         SectorEngine, SectorTransitionId, StopCommandState, TransitionContext,
     };
     use dawn_core::{NodeId, SectorId, ShipId};
-    use dawn_event_store::{InMemoryJournal, JournalIndex};
+    use dawn_storage::{InMemoryJournal, JournalIndex};
 
     #[test]
     fn prepared_transition_is_encoded_as_one_recovery_batch() {

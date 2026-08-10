@@ -17,16 +17,16 @@ use dawn_sector::{galaxy::Galaxy, game_data::GameDataCatalog};
 
 pub(crate) fn client_request_rejection(
     error: ClientRequestAdmissionError,
-) -> dawn_wire::ClientRequestRejectionWire {
+) -> dawn_protocol::ClientRequestRejectionWire {
     match error {
         ClientRequestAdmissionError::Validation(error) => {
-            dawn_wire::ClientRequestRejectionWire::validation(error)
+            dawn_protocol::ClientRequestRejectionWire::validation(error)
         }
         ClientRequestAdmissionError::NoActiveShip => {
-            dawn_wire::ClientRequestRejectionWire::no_active_ship()
+            dawn_protocol::ClientRequestRejectionWire::no_active_ship()
         }
         ClientRequestAdmissionError::UnsupportedRequest { request } => {
-            dawn_wire::ClientRequestRejectionWire::unsupported_request(request)
+            dawn_protocol::ClientRequestRejectionWire::unsupported_request(request)
         }
     }
 }
@@ -231,8 +231,8 @@ mod serve_pipeline_tests {
     use super::*;
     use dawn_actor::{ClientConnection, InProcessConnection};
     use dawn_core::{ClientRequest, DomainEvent, NodeId, Position, SectorBounds, SectorId};
+    use dawn_protocol::{project_domain_event, ServerFact};
     use dawn_sector::node;
-    use dawn_wire::{project_domain_event, ServerFact};
 
     fn build_test_node(
         id: NodeId,

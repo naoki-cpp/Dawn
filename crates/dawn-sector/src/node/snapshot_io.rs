@@ -233,7 +233,7 @@ mod tests {
     use crate::node::station::StationOperationOutcome;
     use crate::persistence::StateSnapshot;
     use dawn_core::{NodeId, PlayerId, Position, SectorBounds, SectorId, ShipId, Tick, Velocity};
-    use dawn_event_store::{store::EventStore, FileEventStore, InMemoryEventStore};
+    use dawn_storage::{store::EventStore, FileEventStore, InMemoryEventStore};
 
     fn mem_node() -> SimulationNode {
         SimulationNode::new_test(
@@ -418,7 +418,7 @@ mod tests {
                 SectorId(0),
                 SectorBounds::centered(SectorBounds::DEFAULT_HALF),
                 std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-                dawn_event_store::InMemoryEventStore::new(),
+                dawn_storage::InMemoryEventStore::new(),
             );
 
             // Spawn owned player ships with a stable velocity. The legacy
@@ -606,7 +606,7 @@ mod tests {
                 SectorId(0),
                 SectorBounds::centered(SectorBounds::DEFAULT_HALF),
                 std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-                dawn_event_store::InMemoryEventStore::new(),
+                dawn_storage::InMemoryEventStore::new(),
             );
             for i in 0..3u64 {
                 node.spawn_ship(

@@ -52,9 +52,9 @@ after the transport API has an independent owner.
 The resulting executable boundary is:
 
 ```text
-dawn-core / dawn-wire / dawn-market / dawn-ecs / dawn-event-store
+dawn-core / dawn-protocol / dawn-market / dawn-ecs / dawn-storage
         ^
-    dawn-sector          dawn-consensus / dawn-replication
+    dawn-sector          dawn-distributed
         ^                         ^
                  dawn-server
           (simulate + sector-node)

@@ -8,7 +8,7 @@
 
 use crate::{Ingest, LogBatch, ReplicaSet, ReplicaSnapshot, SnapshotInstall};
 use dawn_core::SectorId;
-use dawn_event_store::EventStore;
+use dawn_storage::EventStore;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio::sync::broadcast;
@@ -705,7 +705,7 @@ impl CatchUpManager {
 mod tests {
     use super::*;
     use dawn_core::{events::VelocityChanged, DomainEvent, NodeId, ShipId, Tick, Velocity};
-    use dawn_event_store::{EventStore, FileEventStore, InMemoryEventStore};
+    use dawn_storage::{EventStore, FileEventStore, InMemoryEventStore};
 
     fn event(n: u64) -> DomainEvent {
         DomainEvent::VelocityChanged(VelocityChanged {

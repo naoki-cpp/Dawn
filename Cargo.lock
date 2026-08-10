@@ -128,7 +128,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "dawn-core",
- "dawn-wire",
+ "dawn-protocol",
  "futures",
  "futures-util",
  "schemars",
@@ -153,21 +153,9 @@ version = "0.1.0"
 dependencies = [
  "dawn-client-core",
  "dawn-core",
+ "dawn-protocol",
  "dawn-sector",
- "dawn-wire",
  "godot",
-]
-
-[[package]]
-name = "dawn-consensus"
-version = "0.1.0"
-dependencies = [
- "dawn-core",
- "dawn-peer-transport",
- "postcard",
- "rand 0.8.6",
- "serde",
- "tokio",
 ]
 
 [[package]]
@@ -180,23 +168,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "dawn-distributed"
+version = "0.1.0"
+dependencies = [
+ "dawn-core",
+ "dawn-storage",
+ "postcard",
+ "rand 0.8.6",
+ "serde",
+ "tempfile",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "dawn-ecs"
 version = "0.1.0"
 dependencies = [
  "dawn-core",
  "hecs",
  "rand 0.8.6",
-]
-
-[[package]]
-name = "dawn-event-store"
-version = "0.1.0"
-dependencies = [
- "dawn-core",
- "postcard",
- "serde",
- "tempfile",
- "thiserror",
 ]
 
 [[package]]
@@ -209,39 +200,26 @@ dependencies = [
 ]
 
 [[package]]
-name = "dawn-peer-transport"
+name = "dawn-protocol"
 version = "0.1.0"
 dependencies = [
  "dawn-core",
  "postcard",
+ "schemars",
  "serde",
+ "serde_json",
  "thiserror",
- "tokio",
-]
-
-[[package]]
-name = "dawn-replication"
-version = "0.1.0"
-dependencies = [
- "dawn-core",
- "dawn-event-store",
- "dawn-peer-transport",
- "postcard",
- "serde",
- "tempfile",
- "thiserror",
- "tokio",
 ]
 
 [[package]]
 name = "dawn-sector"
 version = "0.1.0"
 dependencies = [
- "dawn-consensus",
  "dawn-core",
+ "dawn-distributed",
  "dawn-ecs",
- "dawn-event-store",
- "dawn-wire",
+ "dawn-protocol",
+ "dawn-storage",
  "postcard",
  "rand 0.8.6",
  "rusqlite",
@@ -258,14 +236,12 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "dawn-actor",
- "dawn-consensus",
  "dawn-core",
- "dawn-event-store",
+ "dawn-distributed",
  "dawn-market",
- "dawn-peer-transport",
- "dawn-replication",
+ "dawn-protocol",
  "dawn-sector",
- "dawn-wire",
+ "dawn-storage",
  "futures-util",
  "rand 0.8.6",
  "rusqlite",
@@ -278,14 +254,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "dawn-wire"
+name = "dawn-storage"
 version = "0.1.0"
 dependencies = [
  "dawn-core",
  "postcard",
- "schemars",
  "serde",
- "serde_json",
+ "tempfile",
  "thiserror",
 ]
 

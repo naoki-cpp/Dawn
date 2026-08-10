@@ -1,5 +1,5 @@
 //! GDExtension binding exposing `dawn-client-core` to the Godot client
-//! (ADR-0040). This crate converts `dawn-wire` messages into typed client
+//! (ADR-0040). This crate converts `dawn-protocol` messages into typed client
 //! facts and Godot presentation records. Every inbound state mutation is
 //! applied before the single presentation dispatch seam invokes GDScript.
 

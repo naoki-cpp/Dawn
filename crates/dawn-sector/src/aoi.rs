@@ -19,7 +19,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use dawn_core::{AbsolutePosition, DomainEvent, PlayerId, ShipId};
-use dawn_wire::{
+use dawn_protocol::{
     project_domain_event, AbsPosWire, ServerFact, ServerMessage, ShipStateWire, VelWire,
 };
 
@@ -404,7 +404,7 @@ mod tests {
     use super::*;
     use crate::node::SimulationNode;
     use dawn_core::NodeId;
-    use dawn_wire::ShipStateWire;
+    use dawn_protocol::ShipStateWire;
 
     fn ship(n: u64) -> ShipId {
         ShipId::new(NodeId(0), n)
@@ -543,7 +543,7 @@ mod tests {
 
     #[derive(Default)]
     struct FakeSink {
-        facts: Vec<dawn_wire::ServerFact>,
+        facts: Vec<dawn_protocol::ServerFact>,
         aoi_enters: Vec<ShipStateWire>,
         aoi_leaves: Vec<u64>,
         position_snaps: Vec<(u64, AbsPosWire)>,
@@ -696,10 +696,10 @@ mod tests {
 
         assert_eq!(
             sink.facts,
-            vec![dawn_wire::ServerFact::ModuleActivated {
+            vec![dawn_protocol::ServerFact::ModuleActivated {
                 ship_id: own_ship.raw(),
                 module_id: 7,
-                slot: dawn_wire::ServerFactSlot::Mid,
+                slot: dawn_protocol::ServerFactSlot::Mid,
                 target_ship_id: None,
                 tick: 1,
             }],

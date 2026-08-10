@@ -1,5 +1,5 @@
 use dawn_core::ItemId;
-use dawn_wire::{ItemWire, PlayerLoadoutWire, ServerFact, ServerMessage};
+use dawn_protocol::{ItemWire, PlayerLoadoutWire, ServerFact, ServerMessage};
 
 /// Decode one postcard frame and reject values that cannot cross the Godot
 /// boundary without narrowing or losing canonical item identity.
@@ -149,7 +149,7 @@ fn validate_godot_integer_range(message: &ServerMessage) -> Result<(), String> {
 mod tests {
     use super::*;
     use dawn_core::{ModuleKind, StatDelta};
-    use dawn_wire::{
+    use dawn_protocol::{
         AbsPosWire, InitialStateWire, ItemRowWire, ItemWire, MarketOrderWire, MarketSnapshotWire,
         ModuleRowWire, OwnedShipRowWire, PlayerLoadoutWire, ServerFactDeactivationReason,
         ServerFactSlot, ShipStateWire, SlotCapacityWire, VelWire,
@@ -217,11 +217,11 @@ mod tests {
             ServerMessage::Welcome {
                 player_id: 1,
                 ship_id: 7,
-                resume_ticket: dawn_wire::ResumeTicket::from_bytes([3; 32]),
+                resume_ticket: dawn_protocol::ResumeTicket::from_bytes([3; 32]),
             },
             ServerMessage::Redirect {
                 ws_addr: "127.0.0.1:7880".to_owned(),
-                resume_ticket: dawn_wire::ResumeTicket::from_bytes([3; 32]),
+                resume_ticket: dawn_protocol::ResumeTicket::from_bytes([3; 32]),
             },
             ServerMessage::Fact(ServerFact::ShipDespawned {
                 ship_id: 7,
@@ -302,7 +302,7 @@ mod tests {
             &ServerMessage::Welcome {
                 player_id: 1,
                 ship_id: invalid,
-                resume_ticket: dawn_wire::ResumeTicket::from_bytes([3; 32]),
+                resume_ticket: dawn_protocol::ResumeTicket::from_bytes([3; 32]),
             }
             .encode()
             .expect("typed server message must encode"),

@@ -9,10 +9,10 @@ use dawn_core::{EntityId, ItemId, PlayerId, ShipId};
 #[cfg(test)]
 use dawn_market::MarketCommand;
 use dawn_market::{MarketDb, MarketOrderView, OrderId, OrderSide};
-use dawn_sector::node::SimulationNode;
-use dawn_wire::{
+use dawn_protocol::{
     ItemWire, MarketCommandWire, MarketOrderSide, MarketOrderWire, MarketSnapshotWire,
 };
+use dawn_sector::node::SimulationNode;
 
 use super::market_settlement::{MarketSettlement, ParsedOrder};
 

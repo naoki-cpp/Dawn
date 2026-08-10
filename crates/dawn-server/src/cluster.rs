@@ -16,13 +16,13 @@
 use crate::sector_runtime_driver::{
     NodeStats, SectorRuntimeConfig, SectorRuntimeHandle, TickSummary,
 };
-use dawn_consensus::{
+use dawn_core::{NodeId, SectorBounds, SectorId};
+use dawn_distributed::InMemoryReplicationBus;
+use dawn_distributed::OutboundLogPublisher;
+use dawn_distributed::{
     InProcessTransport, PartitionableTransport, RaftActor, RaftActorHandle, RaftState,
     RaftTransport, Role, Term,
 };
-use dawn_core::{NodeId, SectorBounds, SectorId};
-use dawn_replication::InMemoryReplicationBus;
-use dawn_replication::OutboundLogPublisher;
 #[cfg(not(test))]
 use dawn_sector::game_data::GameDataCatalog;
 use dawn_sector::spawner::{generate_ships, SpawnConfig};
@@ -329,7 +329,7 @@ mod tests {
         let roles = cluster.raft_roles().await;
         let leaders = roles
             .iter()
-            .filter(|(role, _)| *role == dawn_consensus::Role::Leader)
+            .filter(|(role, _)| *role == dawn_distributed::Role::Leader)
             .count();
         assert_eq!(
             leaders, 1,
@@ -501,7 +501,7 @@ mod tests {
         let (leader_idx, (_, old_term)) = roles
             .iter()
             .enumerate()
-            .find(|(_, (role, _))| *role == dawn_consensus::Role::Leader)
+            .find(|(_, (role, _))| *role == dawn_distributed::Role::Leader)
             .expect("a leader must exist before the partition");
         let old_term = *old_term;
 
@@ -520,7 +520,7 @@ mod tests {
                 .iter()
                 .enumerate()
                 .filter(|&(idx, (role, _))| {
-                    idx != leader_idx && *role == dawn_consensus::Role::Leader
+                    idx != leader_idx && *role == dawn_distributed::Role::Leader
                 })
                 .count();
             assert!(
@@ -533,7 +533,9 @@ mod tests {
         let leaders: Vec<_> = roles
             .iter()
             .enumerate()
-            .filter(|&(idx, (role, _))| idx != leader_idx && *role == dawn_consensus::Role::Leader)
+            .filter(|&(idx, (role, _))| {
+                idx != leader_idx && *role == dawn_distributed::Role::Leader
+            })
             .collect();
         assert_eq!(
             leaders.len(),
@@ -570,7 +572,7 @@ mod tests {
         let (old_leader_idx, _) = roles
             .iter()
             .enumerate()
-            .find(|(_, (role, _))| *role == dawn_consensus::Role::Leader)
+            .find(|(_, (role, _))| *role == dawn_distributed::Role::Leader)
             .expect("a leader must exist before the partition");
 
         // Take the old Leader down before any Transit is proposed.
@@ -585,7 +587,7 @@ mod tests {
             .iter()
             .enumerate()
             .find(|&(idx, (role, _))| {
-                idx != old_leader_idx && *role == dawn_consensus::Role::Leader
+                idx != old_leader_idx && *role == dawn_distributed::Role::Leader
             })
             .expect("a new leader must be elected after the partition");
 

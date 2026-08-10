@@ -1,12 +1,12 @@
 //! Replication and catch-up adapters over the shared peer transport.
 
+use crate::peer_transport::{PeerFrame, PeerMessageKind, PeerTransport};
 use crate::{
     CatchUpMessage, CatchUpPayload, CatchUpResponse, CatchUpTransport, LogBatch, ReplicaSnapshot,
     ReplicationTransport,
 };
 use dawn_core::{NodeId, SectorId};
-use dawn_event_store::{DurabilityTransportMessage, JournalError};
-use dawn_peer_transport::{PeerFrame, PeerMessageKind, PeerTransport};
+use dawn_storage::{DurabilityTransportMessage, JournalError};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::broadcast;
@@ -19,7 +19,7 @@ pub enum DurabilitySendError {
     #[error("failed to encode durability message: {0}")]
     Postcard(#[from] postcard::Error),
     #[error("failed to send durability message: {0}")]
-    Peer(#[from] dawn_peer_transport::PeerSendError),
+    Peer(#[from] crate::peer_transport::PeerSendError),
     #[error("invalid durability message: {0}")]
     Journal(#[from] JournalError),
 }
@@ -305,7 +305,7 @@ impl PeerReplicationTransport {
         peer: NodeId,
         metadata: Vec<u8>,
         payload: Vec<u8>,
-    ) -> Result<(), dawn_peer_transport::PeerSendError> {
+    ) -> Result<(), crate::peer_transport::PeerSendError> {
         self.peer
             .send_split(peer, PeerMessageKind::RepositoryCatchUp, metadata, payload)
     }
@@ -336,9 +336,11 @@ impl PeerReplicationTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::peer_transport::{
+        PeerCapabilities, PeerEndpoint, PeerIdentity, PeerTransportConfig,
+    };
     use crate::CatchUpRequest;
     use dawn_core::NodeId;
-    use dawn_peer_transport::{PeerCapabilities, PeerEndpoint, PeerIdentity, PeerTransportConfig};
     use tokio::time::{sleep, timeout, Duration};
 
     fn identity(node: u8, sector: u8) -> PeerIdentity {

@@ -6,9 +6,9 @@ description = "Player-to-player Market: bid/ask order book + PlayerId Currency l
 repository.workspace = true
 publish.workspace     = true
 
-# dawn-market is a leaf crate, same DAG position as dawn-wire: dawn-core (for
+# dawn-market is a leaf crate, same DAG position as dawn-protocol: dawn-core (for
 # PlayerId/ItemId/ShipId) + thiserror + rusqlite only. It must NOT depend on
-# dawn-ecs/dawn-event-store/dawn-sector -- ADR-0034 §4 deliberately keeps
+# dawn-ecs/dawn-storage/dawn-sector -- ADR-0034 §4 deliberately keeps
 # Market's own state (order book, Currency ledger, and settlement outbox)
 # outside the Sector tick's determinism constraints (INV-001/002/005).
 [dependencies]

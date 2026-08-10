@@ -1,8 +1,8 @@
-//! Raft adapter over the shared [`dawn_peer_transport`] lifecycle.
+//! Raft adapter over the shared [`crate::peer_transport`] lifecycle.
 
+use crate::peer_transport::{PeerMessageKind, PeerTransport};
 use crate::{actor::RaftActorMessage, rpc::RaftMessage, transport::RaftTransport};
 use dawn_core::NodeId;
-use dawn_peer_transport::{PeerMessageKind, PeerTransport};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
 

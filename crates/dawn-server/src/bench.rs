@@ -3,11 +3,11 @@
 use crate::cluster::MultiNodeCluster;
 use crate::serve::AOI_CELL_SIZE;
 use dawn_core::{NodeId, Position, SectorBounds, SectorId, Velocity};
-use dawn_event_store::FileEventStore;
 use dawn_sector::node::SimulationNode;
 use dawn_sector::persistence::StateSnapshot;
 use dawn_sector::spawner::{generate_ships, SpawnConfig};
 use dawn_sector::{aoi, game_data::GameDataCatalog, persistence, ship_types};
+use dawn_storage::FileEventStore;
 use std::time::Instant;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -35,11 +35,11 @@ fn benchmark_catalog() -> std::sync::Arc<GameDataCatalog> {
 /// leader election → Transit through the Raft Log → leader failover →
 /// Transit completing under a partitioned old leader → partition heal.
 pub(crate) async fn run_raft_demo() {
-    use dawn_consensus::Role;
+    use dawn_distributed::Role;
 
     const NODES: usize = 3;
 
-    fn print_roles(label: &str, roles: &[(Role, dawn_consensus::Term)]) {
+    fn print_roles(label: &str, roles: &[(Role, dawn_distributed::Term)]) {
         print!("  [{label}] roles:");
         for (i, (role, term)) in roles.iter().enumerate() {
             print!("  node{i}={role:?}(t{})", term.0);

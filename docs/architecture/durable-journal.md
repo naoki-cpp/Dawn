@@ -7,7 +7,7 @@ related  : recovery-contract.md, ../adr/ADR-0049-sector-recovery-state-delta-wal
 
 # Durable Journal
 
-`dawn-event-store::DurableJournal` is the storage boundary for one logical
+`dawn-storage::DurableJournal` is the storage boundary for one logical
 Sector transition. It stores encoded bytes, not a particular domain event type,
 so ADR-0049's versioned recovery representation can evolve independently of
 the physical journal.

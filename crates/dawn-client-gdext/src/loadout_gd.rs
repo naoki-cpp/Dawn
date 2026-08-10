@@ -26,7 +26,7 @@ fn wire_module_kind(kind: dawn_core::ModuleKind) -> dawn_client_core::ModuleKind
     }
 }
 
-pub(crate) fn wire_to_loadout_msg(wire: dawn_wire::PlayerLoadoutWire) -> PlayerLoadoutMsg {
+pub(crate) fn wire_to_loadout_msg(wire: dawn_protocol::PlayerLoadoutWire) -> PlayerLoadoutMsg {
     PlayerLoadoutMsg {
         tick: wire.tick,
         modules: wire.modules.into_iter().map(wire_to_module_row).collect(),
@@ -59,7 +59,7 @@ pub(crate) fn wire_to_loadout_msg(wire: dawn_wire::PlayerLoadoutWire) -> PlayerL
     }
 }
 
-fn wire_to_module_row(row: dawn_wire::ModuleRowWire) -> dawn_client_core::ModuleRow {
+fn wire_to_module_row(row: dawn_protocol::ModuleRowWire) -> dawn_client_core::ModuleRow {
     dawn_client_core::ModuleRow {
         slot: row.slot,
         index: row.index,
@@ -77,7 +77,7 @@ fn wire_to_module_row(row: dawn_wire::ModuleRowWire) -> dawn_client_core::Module
     }
 }
 
-fn wire_to_item_row(row: dawn_wire::ItemRowWire) -> dawn_client_core::ItemRow {
+fn wire_to_item_row(row: dawn_protocol::ItemRowWire) -> dawn_client_core::ItemRow {
     dawn_client_core::ItemRow {
         item_id: dawn_core::ItemId::try_from(row.item_id)
             .expect("server emitted an invalid Item wire identity"),

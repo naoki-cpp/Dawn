@@ -6,7 +6,7 @@
 
 use dawn_core::{AbsolutePosition, ShipId};
 use dawn_ecs::components::{HullComp, ShipStatsComp, VelocityComp};
-use dawn_wire::{
+use dawn_protocol::{
     AbsPosWire, BuildableShipTypeWire, CelestialBodyWire, InitialStateWire, JumpGateWire,
     PlayerLoadoutWire, ShipStateWire, StationWire, SystemWire,
 };
@@ -223,7 +223,7 @@ impl SimulationNode {
             ship_id: ship_id.raw(),
             ship_type_name: ship_type_name.to_string(),
             position: abs_pos_json(pos),
-            velocity: dawn_wire::VelWire::from(
+            velocity: dawn_protocol::VelWire::from(
                 self.simulation.world.get::<VelocityComp>(*entity)?.0,
             ),
             max_speed: stats.max_speed,

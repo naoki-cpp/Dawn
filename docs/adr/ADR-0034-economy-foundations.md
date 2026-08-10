@@ -243,7 +243,7 @@ Market は固定価格やアルゴリズム式（AMM/Bonding curve）で価格�
 - [x] dawn-sector: Assemble コマンド・バリデーション（入力は Station inventory 上の `PackagedShip`、**docked 中のみ**、Assemble 後の艤装は既存 Fit 経路で行う。`node/station_materialization.rs::assemble_ship_owned`）
 - [x] dawn-sector: Disassemble コマンド・バリデーション（無傷・未艤装チェック、出力は Station inventory 上の `PackagedShip`、**docked 中のみ**）
 - [x] dawn-sector: Packaged Ship 建造（Scrap Metal 消費、入出力とも Station inventory、**docked 中のみ**。MVP コストは `1 Scrap Metal / 1 hull` の固定値）
-- [x] 新規クレート `dawn-market` の Dependency DAG 上の位置を確定（2026-07-13、`dawn-wire`と同じ葉クレート。`dawn-simulation`にのみ組み込み、`dawn-sector-node`への配線は別タスク。詳細は roadmap.md §12 9D-1）
+- [x] 新規クレート `dawn-market` の Dependency DAG 上の位置を確定（2026-07-13、`dawn-protocol`と同じ葉クレート。`dawn-simulation`にのみ組み込み、`dawn-sector-node`への配線は別タスク。詳細は roadmap.md §12 9D-1）
 - [x] `dawn-market`: SQLite バックエンドの指値注文帳（bid/ask マッチング、2026-07-13。roadmap.md §12 9D-2）
 - [x] `dawn-market`: `PlayerId` 単位の Currency 台帳（Bid時エスクロー・約定時決済・Cancel時払い戻し、2026-07-13。roadmap.md §12 9D-3）
 - [x] `dawn-market`: `SettlementIntent` transactional outbox、stable `SettlementId`、SQLite atomic commit、Sector側重複配送防止（2026-08-10。#279）

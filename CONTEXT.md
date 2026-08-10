@@ -81,9 +81,9 @@ player stronger.
 - `dawn-client-gdext` is the GDExtension binding exposing `dawn-client-core`
   to the Godot client (ADR-0040).
 - `dawn-ecs` defines components and systems without owning persistence.
-- `dawn-event-store` owns append-only persistence and snapshots.
-- `dawn-consensus` owns Raft and sector transit consensus.
-- `dawn-replication` owns sector-local append-log replication.
+- `dawn-storage` owns append-only persistence and snapshots.
+- `dawn-distributed` owns Raft and sector transit consensus.
+- `dawn-distributed` owns sector-local append-log replication.
 - `dawn-sector` owns sector game logic and writes committed facts.
 - `dawn-actor` owns the client/server protocol boundary.
 - `dawn-server` owns the server composition boundary: `simulate` wires local
@@ -100,12 +100,12 @@ Use these names consistently:
 - Use "Warp" for intra-sector fast movement.
 - Use "Tackle" for escape denial.
 - Use "TiDi" only for real-time pacing, not for changing logical tick order.
-- Use a `*Wire` suffix for adapter-only `dawn-wire` schema types
+- Use a `*Wire` suffix for adapter-only `dawn-protocol` schema types
   (`AbsPosWire`, `VelWire`, ...). `ServerFact` is the typed client projection,
   not a durable-event mirror -- ADR-0042/#274 moved every client<->server
   message onto the postcard binary envelope. The Sector
   request exception is the shared typed `ClientRequest` authority, re-exported
-  by `dawn-wire` rather than duplicated as a `*Wire` mirror. Functions that
+  by `dawn-protocol` rather than duplicated as a `*Wire` mirror. Functions that
   genuinely produce a JSON Schema document (`server_fact_json_schema()`,
   `client_request_json_schema()`) keep `json` in their names.
 

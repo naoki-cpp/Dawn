@@ -28,7 +28,15 @@ def main() -> int:
     packages = {package["name"]: package for package in metadata["packages"]}
     errors: list[str] = []
 
-    forbidden_packages = {"dawn-simulation", "dawn-sector-node"}
+    forbidden_packages = {
+        "dawn-simulation",
+        "dawn-sector-node",
+        "dawn-wire",
+        "dawn-event-store",
+        "dawn-consensus",
+        "dawn-peer-transport",
+        "dawn-replication",
+    }
     for package in sorted(forbidden_packages & packages.keys()):
         errors.append(f"obsolete package is still in the workspace: {package}")
 
@@ -43,6 +51,10 @@ def main() -> int:
         }
         for required in {"simulate", "sector-node"} - binary_names:
             errors.append(f"dawn-server is missing required binary: {required}")
+
+    for required in {"dawn-protocol", "dawn-storage", "dawn-distributed"}:
+        if required not in packages:
+            errors.append(f"final workspace boundary is missing: {required}")
 
     def normal_dependencies(package: dict) -> set[str]:
         return {
@@ -59,7 +71,7 @@ def main() -> int:
 
     forbidden_edges = {
         "dawn-core": graph.get("dawn-core", set()),
-        "dawn-wire": {"dawn-sector", "dawn-server", "dawn-actor"},
+        "dawn-protocol": {"dawn-sector", "dawn-server", "dawn-actor"},
         "dawn-client-core": {"dawn-sector", "dawn-server", "dawn-actor"},
         "dawn-client-gdext": {
             "dawn-sector",
@@ -81,6 +93,22 @@ def main() -> int:
             "dawn-sector-node",
             "dawn-client-core",
             "dawn-client-gdext",
+        },
+        "dawn-storage": {
+            "dawn-sector",
+            "dawn-server",
+            "dawn-distributed",
+            "dawn-client-core",
+            "dawn-client-gdext",
+        },
+        "dawn-distributed": {
+            "dawn-sector",
+            "dawn-server",
+            "dawn-actor",
+            "dawn-client-core",
+            "dawn-client-gdext",
+            "dawn-protocol",
+            "dawn-market",
         },
     }
     for package, forbidden in forbidden_edges.items():

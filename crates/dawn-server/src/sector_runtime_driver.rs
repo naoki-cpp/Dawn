@@ -2,7 +2,7 @@
 //!
 //! Provides an async, message-passing interface to the synchronous
 //! `SimulationNode`.  After each state-changing operation, new events are
-//! forwarded to `dawn-replication` *before* the reply is sent to the caller.
+//! forwarded to `dawn-distributed` *before* the reply is sent to the caller.
 //! This ordering guarantee makes multi-node consistency tests deterministic
 //! without sleeps or explicit flush operations.
 //!
@@ -11,23 +11,23 @@
 //! ```text
 //! Actor loop:
 //!   1. Execute operation (tick / spawn_ship)
-//!   2. Send new events to dawn-replication  ← must happen FIRST
+//!   2. Send new events to dawn-distributed  ← must happen FIRST
 //!   3. Send reply to caller               ← happens AFTER
 //!
 //! Consequence: by the time the caller's .await returns, all events are
 //! already in the bus channel ahead of any subsequent query.
 //! ```
 
-use dawn_consensus::{RaftActorHandle, Role, Term};
 use dawn_core::{NodeId, Position, SectorBounds, SectorId, ShipId, Tick, Velocity};
-use dawn_event_store::{DurabilityMode, InMemoryJournal};
-use dawn_replication::{InMemoryReplicationBus, OutboundLogPublisher};
+use dawn_distributed::{InMemoryReplicationBus, OutboundLogPublisher};
+use dawn_distributed::{RaftActorHandle, Role, Term};
 use dawn_sector::game_data::GameDataCatalog;
 use dawn_sector::node::SimulationNode;
 use dawn_sector::transit::{
     run_durable_runtime_tick_with_consensus_and_health, DurableRuntimeTickContext,
     RaftRuntimeConsensus, RuntimeDurabilityProfile, RuntimeHealth, TransitOp,
 };
+use dawn_storage::{DurabilityMode, InMemoryJournal};
 use tokio::sync::{mpsc, oneshot};
 
 // ── Public result/stats types ─────────────────────────────────────────────────
@@ -400,7 +400,7 @@ impl SectorRuntimeHandle {
 mod tests {
     use super::*;
     use dawn_core::{SectorBounds, Velocity};
-    use dawn_replication::InMemoryReplicationBus;
+    use dawn_distributed::InMemoryReplicationBus;
 
     fn spawn_runtime() -> (SectorRuntimeHandle, InMemoryReplicationBus) {
         let bus = InMemoryReplicationBus::spawn();
@@ -408,12 +408,12 @@ mod tests {
         // Single-node Raft cluster: no peers, transport delivers nowhere.
         let (raft_tx, raft_rx) = mpsc::unbounded_channel();
         let (committed_tx, committed_rx) = mpsc::unbounded_channel();
-        let transport = std::sync::Arc::new(dawn_consensus::InProcessTransport::new(
+        let transport = std::sync::Arc::new(dawn_distributed::InProcessTransport::new(
             std::collections::HashMap::new(),
         ));
-        let state = dawn_consensus::RaftState::new(NodeId(0), vec![], 10, 2);
+        let state = dawn_distributed::RaftState::new(NodeId(0), vec![], 10, 2);
         tokio::spawn(
-            dawn_consensus::RaftActor::new(state, vec![], transport, raft_rx, committed_tx).run(),
+            dawn_distributed::RaftActor::new(state, vec![], transport, raft_rx, committed_tx).run(),
         );
         let raft = RaftActorHandle::new(raft_tx);
 

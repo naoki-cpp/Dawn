@@ -11,12 +11,12 @@ pub(crate) mod handoff;
 pub(crate) mod pipeline;
 
 use crate::node::SimulationNode;
-use dawn_consensus::RaftActorHandle;
 use dawn_core::{
     AbsolutePosition, DomainEvent, JumpGateId, NodeId, SectorId, ShipId, Tick, TransitAttemptId,
     TransitHandoffState,
 };
-use dawn_event_store::{
+use dawn_distributed::RaftActorHandle;
+use dawn_storage::{
     AppendReceipt, DurabilityEvidence, DurabilityEvidenceSource, DurabilityMode, DurableJournal,
     JournalError,
 };
@@ -451,7 +451,7 @@ pub enum RuntimeDurabilityPolicyError {
 
 /// One remote receipt supplied by a peer-transport adapter.
 ///
-/// The receipt itself is owned by `dawn-event-store`; this wrapper adds the
+/// The receipt itself is owned by `dawn-storage`; this wrapper adds the
 /// replica identity that quorum membership and duplicate suppression require.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RuntimeReplicaReceipt {

@@ -6,7 +6,7 @@
 //! batch are public projections or reliable effects and are deliberately not
 //! applied to the authoritative world.
 
-use dawn_event_store::{DurableJournal, JournalError, JournalIndex, JournalStream, TransitionId};
+use dawn_storage::{DurableJournal, JournalError, JournalIndex, JournalStream, TransitionId};
 use std::collections::HashSet;
 use thiserror::Error;
 
@@ -153,7 +153,7 @@ mod tests {
         transition::SectorTransitionId,
     };
     use dawn_core::{NodeId, SectorBounds, SectorId};
-    use dawn_event_store::{
+    use dawn_storage::{
         DurabilityContext, DurabilityMode, InMemoryJournal, JournalBatch, JournalEntry,
     };
     use std::sync::Arc;

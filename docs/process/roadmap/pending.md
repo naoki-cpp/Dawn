@@ -48,12 +48,6 @@ related  : ./README.md, ./deferred.md, ../roadmap.md, ../roadmap-history.md
 | 6 | Bloom・トーンマッピング等の調整 | TODO |
 | 7 | 視覚エフェクトのフレームレート回帰確認 | 1〜6後 |
 
-### 3.5 Architecture consolidation
-
-| ID | タスク | 状態 |
-|---|---|---|
-| #282 | `dawn-server`へproduction/local composition rootを統合し、workspaceの依存境界を固定 | 実装中。ADR-0051、`sector-node`統合、CI境界チェックを追加 |
-
 ## 9. 継続的に開発するシステム
 
 ### Combat System

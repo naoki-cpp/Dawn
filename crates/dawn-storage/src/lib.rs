@@ -1,10 +1,10 @@
-//! # dawn-event-store
+//! # dawn-storage
 //!
 //! Append-only journal storage for the Dawn simulation.
 //!
 //! ## Invariants (INV-001, INV-002)
 //!
-//! - The legacy `EventStore` appends public `DomainEvent` values with a
+//! - The public-fact `EventStore` appends `DomainEvent` values with a
 //!   monotonically increasing `log_index`.
 //! - `DurableJournal` appends encoded logical-transition batches with explicit
 //!   errors, receipts, and durability modes.
@@ -25,7 +25,7 @@
 //! ```
 //! use dawn_core::{AbsolutePosition, DomainEvent, NodeId, SectorId, ShipId, ShipTypeId, Tick};
 //! use dawn_core::events::ShipSpawned;
-//! use dawn_event_store::{EventStore, InMemoryEventStore};
+//! use dawn_storage::{EventStore, InMemoryEventStore};
 //!
 //! let mut store = InMemoryEventStore::new();
 //! let ship_id = ShipId::new(NodeId(1), 7);

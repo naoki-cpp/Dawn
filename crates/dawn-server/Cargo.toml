@@ -16,14 +16,12 @@ path = "src/bin/sector-node.rs"
 
 [dependencies]
 dawn-core        = { path = "../dawn-core" }
-dawn-event-store = { path = "../dawn-event-store" }
+dawn-storage = { path = "../dawn-storage" }
 dawn-market      = { path = "../dawn-market" }
 dawn-actor       = { path = "../dawn-actor" }
-dawn-wire        = { path = "../dawn-wire" }
-dawn-consensus   = { path = "../dawn-consensus" }
-dawn-replication = { path = "../dawn-replication" }
+dawn-protocol        = { path = "../dawn-protocol" }
+dawn-distributed   = { path = "../dawn-distributed" }
 dawn-sector      = { path = "../dawn-sector" }
-dawn-peer-transport = { path = "../dawn-peer-transport" }
 rand             = { workspace = true, features = ["small_rng"] }
 tokio            = { workspace = true }
 serde            = { workspace = true }

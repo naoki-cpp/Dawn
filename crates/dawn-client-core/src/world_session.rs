@@ -198,7 +198,7 @@ pub struct DestructionOutcome {
 /// One typed state transition accepted by [`WorldSessionState`].
 ///
 /// The wire/Godot adapter converts external schemas into these plain values;
-/// the state module remains independent from `dawn-wire` and Godot.
+/// the state module remains independent from `dawn-protocol` and Godot.
 #[derive(Debug, Clone, PartialEq)]
 pub enum WorldSessionUpdate {
     InitialState {

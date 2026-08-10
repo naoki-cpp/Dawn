@@ -232,7 +232,7 @@ impl SectorView for SimulationNode {
         SimulationNode::ship_absolute_pos(self, ship_id)
     }
 
-    fn ship_state(&self, ship_id: ShipId) -> Option<dawn_wire::ShipStateWire> {
+    fn ship_state(&self, ship_id: ShipId) -> Option<dawn_protocol::ShipStateWire> {
         self.ship_state_json(ship_id)
     }
 
@@ -284,7 +284,7 @@ impl SimulationNode {
     }
 
     #[cfg(test)]
-    pub(crate) fn restore_from_test<S: dawn_event_store::EventStore>(
+    pub(crate) fn restore_from_test<S: dawn_storage::EventStore>(
         store: S,
         snapshot: &StateSnapshot,
         galaxy: Arc<crate::galaxy::Galaxy>,
@@ -905,7 +905,7 @@ mod tests {
 
         let snapshot = node.take_snapshot();
         let restored = SimulationNode::restore_from_test(
-            dawn_event_store::InMemoryEventStore::new(),
+            dawn_storage::InMemoryEventStore::new(),
             &snapshot,
             Arc::clone(&galaxy),
             &[],

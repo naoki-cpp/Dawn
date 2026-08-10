@@ -25,7 +25,7 @@ Transitについては、Raftの回復判断とShipの状態変更を別module�
 
 | 観点 | 評価 | 現在の判断 |
 |---|---|---|
-| クレート構成 | A− | `dawn-server` が `simulate` と production `sector-node` の唯一のcomposition boundary。`dawn-core` / `dawn-sector` / `dawn-wire` / client 2 crateへの依存方向も維持 |
+| クレート構成 | A− | `dawn-server` が `simulate` と production `sector-node` の唯一のcomposition boundary。`dawn-core` / `dawn-sector` / `dawn-protocol` / client 2 crateへの依存方向も維持 |
 | ファイルサイズ | B+ | 500行超のRustファイルは複数あるが、主な超過は同居テストまたは単一の状態機械。`commands.rs` はfamily policyを分離済み、`transit.rs` / `warp.rs` はR-3でtriggerを管理 |
 | 型設計 | A− | domain固有のResult/Outcomeを維持。dispatcher都合で共通型へ潰さない（ADR-0047） |
 | 重複 | A− | live/replayのShip materialization、Station runtime apply、SectorMap projectionを解消。Transit policy/state mutationも分離 |
@@ -67,9 +67,9 @@ only as an async in-memory adapter; it is not a second Tick implementation.
 | `crates/dawn-sector/src/node/snapshot_io.rs` | 934 | 🟢 snapshot/checkpoint/restore seam・tests |
 | `crates/dawn-sector/src/node/mod.rs` | 980 | 🟢 node state・identity/accessor・population/repository composition boundary・tests |
 | `crates/dawn-sector/src/node/inventory.rs` | 923 | 🟢 fitting mutation boundary・tests。cargo操作は`ship_cargo.rs`へ分離済み |
-| `crates/dawn-wire/src/client_command.rs` | 868 | 🟢 client command wire schema/conversion・tests |
-| `crates/dawn-replication/src/catch_up.rs` | 843 | 🟢 catch-up policy・tests |
-| `crates/dawn-wire/src/server_fact.rs` | 816 | 🟢 server fact projection/schema・tests |
+| `crates/dawn-protocol/src/client_command.rs` | 868 | 🟢 client command wire schema/conversion・tests |
+| `crates/dawn-distributed/src/catch_up.rs` | 843 | 🟢 catch-up policy・tests |
+| `crates/dawn-protocol/src/server_fact.rs` | 816 | 🟢 server fact projection/schema・tests |
 | `crates/dawn-core/src/events.rs` | 731 | 🟢 domain event catalog/type definitions・tests |
 | `crates/dawn-sector/src/node/spawner_logic.rs` | 725 | 🟢 spawn policy・tests |
 | `crates/dawn-sector/src/aoi.rs` | 721 | 🟢 AoI index/delta delivery contract・tests |
@@ -77,8 +77,8 @@ only as an async in-memory adapter; it is not a second Tick implementation.
 | `crates/dawn-core/src/commands.rs` | 644 | 🟢 domain command types/validation data・tests |
 | `crates/dawn-server/src/cluster.rs` | 632 | 🟢 cluster runtime wiring・tests |
 | `crates/dawn-sector/src/node/approach.rs` | 615 | 🟢 approach steering state machine・tests |
-| `crates/dawn-peer-transport/src/lib.rs` | 961 | 🟡 shared peer framing/lifecycle・control/bulk isolation・tests; split protocol/framing if the adapter surface grows further |
-| `crates/dawn-consensus/src/state.rs` | 593 | 🟢 Raft state transition/persistence boundary・tests |
+| `crates/dawn-distributed/src/lib.rs` | 961 | 🟡 shared peer framing/lifecycle・control/bulk isolation・tests; split protocol/framing if the adapter surface grows further |
+| `crates/dawn-distributed/src/state.rs` | 593 | 🟢 Raft state transition/persistence boundary・tests |
 | `crates/dawn-ecs/src/systems/combat.rs` | 584 | 🟢 combat system・tests |
 | `crates/dawn-sector/src/transit/pipeline.rs` | 577 | 🟢 retry/idempotency/recovery policy |
 | `crates/dawn-sector/src/node/ship_cargo.rs` | 577 | 🟢 ship cargo ownership/bridge boundary・tests |

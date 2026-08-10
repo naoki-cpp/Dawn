@@ -13,7 +13,7 @@
 //!
 //! ```
 //! use dawn_core::{NodeId, SectorId};
-//! use dawn_peer_transport::{PeerCapabilities, PeerEndpoint, PeerIdentity, PeerTransportConfig};
+//! use dawn_distributed::{PeerCapabilities, PeerEndpoint, PeerIdentity, PeerTransportConfig};
 //!
 //! let config = PeerTransportConfig {
 //!     local_identity: PeerIdentity { node_id: NodeId(1), sector_id: SectorId(1) },
