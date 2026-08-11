@@ -83,8 +83,9 @@ DomainEvent 受信（`connection.gd::_handle_message`のDictionaryディスパ�
 ## 実装チェックリスト
 
 - [x] `crates/dawn-protocol/Cargo.toml`新設（`dawn-core`+`serde`+`serde_json`+`schemars`のみ）
-- [x] `crates/dawn-actor/src/protocol/client_command.rs`を`dawn-protocol/src/client_command.rs`
-      へ移動、`ClientCommandJson`に`Serialize`を追加
+- [x] 旧 `crates/dawn-actor/src/protocol/client_command.rs` を
+      `crates/dawn-protocol/src/client_request.rs` へ移動し、`Serialize`を追加
+      （後続の #273 で `ClientRequest` に統合）
 - [x] `dawn-actor/src/protocol/mod.rs`: `pub use dawn_protocol::{...}`で同名再エクスポート
 - [x] `dawn-actor/Cargo.toml`: `dawn-protocol`依存追加
 - [x] ワークスペース`Cargo.toml`の`members`に`dawn-protocol`追加

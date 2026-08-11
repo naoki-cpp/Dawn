@@ -144,12 +144,15 @@ GDScript 自身は postcard をデコードできない。`connection.gd::_flush
 ### 段階1（本PR）
 
 - [x] `dawn-protocol`: `postcard` 依存追加（workspace依存を流用）
-- [x] `crates/dawn-actor/src/protocol/server_event.rs` を `dawn-protocol/src/server_event.rs`
-      へ移動、`EventJson` に `Deserialize` を追加
-- [x] `crates/dawn-actor/src/protocol/hello_resume.rs` を `dawn-protocol/src/hello_resume.rs`
+- [x] 旧 `crates/dawn-actor/src/protocol/server_event.rs` を
+      `crates/dawn-protocol/src/server_fact.rs` へ移動し、`Deserialize` を追加
+      （後続の #274 で `ServerFact` に再編）
+- [x] 旧 `crates/dawn-actor/src/protocol/hello_resume.rs` を
+      `crates/dawn-protocol/src/hello_resume.rs`
       へ移動、`ResumeIdentity`/`HelloMessage` に `Serialize`/`Deserialize` を追加
 - [x] `dawn-protocol`: `ServerMessage`/`ClientMessage` 統合 enum を新設
-- [x] `dawn-actor::protocol`: `pub use dawn_protocol::{...}` で再エクスポート（ADR-0041と同じパターン）
+- [x] `dawn-actor::protocol`: `pub use dawn_protocol::{...}` で再エクスポート（ADR-0041と同じパターン）。
+      後続の #282 でこの互換再エクスポート層は削除済み
 - [x] `dawn-actor/src/ws_server.rs`: `Message::Text(json+"\n")` を
       `Message::Binary(postcard::to_stdvec(&ServerMessage::...))` に置き換え。
       `InitialState`/`AoiEnter`/`PlayerLoadout`（`send_raw`）は現状のJSON `Message::Text`
@@ -281,7 +284,8 @@ retained as migration history.
       最後の`send_raw`呼び出し元だった）。`WsClientConnection::send_raw`/
       `PlayerSession::send_raw`も削除（ADR-0042の元々のゴール「全メッセージが
       `ServerMessage`経由になった時点でsend_rawを削除」を達成）
-- [x] `dawn-sector-node/src/runtime.rs`/`dawn-simulation/src/serve/aoi_delivery.rs`:
+- [x] 旧 `dawn-sector-node/src/runtime.rs` / `dawn-simulation/src/serve/aoi_delivery.rs`
+      （現 `dawn-server/src/runtime_frame.rs` / `dawn-sector/src/aoi_frame.rs`）:
       `AoiSink`実装から`send_raw`アームを削除
 - [x] `dawn-client-gdext/src/server_message_gd.rs`: `ServerMessageDecoder`に
       `AoiEnter`（`{"type":"AoiEnter","ship":{...}}`、既存の`main.gd`
@@ -345,7 +349,8 @@ JSON文字列ラッパーとして残っていることも判明）。以下を�
       `event_json_schema`/`client_command_json_schema`→
       `event_wire_json_schema`/`client_command_wire_json_schema`（本物の
       JSON Schema生成なので`json`は残すが、対象の型名変更に合わせて改名）
-- [x] `dawn-actor/src/protocol/mod.rs`のテスト（~30件）: 削除した
+- [x] 旧 `dawn-actor/src/protocol/mod.rs` のテスト（~30件）: 削除した
+      （現行の契約テストは `dawn-protocol/src/lib.rs`）
       `parse_client_command`の代わりにテストモジュール内ローカルヘルパー
       `command_from_json`を新設（`docs/architecture/wire-protocol-commands.schema.json`
       が示す生JSONテキストの形をそのまま検証する価値があるため、

@@ -24,10 +24,10 @@ Check:
 
 ### Step 2: Wire protocol
 
-Run `cargo test -p dawn-actor wire_schema_doc_is_up_to_date` to check the two
+Run `cargo test -p dawn-protocol wire_schema_doc_is_up_to_date` to check the two
 generated schema files (`docs/architecture/wire-protocol.schema.json` /
-`wire-protocol-commands.schema.json`) against `EventJson` /
-`ClientCommandJson` in `crates/dawn-actor/src/protocol.rs`. If it fails,
+`wire-protocol-commands.schema.json`) against `ServerFact` / `ClientRequest`
+in `crates/dawn-protocol/src/`. If it fails,
 regenerate with `cargo run -p dawn-actor --example gen_wire_schema` and
 commit the updated files — do not hand-edit them.
 

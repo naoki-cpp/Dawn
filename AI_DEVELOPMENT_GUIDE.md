@@ -428,4 +428,4 @@ this guide.
 
 ---
 
-Last updated: 2026-08-10 / Covers ADR-0001 through ADR-0051
+Last updated: 2026-08-11 / Covers ADR-0001 through ADR-0052

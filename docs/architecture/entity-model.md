@@ -155,7 +155,11 @@ Name  (ship name)   <- UI / Social Context
 role as of ADR-0034's `ItemId` generalization; see the conditionally-attached
 table above.)
 
-Ownership (PlayerId) is not an ECS Component; it's tracked in `SimulationNode`'s `ship_owners: HashMap<ShipId, PlayerId>`.
+Ownership (`PlayerId`) is not an ECS Component; it is tracked by the
+`SimulationNode` composition root in `PlayerState.owners` (`ShipId -> PlayerId`).
+The owner map is authoritative routing state and is included in ADR-0049
+recovery, while the ECS world remains responsible for per-Ship simulation
+components.
 
 ### Ship Template (data-driven)
 

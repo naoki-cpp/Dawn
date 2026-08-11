@@ -2,7 +2,7 @@
 scope    : Map of the whole system. A bird's-eye view of what exists and how it connects
 audience : AI Agent / Human Developer
 update   : When crate composition changes / when a phase advances / when a cross-cutting architecture contract changes
-related  : entity-model.md, event-catalog.md, ownership.md, tick-model.md, recovery-contract.md, durable-journal.md, database-strategy.md, ../process/roadmap.md, ../../CLAUDE.md
+related  : entity-model.md, event-catalog.md, ownership.md, tick-model.md, recovery-contract.md, durable-journal.md, database-strategy.md, ../process/roadmap.md, ../../CLAUDE.md, ../adr/ADR-0052-workspace-boundaries.md
 ---
 
 # Dawn Architecture
@@ -68,7 +68,7 @@ Persistence      : FileEventStore remains the append-only public-fact mirror and
                     transitions use the runtime-owned DurableJournal boundary.
 ```
 
-See [ADR-0003](../adr/ADR-0003-local-first-development.md), [ADR-0027](../adr/ADR-0027-dawn-distributed-crate.md), [ADR-0049](../adr/ADR-0049-sector-recovery-state-delta-wal.md), and [ADR-0051](../adr/ADR-0051-server-composition-boundary.md).
+See [ADR-0003](../adr/ADR-0003-local-first-development.md), [ADR-0027](../adr/ADR-0027-dawn-distributed-crate.md), [ADR-0049](../adr/ADR-0049-sector-recovery-state-delta-wal.md), [ADR-0051](../adr/ADR-0051-server-composition-boundary.md), and [ADR-0052](../adr/ADR-0052-workspace-boundaries.md).
 
 ### Future scope (direction only, not implemented)
 
