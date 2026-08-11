@@ -4,7 +4,7 @@ audience : AI Agent / Human Developer
 update   : /architecture-review が issue を解消済みへ移動するたびに追記
 related  : docs/architecture/architecture-review/server.md（構造評価）,
            docs/architecture/architecture-review/server-pending.md（未完項目）
-date     : 2026-07-30
+date     : 2026-08-11
 ---
 
 # Architecture Review — Dawn Codebase（完了済みログ）
@@ -26,6 +26,15 @@ Shipのfreeze・snapshot・materialize・re-anchor・source finalize・replayを
 Transit protocol、Event schema、crate境界、live/replayの挙動は変更していない。
 `cargo test -p dawn-sector`（377 passed、1 ignored）で既存のretry、duplicate、
 snapshot + tail replay、Ack前帰還の回帰を確認した。
+
+### 2026-08-11: Transit handoff module の deepening
+
+`node/transit.rs` の実装を、source lifecycle mutation、live/replay共通の handoff
+materialization kernel、public-event replay adapterへ分離した。root moduleはprivate module入口と
+テスト宣言だけを持ち、回帰testsは`node/transit/tests.rs`へ移した。`SimulationNode`のprivate ECS
+state、Transit protocol、RecoveryDelta、public event semantics、`transit/handoff.rs`のSaga policyは
+変更していない。`cargo fmt --all -- --check`、`cargo clippy -p dawn-sector --all-targets -- -D warnings`、
+`cargo test --workspace`（全件成功）で既存のlifecycle、duplicate、snapshot + tail replayを確認した。
 
 **Phase 2〜8D（2026-06-19〜2026-06-30、アーカイブ済み）**: node.rs のサブモジュール化
 （commands/navigation/serialization/sector_map/ship_registry/tick/spawner_logic/tackle/

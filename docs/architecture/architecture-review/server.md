@@ -5,7 +5,7 @@ update   : 大規模リファクタ実施後 / 新クレート追加時 / archit
 related  : AI_DEVELOPMENT_GUIDE.md「Crate Boundaries」, docs/architecture/architecture.md,
            docs/architecture/architecture-review/server-completed.md（完了済みログ）,
            docs/architecture/architecture-review/server-pending.md（未完項目・issue一覧）
-date     : 2026-08-11（#305 RuntimeFrameHost統合後、全Rustクレートを再計測）
+date     : 2026-08-11（Transit handoff deepening後、全Rustクレートを再計測）
 ---
 
 # Architecture Review — Dawn Codebase（現行構造評価）
@@ -15,19 +15,20 @@ date     : 2026-08-11（#305 RuntimeFrameHost統合後、全Rustクレートを�
 
 ## 現状評価
 
-**総合: B。** crate DAGとdeep module境界は健全で、production / single-sector / cluster /
-in-process driverは`RuntimeFrameHost`へ統合された。一方、`repositories.rs`（1964行）と
-`node/transit.rs`（1902行）は、テストを除いても複数の独立した変更理由を抱え、分割triggerが
-発火している。今回の再計測では、共有ランタイムの改善を反映しつつ、実装行数と責務混在を
-分けて再評価した。
+**総合: B+。** crate DAGとdeep module境界は健全で、production / single-sector / cluster /
+in-process driverは`RuntimeFrameHost`へ統合された。一方、`repositories.rs`（1964行）は複数の
+独立した変更理由を抱え、分割triggerが発火している。Transit handoffは今回、root入口を12行へ
+縮小し、lifecycle / materialization / replayをprivate moduleへ分離した。今回の再計測では、
+共有ランタイムとTransit deepeningを反映しつつ、実装行数と責務混在を分けて再評価した。
 
 2026-07-30の調査では、行数よりも**同じ状態・projection・authorityの二重所有**を優先課題とした。
-Transitについては、Raftの回復判断とShipの状態変更を別moduleに分け、後者を`node::transit`へ集約した。
+Transitについては、Raftの回復判断を`transit::handoff`に残し、Shipの状態変更を`node::transit`
+配下のlifecycle / materialization / replayへ分けた。
 
 | 観点 | 評価 | 現在の判断 |
 |---|---|---|
 | クレート構成 | A− | `dawn-server` が `simulate` と production `sector-node` の唯一のcomposition boundary。`dawn-core` / `dawn-sector` / `dawn-protocol` / client 2 crateへの依存方向も維持 |
-| ファイルサイズ | B | `repositories.rs` はAdmission / Identity / Station projectionを一つのSQLite境界に実装し、`transit.rs` はhandoff / materialization / replayを761行の実装に集約。R-3、R-6、R-7へ記録 |
+| ファイルサイズ | B+ | `repositories.rs` はAdmission / Identity / Station projectionを一つのSQLite境界に実装しているためR-7へ記録。Transitはroot入口12行、lifecycle 510行、materialization 134行、replay 81行へ分離済み |
 | 型設計 | A− | domain固有のResult/Outcomeを維持。dispatcher都合で共通型へ潰さない（ADR-0047） |
 | 重複 | A− | live/replayのShip materialization、Station runtime apply、SectorMap projectionを解消。Transit policy/state mutationも分離 |
 | 永続化 | A− | snapshot seamとpost-snapshot tail replayの同値性を#197で固定済み |
@@ -46,9 +47,8 @@ Transitについては、Raftの回復判断とShipの状態変更を別module�
 Open:
 
 1. **M-9** `EventStore::append`のinfallible contract（保留）
-2. **R-3** `node/transit.rs`のhandoff / replay責務分離（部分発火）
-3. **R-6** `RuntimeFrameHost`のFrameInput境界（Fix候補）
-4. **R-7** `SectorRepository`のbounded-context分割（Fix候補）
+2. **R-6** `RuntimeFrameHost`のFrameInput境界（Fix候補）
+3. **R-7** `SectorRepository`のbounded-context分割（Fix候補）
 
 Resolved in #278: production, single-sector, clustered, and in-process test
 drivers now call the shared durable runtime frame. `SectorRuntimeDriver` remains
@@ -62,7 +62,10 @@ only as an async in-memory adapter; it is not a second Tick implementation.
 | ファイル | 行数 | 判定 |
 |---|---:|---|
 | `crates/dawn-sector/src/node/repositories.rs` | 1964 | 🔴 Admission / Identity / Station projectionのschema・codec・transaction・testsを一つの入口に集約。R-7でbounded-context分割をFix |
-| `crates/dawn-sector/src/node/transit.rs` | 1902 | 🔴 handoff、source/destination materialization、replayを761行の実装に集約。R-3でlifecycle / replay分離をFix |
+| `crates/dawn-sector/src/node/transit/lifecycle.rs` | 510 | 🟢 source freeze / handoff snapshot / Ack cleanup。Saga policyとはprivate node state seamで接続 |
+| `crates/dawn-sector/src/node/transit/materialization.rs` | 134 | 🟢 live Commitとpublic-event replayが共有するhandoff-to-ECS materialization kernel |
+| `crates/dawn-sector/src/node/transit/replay.rs` | 81 | 🟢 public-event replay adapter。live materializationとの差分をadapterに限定 |
+| `crates/dawn-sector/src/node/transit/tests.rs` | 1142 | 🟢 Transit lifecycle・materialization・replayの回帰およびcross-Sector統合tests |
 | `crates/dawn-sector/src/node/tick.rs` | 1520 | 🟢 authoritative tick orderとprepare→durable→applyのkernel・tests。単一の順序機械なので分割しない |
 | `crates/dawn-sector/src/node/commands.rs` | 1391 | 🟢 外側のfamily選択・runtime command collection・follow-up射影・統合tests。policyは専用moduleへ分離済み |
 | `crates/dawn-storage/src/file_journal.rs` | 1366 | 🟢 versioned journal framing・compaction・corruption recoveryの一つのstorage kernel・tests |
