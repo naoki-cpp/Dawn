@@ -268,6 +268,9 @@ func _update_sun_direction(player_ship_id: int, ships: Dictionary, bodies: Array
 	_sky_mat.set_shader_parameter("sun_direction", state.get("direction", Vector3.FORWARD) as Vector3)
 	_sky_mat.set_shader_parameter("sun_active", 1.0)
 	_sky_mat.set_shader_parameter("sun_color", state.get("color", Vector3.ONE) as Vector3)
+	if _camera != null:
+		_sky_mat.set_shader_parameter("sun_flare_right", _camera.global_basis.x.normalized())
+		_sky_mat.set_shader_parameter("sun_flare_up", _camera.global_basis.y.normalized())
 
 
 

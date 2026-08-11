@@ -33,6 +33,9 @@ uniform vec3  ambient_color     : source_color             = vec3(0.002, 0.002, 
 uniform vec3  sun_direction : source_color = vec3(1.0, 0.0, 0.0);
 uniform float sun_active               = 0.0;
 uniform vec3  sun_color : source_color = vec3(1.00, 0.95, 0.80);
+// Screen-space axes supplied by the camera for optical lens effects.
+uniform vec3  sun_flare_right : source_color = vec3(1.0, 0.0, 0.0);
+uniform vec3  sun_flare_up : source_color = vec3(0.0, 1.0, 0.0);
 
 // ── Hash / Noise ──────────────────────────────────────────────────────────────
 // Note: PI and TAU are Godot 4 built-in shader constants.
@@ -168,6 +171,41 @@ vec3 spectral_color(float t) {
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
+// Build a tangent frame around the local star. The sky shader has no
+// finite-distance surface to shade, so this projects procedural granulation
+// onto the apparent disc without introducing parallax.
+void sun_frame(vec3 sun_dir, out vec3 sun_right, out vec3 sun_up) {
+	vec3 reference_up = vec3(0.0, 1.0, 0.0);
+	if (abs(sun_dir.y) > 0.95) {
+		reference_up = vec3(1.0, 0.0, 0.0);
+	}
+	sun_right = normalize(cross(reference_up, sun_dir));
+	sun_up = normalize(cross(sun_dir, sun_right));
+}
+
+vec3 sun_surface_color(vec2 disc_uv, vec3 base_sun_color, float disc_radius) {
+	// Limb darkening is the visible consequence of looking through less of the
+	// photosphere near its edge. Moving noise layers suggest convection cells.
+	float mu = sqrt(max(0.0, 1.0 - disc_radius * disc_radius));
+	float limb_darkening = mix(0.56, 1.0, mu);
+	vec2 drift = vec2(TIME * 0.003, -TIME * 0.0017);
+	float large_cells = fbm(vec3(disc_uv * 7.0 + drift, 2.0));
+	float fine_cells = fbm(vec3(disc_uv * 19.0 - drift * 1.8, 7.0));
+	float granulation = mix(large_cells, fine_cells, 0.35);
+	float photosphere = 0.78 + smoothstep(0.18, 0.82, granulation) * 0.34;
+
+	// A sparse, soft black-spot layer gives the surface a solar rather than
+	// generic fireball character and fades at the foreshortened limb.
+	float spot_field = fbm(vec3(disc_uv * 3.5 + vec2(4.0, -2.0), 13.0));
+	float spot_detail = fbm(vec3(disc_uv * 17.0 + vec2(-1.0, 6.0), 19.0));
+	float spots = smoothstep(0.68, 0.84, spot_field)
+		* smoothstep(0.52, 0.76, spot_detail)
+		* (1.0 - smoothstep(0.55, 0.96, disc_radius));
+	photosphere = mix(photosphere, 0.43, spots);
+
+	return base_sun_color * photosphere * limb_darkening;
+}
+
 void sky() {
 	vec3 dir = normalize(EYEDIR);
 	vec3 col = ambient_color;
@@ -297,21 +335,63 @@ void sky() {
 	if (sun_active > 0.5) {
 		vec3 sun_dir = normalize(sun_direction);
 		float cos_angle = dot(dir, sun_dir);
+		vec3 sun_right;
+		vec3 sun_up;
+		sun_frame(sun_dir, sun_right, sun_up);
 
-		// Sharp disc: angular radius ~1.5° (cos(1.5°) ≈ 0.9997)
-		float disc_edge = 0.9997;
+		// Photosphere disc with an angular radius of approximately 1.5 degrees.
+		float disc_edge = 0.9996573;
 		if (cos_angle > disc_edge) {
-			float t = (cos_angle - disc_edge) / (1.0 - disc_edge);
-			col += sun_color * 12.0 * t * t;
+			float disc_t = (cos_angle - disc_edge) / (1.0 - disc_edge);
+			vec2 disc_uv = vec2(
+				dot(dir, sun_right),
+				dot(dir, sun_up)
+			) / 0.02618;
+			float disc_radius = length(disc_uv);
+			float disc_mask = 1.0 - smoothstep(0.84, 1.0, disc_radius);
+			vec3 surface = sun_surface_color(disc_uv, sun_color, disc_radius);
+			col += surface * disc_mask * (1.8 + 5.5 * disc_t * disc_t);
 		}
 
-		// Inner corona (bright halo ≈ 3°)
-		float corona_k = max(0.0, cos_angle - 0.97);
-		col += sun_color * 2.5 * corona_k * corona_k * 800.0;
+		// Layered corona: a tight inner halo plus animated outer streamers.
+		float sun_angle = acos(clamp(cos_angle, -1.0, 1.0));
+		vec2 corona_uv = vec2(dot(dir, sun_right), dot(dir, sun_up));
+		float corona_noise = fbm(vec3(corona_uv * 22.0, TIME * 0.006));
+		float inner_corona = exp(-sun_angle * 72.0) * 2.4;
+		float outer_corona = exp(-sun_angle * 11.0)
+			* mix(0.18, 0.70, smoothstep(0.26, 0.78, corona_noise));
 
-		// Outer glow (soft haze ≈ 15°)
-		float glow_k = max(0.0, cos_angle);
-		col += sun_color * pow(glow_k, 64.0) * 0.6;
+		// The core is white-hot while the photosphere and corona retain the
+		// star's spectral tint. This keeps the bloom from reading as a flat disk.
+		float white_core = exp(-sun_angle * 260.0) * 8.0;
+		vec3 core_color = mix(sun_color, vec3(1.0, 0.97, 0.88), 0.72);
+
+		// Optical flare is screen-aligned and centered on the sun. The old
+		// world-space tangent frame made the streak rotate as the ship moved.
+		vec2 sun_screen = vec2(
+			dot(sun_dir, sun_flare_right),
+			dot(sun_dir, sun_flare_up)
+		);
+		vec2 flare_uv = vec2(
+			dot(dir, sun_flare_right),
+			dot(dir, sun_flare_up)
+		) - sun_screen;
+		// A projected sun direction can overlap the screen center even when the
+		// star is behind the camera. Only emit lens artifacts on front-facing sky.
+		float front_facing = smoothstep(-0.02, 0.08, cos_angle);
+		float flare_distance = length(flare_uv);
+		float flare_envelope = 1.0 - smoothstep(0.16, 0.34, flare_distance);
+		float horizontal_flare = exp(-pow(flare_uv.y / 0.006, 2.0))
+			* exp(-pow(flare_uv.x / 0.16, 2.0)) * 0.42 * flare_envelope * front_facing;
+		float central_glint = exp(-pow(flare_uv.y / 0.0015, 2.0))
+			* exp(-pow(flare_uv.x / 0.045, 2.0)) * 0.55 * front_facing;
+		float scattered_glow = exp(-sun_angle * 4.5) * 0.28;
+		vec3 flare_color = mix(core_color, sun_color,
+			smoothstep(0.0, 0.12, flare_distance));
+		col += core_color * white_core;
+		col += sun_color * (inner_corona + outer_corona + scattered_glow);
+		col += flare_color * (horizontal_flare + central_glint);
+
 	}
 
 	col = max(col, vec3(0.0));
