@@ -202,8 +202,16 @@ impl ShipMotion {
     }
 
     #[func]
+    // Server-space form of the bounded presentation position. Floating-origin
+    // tracking follows this path so the rendered ship remains nearby in warp.
     fn server_position(&self) -> PackedFloat64Array {
         self.core.frame().predicted_position.into()
+    }
+
+    #[func]
+    // Continuous position for direction-only world presentation such as the sun.
+    fn world_presentation_position(&self) -> PackedFloat64Array {
+        self.core.world_presentation_position().into()
     }
 
     #[func]

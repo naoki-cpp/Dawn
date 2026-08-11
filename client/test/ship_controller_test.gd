@@ -42,6 +42,22 @@ func test_warp_visual_cap_does_not_switch_back_to_prediction_during_deceleration
 	ship.free()
 
 
+func test_warp_exposes_continuous_world_position_for_celestial_parallax() -> void:
+	var ship := ShipController.new()
+	add_child(ship)
+	ship.initialize(1, PackedFloat64Array([0.0, 0.0, 0.0]), PackedFloat64Array([0.0, 0.0, 0.0]))
+	ship.set_as_player()
+
+	ship.set_velocity(Vector3(30_000.0, 0.0, 0.0))
+	ship._process(0.05)
+
+	var capped_position: PackedFloat64Array = ship.server_position()
+	var world_position: PackedFloat64Array = ship.world_presentation_position()
+	assert_float(capped_position[0]).is_equal_approx(10_000.0, 0.001)
+	assert_float(world_position[0]).is_equal_approx(15_000.0, 0.001)
+	ship.free()
+
+
 func test_attaching_to_an_already_warping_ship_keeps_dead_reckoning() -> void:
 	var ship := ShipController.new()
 	add_child(ship)

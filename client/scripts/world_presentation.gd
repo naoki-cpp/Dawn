@@ -12,7 +12,9 @@ const NavigationMarkerRendererScript = preload("res://scripts/navigation_marker_
 
 const NAV_MARKER_CLAMP_DISTANCE : float = 30_000.0
 const WARP_TUNNEL_THRESHOLD : float = 2_000.0
-const WARP_TUNNEL_FADE_RATE : float = 3.0
+const WARP_TUNNEL_FADE_IN_RATE : float = 3.0
+const WARP_TUNNEL_FADE_OUT_RATE : float = 0.5
+const WARP_TUNNEL_MAX_VISUAL_DELTA : float = 0.1
 const WARP_TUNNEL_FOV_BOOST : float = 15.0
 const SUN_EFFECTIVE_DISTANCE : float = 50_000_000.0
 const SUN_FAR_DIRECTION : Vector3 = Vector3(0.62, 0.31, 0.72)
@@ -179,10 +181,14 @@ static func next_warp_tunnel_amount(
 	speed_godot: float,
 	delta: float,
 	threshold: float = WARP_TUNNEL_THRESHOLD,
-	fade_rate: float = WARP_TUNNEL_FADE_RATE
+	fade_in_rate: float = WARP_TUNNEL_FADE_IN_RATE,
+	fade_out_rate: float = WARP_TUNNEL_FADE_OUT_RATE
 ) -> float:
 	var target := 1.0 if speed_godot > threshold else 0.0
-	return lerpf(current, target, clampf(delta * fade_rate, 0.0, 1.0))
+	if target > current:
+		return lerpf(current, target, clampf(delta * fade_in_rate, 0.0, 1.0))
+	var visual_delta := clampf(delta, 0.0, WARP_TUNNEL_MAX_VISUAL_DELTA)
+	return move_toward(current, target, visual_delta * fade_out_rate)
 
 
 static func sun_state(
@@ -260,7 +266,13 @@ func _update_sun_direction(player_ship_id: int, ships: Dictionary, bodies: Array
 	if _sky_mat == null or player_ship_id < 0 or not ships.has(player_ship_id) or _world == null:
 		return
 	var ship_node: Node3D = ships[player_ship_id] as Node3D
-	var player_server: PackedFloat64Array = _world.to_server_components(ship_node.global_position)
+	var player_server: PackedFloat64Array
+	if ship_node.has_method("world_presentation_position"):
+		player_server = ship_node.call("world_presentation_position") as PackedFloat64Array
+	elif ship_node.has_method("server_position"):
+		player_server = ship_node.call("server_position") as PackedFloat64Array
+	else:
+		player_server = _world.to_server_components(ship_node.global_position)
 	var state: Dictionary = sun_state(bodies, player_server, Callable(_world, "dir_to_godot"))
 	if not (state.get("active", false) as bool):
 		_sky_mat.set_shader_parameter("sun_active", 0.0)

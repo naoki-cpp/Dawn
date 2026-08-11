@@ -26,17 +26,35 @@ class FakeWorld:
 	func to_godot_components(x: float, y: float, z: float) -> Vector3:
 		return Vector3(x, y, -z) * render_scale_value
 
+	func to_server_components(position: Vector3) -> PackedFloat64Array:
+		return PackedFloat64Array([
+			position.x / render_scale_value,
+			position.y / render_scale_value,
+			-position.z / render_scale_value,
+		])
+
+	func dir_to_godot(direction: Vector3) -> Vector3:
+		return Vector3(direction.x, direction.y, -direction.z)
+
 
 class FakeShip:
 	extends Node3D
 
 	var motion_rebase_calls: Array[PackedFloat64Array] = []
+	var server_position_value := PackedFloat64Array([0.0, 0.0, 0.0])
+	var world_presentation_position_value := PackedFloat64Array([0.0, 0.0, 0.0])
 
 	func rebase_motion(new_origin: PackedFloat64Array) -> void:
 		motion_rebase_calls.append(new_origin)
 
 	func apply_origin_rebase(new_origin: PackedFloat64Array) -> void:
 		rebase_motion(new_origin)
+
+	func server_position() -> PackedFloat64Array:
+		return server_position_value
+
+	func world_presentation_position() -> PackedFloat64Array:
+		return world_presentation_position_value
 
 
 func test_render_scale_is_queried_from_world_space_authority() -> void:
@@ -105,10 +123,16 @@ func test_next_warp_tunnel_amount_eases_toward_one_above_threshold() -> void:
 	assert_float(amount).is_equal_approx(0.3, 0.0001)
 
 
-func test_next_warp_tunnel_amount_eases_back_toward_zero_below_threshold() -> void:
-	var amount: float = WorldPresentation.next_warp_tunnel_amount(1.0, 0.0, 0.1, 2000.0, 3.0)
+func test_warp_arrival_keeps_the_tunnel_visible_during_the_first_tenth_second() -> void:
+	var amount: float = WorldPresentation.next_warp_tunnel_amount(1.0, 0.0, 0.1)
 
-	assert_float(amount).is_equal_approx(0.7, 0.0001)
+	assert_float(amount).is_equal_approx(0.95, 0.0001)
+
+
+func test_warp_arrival_frame_hitch_cannot_clear_the_tunnel_in_one_step() -> void:
+	var amount: float = WorldPresentation.next_warp_tunnel_amount(1.0, 0.0, 0.5)
+
+	assert_float(amount).is_equal_approx(0.95, 0.0001)
 
 
 func test_sun_state_returns_inactive_when_no_star_exists() -> void:
@@ -133,6 +157,34 @@ func test_sun_state_returns_direction_and_color_from_star_data() -> void:
 		.is_equal_approx(WorldPresentation.SUN_FAR_DIRECTION.normalized(), Vector3(0.0001, 0.0001, 0.0001))
 	assert_vector(state.get("color", Vector3.ZERO) as Vector3) \
 		.is_equal_approx(Vector3(0.55, 0.65, 1.00), Vector3(0.0001, 0.0001, 0.0001))
+
+
+func test_sun_direction_uses_world_position_while_warp_render_position_is_fixed() -> void:
+	var presentation := WorldPresentation.new()
+	var world := FakeWorld.new()
+	presentation._world = world
+	var sky_material := ShaderMaterial.new()
+	sky_material.shader = load("res://shaders/space_sky.gdshader") as Shader
+	presentation._sky_mat = sky_material
+
+	var ship := auto_free(FakeShip.new()) as FakeShip
+	add_child(ship)
+	ship.position = Vector3.ZERO
+	ship.server_position_value = _position(0.0, 0.0, 0.0)
+	ship.world_presentation_position_value = _position(25_000_000.0, 0.0, 0.0)
+	var bodies: Array = [
+		_body(1, "Star", "Helios", _position(0.0, 0.0, 0.0), 1000.0, 0.6),
+	]
+	presentation._update_sun_direction(7, {7: ship}, bodies)
+
+	var expected: Dictionary = WorldPresentation.sun_state(
+		bodies,
+		ship.world_presentation_position_value,
+		Callable(world, "dir_to_godot"))
+	assert_vector(sky_material.get_shader_parameter("sun_direction") as Vector3) \
+		.is_equal_approx(
+			expected.get("direction", Vector3.ZERO) as Vector3,
+			Vector3(0.0001, 0.0001, 0.0001))
 
 
 func test_origin_rebase_moves_ship_and_motion_track_together() -> void:

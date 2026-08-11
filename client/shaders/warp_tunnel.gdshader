@@ -7,8 +7,8 @@
 // -- so instead of showing that, this overlay fades in to cover the cruise
 // portion of the transit, with `intensity` driven by the client from the
 // ship's speed (smoothed, so the fade itself reads as the accelerate-in /
-// decelerate-out transition rather than a hard cut -- see main.gd
-// _update_warp_tunnel_effect()).
+// decelerate-out transition rather than a hard cut -- see
+// WorldPresentation._update_warp_tunnel_effect()).
 //
 // Purely cosmetic: radial streaks scrolling outward + a bright converging
 // core, intensity-modulated alpha so intensity=0 is fully transparent.

@@ -108,14 +108,12 @@ static func spawn_gate_markers(gates_root: Node3D, gates: Array, world_scale: fl
 ## position into Godot world space after origin subtraction.
 ##
 ## Stars get no marker/mesh here: the sky shader (space_sky.gdshader) already
-## draws the local star as a direction-based disc/corona/glow (main.gd's
-## _update_sun_direction), which is correct for something effectively at
-## infinite distance for skybox purposes. Layering a *finite-distance* 3D
-## mesh sphere on top of that direction-only disc caused a visible mismatch:
-## the mesh has real parallax as the ship moves/orbits, the skybox disc does
-## not, so the two drifted apart depending on viewing angle. Keeping only the
-## skybox representation removes the duplicate and the seam, at the cost of
-## the star no longer being a clickable warp target (planets are unaffected).
+## draws the local star as a direction-based disc/corona/glow. WorldPresentation
+## updates that direction from the ship's continuous world-presentation position so it
+## keeps celestial parallax during warp. A finite-distance mesh duplicated the
+## star with a separate projection and created a visible seam. Keeping one sky
+## representation removes that mismatch, at the cost of the star no longer
+## being a clickable warp target (planets are unaffected).
 static func spawn_body_markers(bodies_root: Node3D, bodies: Array, world_scale: float, to_godot_components: Callable) -> void:
 	clear_children(bodies_root)
 

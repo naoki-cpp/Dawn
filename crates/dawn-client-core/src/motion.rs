@@ -109,6 +109,7 @@ pub struct MotionPredictor {
     render_correction: [f64; 3],
     has_rendered: bool,
     warp_render_position: Option<[f64; 3]>,
+    warp_world_position: Option<[f64; 3]>,
     warp_server_speed_cap: Option<f64>,
 }
 
@@ -132,6 +133,7 @@ impl MotionPredictor {
             render_correction: [0.0; 3],
             has_rendered: false,
             warp_render_position: None,
+            warp_world_position: None,
             warp_server_speed_cap: None,
         }
     }
@@ -170,6 +172,7 @@ impl MotionPredictor {
     pub fn enable_prediction(&mut self) {
         self.state = MotionState::Prediction;
         self.warp_render_position = None;
+        self.warp_world_position = None;
         self.warp_server_speed_cap = None;
     }
 
@@ -179,6 +182,7 @@ impl MotionPredictor {
         self.state = MotionState::DeadReckoning;
         self.input = MotionInput::Coast;
         self.warp_render_position = None;
+        self.warp_world_position = None;
         self.warp_server_speed_cap = None;
     }
 
@@ -192,9 +196,13 @@ impl MotionPredictor {
         if !server_speed_cap.is_finite() || server_speed_cap <= 0.0 {
             return false;
         }
+        let presentation_position = self.predicted_position();
         self.state = MotionState::WarpPresentation;
         self.input = MotionInput::Coast;
-        self.warp_render_position = Some(self.predicted_position());
+        self.warp_render_position
+            .get_or_insert(presentation_position);
+        self.warp_world_position
+            .get_or_insert(presentation_position);
         self.warp_server_speed_cap = Some(server_speed_cap);
         true
     }
@@ -216,6 +224,7 @@ impl MotionPredictor {
         self.render_correction = [0.0; 3];
         self.has_rendered = false;
         self.warp_render_position = None;
+        self.warp_world_position = None;
         self.warp_server_speed_cap = None;
         true
     }
@@ -305,6 +314,11 @@ impl MotionPredictor {
         }
 
         if self.state == MotionState::WarpPresentation {
+            let world_position = self
+                .warp_world_position
+                .unwrap_or_else(|| self.predicted_position());
+            self.warp_world_position = Some(add(world_position, scale(self.velocity, ticks)));
+
             let speed = magnitude(self.velocity);
             if speed > VECTOR_EPSILON {
                 let direction = scale(self.velocity, 1.0 / speed);
@@ -359,6 +373,7 @@ impl MotionPredictor {
         self.render_correction = [0.0; 3];
         self.has_rendered = false;
         self.warp_render_position = None;
+        self.warp_world_position = None;
         self.warp_server_speed_cap = None;
     }
 
@@ -370,6 +385,9 @@ impl MotionPredictor {
         self.position = add(self.position, shift);
         if let Some(render_position) = self.warp_render_position.as_mut() {
             *render_position = add(*render_position, shift);
+        }
+        if let Some(world_position) = self.warp_world_position.as_mut() {
+            *world_position = add(*world_position, shift);
         }
     }
 
@@ -387,6 +405,15 @@ impl MotionPredictor {
             add(self.position, scale(self.velocity, self.fractional_ticks)),
             self.render_correction,
         )
+    }
+
+    pub(crate) fn world_presentation_position(&self) -> [f64; 3] {
+        if self.state == MotionState::WarpPresentation {
+            if let Some(world_position) = self.warp_world_position {
+                return world_position;
+            }
+        }
+        self.predicted_position()
     }
 
     pub fn velocity(&self) -> [f64; 3] {

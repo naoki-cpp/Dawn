@@ -115,10 +115,9 @@ func test_spawn_gate_markers_builds_one_marker_per_array_entry() -> void:
 # -- spawn_body_markers -------------------------------------------------------------
 
 func test_spawn_body_markers_skips_stars_and_only_tags_planet_markers() -> void:
-	## Stars get no marker: the sky shader draws the local star as a
-	## direction-based disc (main.gd's _update_sun_direction), and layering a
-	## finite-distance mesh on top caused a visible parallax mismatch as the
-	## ship moved. See the doc comment on spawn_body_markers().
+	## Stars get no marker: WorldPresentation moves the sky shader's single
+	## direction-based disc, so a second finite-distance mesh would duplicate it.
+	## See the doc comment on spawn_body_markers().
 	var bodies_root: Node3D = auto_free(Node3D.new())
 	var bodies: Array = [
 		_body(1, "Star", "Helios", _position(0.0, 0.0, 0.0), 1000.0, 0.5),

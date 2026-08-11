@@ -291,8 +291,15 @@ func get_speed_server() -> float:
 func get_speed_godot() -> float:
 	return _motion.render_speed()
 
+## Server-space form of the bounded render track used by floating-origin logic.
 func server_position() -> PackedFloat64Array:
 	return _motion.server_position()
+
+
+## Continuous server-space observer position for direction-only world effects.
+## It advances at true warp speed while the ship mesh stays bounded.
+func world_presentation_position() -> PackedFloat64Array:
+	return _motion.world_presentation_position()
 
 ## ロック状態を設定する。
 ## state: "none" / "locking" / "locked"

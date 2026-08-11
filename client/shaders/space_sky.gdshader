@@ -173,7 +173,7 @@ vec3 spectral_color(float t) {
 
 // Build a tangent frame around the local star. The sky shader has no
 // finite-distance surface to shade, so this projects procedural granulation
-// onto the apparent disc without introducing parallax.
+// onto the apparent disc without introducing a second position authority.
 void sun_frame(vec3 sun_dir, out vec3 sun_right, out vec3 sun_up) {
 	vec3 reference_up = vec3(0.0, 1.0, 0.0);
 	if (abs(sun_dir.y) > 0.95) {
