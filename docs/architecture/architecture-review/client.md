@@ -5,7 +5,7 @@ update   : クライアント側で大規模リファクタ実施後 / architect
 related  : docs/architecture/architecture-review/server.md（サーバー側）,
            docs/architecture/architecture-review/client-completed.md（完了済みログ）,
            docs/architecture/architecture-review/client-pending.md（未完項目）
-date     : 2026-08-10（#281 typed client intents and request builders）
+date     : 2026-08-11（#305後、GDScriptとRust/GDExtension境界を再計測）
 ---
 
 # Architecture Review — Dawn Client（現行構造評価）
@@ -15,7 +15,10 @@ date     : 2026-08-10（#281 typed client intents and request builders）
 
 ## 現状評価
 
-**総合: A。** `main.gd`は長いがgod objectには戻っていない。state、interaction、presentation、HUD、wire adapterの所有者は分離済み。
+**総合: B+。** `main.gd`は1148行、`hud_manager.gd`は877行まで増えているが、state、
+interaction、presentation、HUD、wire adapterの所有者は分離済みで、直ちにgod objectへ戻ったとは
+判断しない。一方、Rust/GDExtensionの`server_message_gd.rs`は995行あり、decode、ClientFact変換、
+state apply、Godot callback dispatchが一つのadapterに同居しているため、C-16をFix候補として記録する。
 
 issue #238で復号済みwire型をGodot `Dictionary`へ投影してRustへ戻す経路を削除し、
 #248で旧client adapterを削除した。#251ではtick、lock、dock、system、loadout、module、
@@ -30,7 +33,7 @@ review修正後のGDExtension境界、追加したClientState回帰test、明示
 
 | 観点 | 評価 | 現在の判断 |
 |---|---|---|
-| ファイル分割 | A | `WorldSession` / `WorldInteraction` / `WorldPresentation` / HUD各層の所有者が明確。18スクリプトへ分割済み |
+| ファイル分割 | B+ | 18スクリプトへの分割は維持。`main.gd` 1148行と`hud_manager.gd` 877行は監視帯、Rust message adapterはC-16で分割候補 |
 | `main.gd`責務 | A− | scene lifecycle、node generation、event dispatch、network send、HUD assemblyに限定 |
 | 型境界 | A | wire decode → `ClientFact` → Rust state commit → typed presentationと、typed request/intent constructionの単一経路。Dictionary再入力なし |
 | 重複 | A− | shadow state、JSON往復、adapter内domain policy、二段event dispatchは解消。残るauthority/API重複は#200・#202 |
@@ -51,6 +54,41 @@ review修正後のGDExtension境界、追加したClientState回帰test、明示
 
 navigation map cacheはSector内でwrite-onceに近いpresentation cacheとして許容し、毎frameのRust→Godot再構築は行わない。
 
+## ファイルサイズ（2026-08-11再計測）
+
+### GDScript（`client/scripts/`）
+
+| ファイル | 行数 | 判定 |
+|---|---:|---|
+| `client/scripts/main.gd` | 1148 | 🟡 R-2。scene lifecycle / node registry / event wiring / HUD assemblyのorchestration。機械的分割はしない |
+| `client/scripts/hud_manager.gd` | 877 | 🟡 C-9。typed refsとpanel build/updateが同一責務。独立変更理由が分かれるまで保留 |
+| `client/scripts/ship_controller.gd` | 437 | 🟢 motion adapterとvisual effectの一つのShip presentation boundary |
+| `client/scripts/connection.gd` | 394 | 🟢 WebSocket接続・reconnect・typed outcome受け渡し |
+| `client/scripts/world_presentation.gd` | 337 | 🟢 marker・floating-origin presentation |
+| `client/scripts/market_surface.gd` | 270 | 🟢 Market panel surface |
+| `client/scripts/hud_surface.gd` | 266 | 🟢 HUD reference ownership・dirty tracking |
+| `client/scripts/navigation_marker_renderer.gd` | 227 | 🟢 navigation marker rendering |
+| `client/scripts/camera_controller.gd` | 145 | 🟢 camera orbit input |
+| `client/scripts/input_decoder.gd` | 118 | 🟢 raw inputからtyped intentへの変換 |
+| `client/scripts/ship_picking.gd` | 104 | 🟢 screen-space picking |
+| `client/scripts/world_interaction.gd` | 103 | 🟢 selection・click/key intent |
+| `client/scripts/tactical_overlay.gd` | 93 | 🟢 tactical overlay |
+| `client/scripts/inventory_row.gd` | 87 | 🟢 typed inventory row presentation |
+| `client/scripts/hud_hit_test.gd` | 80 | 🟢 HUD hit-test geometry |
+| `client/scripts/billboard_ring.gd` | 65 | 🟢 selection/lock ring visual |
+| `client/scripts/unit_format.gd` | 38 | 🟢 unit formatting |
+| `client/scripts/warp_tunnel_effect.gd` | 10 | 🟢 warp tunnel visual |
+
+### Rust/GDExtension boundary（client crates、500行以上）
+
+| ファイル | 行数 | 判定 |
+|---|---:|---|
+| `crates/dawn-client-core/src/world_session.rs` | 1202 | 🟢 typed world state machine・lifecycle/reconciliation。単一のsession authority |
+| `crates/dawn-client-gdext/src/server_message_gd.rs` | 995 | 🔴 C-16。decode / wire→ClientFact / state apply / Godot dispatchの変更理由が混在 |
+| `crates/dawn-client-core/src/client_state.rs` | 778 | 🟢 ClientFactからWorldSessionEffectへの純粋なstate policy |
+| `crates/dawn-client-core/src/motion.rs` | 653 | 🟢 client motion/prediction kernel・tests |
+| `crates/dawn-client-gdext/src/client_command_gd.rs` | 555 | 🟢 typed request builder・入力検証・encode結果のGDExtension boundary |
+
 ## Issue登録簿
 
 | ID | GitHub | 内容 | 状態 |
@@ -63,5 +101,6 @@ navigation map cacheはSector内でwrite-onceに近いpresentation cacheとし�
 | C-13 | #238 | server outcomeのtyped stateをDictionary経由でRustへ戻す二重変換 | 解消済み |
 | C-14 | #251 | server-fact policyがGodot adapterに残る | 解消済み |
 | C-15 | #281 | Dictionary/string-tag intent、Market JSON builder、空byteエラーsentinel | 解消済み |
+| C-16 | — | `server_message_gd.rs`のdecode / fact apply / Godot dispatch混在 | Fix候補 |
 
 `main.gd`の機械的な`.tscn`分割、raw `InputEvent`のdeep module流入、typed recordのDictionary回帰は行わない。
