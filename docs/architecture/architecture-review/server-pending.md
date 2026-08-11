@@ -25,18 +25,13 @@ date     : 2026-08-11
 live state、interaction、presentationは分離済み。残るscene lifecycle / node generation / network send / HUD assemblyは凝集している。
 **再評価:** scene-tree構成を自動検証できるようになるか、独立した変更理由が再び混在する場合。
 
-### R-3（部分発火・継続監視）: `node/`系ファイルの再肥大
+### R-3（保留・warp trigger）: `node/`系ファイルの再肥大
 
 2026-08-05、`node/commands.rs` では flight / module / station / loadout-refresh という
 独立した変更理由が一つの入口に混在していたため trigger が発火した。issue #264 で、外側の
 網羅的な family 選択と follow-up 射影だけを `commands.rs` に残し、各 policy を
 `command_flight.rs` / `command_module.rs` / `command_loadout.rs` / `command_station.rs` へ
 移した。wire shape、domain result、event semantics は変更していない（ADR-0047 amendment）。
-
-`node/transit.rs` は2026-08-11に1902行、テストを除く実装761行となり、triggerが発火した。
-handoffのsource/destination materializationと、replay/recoveryの適用が同じ`SimulationNode`
-implに積み上がっている。**判断: Fix。** lifecycle mutationとreplay adapterを別moduleへ分けるが、
-private ECS stateと`SimulationNode`の所有権は維持し、wire/event semanticsは変更しない。
 
 `node/warp.rs` は1203行だが実装は573行で、geometry kernelとstate machineが凝集している。
 **判断: Defer。** テストを除く実装が約700行を超え、かつ独立した変更理由が混在する、または
@@ -68,7 +63,7 @@ typed codec、allocator、transaction boundary、全ての回帰testsを一つ�
 | 項目 | 状態 |
 |---|---|
 | R-2 | 保留・trigger付き |
-| R-3 | commands slice 完了、transitはFix、warpはtrigger付きで保留 |
+| R-3 | commands slice・transit deepening 完了、warpはtrigger付きで保留 |
 | R-6 | Fix候補・FrameInput境界 |
 | R-7 | Fix候補・repository bounded-context分割 |
 | M-9 | 保留・trigger付き |
