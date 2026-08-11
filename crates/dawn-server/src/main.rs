@@ -13,6 +13,7 @@
 
 mod bench;
 mod cluster;
+mod runtime_frame;
 mod sector_runtime_driver;
 mod serve;
 

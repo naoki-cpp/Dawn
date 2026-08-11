@@ -6,6 +6,7 @@
 //! session loop, Sector routing, and the orphan-rule sink adapter for
 //! `ws_server::PlayerSession`.
 
+use crate::runtime_frame::RuntimeNodeView;
 use crate::ws_server;
 use dawn_core::{DomainEvent, PlayerId, ShipId};
 use dawn_sector::aoi::{AoiMessage, AoiSink, Observer};
@@ -35,15 +36,18 @@ impl AoiDelivery {
         self.frames[0].seed_observer(node, Observer { player_id, ship_id });
     }
 
-    pub(crate) fn seed_cluster_player(
+    pub(crate) fn seed_cluster_player<N: RuntimeNodeView>(
         &mut self,
-        nodes: &[SimulationNode],
+        nodes: &[N],
         sector: usize,
         player_id: PlayerId,
         ship_id: ShipId,
     ) {
         self.ensure_frame_count(nodes.len());
-        self.frames[sector].seed_observer(&nodes[sector], Observer { player_id, ship_id });
+        self.frames[sector].seed_observer(
+            nodes[sector].runtime_node(),
+            Observer { player_id, ship_id },
+        );
     }
 
     pub(crate) fn deliver_single_sector(
@@ -62,9 +66,9 @@ impl AoiDelivery {
         );
     }
 
-    pub(crate) fn deliver_cluster_sectors(
+    pub(crate) fn deliver_cluster_sectors<N: RuntimeNodeView>(
         &mut self,
-        nodes: &[SimulationNode],
+        nodes: &[N],
         sessions: &mut Vec<ws_server::PlayerSession>,
         player_sector: &HashMap<PlayerId, usize>,
         new_events_by_sector: &[Vec<DomainEvent>],
@@ -137,9 +141,9 @@ fn deliver_runtime_session<T: RuntimeAoiSession>(
 
 fn ignore_runtime_redirect<T>(_session: &mut T, _destination: dawn_core::SectorId) {}
 
-fn deliver_cluster_sessions<T: RuntimeAoiSession>(
+fn deliver_cluster_sessions<T: RuntimeAoiSession, N: RuntimeNodeView>(
     frames: &mut [AoiFrame],
-    nodes: &[SimulationNode],
+    nodes: &[N],
     sessions: &mut Vec<T>,
     player_sector: &HashMap<PlayerId, usize>,
     new_events_by_sector: &[Vec<DomainEvent>],
@@ -147,7 +151,7 @@ fn deliver_cluster_sessions<T: RuntimeAoiSession>(
     reseed_players: &HashSet<PlayerId>,
 ) {
     for (frame, node) in frames.iter_mut().zip(nodes) {
-        frame.rebuild(node);
+        frame.rebuild(node.runtime_node());
     }
 
     sessions.retain_mut(|session| {
@@ -159,13 +163,13 @@ fn deliver_cluster_sessions<T: RuntimeAoiSession>(
         };
 
         if reseed_players.contains(&player_id) {
-            frames[sector].seed_observer_from_index(&nodes[sector], observer);
+            frames[sector].seed_observer_from_index(nodes[sector].runtime_node(), observer);
             return true;
         }
 
         session.deliver(
             &mut frames[sector],
-            &nodes[sector],
+            nodes[sector].runtime_node(),
             &new_events_by_sector[sector],
             &warp_arrivals_by_sector[sector],
         )

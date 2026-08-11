@@ -138,13 +138,22 @@ drain committed consensus input through RuntimeConsensus
   -> propose validated auto-jump work and drain presentation transients
 ```
 
-`dawn-sector::transit::run_durable_runtime_tick_with_consensus` is the shared
-boundary. `dawn-server --bin sector-node` supplies the Raft/FileJournal
-production adapters;
-single-sector serve supplies `LocalRuntimeConsensus`/InMemoryJournal; clustered serve
-and `SectorRuntimeDriver` supply Raft/InMemoryJournal adapters. The latter are
-test/local durability adapters, not a claim that their in-memory journal
+`dawn-server::runtime_frame::RuntimeFrameHost` is the shared one-Sector owner
+boundary. It owns the `SimulationNode`, journal, consensus adapter, runtime
+health, and selected durability policy, and delegates the actual transition to
+`dawn-sector::transit::run_durable_runtime_tick_with_consensus_and_health`.
+`dawn-server --bin sector-node` supplies the Raft/FileJournal production adapters;
+single-sector serve supplies `LocalRuntimeConsensus`/InMemoryJournal; clustered
+serve and `SectorRuntimeDriver` supply Raft/InMemoryJournal adapters. The latter
+are test/local durability adapters, not a claim that their in-memory journal
 survives process loss.
+
+Server entry points collect normalized commands before invoking the Host and
+consume its typed `RuntimeTickOutput` afterward. The Host's output hook is the
+production publication point: replication publication is allowed only after
+live apply and required reconciliation. AoI delivery, network sends, and
+cross-Sector handoff remain outside the Host because they are adapter/coordinator
+concerns rather than part of one Sector's durable state transition.
 
 The frame now exposes a `RuntimeDurabilityPolicy` port. Its replicated policy
 validates distinct replica membership, current owner epoch, transition/range/

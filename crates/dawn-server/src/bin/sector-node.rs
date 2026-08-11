@@ -22,6 +22,8 @@ mod client_admission;
 mod config;
 #[path = "sector-node/runtime.rs"]
 mod runtime;
+#[path = "../runtime_frame.rs"]
+mod runtime_frame;
 
 use dawn_actor::ws_server;
 use dawn_core::{NodeId, SectorBounds, SectorId};
@@ -39,8 +41,9 @@ use dawn_sector::node::SimulationNode;
 use dawn_sector::persistence::{
     recovery::apply_tail, CheckpointConfig, CheckpointScheduler, StateSnapshot,
 };
-use dawn_sector::{galaxy::Galaxy, game_data::GameDataCatalog, transit};
-use dawn_storage::{DurabilityMode, DurableJournal, EventStore, FileEventStore, FileJournal};
+use dawn_sector::{galaxy::Galaxy, game_data::GameDataCatalog};
+use dawn_storage::{DurableJournal, EventStore, FileEventStore, FileJournal};
+use runtime_frame::{OwnedRaftRuntimeConsensus, RuntimeFrameHost, RuntimeFramePolicy};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::Path;
@@ -88,11 +91,8 @@ async fn main() -> anyhow::Result<()> {
 
     // ── SimulationNode ────────────────────────────────────────────────────────
 
-    let (mut node, mut event_store, mut recovery_journal, is_fresh) =
+    let (node, mut event_store, recovery_journal, is_fresh) =
         build_node(&cfg, node_id, sector_id, bounds);
-    if is_fresh {
-        node.spawn_npc_frigates(cfg.npc_ships);
-    }
 
     // Lookup: SectorId → peer WS address (for client Redirect on jump).
     let peer_ws = peer_ws_addresses(&cfg.peers);
@@ -148,7 +148,7 @@ async fn main() -> anyhow::Result<()> {
         &mut rand::thread_rng(),
     );
 
-    let (committed_tx, mut committed_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+    let (committed_tx, committed_rx) = mpsc::unbounded_channel::<Vec<u8>>();
     tokio::spawn(
         RaftActor::new(
             raft_state,
@@ -160,6 +160,15 @@ async fn main() -> anyhow::Result<()> {
         .run(),
     );
     let raft = RaftActorHandle::new(actor_tx);
+    let mut host = RuntimeFrameHost::new(
+        node,
+        recovery_journal,
+        OwnedRaftRuntimeConsensus::new(raft.clone(), committed_rx),
+        RuntimeFramePolicy::local_durable(0),
+    );
+    if is_fresh {
+        host.with_node_mut(|node| node.spawn_npc_frigates(cfg.npc_ships));
+    }
 
     // ── Shared peer transport: replication adapter ────────────────────────────
 
@@ -199,22 +208,9 @@ async fn main() -> anyhow::Result<()> {
     // Raft warm-up: tick until a leader is elected (≤ 20 ticks election timeout).
     println!("[Node] Raft warm-up (30 ticks)...");
     for _ in 0..30 {
-        let transition_id = transit::runtime_transition_id(&node);
-        let output = transit::run_durable_runtime_tick(
-            &mut node,
-            &mut recovery_journal,
-            &raft,
-            &mut committed_rx,
-            &[],
-            transit::DurableRuntimeTickContext {
-                transition_id,
-                owner_epoch: 0,
-                durability: DurabilityMode::Synced,
-                profile: transit::RuntimeDurabilityProfile::LocalDurable,
-            },
-            |_, _, _| {},
-        )
-        .unwrap_or_else(|error| panic!("durable Raft warm-up tick failed: {error}"));
+        let output = host
+            .run_frame(&[])
+            .unwrap_or_else(|error| panic!("durable Raft warm-up tick failed: {error}"));
         event_store.append_batch(output.events);
     }
     println!("[Node] warm-up done. Waiting for players...");
@@ -226,6 +222,7 @@ async fn main() -> anyhow::Result<()> {
     // ── Main tick loop ────────────────────────────────────────────────────────
 
     let mut runtime = runtime::SectorNodeRuntime::new(
+        host,
         sector_id,
         AOI_CELL_SIZE,
         peer_ws,
@@ -243,11 +240,13 @@ async fn main() -> anyhow::Result<()> {
         interval.tick().await;
         let tick_started = std::time::Instant::now();
 
-        admission.advance_handshakes(&mut node, sector_id, AOI_CELL_SIZE);
+        runtime.with_node_mut(|node| {
+            admission.advance_handshakes(node, sector_id, AOI_CELL_SIZE);
+        });
 
         // Promote completed handshakes to active sessions.
         while let Some(sess) = admission.try_recv_ready_session() {
-            runtime.promote_ready_session(&node, sess);
+            runtime.promote_ready_session(sess);
         }
 
         // Ordinary gossip is ingested into foreign recovery replicas. A gap
@@ -269,13 +268,7 @@ async fn main() -> anyhow::Result<()> {
         emit_catch_up_step(&repl_transport, catch_up.tick());
 
         runtime
-            .run_frame(
-                &mut node,
-                &raft,
-                &mut committed_rx,
-                &mut event_store,
-                &mut recovery_journal,
-            )
+            .run_frame(&mut event_store)
             .expect("authoritative recovery journal failed; node is fenced");
 
         // Snapshot + compact on a fixed logical-tick cadence (ADR-0017 §5-C).
@@ -283,7 +276,7 @@ async fn main() -> anyhow::Result<()> {
         // than killing the live server -- the hot log keeps appending
         // normally on the next tick either way, and the next scheduled
         // checkpoint will retry.
-        match checkpoints.maybe_checkpoint(&mut node, &mut recovery_journal) {
+        match runtime.with_state_mut(|node, journal| checkpoints.maybe_checkpoint(node, journal)) {
             Ok(Some(snapshot)) => {
                 println!(
                     "[Node] checkpoint at tick {} (covered_recovery_index={})",

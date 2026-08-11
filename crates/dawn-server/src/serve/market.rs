@@ -15,6 +15,7 @@ use dawn_protocol::{
 use dawn_sector::node::SimulationNode;
 
 use super::market_settlement::{MarketSettlement, ParsedOrder};
+use crate::runtime_frame::RuntimeNodeMutation;
 
 const MAX_MARKET_ORDERS: usize = 200;
 const MARKET_DOCK_REQUIRED_NOTICE: &str = "Dock at a station to use the Market";
@@ -38,13 +39,17 @@ impl MarketRuntime {
         }
     }
 
-    pub(crate) fn handle_single(
+    pub(crate) fn handle_single<N: RuntimeNodeMutation>(
         &mut self,
         player_id: PlayerId,
         command: MarketCommandWire,
-        node: &mut SimulationNode,
+        node: &mut N,
     ) -> MarketSnapshotWire {
-        if node.player_docked_station(player_id).is_none() {
+        if node
+            .runtime_node()
+            .player_docked_station(player_id)
+            .is_none()
+        {
             return Self::market_unavailable_snapshot();
         }
         match command {
@@ -65,17 +70,18 @@ impl MarketRuntime {
         }
     }
 
-    pub(crate) fn handle_cluster(
+    pub(crate) fn handle_cluster<N: RuntimeNodeMutation>(
         &mut self,
         player_id: PlayerId,
         command: MarketCommandWire,
         player_sector: usize,
-        nodes: &mut [SimulationNode],
+        nodes: &mut [N],
     ) -> MarketSnapshotWire {
-        if nodes
-            .get(player_sector)
-            .is_none_or(|node| node.player_docked_station(player_id).is_none())
-        {
+        if nodes.get(player_sector).is_none_or(|node| {
+            node.runtime_node()
+                .player_docked_station(player_id)
+                .is_none()
+        }) {
             return Self::market_unavailable_snapshot();
         }
         match command {
@@ -96,29 +102,29 @@ impl MarketRuntime {
         }
     }
 
-    fn place_single(
+    fn place_single<N: RuntimeNodeMutation>(
         &mut self,
         player_id: PlayerId,
         order: ParsedOrder,
-        node: &mut SimulationNode,
+        node: &mut N,
     ) -> MarketSnapshotWire {
-        if !can_place_order(node, player_id, order.ship_id) {
+        if !can_place_order(node.runtime_node(), player_id, order.ship_id) {
             return self.snapshot(player_id, "Market order rejected");
         }
         let result = MarketSettlement::place_single(&mut self.db, player_id, order, node);
         self.snapshot(player_id, result.notice())
     }
 
-    fn place_cluster(
+    fn place_cluster<N: RuntimeNodeMutation>(
         &mut self,
         player_id: PlayerId,
         order: ParsedOrder,
         player_sector: usize,
-        nodes: &mut [SimulationNode],
+        nodes: &mut [N],
     ) -> MarketSnapshotWire {
         if !nodes
             .get(player_sector)
-            .is_some_and(|node| can_place_order(node, player_id, order.ship_id))
+            .is_some_and(|node| can_place_order(node.runtime_node(), player_id, order.ship_id))
         {
             return self.snapshot(player_id, "Market order rejected");
         }
@@ -126,11 +132,11 @@ impl MarketRuntime {
         self.snapshot(player_id, result.notice())
     }
 
-    fn cancel_single(
+    fn cancel_single<N: RuntimeNodeMutation>(
         &mut self,
         player_id: PlayerId,
         raw_order_id: u64,
-        node: &mut SimulationNode,
+        node: &mut N,
     ) -> MarketSnapshotWire {
         let Some(order_id) = order_id_from_wire(raw_order_id) else {
             return self.snapshot(player_id, "Market order rejected");
@@ -139,11 +145,11 @@ impl MarketRuntime {
         self.snapshot(player_id, result.notice())
     }
 
-    fn cancel_cluster(
+    fn cancel_cluster<N: RuntimeNodeMutation>(
         &mut self,
         player_id: PlayerId,
         raw_order_id: u64,
-        nodes: &mut [SimulationNode],
+        nodes: &mut [N],
     ) -> MarketSnapshotWire {
         let Some(order_id) = order_id_from_wire(raw_order_id) else {
             return self.snapshot(player_id, "Market order rejected");

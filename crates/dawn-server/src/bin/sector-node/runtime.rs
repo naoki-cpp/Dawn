@@ -5,23 +5,19 @@
 //! jump proposal fallback, runtime tick stepping, outbound replication,
 //! Redirect handling, and AoI delivery.
 
+use crate::runtime_frame::{OwnedRaftRuntimeConsensus, RuntimeFrameHost};
 use dawn_actor::ws_server;
 use dawn_core::{DomainEvent, SectorId, ShipId};
-use dawn_distributed::RaftActorHandle;
 use dawn_distributed::{OutboundLogPublisher, PeerReplicationTransport};
 use dawn_protocol::ServerMessage;
 use dawn_sector::aoi::{AoiMessage, AoiSink, Observer};
 use dawn_sector::aoi_frame::{deliver_sector_sessions, AoiFrame, AoiSessionCallbacks};
 use dawn_sector::node::{
-    collect_runtime_commands, ClientRequestAdmissionError, JumpOutcome, RuntimeCommandDispatch,
-    SimulationNode,
+    ClientRequestAdmissionError, JumpOutcome, RuntimeCommandDispatch, SimulationNode,
 };
-use dawn_sector::transit;
-use dawn_sector::transit::RuntimeHealth;
-use dawn_storage::DurableJournal;
+use dawn_storage::{EventStore, FileJournal};
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use tokio::sync::mpsc;
 
 fn client_request_rejection(
     error: ClientRequestAdmissionError,
@@ -40,21 +36,22 @@ fn client_request_rejection(
 }
 
 pub(crate) struct SectorNodeRuntime {
+    host: RuntimeFrameHost<FileJournal, OwnedRaftRuntimeConsensus>,
     sector_id: SectorId,
     peer_ws: HashMap<SectorId, SocketAddr>,
     sessions: Vec<ws_server::PlayerSession>,
     aoi_frame: AoiFrame,
     outbound_replication: OutboundLogPublisher<PeerReplicationTransport>,
-    runtime_health: RuntimeHealth,
 }
 
 impl SectorNodeRuntime {
     pub(crate) fn new(
+        host: RuntimeFrameHost<FileJournal, OwnedRaftRuntimeConsensus>,
         sector_id: SectorId,
         aoi_cell_size: f64,
         peer_ws: HashMap<SectorId, SocketAddr>,
         repl_transport: PeerReplicationTransport,
-        event_store: &impl dawn_storage::store::EventStore,
+        event_store: &impl EventStore,
     ) -> Self {
         Self {
             sector_id,
@@ -65,15 +62,25 @@ impl SectorNodeRuntime {
                 repl_transport,
                 event_store,
             ),
-            runtime_health: RuntimeHealth::new(),
+            host,
         }
     }
 
-    pub(crate) fn promote_ready_session(
+    pub(crate) fn with_node_mut<R>(
         &mut self,
-        node: &SimulationNode,
-        sess: ws_server::PlayerSession,
-    ) {
+        operation: impl FnOnce(&mut SimulationNode) -> R,
+    ) -> R {
+        self.host.with_node_mut(operation)
+    }
+
+    pub(crate) fn with_state_mut<R>(
+        &mut self,
+        operation: impl FnOnce(&mut SimulationNode, &mut FileJournal) -> R,
+    ) -> R {
+        self.host.with_state_mut(operation)
+    }
+
+    pub(crate) fn promote_ready_session(&mut self, sess: ws_server::PlayerSession) {
         println!(
             "[Node] {:?} joined with ship #{}",
             sess.player_id,
@@ -85,7 +92,7 @@ impl SectorNodeRuntime {
         self.aoi_frame
             .retain_players(|player_id| player_id != sess.player_id);
         self.aoi_frame.seed_observer(
-            node,
+            self.host.node(),
             Observer {
                 player_id: sess.player_id,
                 ship_id: sess.ship_id,
@@ -94,48 +101,27 @@ impl SectorNodeRuntime {
         self.sessions.push(sess);
     }
 
-    pub(crate) fn run_frame(
-        &mut self,
-        node: &mut SimulationNode,
-        raft: &RaftActorHandle,
-        committed_rx: &mut mpsc::UnboundedReceiver<Vec<u8>>,
-        event_store: &mut impl dawn_storage::store::EventStore,
-        recovery_journal: &mut impl DurableJournal,
-    ) -> anyhow::Result<()> {
-        let (lock_commands, pending_jumps) = self.collect_player_commands(node);
-        self.propose_player_jumps(node, raft, pending_jumps);
+    pub(crate) fn run_frame(&mut self, event_store: &mut impl EventStore) -> anyhow::Result<()> {
+        let (lock_commands, pending_jumps) = self.collect_player_commands();
+        self.propose_player_jumps(pending_jumps);
 
-        let sector_id = self.sector_id;
-        let transition_id = transit::runtime_transition_id(node);
-        let mut consensus = transit::RaftRuntimeConsensus::new(raft, committed_rx);
-        let output = transit::run_durable_runtime_tick_with_consensus_and_health(
-            node,
-            recovery_journal,
-            &mut consensus,
-            &mut self.runtime_health,
-            &lock_commands,
-            transit::DurableRuntimeTickContext {
-                transition_id,
-                owner_epoch: 0,
-                durability: dawn_storage::DurabilityMode::Synced,
-                profile: transit::RuntimeDurabilityProfile::LocalDurable,
-            },
-            |_, _, _| {},
-        )
-        .map_err(|error| anyhow::anyhow!("authoritative recovery tick failed: {error}"))?;
-        event_store.append_batch(output.events.clone());
-        self.outbound_replication
-            .publish_events(sector_id, &output.events);
+        let outbound_replication = &mut self.outbound_replication;
+        let output = self
+            .host
+            .run_frame_with_output(&lock_commands, |node, _, events| {
+                event_store.append_batch(events.to_vec());
+                outbound_replication.publish_events(node.sector_id(), events);
+            })
+            .map_err(|error| anyhow::anyhow!("authoritative recovery tick failed: {error}"))?;
 
         self.log_auto_jumps(&output.pending_auto_jumps);
         let jumped_ships = self.jumped_ships(&output.events);
-        self.deliver_frames(node, &output.events, &output.completed_warps, &jumped_ships);
+        self.deliver_frames(&output.events, &output.completed_warps, &jumped_ships);
         Ok(())
     }
 
     fn collect_player_commands(
         &mut self,
-        node: &mut SimulationNode,
     ) -> (
         Vec<dawn_core::LockOnCommand>,
         Vec<(usize, ShipId, dawn_core::JumpCommand)>,
@@ -143,8 +129,7 @@ impl SectorNodeRuntime {
         let mut lock_commands = Vec::new();
         let mut pending_jumps = Vec::new();
 
-        for dispatch in collect_runtime_commands(
-            node,
+        for dispatch in self.host.collect_runtime_commands(
             &mut self.sessions,
             &mut lock_commands,
             |session| session.player_id,
@@ -160,7 +145,11 @@ impl SectorNodeRuntime {
                     session_index,
                     player_id,
                 } => {
-                    if let Some(loadout) = node.build_player_loadout_json_for_player(player_id) {
+                    if let Some(loadout) = self
+                        .host
+                        .node()
+                        .build_player_loadout_json_for_player(player_id)
+                    {
                         if let Some(session) = self.sessions.get_mut(session_index) {
                             session.send_message(&ServerMessage::PlayerLoadout(loadout));
                         }
@@ -183,9 +172,7 @@ impl SectorNodeRuntime {
     }
 
     fn propose_player_jumps(
-        &self,
-        node: &mut SimulationNode,
-        raft: &RaftActorHandle,
+        &mut self,
         pending_jumps: Vec<(usize, ShipId, dawn_core::JumpCommand)>,
     ) {
         for (idx, ship_id, j) in pending_jumps {
@@ -195,7 +182,8 @@ impl SectorNodeRuntime {
             if ship_id != sess.ship_id {
                 continue;
             }
-            match transit::propose_jump(node, raft, ship_id, j.gate_id) {
+            let outcome = self.host.propose_jump(ship_id, j.gate_id);
+            match outcome {
                 JumpOutcome::NeedsTransitProposal { to } => {
                     println!(
                         "[Node] Jump proposed: ship #{} gate #{} (-> S{})",
@@ -252,14 +240,13 @@ impl SectorNodeRuntime {
 
     fn deliver_frames(
         &mut self,
-        node: &SimulationNode,
         new_events: &[DomainEvent],
         warp_arrivals: &[ShipId],
         jumped_ships: &HashMap<ShipId, SectorId>,
     ) {
         deliver_sector_sessions(
             &mut self.aoi_frame,
-            node,
+            self.host.node(),
             &mut self.sessions,
             new_events,
             warp_arrivals,
