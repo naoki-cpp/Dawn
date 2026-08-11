@@ -1,18 +1,15 @@
 //! Serve runtime orchestration shared by clustered serve loops.
 
 use super::{AoiDelivery, AOI_CELL_SIZE};
+use crate::runtime_frame::{
+    OwnedRaftRuntimeConsensus, RuntimeFrameHost, RuntimeNodeMutation, RuntimeNodeView,
+};
 use crate::ws_server;
 use dawn_core::{DomainEvent, PlayerId, ShipId};
-use dawn_distributed::RaftActorHandle;
 use dawn_protocol::{project_domain_event, InitialStateWire, ServerFact, ServerMessage};
-use dawn_sector::node::SimulationNode;
-use dawn_sector::transit::{
-    self, run_durable_runtime_tick_with_consensus_and_health, DurableRuntimeTickContext,
-    RaftRuntimeConsensus, RuntimeDurabilityProfile,
-};
-use dawn_storage::{DurabilityMode, InMemoryJournal};
+use dawn_sector::transit;
+use dawn_storage::InMemoryJournal;
 use std::collections::{HashMap, HashSet};
-use tokio::sync::mpsc;
 
 /// Run one clustered serve tick and deliver the resulting client frames.
 ///
@@ -20,11 +17,7 @@ use tokio::sync::mpsc;
 /// transient-output ordering. This adapter only performs jump ownership handoff,
 /// AOI delivery, and scoped InitialState resend for players that changed Sector.
 pub(crate) struct ClusterRuntimeTickContext<'a> {
-    pub(crate) nodes: &'a mut [SimulationNode],
-    pub(crate) rafts: &'a [RaftActorHandle],
-    pub(crate) committed_rxs: &'a mut [mpsc::UnboundedReceiver<Vec<u8>>],
-    pub(crate) recovery_journals: &'a mut [InMemoryJournal],
-    pub(crate) runtime_health: &'a mut [transit::RuntimeHealth],
+    pub(crate) hosts: &'a mut [RuntimeFrameHost<InMemoryJournal, OwnedRaftRuntimeConsensus>],
     pub(crate) sessions: &'a mut Vec<ws_server::PlayerSession>,
     pub(crate) player_sector: &'a mut HashMap<PlayerId, usize>,
     pub(crate) ship_player: &'a HashMap<ShipId, PlayerId>,
@@ -35,25 +28,13 @@ pub(crate) fn run_cluster_runtime_tick(
     ctx: ClusterRuntimeTickContext<'_>,
     lock_commands: &[Vec<dawn_core::LockOnCommand>],
 ) -> Vec<transit::RuntimeTickOutput> {
-    let tick_outputs: Vec<_> = (0..ctx.nodes.len())
-        .map(|i| {
-            let mut consensus = RaftRuntimeConsensus::new(&ctx.rafts[i], &mut ctx.committed_rxs[i]);
-            let transition_id = transit::runtime_transition_id(&ctx.nodes[i]);
-            run_durable_runtime_tick_with_consensus_and_health(
-                &mut ctx.nodes[i],
-                &mut ctx.recovery_journals[i],
-                &mut consensus,
-                &mut ctx.runtime_health[i],
-                &lock_commands[i],
-                DurableRuntimeTickContext {
-                    transition_id,
-                    owner_epoch: 0,
-                    durability: DurabilityMode::Synced,
-                    profile: RuntimeDurabilityProfile::LocalDurable,
-                },
-                |_, _, _| {},
-            )
-            .expect("in-memory clustered runtime must accept durable Tick")
+    let tick_outputs: Vec<_> = ctx
+        .hosts
+        .iter_mut()
+        .zip(lock_commands)
+        .map(|(host, lock_commands)| {
+            host.run_frame(lock_commands)
+                .expect("in-memory clustered runtime must accept durable Tick")
         })
         .collect();
 
@@ -67,13 +48,13 @@ pub(crate) fn run_cluster_runtime_tick(
         .collect();
 
     let handoff = apply_jump_handoffs(
-        ctx.nodes,
+        ctx.hosts,
         ctx.player_sector,
         ctx.ship_player,
         &events_by_sector,
     );
     deliver_cluster_frames(
-        ctx.nodes,
+        ctx.hosts,
         ctx.sessions,
         ctx.player_sector,
         ctx.aoi_delivery,
@@ -81,7 +62,7 @@ pub(crate) fn run_cluster_runtime_tick(
         &warp_arrivals_by_sector,
         &handoff,
     );
-    let failed_players = resend_jump_initial_state(ctx.nodes, ctx.sessions, &handoff);
+    let failed_players = resend_jump_initial_state(ctx.hosts, ctx.sessions, &handoff);
     for player_id in failed_players {
         ctx.player_sector.remove(&player_id);
     }
@@ -93,8 +74,8 @@ struct JumpHandoff {
     own_events: HashMap<PlayerId, Vec<DomainEvent>>,
 }
 
-fn apply_jump_handoffs(
-    nodes: &mut [SimulationNode],
+fn apply_jump_handoffs<N: RuntimeNodeMutation>(
+    nodes: &mut [N],
     player_sector: &mut HashMap<PlayerId, usize>,
     ship_player: &HashMap<ShipId, PlayerId>,
     events_by_sector: &[Vec<DomainEvent>],
@@ -108,7 +89,9 @@ fn apply_jump_handoffs(
                 DomainEvent::JumpGateUsed(e) => {
                     if let Some(&player_id) = ship_player.get(&e.ship_id) {
                         let dest = e.to_sector.0 as usize;
-                        nodes[dest].adopt_player_ship(e.ship_id, player_id);
+                        nodes[dest].with_runtime_node_mut(|node| {
+                            node.adopt_player_ship(e.ship_id, player_id);
+                        });
                         player_sector.insert(player_id, dest);
                         jumped_players.push((player_id, dest));
                         own_events.entry(player_id).or_default().push(event.clone());
@@ -134,8 +117,8 @@ fn apply_jump_handoffs(
     }
 }
 
-fn deliver_cluster_frames(
-    nodes: &[SimulationNode],
+fn deliver_cluster_frames<N: RuntimeNodeView>(
+    nodes: &[N],
     sessions: &mut Vec<ws_server::PlayerSession>,
     player_sector: &HashMap<PlayerId, usize>,
     aoi_delivery: &mut AoiDelivery,
@@ -184,8 +167,8 @@ impl JumpHandoffSession for ws_server::PlayerSession {
     }
 }
 
-fn resend_jump_initial_state<T: JumpHandoffSession>(
-    nodes: &[SimulationNode],
+fn resend_jump_initial_state<T: JumpHandoffSession, N: RuntimeNodeView>(
+    nodes: &[N],
     sessions: &mut Vec<T>,
     handoff: &JumpHandoff,
 ) -> Vec<PlayerId> {
@@ -199,6 +182,7 @@ fn resend_jump_initial_state<T: JumpHandoffSession>(
         };
 
         let initial_state = match nodes[dest]
+            .runtime_node()
             .build_initial_state_for_observer(session.ship_id(), AOI_CELL_SIZE)
         {
             Ok(initial_state) => initial_state,
@@ -226,6 +210,7 @@ fn resend_jump_initial_state<T: JumpHandoffSession>(
 mod tests {
     use super::*;
     use dawn_core::{NodeId, Position, SectorBounds, SectorId, Velocity};
+    use dawn_sector::node::SimulationNode;
     use dawn_sector::ship_types::SHIP_TYPE_NPC_FRIGATE;
 
     struct FakeSession {

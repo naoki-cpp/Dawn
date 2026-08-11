@@ -34,8 +34,9 @@ The #272 migration now exposes both the logical counter seam and a complete
 Tick seam. `SimulationNode::prepare_tick_state_transition` executes the legacy
 systems against a ship-level write-set image, restores the live state, and
 returns the complete post-tick ship image, node routing/maps, queues, public
-events, and recovery context. `run_durable_runtime_tick_with_consensus` appends
-that transition before applying the same delta and publishing outputs. Its
+events, and recovery context. `RuntimeFrameHost` delegates to
+`run_durable_runtime_tick_with_consensus_and_health`, which appends that
+transition before applying the same delta and publishing outputs. Its
 consensus port has a Raft adapter for production/cluster deployments and a
 local adapter for single-sector simulation. Its policy port validates local or
 replicated durability evidence, and its reconciliation hook and health gate run
@@ -316,11 +317,12 @@ TransitOp::Commit  -> current destination imports at entry_pos, appends
                       SectorTransitCompleted / JumpGateUsed / StarSystemChanged as relevant
 ```
 
-This describes the **current implementation baseline** preserved by ADR-0014. #272
-must bring resulting Sector mutation under the same prepare/durable/live-apply contract,
-and #276 replaces EventStore-scan retry/receipt authority with a durable Saga. The
-relative rule that committed consensus input is handled before the ordinary simulation
-Tick can remain unless a later ADR changes it.
+This describes the **current implementation baseline** preserved by ADR-0014.
+`RuntimeFrameHost` now places the resulting Sector mutation under the same
+prepare/durable/live-apply contract, while #276 replaces EventStore-scan
+retry/receipt authority with a durable Saga. The relative rule that committed
+consensus input is handled before the ordinary simulation Tick can remain unless
+a later ADR changes it.
 
 ### Commit means ADR-0049 durable transition, not public-event append
 
@@ -451,24 +453,41 @@ cargo run -p dawn-server --bin simulate --release
 ## 7. Tick Loop Implementation Ownership
 
 `run_phase4_server()` (single node), `run_cluster_server()` (3-node Raft),
-and the production `dawn-server --bin sector-node` process drive their loops via a
-fixed-interval `tokio::time::interval` (100 ms/tick). Every server path currently
-enters `transit::run_runtime_tick()` for the frame order;
-`SimulationNode::tick_with_lock_commands()` remains synchronous.
+the production `dawn-server --bin sector-node` process, and the
+`SectorRuntimeDriver` test/fixture adapter drive their loops via a fixed-interval
+`tokio::time::interval` (100 ms/tick). Each one collects and freezes its inputs
+before calling a `dawn-server::runtime_frame::RuntimeFrameHost` for exactly one
+Sector frame. The Host owns the authoritative `SimulationNode`, journal,
+consensus adapter, runtime health, and selected durability policy, then delegates
+the prepare -> durable -> live-apply -> reconciliation boundary to
+`transit::run_durable_runtime_tick_with_consensus_and_health`.
+
+The Host returns typed frame output to its caller. Network delivery, AoI
+delivery, cross-Sector handoff, and external acknowledgements remain adapter or
+cluster-coordinator work after the Host's local commit boundary. Production uses
+the Host output hook to publish replication only after reconciliation; single and
+cluster serve consume the returned output for their local delivery paths. A
+cluster coordinator runs each Sector Host once, then performs handoff and routing
+using the collected outputs rather than introducing a second Tick ordering.
+
+Bootstrap mutations are allowed only before the first Host frame. Admission,
+Market settlement, and jump-fallback proposal paths currently use bounded Host
+bridges before the frame; the driver `spawn_ship` helper is retained only as
+deterministic fixture setup. These live mutations are being migrated to durable
+FrameInput commands in follow-up slices, so the bridges are explicit rather than
+being mistaken for a second production Tick path.
 
 This is current implementation topology, not a permanent storage/API constraint:
 
-- #272 moves persistence ownership outside the pure Sector engine and introduces the
-  explicit prepared transition boundary. Its current vertical slices cover AoI,
-  Stop, and a bounded full ECS Tick; the default production frame still needs
-  to be switched to the runtime-owned recovery journal;
+- #272 owns the storage-independent engine API and the prepared transition
+  boundary;
 - #275 splits heterogeneous `SimulationNode` state authority into explicit
   Simulation/Player/Station/Transit/Topology/GameData/FrameOutput owners plus a
   separate Persistence adapter;
 - #276 replaces current Transit scan/retry state with a durable Saga;
-- #280 now provides the shared control/bulk replication and snapshot transport
-  wiring while preserving the Tick/recovery ordering defined here; #278 still
-  owns production quorum-policy activation.
+- #280 provides the shared control/bulk replication and snapshot transport
+  wiring while preserving the Tick/recovery ordering defined here; #278 owns
+  production quorum-policy activation.
 
 ---
 

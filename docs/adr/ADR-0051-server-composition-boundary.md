@@ -85,4 +85,8 @@ server composition root.
 - [x] Update scripts, CI, docs, examples, and commands to use `dawn-server`.
 - [x] Add a dependency-boundary check that rejects the deleted package and
       server dependencies from `dawn-sector`.
+- [x] Extract `dawn-server::runtime_frame::RuntimeFrameHost` as the shared
+      one-Sector frame owner used by single serve, cluster serve, the production
+      `sector-node`, and the runtime driver. Keep network delivery and
+      cross-Sector routing outside the Host.
 - [x] Verify both binaries with workspace format, test, and clippy checks.

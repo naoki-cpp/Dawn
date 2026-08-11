@@ -5,6 +5,10 @@ use super::{
     build_serve_node, client_request_rejection, load_serve_dependencies, market::MarketRuntime,
     runtime, AoiDelivery, AOI_CELL_SIZE, P4_TICK_MS,
 };
+use crate::runtime_frame::{
+    OwnedRaftRuntimeConsensus, RuntimeFrameHost, RuntimeFramePolicy, RuntimeNodeMutation,
+    RuntimeNodeView,
+};
 use crate::{cluster, ws_server};
 use dawn_core::{DomainEvent, NodeId, PlayerId, Position, SectorBounds, SectorId, ShipId};
 use dawn_protocol::ServerMessage;
@@ -14,14 +18,8 @@ use dawn_sector::client_admission::{
 use dawn_sector::client_admission_resolution::{
     resolve_client_admission, ClientAdmissionResolution,
 };
-use dawn_sector::node::{
-    collect_runtime_commands, JumpOutcome, RuntimeCommandDispatch, SimulationNode,
-};
-use dawn_sector::transit::{
-    self, run_durable_runtime_tick_with_consensus_and_health, DurableRuntimeTickContext,
-    RaftRuntimeConsensus, RuntimeDurabilityProfile,
-};
-use dawn_storage::{DurabilityMode, InMemoryJournal};
+use dawn_sector::node::{JumpOutcome, RuntimeCommandDispatch, SimulationNode};
+use dawn_storage::InMemoryJournal;
 use std::collections::HashMap;
 use tokio::sync::mpsc;
 
@@ -66,52 +64,38 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
 
     let ids: Vec<NodeId> = (0..SECTORS as u8).map(NodeId).collect();
     let (endpoints, _partitioned) = cluster::spawn_raft_actors(&ids);
-    let (rafts, mut committed_rxs): (Vec<_>, Vec<_>) = endpoints.into_iter().unzip();
+    let (rafts, committed_rxs): (Vec<_>, Vec<_>) = endpoints.into_iter().unzip();
 
     let bounds = SectorBounds::centered(SectorBounds::DEFAULT_HALF);
     let (galaxy, catalog) = load_serve_dependencies();
-    let mut nodes: Vec<SimulationNode> = ids
+    let mut hosts: Vec<RuntimeFrameHost<InMemoryJournal, OwnedRaftRuntimeConsensus>> = ids
         .iter()
-        .map(|&id| {
-            build_serve_node(
-                id,
-                SectorId(id.0),
-                bounds,
-                pop_cap,
-                std::sync::Arc::clone(&galaxy),
-                std::sync::Arc::clone(&catalog),
+        .zip(rafts.into_iter().zip(committed_rxs))
+        .map(|(&id, (raft, committed_rx))| {
+            RuntimeFrameHost::new(
+                build_serve_node(
+                    id,
+                    SectorId(id.0),
+                    bounds,
+                    pop_cap,
+                    std::sync::Arc::clone(&galaxy),
+                    std::sync::Arc::clone(&catalog),
+                ),
+                InMemoryJournal::new(),
+                OwnedRaftRuntimeConsensus::new(raft, committed_rx),
+                RuntimeFramePolicy::local_durable(0),
             )
         })
         .collect();
     let mut market = MarketRuntime::open("data/market.sqlite")
         .expect("failed to open Market database at data/market.sqlite");
 
-    nodes[0].spawn_npc_frigates(ship_count);
-    let mut recovery_journals: Vec<InMemoryJournal> =
-        (0..SECTORS).map(|_| InMemoryJournal::new()).collect();
-    let mut runtime_health: Vec<transit::RuntimeHealth> = (0..SECTORS)
-        .map(|_| transit::RuntimeHealth::new())
-        .collect();
+    hosts[0].with_node_mut(|node| node.spawn_npc_frigates(ship_count));
 
     // Warm up: tick until a Raft leader is elected (election timeout ≤ 20 ticks).
     for _ in 0..30 {
-        for i in 0..SECTORS {
-            let mut consensus = RaftRuntimeConsensus::new(&rafts[i], &mut committed_rxs[i]);
-            let transition_id = transit::runtime_transition_id(&nodes[i]);
-            let _ = run_durable_runtime_tick_with_consensus_and_health(
-                &mut nodes[i],
-                &mut recovery_journals[i],
-                &mut consensus,
-                &mut runtime_health[i],
-                &[],
-                DurableRuntimeTickContext {
-                    transition_id,
-                    owner_epoch: 0,
-                    durability: DurabilityMode::Synced,
-                    profile: RuntimeDurabilityProfile::LocalDurable,
-                },
-                |_, _, _| {},
-            );
+        for host in &mut hosts {
+            let _ = host.run_frame(&[]);
         }
     }
     println!("  [Server] Raft warm-up complete. Waiting for players...");
@@ -152,7 +136,7 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
         // Commit Sector ownership before publishing cluster routing. A failed
         // or disconnected handshake therefore leaves neither route map visible.
         for (sector, sess, _committed) in drain_cluster_admission_completions(
-            &mut nodes,
+            &mut hosts,
             &mut player_sector,
             &mut ship_player,
             &mut completion_rx,
@@ -166,13 +150,13 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
             sessions.retain(|existing| {
                 existing.player_id != sess.player_id && existing.ship_id != sess.ship_id
             });
-            aoi_delivery.seed_cluster_player(&nodes, sector, sess.player_id, sess.ship_id);
+            aoi_delivery.seed_cluster_player(&hosts, sector, sess.player_id, sess.ship_id);
             sessions.push(sess);
         }
         while let Ok(request) = handshake_req_rx.try_recv() {
             let (sector, intent) = match request.resume {
                 Some(resume) => {
-                    let Some(sector) = find_resume_sector(&nodes, resume) else {
+                    let Some(sector) = find_resume_sector(&hosts, resume) else {
                         log_cluster_refusal(
                             request.peer_addr,
                             ClientAdmissionRefusal::ResumeTicketInvalid,
@@ -193,7 +177,9 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                     },
                 ),
             };
-            let mut attempt = match nodes[sector].begin_client_admission(intent, AOI_CELL_SIZE) {
+            let mut attempt = match hosts[sector]
+                .with_node_mut(|node| node.begin_client_admission(intent, AOI_CELL_SIZE))
+            {
                 Ok(attempt) => attempt,
                 Err(refusal) => {
                     log_cluster_refusal(request.peer_addr, refusal);
@@ -227,11 +213,10 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
             let sector = *player_sector.get(&sess.player_id).unwrap_or(&0);
             while let Some(market_command) = sess.try_recv_market_command() {
                 let snapshot =
-                    market.handle_cluster(sess.player_id, market_command, sector, &mut nodes);
+                    market.handle_cluster(sess.player_id, market_command, sector, &mut hosts);
                 sess.send_message(&ServerMessage::MarketSnapshot(snapshot));
             }
-            let dispatches = collect_runtime_commands(
-                &mut nodes[sector],
+            let dispatches = hosts[sector].collect_runtime_commands(
                 std::slice::from_mut(sess),
                 &mut lock_commands[sector],
                 |session| session.player_id,
@@ -245,12 +230,7 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                         if ship_id != sess.ship_id {
                             continue;
                         }
-                        match transit::propose_jump(
-                            &mut nodes[sector],
-                            &rafts[sector],
-                            ship_id,
-                            command.gate_id,
-                        ) {
+                        match hosts[sector].propose_jump(ship_id, command.gate_id) {
                             JumpOutcome::NeedsTransitProposal { to } => {
                                 println!(
                                     "  [Server] Jump proposed: ship #{} gate #{} (S{} → S{})",
@@ -290,8 +270,9 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                         }
                     }
                     RuntimeCommandDispatch::RefreshPlayerLoadout { player_id, .. } => {
-                        if let Some(loadout) =
-                            nodes[sector].build_player_loadout_json_for_player(player_id)
+                        if let Some(loadout) = hosts[sector]
+                            .node()
+                            .build_player_loadout_json_for_player(player_id)
                         {
                             sess.send_message(&ServerMessage::PlayerLoadout(loadout));
                         }
@@ -307,11 +288,7 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
 
         let tick_results = runtime::run_cluster_runtime_tick(
             runtime::ClusterRuntimeTickContext {
-                nodes: &mut nodes,
-                rafts: &rafts,
-                committed_rxs: &mut committed_rxs,
-                recovery_journals: &mut recovery_journals,
-                runtime_health: &mut runtime_health,
+                hosts: &mut hosts,
                 sessions: &mut sessions,
                 player_sector: &mut player_sector,
                 ship_player: &ship_player,
@@ -330,7 +307,8 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                 )
             });
             if should_refresh {
-                if let Some(loadout) = nodes[sector].build_player_loadout_json(sess.ship_id) {
+                if let Some(loadout) = hosts[sector].node().build_player_loadout_json(sess.ship_id)
+                {
                     sess.send_message(&ServerMessage::PlayerLoadout(loadout));
                 }
             }
@@ -364,12 +342,13 @@ fn log_cluster_refusal(addr: std::net::SocketAddr, refusal: ClientAdmissionRefus
     }
 }
 
-fn find_resume_sector(
-    nodes: &[SimulationNode],
+fn find_resume_sector<N: RuntimeNodeView>(
+    nodes: &[N],
     resume_ticket: dawn_core::ResumeTicket,
 ) -> Option<usize> {
     let mut sectors = nodes.iter().enumerate().filter_map(|(sector, node)| {
-        node.hosts_client_resume_ticket(resume_ticket)
+        node.runtime_node()
+            .hosts_client_resume_ticket(resume_ticket)
             .then_some(sector)
     });
     let sector = sectors.next()?;
@@ -380,20 +359,17 @@ fn find_resume_sector(
     }
 }
 
-fn drain_cluster_admission_completions(
-    nodes: &mut [SimulationNode],
+fn drain_cluster_admission_completions<N: RuntimeNodeMutation>(
+    nodes: &mut [N],
     player_sector: &mut HashMap<PlayerId, usize>,
     ship_player: &mut HashMap<ShipId, PlayerId>,
     completion_rx: &mut mpsc::UnboundedReceiver<HandshakeCompletion>,
 ) -> Vec<(usize, ws_server::PlayerSession, CommittedClientAdmission)> {
     let mut ready = Vec::new();
     while let Ok((sector, attempt, result)) = completion_rx.try_recv() {
-        let node = nodes
-            .get_mut(sector)
-            .expect("admission completion Sector must still exist");
-        if let Some((session, committed)) =
+        if let Some((session, committed)) = nodes[sector].with_runtime_node_mut(|node| {
             finish_cluster_admission(node, sector, player_sector, ship_player, attempt, result)
-        {
+        }) {
             ready.push((sector, session, committed));
         }
     }

@@ -15,6 +15,8 @@ use dawn_market::{
 };
 use dawn_sector::node::SimulationNode;
 
+use crate::runtime_frame::{RuntimeNodeMutation, RuntimeNodeView};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum MarketSettlementResult {
     Completed(String),
@@ -52,74 +54,88 @@ trait SettlementTarget {
     fn deliver(&mut self, intent: SettlementIntent) -> SettlementDelivery;
 }
 
-struct SingleTarget<'a> {
-    node: &'a mut SimulationNode,
+struct SingleTarget<'a, N: RuntimeNodeMutation> {
+    node: &'a mut N,
 }
 
-struct ClusterTarget<'a> {
-    nodes: &'a mut [SimulationNode],
+struct ClusterTarget<'a, N: RuntimeNodeMutation> {
+    nodes: &'a mut [N],
 }
 
-impl SettlementTarget for SingleTarget<'_> {
+impl<N: RuntimeNodeMutation> SettlementTarget for SingleTarget<'_, N> {
     fn deliver(&mut self, intent: SettlementIntent) -> SettlementDelivery {
         let (player_id, ship_id) = intent_identity(intent);
-        if !owns_docked_ship(self.node, player_id, ship_id) {
-            return SettlementDelivery::Unavailable;
-        }
-        apply_intent(self.node, intent)
+        self.node.with_runtime_node_mut(|node| {
+            if !owns_docked_ship(node, player_id, ship_id) {
+                return SettlementDelivery::Unavailable;
+            }
+            apply_intent(node, intent)
+        })
     }
 }
 
-impl SettlementTarget for ClusterTarget<'_> {
+impl<N: RuntimeNodeMutation> SettlementTarget for ClusterTarget<'_, N> {
     fn deliver(&mut self, intent: SettlementIntent) -> SettlementDelivery {
         let (player_id, ship_id) = intent_identity(intent);
-        match find_node(self.nodes, player_id, ship_id) {
-            Some(node) => apply_intent(node, intent),
-            None => SettlementDelivery::Unavailable,
-        }
+        let Some(index) = find_node_index(self.nodes, player_id, ship_id) else {
+            return SettlementDelivery::Unavailable;
+        };
+        self.nodes[index].with_runtime_node_mut(|node| apply_intent(node, intent))
+    }
+}
+
+impl<'a, N: RuntimeNodeMutation> ClusterTarget<'a, N> {
+    fn new(nodes: &'a mut [N]) -> Self {
+        Self { nodes }
+    }
+}
+
+impl<'a, N: RuntimeNodeMutation> SingleTarget<'a, N> {
+    fn new(node: &'a mut N) -> Self {
+        Self { node }
     }
 }
 
 pub(super) struct MarketSettlement;
 
 impl MarketSettlement {
-    pub(super) fn place_single(
+    pub(super) fn place_single<N: RuntimeNodeMutation>(
         db: &mut MarketDb,
         player_id: PlayerId,
         order: ParsedOrder,
-        node: &mut SimulationNode,
+        node: &mut N,
     ) -> MarketSettlementResult {
-        let mut target = SingleTarget { node };
+        let mut target = SingleTarget::new(node);
         Self::place(db, player_id, order, &mut target)
     }
 
-    pub(super) fn place_cluster(
+    pub(super) fn place_cluster<N: RuntimeNodeMutation>(
         db: &mut MarketDb,
         player_id: PlayerId,
         order: ParsedOrder,
-        nodes: &mut [SimulationNode],
+        nodes: &mut [N],
     ) -> MarketSettlementResult {
-        let mut target = ClusterTarget { nodes };
+        let mut target = ClusterTarget::new(nodes);
         Self::place(db, player_id, order, &mut target)
     }
 
-    pub(super) fn cancel_single(
+    pub(super) fn cancel_single<N: RuntimeNodeMutation>(
         db: &mut MarketDb,
         player_id: PlayerId,
         order_id: OrderId,
-        node: &mut SimulationNode,
+        node: &mut N,
     ) -> MarketSettlementResult {
-        let mut target = SingleTarget { node };
+        let mut target = SingleTarget::new(node);
         Self::cancel(db, player_id, order_id, &mut target)
     }
 
-    pub(super) fn cancel_cluster(
+    pub(super) fn cancel_cluster<N: RuntimeNodeMutation>(
         db: &mut MarketDb,
         player_id: PlayerId,
         order_id: OrderId,
-        nodes: &mut [SimulationNode],
+        nodes: &mut [N],
     ) -> MarketSettlementResult {
-        let mut target = ClusterTarget { nodes };
+        let mut target = ClusterTarget::new(nodes);
         Self::cancel(db, player_id, order_id, &mut target)
     }
 
@@ -288,14 +304,14 @@ fn intent_identity(intent: SettlementIntent) -> (PlayerId, ShipId) {
     }
 }
 
-fn find_node(
-    nodes: &mut [SimulationNode],
+fn find_node_index<N: RuntimeNodeView>(
+    nodes: &[N],
     player_id: PlayerId,
     ship_id: ShipId,
-) -> Option<&mut SimulationNode> {
+) -> Option<usize> {
     nodes
-        .iter_mut()
-        .find(|node| owns_docked_ship(node, player_id, ship_id))
+        .iter()
+        .position(|node| owns_docked_ship(node.runtime_node(), player_id, ship_id))
 }
 
 fn owns_docked_ship(node: &SimulationNode, player_id: PlayerId, ship_id: ShipId) -> bool {

@@ -23,12 +23,10 @@ use dawn_distributed::{InMemoryReplicationBus, OutboundLogPublisher};
 use dawn_distributed::{RaftActorHandle, Role, Term};
 use dawn_sector::game_data::GameDataCatalog;
 use dawn_sector::node::SimulationNode;
-use dawn_sector::transit::{
-    run_durable_runtime_tick_with_consensus_and_health, DurableRuntimeTickContext,
-    RaftRuntimeConsensus, RuntimeDurabilityProfile, RuntimeHealth, TransitOp,
-};
-use dawn_storage::{DurabilityMode, InMemoryJournal};
+use dawn_storage::InMemoryJournal;
 use tokio::sync::{mpsc, oneshot};
+
+use crate::runtime_frame::{OwnedRaftRuntimeConsensus, RuntimeFrameHost, RuntimeFramePolicy};
 
 // ── Public result/stats types ─────────────────────────────────────────────────
 
@@ -104,15 +102,8 @@ enum SectorRuntimeMessage {
 
 struct SectorRuntimeDriver {
     rx: mpsc::Receiver<SectorRuntimeMessage>,
-    node: SimulationNode,
+    host: RuntimeFrameHost<InMemoryJournal, OwnedRaftRuntimeConsensus>,
     replication: OutboundLogPublisher<InMemoryReplicationBus>,
-    /// Handle to this node's RaftActor (ADR-0014).
-    raft: RaftActorHandle,
-    /// Committed Raft Log payloads from this node's RaftActor, applied at
-    /// Step 7.5 each Tick (ADR-0014 §7).
-    raft_committed_rx: mpsc::UnboundedReceiver<Vec<u8>>,
-    recovery_journal: InMemoryJournal,
-    runtime_health: RuntimeHealth,
 }
 
 impl SectorRuntimeDriver {
@@ -123,22 +114,24 @@ impl SectorRuntimeDriver {
         raft: RaftActorHandle,
         raft_committed_rx: mpsc::UnboundedReceiver<Vec<u8>>,
     ) -> Self {
+        let host = RuntimeFrameHost::new(
+            node,
+            InMemoryJournal::new(),
+            OwnedRaftRuntimeConsensus::new(raft.clone(), raft_committed_rx),
+            RuntimeFramePolicy::local_durable(0),
+        );
         Self {
             rx,
-            node,
+            host,
             replication,
-            raft,
-            raft_committed_rx,
-            recovery_journal: InMemoryJournal::new(),
-            runtime_health: RuntimeHealth::new(),
         }
     }
 
     /// Forward any un-replicated events from the node's local log.
     fn publish_new_events(&mut self) {
-        let events = self.node.drain_pending_events();
+        let events = self.host.drain_pending_events();
         self.replication
-            .publish_events(self.node.sector_id(), &events);
+            .publish_events(self.host.node().sector_id(), &events);
     }
 
     async fn run(mut self) {
@@ -146,26 +139,12 @@ impl SectorRuntimeDriver {
             match msg {
                 SectorRuntimeMessage::Tick { reply } => {
                     let replication = &mut self.replication;
-                    let mut consensus =
-                        RaftRuntimeConsensus::new(&self.raft, &mut self.raft_committed_rx);
-                    let transition_id = dawn_sector::transit::runtime_transition_id(&self.node);
-                    let output = run_durable_runtime_tick_with_consensus_and_health(
-                        &mut self.node,
-                        &mut self.recovery_journal,
-                        &mut consensus,
-                        &mut self.runtime_health,
-                        &[],
-                        DurableRuntimeTickContext {
-                            transition_id,
-                            owner_epoch: 0,
-                            durability: DurabilityMode::Synced,
-                            profile: RuntimeDurabilityProfile::LocalDurable,
-                        },
-                        |node, _, events| {
+                    let output = self
+                        .host
+                        .run_frame_with_output(&[], |node, _, events| {
                             replication.publish_events(node.sector_id(), events);
-                        },
-                    )
-                    .expect("in-memory simulation runtime must accept durable Tick");
+                        })
+                        .expect("in-memory simulation runtime must accept durable Tick");
                     let summary = TickSummary {
                         tick: output.tick_result.tick,
                         events_emitted: output.tick_result.events_emitted,
@@ -179,9 +158,12 @@ impl SectorRuntimeDriver {
                     velocity,
                     reply,
                 } => {
-                    let ship_id =
-                        self.node
-                            .spawn_ship(dawn_core::ShipTypeId(1), position, velocity);
+                    // This actor API is retained for deterministic fixture
+                    // setup. Production runtime mutations must enter through
+                    // RuntimeFrameHost::run_frame once a frame has started.
+                    let ship_id = self.host.with_node_mut(|node| {
+                        node.spawn_ship(dawn_core::ShipTypeId(1), position, velocity)
+                    });
 
                     // Spawn appends to the internal log; publish those events.
                     self.publish_new_events();
@@ -191,16 +173,16 @@ impl SectorRuntimeDriver {
 
                 SectorRuntimeMessage::GetStats { reply } => {
                     let _ = reply.send(NodeStats {
-                        node_id: self.node.node_id(),
-                        sector_id: self.node.sector_id(),
-                        ship_count: self.node.ship_count(),
-                        event_count: self.node.total_event_count(),
-                        current_tick: self.node.current_tick(),
+                        node_id: self.host.node().node_id(),
+                        sector_id: self.host.node().sector_id(),
+                        ship_count: self.host.node().ship_count(),
+                        event_count: self.host.node().total_event_count(),
+                        current_tick: self.host.node().current_tick(),
                     });
                 }
 
                 SectorRuntimeMessage::GetRaftRole { reply } => {
-                    let (role, term) = self.raft.role().await;
+                    let (role, term) = self.host.raft_role().await;
                     let _ = reply.send((role, term));
                 }
 
@@ -208,16 +190,9 @@ impl SectorRuntimeDriver {
                     // Up-front validation only (INV-006: rejection produces
                     // no event). The ECS is untouched until the proposal
                     // commits and is applied at Step 7.5.
-                    let accepted = self.node.can_propose_transit(ship_id);
+                    let accepted = self.host.node().can_propose_transit(ship_id);
                     if accepted {
-                        self.raft.propose(
-                            TransitOp::Request {
-                                ship_id,
-                                to,
-                                gate_id: None,
-                            }
-                            .encode(),
-                        );
+                        self.host.propose_transit_request(ship_id, to, None);
                     }
                     let _ = reply.send(accepted);
                 }
@@ -231,21 +206,16 @@ impl SectorRuntimeDriver {
                     // Up-front validation only (INV-006): Ship must exist,
                     // not be in transit, and be within the gate's
                     // activation_radius (ADR-0009).
-                    let accepted = self.node.can_propose_jump(ship_id, gate_id);
+                    let accepted = self.host.node().can_propose_jump(ship_id, gate_id);
                     if accepted {
                         let to = self
-                            .node
+                            .host
+                            .node()
                             .jump_gate(gate_id)
                             .expect("can_propose_jump confirmed gate exists")
                             .to_sector;
-                        self.raft.propose(
-                            TransitOp::Request {
-                                ship_id,
-                                to,
-                                gate_id: Some(gate_id),
-                            }
-                            .encode(),
-                        );
+                        self.host
+                            .propose_transit_request(ship_id, to, Some(gate_id));
                     }
                     let _ = reply.send(accepted);
                 }

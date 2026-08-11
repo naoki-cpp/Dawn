@@ -5,6 +5,7 @@ use super::{
     build_serve_node, client_request_rejection, load_serve_dependencies, market::MarketRuntime,
     AoiDelivery, DuelMetrics, AOI_CELL_SIZE, P4_TICK_MS, TIDI_BUDGET,
 };
+use crate::runtime_frame::{RuntimeFrameHost, RuntimeFramePolicy};
 use crate::ws_server;
 use dawn_core::{DomainEvent, NodeId, Position, SectorBounds, SectorId, ShipId};
 use dawn_protocol::ServerMessage;
@@ -15,12 +16,9 @@ use dawn_sector::client_admission_resolution::{
     resolve_client_admission, ClientAdmissionResolution,
 };
 use dawn_sector::dilation;
-use dawn_sector::node::{collect_runtime_commands, RuntimeCommandDispatch, SimulationNode};
-use dawn_sector::transit::{
-    run_durable_runtime_tick_with_consensus_and_health, runtime_transition_id,
-    DurableRuntimeTickContext, LocalRuntimeConsensus, RuntimeDurabilityProfile, RuntimeHealth,
-};
-use dawn_storage::{DurabilityMode, InMemoryJournal};
+use dawn_sector::node::{RuntimeCommandDispatch, SimulationNode};
+use dawn_sector::transit::LocalRuntimeConsensus;
+use dawn_storage::InMemoryJournal;
 use tokio::sync::mpsc;
 
 type HandshakeCompletion = (
@@ -58,13 +56,17 @@ pub(crate) async fn run_phase4_server(
 
     let bounds = SectorBounds::centered(SectorBounds::DEFAULT_HALF);
     let (galaxy, catalog) = load_serve_dependencies();
-    let mut node = build_serve_node(NodeId(0), SectorId(0), bounds, pop_cap, galaxy, catalog);
-    let mut recovery_journal = InMemoryJournal::new();
-    let mut runtime_health = RuntimeHealth::new();
+    let node = build_serve_node(NodeId(0), SectorId(0), bounds, pop_cap, galaxy, catalog);
+    let mut host = RuntimeFrameHost::new(
+        node,
+        InMemoryJournal::new(),
+        LocalRuntimeConsensus,
+        RuntimeFramePolicy::local_durable(0),
+    );
     let mut market = MarketRuntime::open("data/market.sqlite")
         .expect("failed to open Market database at data/market.sqlite");
 
-    node.spawn_npc_frigates(ship_count);
+    host.with_node_mut(|node| node.spawn_npc_frigates(ship_count));
     // Duel-mode player spawn: close enough to the Bot to be within weapon
     // range (Small Railgun: 3000 range + 2000 falloff = 5000) from the
     // moment the human connects, instead of the universe-wide
@@ -80,7 +82,7 @@ pub(crate) async fn run_phase4_server(
         // (e.g. to practice locking/engaging more than one target at once).
         for i in 0..enemy_count.max(1) {
             let bot_pos = Position::new(1200.0, i as f64 * 800.0, 0.0);
-            let (_, bot_ship_id) = node.spawn_bot_ship(bot_pos);
+            let (_, bot_ship_id) = host.with_node_mut(|node| node.spawn_bot_ship(bot_pos));
             println!(
                 "  [Server] Duel mode: Bot ship #{} ready at {:?}",
                 bot_ship_id.raw(),
@@ -128,7 +130,8 @@ pub(crate) async fn run_phase4_server(
         // Resolve socket outcomes on the tick-loop thread. A session is not
         // visible to AoI delivery or command routing until its Sector attempt
         // commits successfully.
-        for (sess, _committed) in drain_single_admission_completions(&mut node, &mut completion_rx)
+        for (sess, _committed) in
+            host.with_node_mut(|node| drain_single_admission_completions(node, &mut completion_rx))
         {
             println!(
                 "  [Server] {} joined with ship #{}",
@@ -138,11 +141,11 @@ pub(crate) async fn run_phase4_server(
             sessions.retain(|existing| {
                 existing.player_id != sess.player_id && existing.ship_id != sess.ship_id
             });
-            aoi_delivery.seed_single_player(&node, sess.player_id, sess.ship_id);
+            aoi_delivery.seed_single_player(host.node(), sess.player_id, sess.ship_id);
 
             if duel_mode && player_ship_id.is_none() {
                 player_ship_id = Some(sess.ship_id);
-                let tick = node.current_tick().value();
+                let tick = host.node().current_tick().value();
                 duel_metrics = Some(DuelMetrics::new(tick));
                 println!("  [Duel] metrics collection started at tick {tick}");
             }
@@ -163,7 +166,9 @@ pub(crate) async fn run_phase4_server(
                 None => ClientAdmissionIntent::Fresh { spawn_position },
             };
 
-            let mut attempt = match node.begin_client_admission(intent, AOI_CELL_SIZE) {
+            let mut attempt = match host
+                .with_node_mut(|node| node.begin_client_admission(intent, AOI_CELL_SIZE))
+            {
                 Ok(attempt) => attempt,
                 Err(refusal) => {
                     log_single_refusal(request.peer_addr, refusal);
@@ -195,18 +200,19 @@ pub(crate) async fn run_phase4_server(
         // intentionally ignored by this single-sector adapter). Start this
         // transition with an empty output buffer rather than deriving output
         // from the legacy event-log cursor.
-        let _ = node.drain_pending_events();
+        let _ = host.drain_pending_events();
         let mut all_new_events = Vec::new();
 
         let mut lock_commands: Vec<dawn_core::LockOnCommand> = Vec::new();
         for sess in sessions.iter_mut() {
             while let Some(market_command) = sess.try_recv_market_command() {
-                let snapshot = market.handle_single(sess.player_id, market_command, &mut node);
+                let snapshot = host.with_node_mut(|node| {
+                    market.handle_single(sess.player_id, market_command, node)
+                });
                 sess.send_message(&ServerMessage::MarketSnapshot(snapshot));
             }
         }
-        for dispatch in collect_runtime_commands(
-            &mut node,
+        for dispatch in host.collect_runtime_commands(
             &mut sessions,
             &mut lock_commands,
             |session| session.player_id,
@@ -227,7 +233,9 @@ pub(crate) async fn run_phase4_server(
                     session_index,
                     player_id,
                 } => {
-                    if let Some(loadout) = node.build_player_loadout_json_for_player(player_id) {
+                    if let Some(loadout) =
+                        host.node().build_player_loadout_json_for_player(player_id)
+                    {
                         if let Some(session) = sessions.get_mut(session_index) {
                             session.send_message(&ServerMessage::PlayerLoadout(loadout));
                         }
@@ -246,23 +254,9 @@ pub(crate) async fn run_phase4_server(
             }
         }
 
-        let transition_id = runtime_transition_id(&node);
-        let mut consensus = LocalRuntimeConsensus;
-        let output = run_durable_runtime_tick_with_consensus_and_health(
-            &mut node,
-            &mut recovery_journal,
-            &mut consensus,
-            &mut runtime_health,
-            &lock_commands,
-            DurableRuntimeTickContext {
-                transition_id,
-                owner_epoch: 0,
-                durability: DurabilityMode::Synced,
-                profile: RuntimeDurabilityProfile::LocalDurable,
-            },
-            |_, _, _| {},
-        )
-        .expect("in-memory single-sector runtime must accept durable Tick");
+        let output = host
+            .run_frame(&lock_commands)
+            .expect("in-memory single-sector runtime must accept durable Tick");
         let tick_result = output.tick_result;
         all_new_events.extend(output.events);
 
@@ -275,7 +269,7 @@ pub(crate) async fn run_phase4_server(
                 )
             });
             if should_refresh {
-                if let Some(loadout) = node.build_player_loadout_json(sess.ship_id) {
+                if let Some(loadout) = host.node().build_player_loadout_json(sess.ship_id) {
                     sess.send_message(&ServerMessage::PlayerLoadout(loadout));
                 }
             }
@@ -296,24 +290,29 @@ pub(crate) async fn run_phase4_server(
         }
 
         let warp_arrivals = output.completed_warps;
-        aoi_delivery.deliver_single_sector(&node, &mut sessions, &all_new_events, &warp_arrivals);
+        aoi_delivery.deliver_single_sector(
+            host.node(),
+            &mut sessions,
+            &all_new_events,
+            &warp_arrivals,
+        );
 
         let was_dilated = tidi.is_dilated();
         let prior_active = tidi.active_ticks();
-        tidi.update(node.ship_count() as f64);
+        tidi.update(host.node().ship_count() as f64);
         if tidi.is_dilated() {
             if !was_dilated {
                 println!(
                     "[TiDi] dilation engaged: factor={:.2} (cost {} > budget {TIDI_BUDGET:.0})",
                     tidi.dilation(),
-                    node.ship_count()
+                    host.node().ship_count()
                 );
             }
             let extra = tidi.paced_tick_ms(P4_TICK_MS as f64) - P4_TICK_MS as f64;
             tokio::time::sleep(std::time::Duration::from_millis(extra as u64)).await;
         } else if was_dilated {
             println!("[TiDi] dilation recovered to real-time after {prior_active} ticks (cost {} <= budget {TIDI_BUDGET:.0})",
-                node.ship_count());
+                host.node().ship_count());
         }
     }
 }
