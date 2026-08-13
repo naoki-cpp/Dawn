@@ -11,7 +11,6 @@ extends RefCounted
 
 const GATE_RING_INNER_RATIO    : float = 0.85
 const GATE_LABEL_HEIGHT_RATIO  : float = 0.3
-const PLANET_VISUAL_RADIUS_RATIO: float = 0.5
 const STATION_VISUAL_RADIUS     : float = 350.0
 const STATION_RING_INNER_RATIO  : float = 0.92
 const STATION_LABEL_HEIGHT_RATIO: float = 1.8
@@ -136,13 +135,15 @@ static func spawn_body_markers(bodies_root: Node3D, bodies: Array, world_scale: 
 		marker.set_meta("body_kind", kind)
 		marker.set_meta("body_pos",  b_pos)  ## server coords, kept for sun direction
 		marker.set_meta("nav_pos",   b_pos)
+		marker.set_meta("preserve_physical_position", true)
+		marker.set_meta("physical_extent", radius)
 		bodies_root.add_child(marker)
 
-		## Visual sphere. Planets: solid matte sphere, visual radius = 8% of
-		## logical radius.
+		## Visual sphere. Physical metres are converted once through WorldSpace;
+		## the renderer does not apply a second gameplay or camera-size policy.
 		var mesh_inst: MeshInstance3D = MeshInstance3D.new()
 		var sphere: SphereMesh = SphereMesh.new()
-		sphere.radius = radius * world_scale * PLANET_VISUAL_RADIUS_RATIO
+		sphere.radius = radius * world_scale
 		sphere.height = sphere.radius * 2.0
 		var mat: StandardMaterial3D = StandardMaterial3D.new()
 		mat.albedo_color = Color(0.45, 0.50, 0.60)
@@ -151,6 +152,7 @@ static func spawn_body_markers(bodies_root: Node3D, bodies: Array, world_scale: 
 		mesh_inst.material_override = mat
 		mesh_inst.mesh = sphere
 		marker.add_child(mesh_inst)
+		marker.set_meta("physical_body_mesh", mesh_inst)
 
 		## Name label.
 		var label: Label3D = Label3D.new()
@@ -160,6 +162,7 @@ static func spawn_body_markers(bodies_root: Node3D, bodies: Array, world_scale: 
 		label.no_depth_test = true
 		label.modulate    = Color(0.7, 0.8, 1.0)
 		marker.add_child(label)
+		marker.set_meta("body_label", label)
 
 		## Selection reticle: always the same screen size, so the planet stays
 		## easy to click regardless of distance (pairs with
@@ -169,7 +172,8 @@ static func spawn_body_markers(bodies_root: Node3D, bodies: Array, world_scale: 
 
 ## Appends visual markers for NPC stations in the current star system.
 ## Stations share the bodies root because they live in the same local spatial
-## context as planets and should clamp the same way at true AU distances.
+## context as planets. Their positions and docking rings remain in physical
+## coordinates; only gate markers use the camera-relative distance policy.
 static func spawn_station_markers(bodies_root: Node3D, stations: Array, world_scale: float, to_godot_components: Callable) -> void:
 	for entry: Variant in stations:
 		var station: StationRecord = entry as StationRecord
@@ -184,6 +188,8 @@ static func spawn_station_markers(bodies_root: Node3D, stations: Array, world_sc
 		marker.set_meta("station_id", station_id)
 		marker.set_meta("station_pos", station_pos)
 		marker.set_meta("nav_pos", station_pos)
+		marker.set_meta("preserve_physical_position", true)
+		marker.set_meta("physical_extent", docking_radius)
 		bodies_root.add_child(marker)
 
 		var mesh_inst: MeshInstance3D = MeshInstance3D.new()

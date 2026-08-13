@@ -33,6 +33,12 @@ class FakeWorld:
 			-position.z / render_scale_value,
 		])
 
+	func distance_components(first: PackedFloat64Array, second: PackedFloat64Array) -> float:
+		var dx: float = first[0] - second[0]
+		var dy: float = first[1] - second[1]
+		var dz: float = first[2] - second[2]
+		return sqrt(dx * dx + dy * dy + dz * dz)
+
 	func dir_to_godot(direction: Vector3) -> Vector3:
 		return Vector3(direction.x, direction.y, -direction.z)
 
@@ -91,7 +97,7 @@ func test_render_scale_authority_controls_spawned_navigation_geometry() -> void:
 	var planet_marker: Node3D = bodies_root.get_child(0) as Node3D
 	var planet_visual: MeshInstance3D = planet_marker.get_child(0) as MeshInstance3D
 	var planet_mesh: SphereMesh = planet_visual.mesh as SphereMesh
-	assert_float(planet_mesh.radius).is_equal_approx(2.5, 0.0001)
+	assert_float(planet_mesh.radius).is_equal_approx(5.0, 0.0001)
 
 	var station_marker: Node3D = bodies_root.get_child(1) as Node3D
 	var station_ring: MeshInstance3D = station_marker.get_child(1) as MeshInstance3D
@@ -159,6 +165,28 @@ func test_sun_state_returns_direction_and_color_from_star_data() -> void:
 		.is_equal_approx(Vector3(0.55, 0.65, 1.00), Vector3(0.0001, 0.0001, 0.0001))
 
 
+func test_sun_angular_radius_grows_as_the_observer_approaches_the_star() -> void:
+	var bodies: Array = [
+		_body(1, "Star", "Helios", _position(0.0, 0.0, 0.0), 1000.0, 0.6),
+	]
+	var far_state: Dictionary = WorldPresentation.sun_state(
+		bodies, _position(20_000.0, 0.0, 0.0), func(diff: Vector3) -> Vector3:
+			return diff)
+	var near_state: Dictionary = WorldPresentation.sun_state(
+		bodies, _position(10_000.0, 0.0, 0.0), func(diff: Vector3) -> Vector3:
+			return diff)
+
+	assert_float(near_state.get("angular_radius", 0.0) as float) \
+		.is_greater(far_state.get("angular_radius", 0.0) as float)
+	assert_float(near_state.get("angular_radius", 0.0) as float) \
+		.is_equal_approx(asin(0.1), 0.0001)
+
+
+func test_sun_angular_radius_is_not_capped_at_valid_physical_distance() -> void:
+	assert_float(WorldPresentation.sun_angular_radius(1_000.0, 2_000.0)) \
+		.is_equal_approx(asin(0.5), 0.0001)
+
+
 func test_sun_direction_uses_world_position_while_warp_render_position_is_fixed() -> void:
 	var presentation := WorldPresentation.new()
 	var world := FakeWorld.new()
@@ -185,6 +213,32 @@ func test_sun_direction_uses_world_position_while_warp_render_position_is_fixed(
 		.is_equal_approx(
 			expected.get("direction", Vector3.ZERO) as Vector3,
 			Vector3(0.0001, 0.0001, 0.0001))
+	assert_float(sky_material.get_shader_parameter("sun_angular_radius") as float) \
+		.is_equal_approx(
+			maxf(expected.get("angular_radius", 0.0) as float, WorldPresentation.SUN_MIN_RENDER_ANGULAR_RADIUS),
+			0.0000001)
+
+
+func test_physical_body_marker_keeps_its_true_render_position() -> void:
+	var presentation := WorldPresentation.new()
+	var world := FakeWorld.new()
+	world.render_scale_value = 0.1
+	presentation._world = world
+	var bodies_root: Node3D = auto_free(Node3D.new())
+	add_child(bodies_root)
+	presentation._bodies_root = bodies_root
+	presentation.respawn_navigation_markers(
+		[],
+		[_body(2, "Planet", "Forge", _position(400_000.0, 0.0, 0.0), 6_400_000.0, 0.0)],
+		[],
+		func() -> void:
+			pass)
+	var ship := auto_free(FakeShip.new()) as FakeShip
+	add_child(ship)
+	ship.server_position_value = _position(0.0, 0.0, 0.0)
+	presentation._update_position_markers(bodies_root, "nav_pos", 7, {7: ship})
+	assert_vector((bodies_root.get_child(0) as Node3D).global_position) \
+		.is_equal_approx(Vector3(40_000.0, 0.0, 0.0), Vector3(0.0001, 0.0001, 0.0001))
 
 
 func test_origin_rebase_moves_ship_and_motion_track_together() -> void:

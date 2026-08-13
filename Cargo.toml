@@ -14,6 +14,21 @@ members = [
 ]
 resolver = "2"
 
+# Keep local Rust artifacts bounded. Full debug info is disproportionately
+# large for the workspace and is not needed for normal tests; line tables keep
+# native backtraces actionable. Incremental caches are especially expensive for
+# the GDExtension and server crates and are easy to rebuild when needed.
+[profile.dev]
+debug = 1
+incremental = false
+
+[profile.test]
+debug = 1
+incremental = false
+
+[profile.release]
+strip = "symbols"
+
 [workspace.package]
 repository = "https://github.com/naoki-cpp/Dawn"
 # This is a private game workspace, not a library ecosystem -- none of these

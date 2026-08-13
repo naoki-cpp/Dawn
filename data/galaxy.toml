@@ -1,16 +1,13 @@
 # Production Star System / Jump Gate / Celestial Body topology
 #
-# Scale: 1 unit = 1 m. Intra-system distances are currently gameplay-COMPRESSED
-# (UNITS_PER_AU = 200,000, not a real AU): a true-AU trial (2026-06-23) found
-# that gates have no body near them in this topology (~2.26 AU to the nearest),
-# so "rebase onto nearest anchor" doesn't keep the offset small there. Reverted
-# pending a decision (ADR-0029 residual). The anchor architecture stays.
+# Scale: 1 unit = 1 m. Orbital positions use true astronomical units and are
+# converted by UNITS_PER_AU. Celestial radii are physical metres, so the client
+# can derive angular size from radius and observer distance.
 #
 # Celestial body `position` and Gate `position` are both authored in AU and
-# converted to units at load by UNITS_PER_AU (galaxy.rs); body/gate `radius`
-# and `activation_radius` stay in units (visual size, not AU-coupled). Travel
-# time is set by Warp duration (ADR-0022 parametric warp). To retry true scale,
-# set UNITS_PER_AU to 1.495978707e11 and retune WARP_SPEED.
+# converted to metres at load by UNITS_PER_AU (galaxy.rs); celestial `radius`,
+# gate `activation_radius`, and station `docking_radius` are physical metres.
+# Travel time is set by Warp duration (ADR-0022 parametric warp).
 #
 # Edit this file and restart the server to change the layout (no recompile needed).
 
@@ -83,7 +80,7 @@ sector        = 0
 kind          = "Star"
 name          = "Helios"
 position      = [0.0, 0.0, 0.0]
-radius        = 15000.0
+radius        = 696340000.0 # Helios: representative G-type / solar radius (m)
 spectral_type = 0.60  # G-type, Sun-like yellow
 
 [[celestial_bodies]]
@@ -92,7 +89,7 @@ sector        = 0
 kind          = "Planet"
 name          = "Forge"
 position      = [0.8, 0.0, 0.5]  # AU; inner, +X/+Z (clear of the star)
-radius        = 8000.0
+radius        = 6400000.0 # Earth-like planetary radius (m)
 spectral_type = 0.0
 
 [[celestial_bodies]]
@@ -101,7 +98,7 @@ sector        = 0
 kind          = "Planet"
 name          = "Meridian"
 position      = [-0.7, 0.0, -1.3]  # AU; outer, opposite side of the star from Forge
-radius        = 9000.0
+radius        = 9000000.0 # Super-Earth planetary radius (m)
 spectral_type = 0.0
 
 # Sector 1 (Beta)
@@ -111,7 +108,7 @@ sector        = 1
 kind          = "Star"
 name          = "Aegis"
 position      = [0.0, 0.0, 0.0]
-radius        = 12000.0
+radius        = 1600000000.0 # Aegis: representative A-type stellar radius (m)
 spectral_type = 0.30  # A-type, white-blue
 
 [[celestial_bodies]]
@@ -120,7 +117,7 @@ sector        = 1
 kind          = "Planet"
 name          = "Haven"
 position      = [-0.72, 0.0, 0.24]  # AU; Mars-ish orbit
-radius        = 10000.0
+radius        = 3389500.0 # Mars-like planetary radius (m)
 spectral_type = 0.0
 
 # Sector 2 (Gamma)
@@ -130,7 +127,7 @@ sector        = 2
 kind          = "Star"
 name          = "Crimson"
 position      = [0.0, 0.0, 0.0]
-radius        = 18000.0
+radius        = 487000000.0 # Crimson: representative K/M-type stellar radius (m)
 spectral_type = 0.85  # K/M-type, orange-red
 
 [[celestial_bodies]]
@@ -138,8 +135,8 @@ id            = 5
 sector        = 2
 kind          = "Planet"
 name          = "Bastion"
-position      = [0.7, 0.0, -0.6]  # AU; clear of Crimson's ~0.6-AU visual radius
-radius        = 7000.0
+position      = [0.7, 0.0, -0.6]  # AU; clear of Crimson's physical radius
+radius        = 7000000.0 # Rocky planetary radius (m)
 spectral_type = 0.0
 
 # -- NPC Stations -------------------------------------------------------------
@@ -150,19 +147,19 @@ spectral_type = 0.0
 id             = 0
 sector         = 0
 name           = "Forge Station"
-position       = [0.800000007, 0.0, 0.500000007]  # About 1 km off Forge at true AU
+position       = [0.7999455822219905, 0.0, 0.49996598888874405] # Forge's inward-facing warp arrival ring (1.5 planetary radii)
 docking_radius = 16000.0
 
 [[npc_stations]]
 id             = 1
 sector         = 1
 name           = "Haven Station"
-position       = [-0.719999993, 0.0, 0.240000007]  # About 1 km off Haven at true AU
+position       = [-0.7199677579431074, 0.0, 0.2399892526477025] # Haven's inward-facing warp arrival ring (1.5 planetary radii)
 docking_radius = 16000.0
 
 [[npc_stations]]
 id             = 2
 sector         = 2
 name           = "Bastion Station"
-position       = [0.700000007, 0.0, -0.599999993]  # About 1 km off Bastion at true AU
+position       = [0.6999467091724799, 0.0, -0.59995432214784] # Bastion's inward-facing warp arrival ring (1.5 planetary radii)
 docking_radius = 16000.0

@@ -157,6 +157,19 @@ func test_spawn_body_markers_produces_no_markers_when_only_a_star_is_present() -
 	assert_int(bodies_root.get_child_count()).is_equal(0)
 
 
+func test_spawn_body_markers_converts_physical_planet_radius_once() -> void:
+	var bodies_root: Node3D = auto_free(Node3D.new())
+	var bodies: Array = [
+		_body(2, "Planet", "Forge", _position(500.0, 0.0, 0.0), 6_400_000.0, 0.0),
+	]
+
+	NavigationMarkerRenderer.spawn_body_markers(bodies_root, bodies, 0.1, _to_godot_components)
+
+	var mesh: MeshInstance3D = (bodies_root.get_child(0) as Node3D).get_child(0) as MeshInstance3D
+	assert_float((mesh.mesh as SphereMesh).radius) \
+		.is_equal_approx(640_000.0, 0.0001)
+
+
 func test_spawn_body_markers_adds_a_fixed_size_selection_reticle_to_each_planet() -> void:
 	## Pairs with ShipPicking.pick_body_at's screen-space picking: a planet
 	## should stay equally easy to click regardless of distance, which needs

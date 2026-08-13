@@ -36,8 +36,8 @@ pub struct CelestialBodyDef {
     pub kind         : CelestialBodyKind,
     pub name         : String,
     pub position     : Position,
-    /// 論理半径（ユニット）。ワープ到着距離 = radius × 1.5。
-    pub radius       : f32,
+    /// 物理半径（m）。ワープ到着距離 = radius × 1.5。
+    pub radius       : f64,
     /// 黒体スペクトル型 [0=O型/青 … 1=M型/赤]。惑星では無視。
     pub spectral_type: f32,
 }
@@ -57,7 +57,8 @@ pub enum WarpTarget {
 `celestial_bodies_in_sector(sector_id)` がそのセクターの天体一覧を返す。  
 初期トポロジー（Alpha は恒星1 + 惑星2、Beta/Gamma は恒星1 + 惑星1）：
 
-スケール：**1 unit = 1,000 km → 1 AU ≈ 150,000 units**（ゲート位置 490,000 units ≈ 3.3 AU = 小惑星帯外縁）
+スケール：**1 unit = 1 m、1 AU = 149,597,870,700 units**。軌道位置と天体半径は
+実天文値を使い、ワープ・浮動原点・f64絶対座標で扱う。
 
 > **[Superseded]** (2026-06-21) 当初は 1 unit = 10,000 km（1 AU ≈ 15,000 units）だったが、
 > ワープ速度（5,000 units/tick）に対して軌道間の距離が近すぎ、移動が瞬間的に感じられた。
@@ -81,24 +82,28 @@ pub enum WarpTarget {
 > `WARP_SPEED = 10,000`。狙いは「サブライト移動中に天体の方位がほとんど変わらない＝遠い」と
 > 感じさせること。サブライトは天体近傍ローカル、天体間はワープ（EVE 流）。
 >
-> **[改訂]** (2026-06-21・後) 天体の `position` は **AU で記述**し、読込時に
-> `UNITS_PER_AU = 30,000`（`crates/dawn-sector/src/galaxy.rs`）で units へ換算する方式にした
-> （設計者が AU で軌道を考えられる）。ゲート `position` と天体 `radius` は units のまま
-> （ゲートは Sector 縁のインフラ、radius は誇張視覚値）。上表の units 値は当時のスナップショットで、
-> 現行の権威値は data/galaxy*.toml の AU 記述を参照。
+> **[現行]** (2026-08-12) 天体とゲートの `position` は **AU で記述**し、
+> 読込時に `UNITS_PER_AU = 149,597,870,700`（`crates/dawn-sector/src/galaxy.rs`）で
+> メートルへ換算する。天体 `radius`、ゲート `activation_radius`、ステーションの
+> `docking_radius` もメートルで管理する。`data/galaxy*.toml` が権威データである。
 
-| 星系   | 天体               | 軌道              | 位置                     | 半径   | スペクトル型 |
+| 星系   | 天体               | 軌道              | 位置                     | 半径 (m) | スペクトル型 |
 |--------|------------------|-------------------|--------------------------|--------|------------|
-| Alpha  | Helios（G型恒星） | —                 | (0, 0, 0)                | 15 000 | 0.60       |
-| Alpha  | Forge（惑星）     | 地球軌道（1.0 AU）| (150 000, 0, 0)          | 3 500  | —          |
-| Alpha  | Meridian（惑星）  | 1.8 AU            | (207 000, 0, 174 000)    | 4 000  | —          |
-| Beta   | Aegis（A型恒星）  | —                 | (0, 0, 0)                | 12 000 | 0.30       |
-| Beta   | Haven（惑星）     | 火星軌道（1.52 AU）| (−216 000, 0, 72 000)   | 4 500  | —          |
-| Gamma  | Crimson（K型恒星）| —                 | (0, 0, 0)                | 18 000 | 0.85       |
-| Gamma  | Bastion（惑星）   | 金星軌道（0.72 AU）| (100 000, 0, −40 000)   | 3 000  | —          |
+| Alpha  | Helios（G型恒星） | —                 | (0, 0, 0)                | 696,340,000 | 0.60       |
+| Alpha  | Forge（惑星）     | 0.94 AU           | (0.8, 0, 0.5) AU         | 6,400,000 | —          |
+| Alpha  | Meridian（惑星）  | 1.48 AU           | (−0.7, 0, −1.3) AU       | 9,000,000 | —          |
+| Beta   | Aegis（A型恒星）  | —                 | (0, 0, 0)                | 1,600,000,000 | 0.30       |
+| Beta   | Haven（惑星）     | 0.76 AU           | (−0.72, 0, 0.24) AU      | 3,389,500 | —          |
+| Gamma  | Crimson（K/M型恒星）| —              | (0, 0, 0)                | 487,000,000 | 0.85       |
+| Gamma  | Bastion（惑星）   | 0.92 AU           | (0.7, 0, −0.6) AU        | 7,000,000 | —          |
 
 `CelestialBodyId` は全セクターにわたってグローバルに一意（Alpha: 0, 1, 6、Beta: 2-3、Gamma: 4-5）。
 `CelestialBodyDef.sector` が所属 Sector を明示するため、天体 ID の割り当て規約に依存しない。
+
+ステーション位置も AU で記述する。各初期ステーションは、対応する惑星の中心から
+`radius × 1.5` 離れた内向きのワープ到着リング上に配置し、物理的な惑星半径と
+`docking_radius`（16 km）を両立させる。これにより惑星へのワープ完了後、その惑星の
+ステーションへ入港できる。
 
 ### 3. 天体へのワープ（dawn-simulation）
 
@@ -117,11 +122,17 @@ pub enum WarpTarget {
 uniform vec3  sun_direction;  // 恒星への正規化ワールド方向ベクトル
 uniform float sun_active;     // 0.0 = 無効、1.0 = 有効
 uniform vec3  sun_color;      // スペクトル型に対応した色
+uniform float sun_angular_radius; // 観測距離に応じた見かけの半径（ラジアン）
 ```
 
-`main.gd` の `_process()` で毎フレーム  
-`normalize(star_server_pos - ship_server_pos)` を計算し、Godot 座標系（Z 反転）に変換してシェーダーに渡す。  
-シェーダーはその方向に太陽ディスク・コロナ・グローを描画する。
+`WorldPresentation` が毎フレーム、恒星中心から船までの絶対 f64 座標差分を使って
+`normalize(star_server_pos - ship_server_pos)` を計算し、Godot 座標系（Z 反転）に変換して
+シェーダーに渡す。同時に恒星の物理半径 `R` と観測距離 `d` から
+観測者が恒星の外側にいる通常時は `asin(clamp(R / d, 0, 1))` を見かけの角半径として計算する。
+開始地点のように `d <= R` となる無効な位置では、クライアント表示用の小さなフォールバック値を使う。
+シェーダーはこの角半径で太陽ディスクとコロナを縮尺し、方向に太陽ディスク・コロナ・
+グローを描画する。開始地点のように恒星内部に相当する距離では、クライアント表示用の
+上限を適用して画面全体を覆わないようにする。
 
 ### 5. Godot クライアント（main.gd）
 
@@ -134,17 +145,18 @@ uniform vec3  sun_color;      // スペクトル型に対応した色
   > `client/scripts/main.gd` の `_ingest_star_map()` を参照。本 ADR の元の決定事項
   > （ワープ機構・WarpCommand 等）はこの変更の影響を受けない。
 - 接続時・星系変更時に天体ノード（MeshInstance3D）をワールド座標に配置し、星系遷移時に再生成する。
-- 恒星：小さい発光スフィア（視覚半径 ≈ `radius × WORLD_SCALE × 0.05`）。スペクトル型に合わせたブルーム発光。
+- 恒星：`space_sky.gdshader` の方向ベース描画。視点と恒星の距離に応じた角半径でディスク・コロナ・ブルームを縮尺し、スペクトル型に合わせて発光する。
   > **[Superseded]**（2026-06-21）恒星の実体メッシュ（MeshInstance3D）は削除した。
   > 空シェーダー（`space_sky.gdshader`）が `sun_direction` ベースで恒星のディスク・コロナ・
   > グローを描画する一方、恒星の実体メッシュは有限距離の3Dオブジェクトとして配置されていたため、
   > 視点移動に伴う視差のつき方が両者で食い違い、角度によって恒星の見た目がズレる問題があった。
   > 恒星は方向ベースの空シェーダー描画のみとし、実体メッシュ（クリック選択・W キーでのワープ対象）
   > は撤廃した。惑星は実体メッシュを維持し、引き続きワープ対象として選択できる。
-  > `sun_direction`/`sun_color` の計算（`main.gd` の `_update_sun_direction()`）はこの変更の
-  > 影響を受けない。詳細は `client/scripts/navigation_marker_renderer.gd` の
+  > `sun_direction`/`sun_color`/`sun_angular_radius` の計算（`WorldPresentation` の
+  > `_update_sun_direction()`）はこの変更の影響を受けない。詳細は
+  > `client/scripts/navigation_marker_renderer.gd` の
   > `spawn_body_markers()` を参照。
-- 惑星：サーフェスマテリアルのスフィア（視覚半径 ≈ `radius × WORLD_SCALE × 0.08`）。
+- 惑星：物理半径（m）を `WorldSpace` で一度だけ表示単位へ変換したサーフェスマテリアルのスフィア。
 - 天体をクリックするとワープターゲットとして選択。W キーで WarpCommand を送信。
   > **[Superseded]**（2026-06-21）上記の通り恒星はクリック選択・ワープ対象から外れた。
   > 惑星は変更なし。
