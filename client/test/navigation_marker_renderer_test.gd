@@ -115,10 +115,9 @@ func test_spawn_gate_markers_builds_one_marker_per_array_entry() -> void:
 # -- spawn_body_markers -------------------------------------------------------------
 
 func test_spawn_body_markers_skips_stars_and_only_tags_planet_markers() -> void:
-	## Stars get no marker: the sky shader draws the local star as a
-	## direction-based disc (main.gd's _update_sun_direction), and layering a
-	## finite-distance mesh on top caused a visible parallax mismatch as the
-	## ship moved. See the doc comment on spawn_body_markers().
+	## Stars get no marker: WorldPresentation moves the sky shader's single
+	## direction-based disc, so a second finite-distance mesh would duplicate it.
+	## See the doc comment on spawn_body_markers().
 	var bodies_root: Node3D = auto_free(Node3D.new())
 	var bodies: Array = [
 		_body(1, "Star", "Helios", _position(0.0, 0.0, 0.0), 1000.0, 0.5),
@@ -156,6 +155,19 @@ func test_spawn_body_markers_produces_no_markers_when_only_a_star_is_present() -
 	NavigationMarkerRenderer.spawn_body_markers(bodies_root, bodies, 0.1, _to_godot_components)
 
 	assert_int(bodies_root.get_child_count()).is_equal(0)
+
+
+func test_spawn_body_markers_converts_physical_planet_radius_once() -> void:
+	var bodies_root: Node3D = auto_free(Node3D.new())
+	var bodies: Array = [
+		_body(2, "Planet", "Forge", _position(500.0, 0.0, 0.0), 6_400_000.0, 0.0),
+	]
+
+	NavigationMarkerRenderer.spawn_body_markers(bodies_root, bodies, 0.1, _to_godot_components)
+
+	var mesh: MeshInstance3D = (bodies_root.get_child(0) as Node3D).get_child(0) as MeshInstance3D
+	assert_float((mesh.mesh as SphereMesh).radius) \
+		.is_equal_approx(640_000.0, 0.0001)
 
 
 func test_spawn_body_markers_adds_a_fixed_size_selection_reticle_to_each_planet() -> void:

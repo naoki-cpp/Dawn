@@ -33,6 +33,10 @@ uniform vec3  ambient_color     : source_color             = vec3(0.002, 0.002, 
 uniform vec3  sun_direction : source_color = vec3(1.0, 0.0, 0.0);
 uniform float sun_active               = 0.0;
 uniform vec3  sun_color : source_color = vec3(1.00, 0.95, 0.80);
+// Apparent angular radius in radians, derived from star radius / observer
+// distance by WorldPresentation. The default preserves the original disc
+// size until the first body record is available.
+uniform float sun_angular_radius      = 0.0261799;
 // Screen-space axes supplied by the camera for optical lens effects.
 uniform vec3  sun_flare_right : source_color = vec3(1.0, 0.0, 0.0);
 uniform vec3  sun_flare_up : source_color = vec3(0.0, 1.0, 0.0);
@@ -173,7 +177,7 @@ vec3 spectral_color(float t) {
 
 // Build a tangent frame around the local star. The sky shader has no
 // finite-distance surface to shade, so this projects procedural granulation
-// onto the apparent disc without introducing parallax.
+// onto the apparent disc without introducing a second position authority.
 void sun_frame(vec3 sun_dir, out vec3 sun_right, out vec3 sun_up) {
 	vec3 reference_up = vec3(0.0, 1.0, 0.0);
 	if (abs(sun_dir.y) > 0.95) {
@@ -339,14 +343,15 @@ void sky() {
 		vec3 sun_up;
 		sun_frame(sun_dir, sun_right, sun_up);
 
-		// Photosphere disc with an angular radius of approximately 1.5 degrees.
-		float disc_edge = 0.9996573;
+		// Photosphere disc uses the star's actual apparent angular radius.
+		float disc_radius_angle = max(sun_angular_radius, 0.0001);
+		float disc_edge = cos(disc_radius_angle);
 		if (cos_angle > disc_edge) {
 			float disc_t = (cos_angle - disc_edge) / (1.0 - disc_edge);
 			vec2 disc_uv = vec2(
 				dot(dir, sun_right),
 				dot(dir, sun_up)
-			) / 0.02618;
+			) / sin(disc_radius_angle);
 			float disc_radius = length(disc_uv);
 			float disc_mask = 1.0 - smoothstep(0.84, 1.0, disc_radius);
 			vec3 surface = sun_surface_color(disc_uv, sun_color, disc_radius);
@@ -357,13 +362,14 @@ void sky() {
 		float sun_angle = acos(clamp(cos_angle, -1.0, 1.0));
 		vec2 corona_uv = vec2(dot(dir, sun_right), dot(dir, sun_up));
 		float corona_noise = fbm(vec3(corona_uv * 22.0, TIME * 0.006));
-		float inner_corona = exp(-sun_angle * 72.0) * 2.4;
-		float outer_corona = exp(-sun_angle * 11.0)
+		float sun_angle_ratio = sun_angle / disc_radius_angle;
+		float inner_corona = exp(-sun_angle_ratio * 1.9) * 2.4;
+		float outer_corona = exp(-sun_angle_ratio * 0.29)
 			* mix(0.18, 0.70, smoothstep(0.26, 0.78, corona_noise));
 
 		// The core is white-hot while the photosphere and corona retain the
 		// star's spectral tint. This keeps the bloom from reading as a flat disk.
-		float white_core = exp(-sun_angle * 260.0) * 8.0;
+		float white_core = exp(-sun_angle_ratio * 6.8) * 8.0;
 		vec3 core_color = mix(sun_color, vec3(1.0, 0.97, 0.88), 0.72);
 
 		// Optical flare is screen-aligned and centered on the sun. The old
@@ -385,7 +391,7 @@ void sky() {
 			* exp(-pow(flare_uv.x / 0.16, 2.0)) * 0.42 * flare_envelope * front_facing;
 		float central_glint = exp(-pow(flare_uv.y / 0.0015, 2.0))
 			* exp(-pow(flare_uv.x / 0.045, 2.0)) * 0.55 * front_facing;
-		float scattered_glow = exp(-sun_angle * 4.5) * 0.28;
+		float scattered_glow = exp(-sun_angle_ratio * 0.12) * 0.28;
 		vec3 flare_color = mix(core_color, sun_color,
 			smoothstep(0.0, 0.12, flare_distance));
 		col += core_color * white_core;

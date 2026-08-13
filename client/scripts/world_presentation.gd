@@ -11,10 +11,18 @@ extends RefCounted
 const NavigationMarkerRendererScript = preload("res://scripts/navigation_marker_renderer.gd")
 
 const NAV_MARKER_CLAMP_DISTANCE : float = 30_000.0
+const DISTANT_BODY_LABEL_OFFSET : float = 800.0
 const WARP_TUNNEL_THRESHOLD : float = 2_000.0
-const WARP_TUNNEL_FADE_RATE : float = 3.0
+const WARP_TUNNEL_FADE_IN_RATE : float = 3.0
+const WARP_TUNNEL_FADE_OUT_RATE : float = 0.5
+const WARP_TUNNEL_MAX_VISUAL_DELTA : float = 0.1
 const WARP_TUNNEL_FOV_BOOST : float = 15.0
-const SUN_EFFECTIVE_DISTANCE : float = 50_000_000.0
+## The client starts at the sector origin, which is also the star's authored
+## position. That is inside the star and has no physical apparent radius, so
+## use a small fallback only for this invalid startup position.
+const SUN_INVALID_POSITION_ANGULAR_RADIUS : float = 0.20943951 # 12 degrees
+const SUN_MIN_RENDER_ANGULAR_RADIUS : float = 0.0001
+const SUN_DIRECTION_EPSILON : float = 1.0
 const SUN_FAR_DIRECTION : Vector3 = Vector3(0.62, 0.31, 0.72)
 
 var _world: RefCounted = null
@@ -179,10 +187,14 @@ static func next_warp_tunnel_amount(
 	speed_godot: float,
 	delta: float,
 	threshold: float = WARP_TUNNEL_THRESHOLD,
-	fade_rate: float = WARP_TUNNEL_FADE_RATE
+	fade_in_rate: float = WARP_TUNNEL_FADE_IN_RATE,
+	fade_out_rate: float = WARP_TUNNEL_FADE_OUT_RATE
 ) -> float:
 	var target := 1.0 if speed_godot > threshold else 0.0
-	return lerpf(current, target, clampf(delta * fade_rate, 0.0, 1.0))
+	if target > current:
+		return lerpf(current, target, clampf(delta * fade_in_rate, 0.0, 1.0))
+	var visual_delta := clampf(delta, 0.0, WARP_TUNNEL_MAX_VISUAL_DELTA)
+	return move_toward(current, target, visual_delta * fade_out_rate)
 
 
 static func sun_state(
@@ -194,21 +206,33 @@ static func sun_state(
 	if star == null:
 		return {"active": false}
 	var star_pos: PackedFloat64Array = star.position
-	var far_direction := SUN_FAR_DIRECTION.normalized()
-	var diff := Vector3(
-		star_pos[0] + far_direction.x * SUN_EFFECTIVE_DISTANCE - player_server[0],
-		star_pos[1] + far_direction.y * SUN_EFFECTIVE_DISTANCE - player_server[1],
-		star_pos[2] + far_direction.z * SUN_EFFECTIVE_DISTANCE - player_server[2])
-	if diff.length_squared() < 1.0:
-		return {"active": false}
-	var godot_dir: Vector3 = (dir_to_godot.call(diff) as Vector3).normalized()
+	var diff_x: float = star_pos[0] - player_server[0]
+	var diff_y: float = star_pos[1] - player_server[1]
+	var diff_z: float = star_pos[2] - player_server[2]
+	var distance: float = sqrt(diff_x * diff_x + diff_y * diff_y + diff_z * diff_z)
+	var direction := SUN_FAR_DIRECTION.normalized()
+	if distance > SUN_DIRECTION_EPSILON:
+		direction = Vector3(diff_x, diff_y, diff_z)
+	var godot_dir: Vector3 = (dir_to_godot.call(direction) as Vector3).normalized()
 	var spec: float = star.spectral_type
 	var sun_col: Color = NavigationMarkerRendererScript.spectral_color(spec)
 	return {
 		"active": true,
 		"direction": godot_dir,
 		"color": Vector3(sun_col.r, sun_col.g, sun_col.b),
+		"angular_radius": sun_angular_radius(star.radius, distance),
 	}
+
+
+static func sun_angular_radius(star_radius: float, distance: float) -> float:
+	var safe_radius: float = maxf(star_radius, 0.0)
+	if safe_radius <= 0.0:
+		return 0.0
+	if distance <= safe_radius:
+		return SUN_INVALID_POSITION_ANGULAR_RADIUS
+	var safe_distance: float = distance
+	var radius_ratio: float = clampf(safe_radius / safe_distance, 0.0, 1.0)
+	return asin(radius_ratio)
 
 
 static func _find_star(bodies: Array) -> CelestialBodyRecord:
@@ -222,7 +246,9 @@ static func _find_star(bodies: Array) -> CelestialBodyRecord:
 func _update_position_markers(root: Node3D, meta_key: String, player_ship_id: int, ships: Dictionary) -> void:
 	if root == null or player_ship_id < 0 or not ships.has(player_ship_id):
 		return
-	var player_godot: Vector3 = (ships[player_ship_id] as Node3D).global_position
+	var player_ship: Node3D = ships[player_ship_id] as Node3D
+	var player_godot: Vector3 = player_ship.global_position
+	var player_server: PackedFloat64Array = _ship_server_position(player_ship)
 	for child: Node in root.get_children():
 		var marker: Node3D = child as Node3D
 		if marker == null or not marker.has_meta(meta_key):
@@ -230,7 +256,50 @@ func _update_position_markers(root: Node3D, meta_key: String, player_ship_id: in
 		var marker_server := marker.get_meta(meta_key) as PackedFloat64Array
 		var marker_godot: Vector3 = _world.to_godot_components(
 			marker_server[0], marker_server[1], marker_server[2])
-		marker.global_position = clamped_marker_position(player_godot, marker_godot)
+		if marker.get_meta("preserve_physical_position", false):
+			var is_physically_visible := _marker_fits_camera(
+				marker, player_server, marker_server)
+			marker.global_position = marker_godot if is_physically_visible else clamped_marker_position(
+				player_godot, marker_godot)
+			_update_body_lod(marker, is_physically_visible)
+		else:
+			marker.global_position = clamped_marker_position(player_godot, marker_godot)
+
+
+func _ship_server_position(ship: Node3D) -> PackedFloat64Array:
+	if ship.has_method("world_presentation_position"):
+		return ship.call("world_presentation_position") as PackedFloat64Array
+	if ship.has_method("server_position"):
+		return ship.call("server_position") as PackedFloat64Array
+	return _world.to_server_components(ship.global_position)
+
+
+func _marker_fits_camera(
+	marker: Node3D,
+	player_server: PackedFloat64Array,
+	marker_server: PackedFloat64Array
+) -> bool:
+	if _camera == null:
+		return true
+	var distance_server: float = _world.call(
+		"distance_components", player_server, marker_server) as float
+	var extent_server: float = marker.get_meta("physical_extent", 0.0) as float
+	return (distance_server + extent_server) * _render_scale() <= _camera.far
+
+
+func _update_body_lod(marker: Node3D, is_physically_visible: bool) -> void:
+	if not marker.has_meta("physical_body_mesh") and not marker.has_meta("body_label"):
+		return
+	var body_mesh: MeshInstance3D = marker.get_meta("physical_body_mesh") as MeshInstance3D
+	if body_mesh != null:
+		body_mesh.visible = is_physically_visible
+	var body_label: Label3D = marker.get_meta("body_label") as Label3D
+	if body_label != null:
+		var label_offset := DISTANT_BODY_LABEL_OFFSET
+		if is_physically_visible and body_mesh != null:
+			var sphere: SphereMesh = body_mesh.mesh as SphereMesh
+			label_offset = sphere.radius * 1.4
+		body_label.position = Vector3(0.0, label_offset, 0.0)
 
 
 func _update_warp_tunnel_effect(delta: float, player_ship_id: int, ships: Dictionary) -> void:
@@ -260,7 +329,13 @@ func _update_sun_direction(player_ship_id: int, ships: Dictionary, bodies: Array
 	if _sky_mat == null or player_ship_id < 0 or not ships.has(player_ship_id) or _world == null:
 		return
 	var ship_node: Node3D = ships[player_ship_id] as Node3D
-	var player_server: PackedFloat64Array = _world.to_server_components(ship_node.global_position)
+	var player_server: PackedFloat64Array
+	if ship_node.has_method("world_presentation_position"):
+		player_server = ship_node.call("world_presentation_position") as PackedFloat64Array
+	elif ship_node.has_method("server_position"):
+		player_server = ship_node.call("server_position") as PackedFloat64Array
+	else:
+		player_server = _world.to_server_components(ship_node.global_position)
 	var state: Dictionary = sun_state(bodies, player_server, Callable(_world, "dir_to_godot"))
 	if not (state.get("active", false) as bool):
 		_sky_mat.set_shader_parameter("sun_active", 0.0)
@@ -268,6 +343,9 @@ func _update_sun_direction(player_ship_id: int, ships: Dictionary, bodies: Array
 	_sky_mat.set_shader_parameter("sun_direction", state.get("direction", Vector3.FORWARD) as Vector3)
 	_sky_mat.set_shader_parameter("sun_active", 1.0)
 	_sky_mat.set_shader_parameter("sun_color", state.get("color", Vector3.ONE) as Vector3)
+	_sky_mat.set_shader_parameter(
+		"sun_angular_radius",
+		maxf(state.get("angular_radius", 0.0) as float, SUN_MIN_RENDER_ANGULAR_RADIUS))
 	if _camera != null:
 		_sky_mat.set_shader_parameter("sun_flare_right", _camera.global_basis.x.normalized())
 		_sky_mat.set_shader_parameter("sun_flare_up", _camera.global_basis.y.normalized())

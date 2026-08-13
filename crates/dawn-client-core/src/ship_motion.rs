@@ -244,6 +244,15 @@ impl ShipMotion {
         }
     }
 
+    /// Returns the continuous server-space observer position for world effects.
+    ///
+    /// During warp this advances at the reported velocity without the ship
+    /// mesh's speed cap. Direction-only effects can therefore retain parallax
+    /// while [`MotionFrame::render_position`] remains bounded.
+    pub fn world_presentation_position(&self) -> [f64; 3] {
+        self.track.world_presentation_position()
+    }
+
     /// Returns the current server-space speed.
     pub fn server_speed(&self) -> f64 {
         magnitude(self.track.velocity())
@@ -381,5 +390,45 @@ mod tests {
         let motion = ShipMotion::default();
 
         assert_eq!(motion.render_speed_to_server(2_000.0), Some(20_000.0));
+    }
+
+    #[test]
+    fn world_presentation_position_remains_continuous_during_warp() {
+        let mut motion =
+            ShipMotion::new(MotionProfile::default(), [0.0; 3], [3_000.0, 0.0, 0.0], 0)
+                .expect("test motion is valid");
+
+        assert_eq!(
+            motion.dispatch(MotionCommand::BeginWarp {
+                server_speed_cap: 2_000.0,
+            }),
+            MotionDispatch::Applied
+        );
+        assert_eq!(
+            motion.dispatch(MotionCommand::Advance { ticks: 0.5 }),
+            MotionDispatch::Applied
+        );
+
+        assert_eq!(motion.frame().predicted_position, [1_000.0, 0.0, 0.0]);
+        assert_eq!(motion.world_presentation_position(), [1_500.0, 0.0, 0.0]);
+
+        assert_eq!(
+            motion.dispatch(MotionCommand::SetVelocity {
+                velocity: [4_000.0, 0.0, 0.0],
+                tick: 1,
+            }),
+            MotionDispatch::Applied
+        );
+        assert_eq!(
+            motion.dispatch(MotionCommand::BeginWarp {
+                server_speed_cap: 2_000.0,
+            }),
+            MotionDispatch::Applied
+        );
+        assert_eq!(motion.world_presentation_position(), [1_500.0, 0.0, 0.0]);
+
+        motion.dispatch(MotionCommand::Advance { ticks: 0.5 });
+        assert_eq!(motion.frame().predicted_position, [2_000.0, 0.0, 0.0]);
+        assert_eq!(motion.world_presentation_position(), [3_500.0, 0.0, 0.0]);
     }
 }

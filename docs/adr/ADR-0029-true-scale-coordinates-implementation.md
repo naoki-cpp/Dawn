@@ -146,8 +146,10 @@ AnchorTable（静的・スナップショット非対象）: AnchorId → 絶対
   到着リベースで自己修正）。`warp_arrival_abs` に「到着リング内ならオーバーシュートせず現在地に留まる」ガードを
   追加（旧 `warp_arrival_point` の f32 版にあったが、到着点計算の一元化で見落としていた edge case）。
   `WarpComp` は非永続（スナップショット対象外）のためスキーマ影響なし。全テスト緑で確認（2026-06-23）。
-- ⬜ **視覚定数の再調整**：`VISUAL_SPEED_CAP`／`SUN_EFFECTIVE_DISTANCE`／`BODY_MARKER_CLAMP_DISTANCE` は `WORLD_SCALE`
-  と暗黙連動。`WARP_SPEED` と共に再活性化時にまとめて再調整。
+- ✅ **視覚定数の再調整**：真AUの恒星・惑星半径を物理メートルへ揃え、太陽の角半径を
+  `asin(radius / distance)` から毎フレーム算出する表示へ移行（2026-08-12）。惑星メッシュも
+  物理半径を `WorldSpace` で一度だけ変換する。`VISUAL_SPEED_CAP` とマーカーの画面相対クランプは
+  浮動原点の表示ポリシーとして残す。
 - ✅ **ゲート近傍にアンカーが無い問題（2026-06-23 発見・解消）**：最初の真AU試行で発覚（§2「アンカー＝天体単位、
   ゲートは自前のアンカーを持たない」のもと、ゲートが最近接の天体からも ~2.26 AU 離れていたため、リベースしても
   オフセットが小さくならなかった）。**トポロジ変更**で解消：`data/galaxy.toml`／`galaxy.demo.toml` のゲート座標を
@@ -165,9 +167,13 @@ AnchorTable（静的・スナップショット非対象）: AnchorId → 絶対
   - 唯一 ignore にした既存テスト：`dawn-simulation::cluster::committed_jump_moves_ship_to_gates_destination_sector`
     （actor 層に f64 絶対座標での spawn 経路が無く、`gate.position` f32 経由の spawn では到着判定の許容半径
     2000m を ulp 誤差が上回る。`SpawnShipAbs` 的なテスト専用メッセージを追加すれば再有効化可能・未着手）。
-- ⬜ **視覚定数の再調整**：`VISUAL_SPEED_CAP`／`SUN_EFFECTIVE_DISTANCE`／`BODY_MARKER_CLAMP_DISTANCE` は
-  カメラ相対の見せ方の定数であり、浮動原点クライアントでは AU スケールと直接連動しない（再検討の結果、
-  事前のブラインド調整は見送り）。実機プレイテストで違和感が出た場合のみ調整する。
+- ✅ **天体の現実スケール表示（2026-08-12）**：恒星・惑星の半径を物理メートルへ揃え、恒星の見かけの
+  角半径を `asin(radius / distance)` から毎フレーム算出する。惑星・ステーションは物理半径を
+  `WorldSpace` で一度だけ変換し、カメラ内では実座標へ配置する。追加の半径上限や gameplay 用の倍率は適用しない。
+  遠距離では惑星の実寸メッシュを隠してナビゲーション表示をカメラ相対位置へ置き、接近してカメラに収まった時だけ
+  実寸メッシュを表示する。ステーションとゲートも遠距離では操作対象を失わないためカメラ相対位置へ置く。
+  カメラの far plane は物理スケールの惑星到着リングを収められる距離へ拡張する。`VISUAL_SPEED_CAP` は
+  ワープ表現専用の画面相対値として維持する。
 - 📝 **記録のみ（許容）**：combat が `anchor_abs: HashMap` を受ける（dawn-ecs へアンカー概念がやや漏出・許容範囲）／
   InitialState のワイヤで body 位置は f32（船と gate は f64。gate はクライアントのマーカー／近接判定と
   サーバの jump 範囲判定を揃えるため `JumpGateDef.abs_m` を配信）／`ship_absolute_pos` が `ship_absolute`
@@ -270,9 +276,9 @@ ADR §1 決定 #5「実値表示（m/s・AU）の内部↔表示変換は単一�
 ### ゲートマーカーも遠距離クランプ対応（2026-06-23・ユーザー指摘）
 
 ゲートは元々マーカー（リング＋ラベル）を持っていたが、惑星マーカーのような「カメラ遠方クリップ面の手前へ
-クランプして常に見える」処理（`_update_body_markers`／`NAV_MARKER_CLAMP_DISTANCE`、旧名
+クランプして常に見える」処理（旧 `_update_body_markers`／`NAV_MARKER_CLAMP_DISTANCE`、旧名
 `BODY_MARKER_CLAMP_DISTANCE`）が無かった。真AU化でゲートが恒星から AU 級に離れた今、クランプ無しではゲート
-マーカーが far plane（`scenes/main.tscn` の `far=100000`）の外に出て実質見えなくなる ——
+マーカーが旧 far plane（`scenes/main.tscn` の `far=100000`）の外に出て実質見えなくなる ——
 ちょうど惑星が以前に抱えていた問題と同根。
 
 **実装**：

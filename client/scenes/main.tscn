@@ -25,7 +25,7 @@ transform = Transform3D(1, 0, 0, 0, 0.866025, 0.5, 0, -0.5, 0.866025, 0, 5000, 1
 current = true
 fov = 60.0
 near = 10.0
-far = 100000.0
+far = 5000000.0
 script = ExtResource("3_cam")
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="World"]

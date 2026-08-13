@@ -43,7 +43,8 @@ pub struct CelestialBodyDef {
     /// precise at true-AU distances where the old f32 `position` would lose ~tens of
     /// km. `AnchorTable` is built from this, not from `position`.
     pub abs_m: AbsolutePosition,
-    /// Logical radius (units). Warp arrival stops at `radius * 1.5` from centre.
+    /// Physical radius in metres. Warp arrival stops at `radius * 1.5` from
+    /// the centre, and the client uses it for apparent angular size.
     pub radius: f64,
     /// Blackbody spectral type [0=O/blue, 0.6=G/Sun-yellow, 1=M/red]. Planets: 0.0.
     pub spectral_type: f32,

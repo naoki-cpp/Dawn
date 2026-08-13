@@ -1,8 +1,8 @@
 ## Regression coverage for typed InitialState -> main.tscn presentation.
 ##
 ## The renderer unit tests prove that a body node can be built, while this
-## suite proves that a typed true-AU body remains inside the client presentation
-## clamp after the real main scene has received its first ship.
+## suite proves that a typed true-AU body keeps its physical radius while its
+## distant navigation projection remains visible in the real main scene.
 extends GdUnitTestSuite
 
 const MainScene := preload("res://scenes/main.tscn")
@@ -24,7 +24,7 @@ func after_test() -> void:
 	await get_tree().process_frame
 
 
-func test_initial_state_planet_is_rendered_near_the_player_at_true_au_scale() -> void:
+func test_initial_state_planet_keeps_true_radius_with_distant_marker() -> void:
 	var connection: Node = _main.get_node("Connection")
 	connection.ship_id = 11
 	var outcome: ServerMessageOutcome = ServerMessageDecoder.new().test_outcome("InitialState")
@@ -39,7 +39,7 @@ func test_initial_state_planet_is_rendered_near_the_player_at_true_au_scale() ->
 	planet.kind = "Planet"
 	planet.name = "Forge"
 	planet.position = PackedFloat64Array([0.8 * AU_M, 0.0, 0.5 * AU_M])
-	planet.radius = 8_000.0
+	planet.radius = 6_400_000.0
 	planet.spectral_type = 0.0
 	_main._presentation.respawn_navigation_markers(
 		[],
@@ -56,3 +56,6 @@ func test_initial_state_planet_is_rendered_near_the_player_at_true_au_scale() ->
 	assert_int(rendered_planet.get_meta("body_id") as int).is_equal(10)
 	assert_bool(rendered_planet.global_position.is_finite()).is_true()
 	assert_float(rendered_planet.global_position.distance_to(Vector3.ZERO)).is_less(30_000.1)
+	var planet_mesh: SphereMesh = (rendered_planet.get_child(0) as MeshInstance3D).mesh as SphereMesh
+	assert_float(planet_mesh.radius).is_equal_approx(640_000.0, 0.1)
+	assert_bool((rendered_planet.get_child(0) as MeshInstance3D).visible).is_false()

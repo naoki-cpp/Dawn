@@ -70,6 +70,9 @@ command-in / frame-out の境界で束ねる。公開する更新経路は `Moti
   そのためコマンドの `server_speed_cap` は常にサーバー単位である。
 - `MotionFrame` は権威位置、予測位置、render位置、server/render速度、状態、tickを
   明示的に分ける。warp中の表示位置を権威位置として扱わない。
+- warp中の船体とfloating originは速度上限付きのrender経路を維持する一方、太陽など
+  方位だけを描く世界表現は`ShipMotion::world_presentation_position`から速度上限前の連続位置を
+  読む。これにより船体をfar plane外へ飛ばさず、天体方位は航路に追従する。
 - `dawn-client-gdext::ShipMotion` は `PackedFloat64Array` の絶対座標をRustへ渡し、
   `Vector3` への縮小はrender frameの最終境界だけで行う。
 - `WorldPresentation` は全船へ同じabsolute originを通知する。rebase後の船ノードを

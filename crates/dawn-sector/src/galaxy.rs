@@ -23,18 +23,18 @@ pub struct Galaxy {
 }
 
 /// Game units per astronomical unit. Celestial body orbits are authored in AU in
-/// `data/galaxy*.toml` and converted to units at load (1 unit = 1 m). Kept f64 so
-/// the anchor source (`CelestialBodyDef.abs_m`) stays precise — this is forward-
-/// compatible with the true-AU value (1.495978707e11).
+/// `data/galaxy*.toml` and converted to metres at load (1 unit = 1 m). Kept f64
+/// so the anchor source (`CelestialBodyDef.abs_m`) stays precise at true-AU
+/// distances.
 ///
 /// **True AU, reactivated 2026-06-23** (ADR-0029): the residual checklist is
 /// clear (gate f64, gate re-authoring, warp-transit f64, AoI f64, anchor-miss
 /// guards, gates repositioned near a body so rebase keeps the offset small).
 /// `WARP_SPEED` (node/mod.rs) is scaled by the same factor so warp durations
-/// (in ticks) are unchanged from the compressed era; visual constants in the
-/// client (`BODY_MARKER_CLAMP_DISTANCE` / `SUN_EFFECTIVE_DISTANCE`) were left
-/// untouched on the reasoning that they are camera-relative rendering
-/// placeholders, not AU-coupled — needs a human playtest to confirm.
+/// (in ticks) are unchanged from the compressed era. Client celestial size is
+/// derived from physical radius and observer distance. Planet and station
+/// markers keep their physical positions; only gate markers may use a
+/// camera-relative position policy for long-distance discoverability.
 pub const UNITS_PER_AU: f64 = 1.495978707e11;
 
 impl Galaxy {
@@ -212,7 +212,8 @@ struct CelestialBodyEntry {
     /// Orbit position in AU (converted to metres by `UNITS_PER_AU` on load).
     /// Parsed as f64 so the authoring precision survives at true-AU scale.
     position: [f64; 3],
-    /// Visual radius in units (exaggerated for gameplay; not an AU distance).
+    /// Physical radius in metres. Warp arrival and client celestial rendering
+    /// both use this value, while orbital positions use the AU conversion above.
     radius: f64,
     #[serde(default)]
     spectral_type: f32,
