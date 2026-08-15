@@ -9,6 +9,28 @@ related : ADR-0001 (Event Sourcing), ADR-0014 (Raft / Transit), ADR-0017 (snapsh
 
 # ADR-0049 - Exact Sector recovery with a versioned state-delta journal
 
+> **Implementation correction (2026-08-15, issue #312):** this ADR's
+> accepted decision already required flight-mode state, lock countdowns, and
+> module-cycle counters to be exact recovery authority (see the Context
+> below and `recovery-contract.md` rows for thrust/flight modes, lock
+> entries/countdowns, and fitted-slot cycle counters -- all "Yes,
+> checkpoint"). The implementation did not satisfy this for the checkpoint
+> path: `StateSnapshot` built its own thin `ShipSnapshot` list independently
+> of the tick-rollback/`TickRecoveryDelta` capture, so a checkpoint restore
+> silently dropped warp/orbit/approach progress, active locks, and module
+> cycle timers, even though a tick-rollback restore already carried them
+> correctly. `TickRecoveryDelta` also omitted `applied_market_settlements`,
+> present only in `StateSnapshot`.
+>
+> Issue #312 closes this gap by giving tick-rollback, `TickRecoveryDelta`,
+> and `StateSnapshot` one shared capture/restore path (`ShipState` for
+> per-ship optional-component state, `NodeState` for node-level
+> scalars/maps), sourced from a single declarative list of a ship's optional
+> ECS components in `dawn-ecs`. `CHECKPOINT_FORMAT_VERSION` and
+> `RECOVERY_DELTA_VERSION` were both bumped (pre-release, no upcaster
+> required). This is an implementation fix, not a new decision -- the
+> recovery contract this ADR already committed to is unchanged.
+
 ## Context
 
 The current Sector runtime mutates authoritative ECS and aggregate state during a
