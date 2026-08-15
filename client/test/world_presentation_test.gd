@@ -5,7 +5,7 @@
 ## easing, and sun-direction derivation from star data.
 extends GdUnitTestSuite
 
-const WorldPresentation = preload("res://scripts/world_presentation.gd")
+const WorldPresentationScript = preload("res://scripts/world_presentation.gd")
 
 func _position(x: float, y: float, z: float) -> PackedFloat64Array:
 	return PackedFloat64Array([x, y, z])
@@ -64,7 +64,7 @@ class FakeShip:
 
 
 func test_render_scale_is_queried_from_world_space_authority() -> void:
-	var presentation := WorldPresentation.new()
+	var presentation := WorldPresentationScript.new()
 	var world := FakeWorld.new()
 	world.render_scale_value = 0.25
 	presentation._world = world
@@ -73,7 +73,7 @@ func test_render_scale_is_queried_from_world_space_authority() -> void:
 
 
 func test_render_scale_authority_controls_spawned_navigation_geometry() -> void:
-	var presentation := WorldPresentation.new()
+	var presentation := WorldPresentationScript.new()
 	var world := FakeWorld.new()
 	world.render_scale_value = 0.25
 	presentation._world = world
@@ -109,7 +109,7 @@ func test_clamped_marker_position_leaves_nearby_marker_unchanged() -> void:
 	var player := Vector3.ZERO
 	var marker := Vector3(100.0, 0.0, 0.0)
 
-	var result: Vector3 = WorldPresentation.clamped_marker_position(player, marker, 500.0)
+	var result: Vector3 = WorldPresentationScript.clamped_marker_position(player, marker, 500.0)
 
 	assert_vector(result).is_equal(marker)
 
@@ -118,31 +118,31 @@ func test_clamped_marker_position_pulls_far_marker_back_to_clamp_radius() -> voi
 	var player := Vector3.ZERO
 	var marker := Vector3(1000.0, 0.0, 0.0)
 
-	var result: Vector3 = WorldPresentation.clamped_marker_position(player, marker, 250.0)
+	var result: Vector3 = WorldPresentationScript.clamped_marker_position(player, marker, 250.0)
 
 	assert_vector(result).is_equal(Vector3(250.0, 0.0, 0.0))
 
 
 func test_next_warp_tunnel_amount_eases_toward_one_above_threshold() -> void:
-	var amount: float = WorldPresentation.next_warp_tunnel_amount(0.0, 3000.0, 0.1, 2000.0, 3.0)
+	var amount: float = WorldPresentationScript.next_warp_tunnel_amount(0.0, 3000.0, 0.1, 2000.0, 3.0)
 
 	assert_float(amount).is_equal_approx(0.3, 0.0001)
 
 
 func test_warp_arrival_keeps_the_tunnel_visible_during_the_first_tenth_second() -> void:
-	var amount: float = WorldPresentation.next_warp_tunnel_amount(1.0, 0.0, 0.1)
+	var amount: float = WorldPresentationScript.next_warp_tunnel_amount(1.0, 0.0, 0.1)
 
 	assert_float(amount).is_equal_approx(0.95, 0.0001)
 
 
 func test_warp_arrival_frame_hitch_cannot_clear_the_tunnel_in_one_step() -> void:
-	var amount: float = WorldPresentation.next_warp_tunnel_amount(1.0, 0.0, 0.5)
+	var amount: float = WorldPresentationScript.next_warp_tunnel_amount(1.0, 0.0, 0.5)
 
 	assert_float(amount).is_equal_approx(0.95, 0.0001)
 
 
 func test_sun_state_returns_inactive_when_no_star_exists() -> void:
-	var state: Dictionary = WorldPresentation.sun_state([
+	var state: Dictionary = WorldPresentationScript.sun_state([
 		_body(2, "Planet", "Forge", _position(100.0, 0.0, 0.0), 200.0, 0.1),
 	], _position(0.0, 0.0, 0.0), func(diff: Vector3) -> Vector3:
 		return diff
@@ -152,27 +152,38 @@ func test_sun_state_returns_inactive_when_no_star_exists() -> void:
 
 
 func test_sun_state_returns_direction_and_color_from_star_data() -> void:
-	var state: Dictionary = WorldPresentation.sun_state([
+	var state: Dictionary = WorldPresentationScript.sun_state([
 		_body(1, "Star", "Helios", _position(0.0, 0.0, 0.0), 1000.0, 0.0),
-	], _position(0.0, 0.0, 0.0), func(diff: Vector3) -> Vector3:
+	], _position(5000.0, 0.0, 0.0), func(diff: Vector3) -> Vector3:
 		return diff
 	)
 
 	assert_bool(state.get("active", false) as bool).is_true()
 	assert_vector(state.get("direction", Vector3.ZERO) as Vector3) \
-		.is_equal_approx(WorldPresentation.SUN_FAR_DIRECTION.normalized(), Vector3(0.0001, 0.0001, 0.0001))
+		.is_equal_approx(Vector3(-1.0, 0.0, 0.0), Vector3(0.0001, 0.0001, 0.0001))
 	assert_vector(state.get("color", Vector3.ZERO) as Vector3) \
 		.is_equal_approx(Vector3(0.55, 0.65, 1.00), Vector3(0.0001, 0.0001, 0.0001))
+
+
+func test_sun_state_is_inactive_inside_the_photosphere() -> void:
+	var state: Dictionary = WorldPresentationScript.sun_state([
+		_body(1, "Star", "Helios", _position(0.0, 0.0, 0.0), 1000.0, 0.6),
+	], _position(0.0, 0.0, 0.0), func(diff: Vector3) -> Vector3:
+		return diff
+	)
+
+	assert_bool(state.get("active", true) as bool).is_false()
+	assert_bool(state.get("invalid_position", false) as bool).is_true()
 
 
 func test_sun_angular_radius_grows_as_the_observer_approaches_the_star() -> void:
 	var bodies: Array = [
 		_body(1, "Star", "Helios", _position(0.0, 0.0, 0.0), 1000.0, 0.6),
 	]
-	var far_state: Dictionary = WorldPresentation.sun_state(
+	var far_state: Dictionary = WorldPresentationScript.sun_state(
 		bodies, _position(20_000.0, 0.0, 0.0), func(diff: Vector3) -> Vector3:
 			return diff)
-	var near_state: Dictionary = WorldPresentation.sun_state(
+	var near_state: Dictionary = WorldPresentationScript.sun_state(
 		bodies, _position(10_000.0, 0.0, 0.0), func(diff: Vector3) -> Vector3:
 			return diff)
 
@@ -183,12 +194,21 @@ func test_sun_angular_radius_grows_as_the_observer_approaches_the_star() -> void
 
 
 func test_sun_angular_radius_is_not_capped_at_valid_physical_distance() -> void:
-	assert_float(WorldPresentation.sun_angular_radius(1_000.0, 2_000.0)) \
+	assert_float(WorldPresentationScript.sun_angular_radius(1_000.0, 2_000.0)) \
 		.is_equal_approx(asin(0.5), 0.0001)
 
 
+func test_directional_light_uses_the_ray_from_star_to_ship() -> void:
+	var sun_direction := Vector3(0.6, 0.0, 0.8).normalized()
+
+	assert_vector(WorldPresentationScript.star_light_ray(sun_direction)) \
+		.is_equal_approx(-sun_direction, Vector3(0.0001, 0.0001, 0.0001))
+	assert_vector(WorldPresentationScript.light_up_axis(Vector3.UP)) \
+		.is_equal_approx(Vector3.RIGHT, Vector3(0.0001, 0.0001, 0.0001))
+
+
 func test_sun_direction_uses_world_position_while_warp_render_position_is_fixed() -> void:
-	var presentation := WorldPresentation.new()
+	var presentation := WorldPresentationScript.new()
 	var world := FakeWorld.new()
 	presentation._world = world
 	var sky_material := ShaderMaterial.new()
@@ -205,7 +225,7 @@ func test_sun_direction_uses_world_position_while_warp_render_position_is_fixed(
 	]
 	presentation._update_sun_direction(7, {7: ship}, bodies)
 
-	var expected: Dictionary = WorldPresentation.sun_state(
+	var expected: Dictionary = WorldPresentationScript.sun_state(
 		bodies,
 		ship.world_presentation_position_value,
 		Callable(world, "dir_to_godot"))
@@ -215,12 +235,12 @@ func test_sun_direction_uses_world_position_while_warp_render_position_is_fixed(
 			Vector3(0.0001, 0.0001, 0.0001))
 	assert_float(sky_material.get_shader_parameter("sun_angular_radius") as float) \
 		.is_equal_approx(
-			maxf(expected.get("angular_radius", 0.0) as float, WorldPresentation.SUN_MIN_RENDER_ANGULAR_RADIUS),
+			maxf(expected.get("angular_radius", 0.0) as float, WorldPresentationScript.SUN_MIN_RENDER_ANGULAR_RADIUS),
 			0.0000001)
 
 
 func test_physical_body_marker_keeps_its_true_render_position() -> void:
-	var presentation := WorldPresentation.new()
+	var presentation := WorldPresentationScript.new()
 	var world := FakeWorld.new()
 	world.render_scale_value = 0.1
 	presentation._world = world
@@ -242,7 +262,7 @@ func test_physical_body_marker_keeps_its_true_render_position() -> void:
 
 
 func test_origin_rebase_moves_ship_and_motion_track_together() -> void:
-	var presentation := WorldPresentation.new()
+	var presentation := WorldPresentationScript.new()
 	var world := FakeWorld.new()
 	world.rebase_shift = Vector3(100.0, 2.0, -3.0)
 	presentation._world = world
@@ -268,20 +288,20 @@ func _gate(gate_id: int, pos: PackedFloat64Array, activation_radius: float, to_s
 	return gate
 
 
-func _station(station_id: int, name: String, pos: PackedFloat64Array, docking_radius: float) -> StationRecord:
+func _station(station_id: int, station_name: String, pos: PackedFloat64Array, docking_radius: float) -> StationRecord:
 	var station := StationRecord.new()
 	station.station_id = station_id
-	station.name = name
+	station.name = station_name
 	station.position = pos
 	station.docking_radius = docking_radius
 	return station
 
 
-func _body(body_id: int, kind: String, name: String, pos: PackedFloat64Array, radius: float, spectral_type: float) -> CelestialBodyRecord:
+func _body(body_id: int, kind: String, body_name: String, pos: PackedFloat64Array, radius: float, spectral_type: float) -> CelestialBodyRecord:
 	var b := CelestialBodyRecord.new()
 	b.body_id = body_id
 	b.kind = kind
-	b.name = name
+	b.name = body_name
 	b.position = pos
 	b.radius = radius
 	b.spectral_type = spectral_type

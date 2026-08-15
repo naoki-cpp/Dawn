@@ -1,6 +1,6 @@
 use dawn_core::{
-    events::ShipSpawned, DomainEvent, FitModuleCommand, NodeId, PlayerId, Position, ShipId,
-    Velocity,
+    events::ShipSpawned, CelestialBodyKind, DomainEvent, FitModuleCommand, NodeId, PlayerId,
+    Position, ShipId, Velocity,
 };
 use dawn_ecs::components::{
     CapacitorComp, HullComp, IsBotComp, IsNpcComp, PositionComp, ShipStatsComp,
@@ -131,19 +131,70 @@ impl SimulationNode {
         id
     }
 
-    /// Default player spawn point: 2x the demo galaxy's Alpha star (Helios)
-    /// radius (15_000 units) along +X, clear of the star body itself and
-    /// far short of Gate 0 (600_000 units, at the Sector edge) so a fresh spawn
-    /// doesn't start already inside the star or already in jump range.
+    /// Legacy fallback used only when a fixture has no local station or body.
+    /// Production admission derives the spawn point from the sector topology.
+    /// Keeping this constant preserves the public API for callers that used it
+    /// before the galaxy moved to physical metre radii (ADR-0025).
     pub const DEFAULT_PLAYER_SPAWN: Position = Position {
-        x: 30_000.0,
+        x: 4_000_000_000.0,
         y: 0.0,
         z: 0.0,
     };
 
-    /// Spawn a player ship at the default starting position.
+    /// Select a safe, topology-derived starting point for a fresh player.
+    ///
+    /// Stations are the first choice because a new player can immediately
+    /// exercise the station workflow. A station-less fixture falls back to a
+    /// point outside the first local planet, then outside the local star. All
+    /// positions are absolute metres, so this remains valid when celestial
+    /// radii and orbital distances use real astronomical scale.
+    pub fn default_player_spawn_position(&self) -> Position {
+        let galaxy = self.galaxy();
+        if let Some(station) = galaxy
+            .stations
+            .iter()
+            .find(|station| station.sector == self.sector_id)
+        {
+            return Position::new(station.abs_m[0], station.abs_m[1], station.abs_m[2]);
+        }
+
+        let star = galaxy
+            .bodies
+            .iter()
+            .find(|body| body.sector == self.sector_id && body.kind == CelestialBodyKind::Star);
+        if let Some(star) = star {
+            if let Some(planet) = galaxy.bodies.iter().find(|body| {
+                body.sector == self.sector_id && body.kind == CelestialBodyKind::Planet
+            }) {
+                let delta = [
+                    planet.abs_m[0] - star.abs_m[0],
+                    planet.abs_m[1] - star.abs_m[1],
+                    planet.abs_m[2] - star.abs_m[2],
+                ];
+                let distance =
+                    (delta[0] * delta[0] + delta[1] * delta[1] + delta[2] * delta[2]).sqrt();
+                if distance > 0.0 {
+                    return Position::new(
+                        planet.abs_m[0] + delta[0] / distance * planet.radius * 2.0,
+                        planet.abs_m[1] + delta[1] / distance * planet.radius * 2.0,
+                        planet.abs_m[2] + delta[2] / distance * planet.radius * 2.0,
+                    );
+                }
+            }
+
+            return Position::new(
+                star.abs_m[0] + star.radius * 2.0,
+                star.abs_m[1],
+                star.abs_m[2],
+            );
+        }
+
+        Self::DEFAULT_PLAYER_SPAWN
+    }
+
+    /// Spawn a player ship at the topology-derived starting position.
     pub fn spawn_player_ship(&mut self, player_id: PlayerId) -> ShipId {
-        self.spawn_player_ship_at(player_id, Self::DEFAULT_PLAYER_SPAWN)
+        self.spawn_player_ship_at(player_id, self.default_player_spawn_position())
     }
 
     /// Spawn a player ship at a specific position.
@@ -702,6 +753,38 @@ mod tests {
         assert!(
             (after - expected).abs() < 1.0,
             "cross-anchor distance {after} != {expected}"
+        );
+    }
+
+    #[test]
+    fn default_player_spawn_uses_local_station_and_stays_outside_star() {
+        let node = node_with_catalog();
+        let spawn = node.default_player_spawn_position();
+        let galaxy = node.galaxy();
+        let station = galaxy
+            .stations
+            .iter()
+            .find(|station| station.sector == node.sector_id())
+            .expect("demo sector has a station");
+        let star = galaxy
+            .bodies
+            .iter()
+            .find(|body| body.sector == node.sector_id() && body.kind == CelestialBodyKind::Star)
+            .expect("demo sector has a star");
+        let distance_to_star = ((spawn.x - star.abs_m[0]).powi(2)
+            + (spawn.y - star.abs_m[1]).powi(2)
+            + (spawn.z - star.abs_m[2]).powi(2))
+        .sqrt();
+
+        assert_eq!(
+            [spawn.x, spawn.y, spawn.z],
+            [station.abs_m[0], station.abs_m[1], station.abs_m[2]],
+            "fresh players should begin at the local station"
+        );
+        assert!(
+            distance_to_star > star.radius,
+            "spawn {spawn:?} must be outside star radius {} (distance {distance_to_star})",
+            star.radius
         );
     }
 

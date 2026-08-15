@@ -25,6 +25,13 @@ uniform float star_brightness   : hint_range(0.5,  8.0)   = 1.5;
 uniform float nebula_strength   : hint_range(0.0,  1.0)   = 0.50;
 uniform float milkyway_strength : hint_range(0.0,  1.0)   = 0.20;
 uniform vec3  ambient_color     : source_color             = vec3(0.002, 0.002, 0.006);
+uniform vec3  milkyway_core_color : source_color         = vec3(0.52, 0.62, 0.92);
+uniform vec3  milkyway_outer_color : source_color        = vec3(0.72, 0.68, 0.58);
+// Bright-star landmarks are supplied from SkyCatalog. Zero directions are
+// unused slots, allowing the shader to keep a fixed loop on all renderers.
+uniform vec3  catalog_directions[16];
+uniform vec3  catalog_colors[16] : source_color;
+uniform float catalog_brightness[16];
 
 // ── Local star (ADR-0025) ─────────────────────────────────────────────────────
 // sun_direction: normalised world-space direction from ship toward the star.
@@ -221,9 +228,9 @@ void sky() {
 	// ── Milky Way ────────────────────────────────────────────────────────
 	float mw  = milkyway_density(gal);
 	// Core color: warm blue-white (hot young O/B stars + scattered blue starlight)
-	vec3 mw_core  = vec3(0.52, 0.62, 0.92);
+	vec3 mw_core  = milkyway_core_color;
 	// Outer disk: slightly warmer (older K/G stars dominate by count)
-	vec3 mw_outer = vec3(0.72, 0.68, 0.58);
+	vec3 mw_outer = milkyway_outer_color;
 	float mw_mix  = smoothstep(0.0, 1.5, mw);
 	vec3 mw_col   = mix(mw_outer, mw_core, mw_mix);
 	col += mw_col * mw * milkyway_strength;
@@ -333,6 +340,17 @@ void sky() {
 				col          += star_col * (spike_x + spike_y) * bri * 0.055;
 			}
 		}
+	}
+
+	// Explicit bright-star landmarks sit above the diffuse statistical layer.
+	// The angular kernel is intentionally sub-pixel at normal FOVs and blooms
+	// naturally through Environment.glow, so these do not become oversized dots.
+	for (int i = 0; i < 16; i++) {
+		vec3 catalog_dir = catalog_directions[i];
+		float slot_active = step(0.001, length(catalog_dir));
+		float separation = 1.0 - dot(dir, normalize(catalog_dir + vec3(0.000001)));
+		float point = exp(-separation * 250000.0) * catalog_brightness[i] * slot_active;
+		col += catalog_colors[i] * point;
 	}
 
 	// ── Local star disc + corona (ADR-0025) ──────────────────────────────

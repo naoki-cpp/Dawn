@@ -21,6 +21,15 @@ const PICK_RADIUS_GATE: float = 300.0
 const PICK_RADIUS_BODY_PX: float = 10.0
 
 
+## Navigation markers carry the screen-space extent of their bracket. Keeping
+## this on the marker root means the visual Sprite3D remains non-interactive,
+## while a click on any visible corner selects the same target.
+static func _screen_pick_radius(marker: Node, fallback: float) -> float:
+	if marker.has_meta("nav_pick_radius_px"):
+		return maxf(fallback, float(marker.get_meta("nav_pick_radius_px")))
+	return fallback
+
+
 ## Perpendicular distance from world point `p` to the ray (`from`, `dir`),
 ## packed as (dist, t) — `t` is the ray parameter at the closest approach
 ## (t <= 0 means `p` is behind the camera).
@@ -67,8 +76,8 @@ static func pick_ship_at(camera: Camera3D, screen_pos: Vector2, ships: Dictionar
 ## bounded render distance like body markers, navigation_marker_renderer.gd /
 ## main.gd's _update_gate_markers) rather than recomputing the true server
 ## position, so a click lands on what's on screen even when a gate is too far
-## to render at its real position. Gates are large objects, so the pick
-## radius is wider than for ships.
+## to render at its real position. A marker's bracket also contributes a
+## screen-space hit area so clicking a visible corner selects the gate.
 static func pick_gate_at(camera: Camera3D, screen_pos: Vector2, gates_root: Node) -> int:
 	var from: Vector3 = camera.project_ray_origin(screen_pos)
 	var dir : Vector3 = camera.project_ray_normal(screen_pos)
@@ -79,7 +88,10 @@ static func pick_gate_at(camera: Camera3D, screen_pos: Vector2, gates_root: Node
 			continue
 		var p : Vector3 = (marker as Node3D).global_position
 		var dt: Vector2 = ray_point_distance(from, dir, p)
-		if dt.x < PICK_RADIUS_GATE and dt.y > 0.0 and dt.x < closest_dist:
+		var screen_dt: Vector2 = screen_point_distance(camera, screen_pos, p)
+		var ray_hit := dt.x < PICK_RADIUS_GATE and dt.y > 0.0
+		var bracket_hit := screen_dt.y > 0.0 and screen_dt.x < _screen_pick_radius(marker, 0.0)
+		if (ray_hit or bracket_hit) and dt.x < closest_dist:
 			closest_dist = dt.x
 			closest_id   = marker.get_meta("gate_id") as int
 	return closest_id
@@ -98,7 +110,8 @@ static func pick_body_at(camera: Camera3D, screen_pos: Vector2, bodies_root: Nod
 			continue
 		var p : Vector3 = (marker as Node3D).global_position
 		var dt: Vector2 = screen_point_distance(camera, screen_pos, p)
-		if dt.x < PICK_RADIUS_BODY_PX and dt.y > 0.0 and dt.x < closest_dist:
+		var pick_radius := _screen_pick_radius(marker, PICK_RADIUS_BODY_PX)
+		if dt.x < pick_radius and dt.y > 0.0 and dt.x < closest_dist:
 			closest_dist = dt.x
 			closest_id   = marker.get_meta("body_id") as int
 	return closest_id

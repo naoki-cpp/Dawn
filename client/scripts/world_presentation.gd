@@ -9,6 +9,7 @@ class_name WorldPresentation
 extends RefCounted
 
 const NavigationMarkerRendererScript = preload("res://scripts/navigation_marker_renderer.gd")
+const SkyCatalogScript = preload("res://scripts/sky_catalog.gd")
 
 const NAV_MARKER_CLAMP_DISTANCE : float = 30_000.0
 const DISTANT_BODY_LABEL_OFFSET : float = 800.0
@@ -17,10 +18,6 @@ const WARP_TUNNEL_FADE_IN_RATE : float = 3.0
 const WARP_TUNNEL_FADE_OUT_RATE : float = 0.5
 const WARP_TUNNEL_MAX_VISUAL_DELTA : float = 0.1
 const WARP_TUNNEL_FOV_BOOST : float = 15.0
-## The client starts at the sector origin, which is also the star's authored
-## position. That is inside the star and has no physical apparent radius, so
-## use a small fallback only for this invalid startup position.
-const SUN_INVALID_POSITION_ANGULAR_RADIUS : float = 0.20943951 # 12 degrees
 const SUN_MIN_RENDER_ANGULAR_RADIUS : float = 0.0001
 const SUN_DIRECTION_EPSILON : float = 1.0
 const SUN_FAR_DIRECTION : Vector3 = Vector3(0.62, 0.31, 0.72)
@@ -31,6 +28,7 @@ var _warp_tunnel: ColorRect = null
 var _gates_root: Node3D = null
 var _bodies_root: Node3D = null
 var _sky_mat: ShaderMaterial = null
+var _directional_light: DirectionalLight3D = null
 var _player_material: StandardMaterial3D = null
 var _tactical_overlay: Node3D = null
 ## The ship currently wearing the player material/indicators, so
@@ -48,13 +46,15 @@ func build(
 	warp_tunnel: ColorRect,
 	gates_root: Node3D,
 	bodies_root: Node3D,
-	world: RefCounted
+	world: RefCounted,
+	directional_light: DirectionalLight3D = null
 ) -> void:
 	_camera = camera
 	_warp_tunnel = warp_tunnel
 	_gates_root = gates_root
 	_bodies_root = bodies_root
 	_world = world
+	_directional_light = directional_light
 	if _camera != null:
 		_camera_base_fov = _camera.fov
 	_build_player_material()
@@ -210,6 +210,11 @@ static func sun_state(
 	var diff_y: float = star_pos[1] - player_server[1]
 	var diff_z: float = star_pos[2] - player_server[2]
 	var distance: float = sqrt(diff_x * diff_x + diff_y * diff_y + diff_z * diff_z)
+	if distance <= maxf(star.radius, SUN_DIRECTION_EPSILON):
+		## A camera inside a photosphere has no meaningful external solar disc.
+		## Fresh production spawns are station-derived, so this is a defensive
+		## state for incomplete fixtures or invalid reconnect positions.
+		return {"active": false, "invalid_position": true}
 	var direction := SUN_FAR_DIRECTION.normalized()
 	if distance > SUN_DIRECTION_EPSILON:
 		direction = Vector3(diff_x, diff_y, diff_z)
@@ -229,10 +234,23 @@ static func sun_angular_radius(star_radius: float, distance: float) -> float:
 	if safe_radius <= 0.0:
 		return 0.0
 	if distance <= safe_radius:
-		return SUN_INVALID_POSITION_ANGULAR_RADIUS
+		return 0.0
 	var safe_distance: float = distance
 	var radius_ratio: float = clampf(safe_radius / safe_distance, 0.0, 1.0)
 	return asin(radius_ratio)
+
+
+## Direction from the star toward the illuminated scene. `sun_direction` is
+## the opposite direction (observer -> star), so the light ray must be
+## reversed before orienting DirectionalLight3D.
+static func star_light_ray(sun_direction: Vector3) -> Vector3:
+	if sun_direction.length_squared() <= 0.000001:
+		return Vector3.FORWARD
+	return -sun_direction.normalized()
+
+
+static func light_up_axis(light_ray: Vector3) -> Vector3:
+	return Vector3.RIGHT if absf(light_ray.dot(Vector3.UP)) > 0.95 else Vector3.UP
 
 
 static func _find_star(bodies: Array) -> CelestialBodyRecord:
@@ -339,16 +357,28 @@ func _update_sun_direction(player_ship_id: int, ships: Dictionary, bodies: Array
 	var state: Dictionary = sun_state(bodies, player_server, Callable(_world, "dir_to_godot"))
 	if not (state.get("active", false) as bool):
 		_sky_mat.set_shader_parameter("sun_active", 0.0)
+		if _directional_light != null:
+			_directional_light.light_energy = 0.0
 		return
-	_sky_mat.set_shader_parameter("sun_direction", state.get("direction", Vector3.FORWARD) as Vector3)
+	var sun_direction := state.get("direction", Vector3.FORWARD) as Vector3
+	_sky_mat.set_shader_parameter("sun_direction", sun_direction)
 	_sky_mat.set_shader_parameter("sun_active", 1.0)
-	_sky_mat.set_shader_parameter("sun_color", state.get("color", Vector3.ONE) as Vector3)
+	var sun_color := state.get("color", Vector3.ONE) as Vector3
+	_sky_mat.set_shader_parameter("sun_color", sun_color)
 	_sky_mat.set_shader_parameter(
 		"sun_angular_radius",
 		maxf(state.get("angular_radius", 0.0) as float, SUN_MIN_RENDER_ANGULAR_RADIUS))
 	if _camera != null:
 		_sky_mat.set_shader_parameter("sun_flare_right", _camera.global_basis.x.normalized())
 		_sky_mat.set_shader_parameter("sun_flare_up", _camera.global_basis.y.normalized())
+	if _directional_light != null:
+		var light_ray := star_light_ray(sun_direction)
+		_directional_light.visible = true
+		_directional_light.light_color = Color(sun_color.x, sun_color.y, sun_color.z)
+		_directional_light.light_energy = 1.8
+		var target := ship_node.global_position
+		_directional_light.global_position = target - light_ray * 1_000.0
+		_directional_light.look_at(target, light_up_axis(light_ray))
 
 
 
@@ -363,10 +393,14 @@ func _setup_space_environment(parent: Node) -> void:
 	_sky_mat = sky_mat
 	sky_mat.set_shader_parameter("star_threshold", 0.960)
 	sky_mat.set_shader_parameter("star_brightness", 3.5)
-	sky_mat.set_shader_parameter("nebula_strength", 0.40)
+	sky_mat.set_shader_parameter("nebula_strength", 0.26)
 	sky_mat.set_shader_parameter("milkyway_strength", 0.12)
-	sky_mat.set_shader_parameter("milkyway_color", Color(0.48, 0.58, 0.90))
+	sky_mat.set_shader_parameter("milkyway_core_color", Color(0.52, 0.62, 0.92))
+	sky_mat.set_shader_parameter("milkyway_outer_color", Color(0.72, 0.68, 0.58))
 	sky_mat.set_shader_parameter("ambient_color", Color(0.004, 0.003, 0.010))
+	sky_mat.set_shader_parameter("catalog_directions", SkyCatalogScript.directions())
+	sky_mat.set_shader_parameter("catalog_colors", SkyCatalogScript.colors())
+	sky_mat.set_shader_parameter("catalog_brightness", SkyCatalogScript.brightness())
 
 	var sky := Sky.new()
 	sky.sky_material = sky_mat

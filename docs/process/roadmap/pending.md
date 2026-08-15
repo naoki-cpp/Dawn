@@ -44,7 +44,6 @@ related  : ./README.md, ./deferred.md, ../roadmap.md, ../roadmap-history.md
 | 2 | 発射・被弾・爆発のパーティクル | TODO |
 | 3 | ワープ突入・離脱エフェクト | TODO・優先度高 |
 | 4 | モジュール発動フィードバックの拡充 | TODO |
-| 5 | 恒星・惑星の見た目の深化 | TODO |
 | 6 | Bloom・トーンマッピング等の調整 | TODO |
 | 7 | 視覚エフェクトのフレームレート回帰確認 | 1〜6後 |
 

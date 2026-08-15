@@ -5,7 +5,7 @@ update   : クライアント側で大規模リファクタ実施後 / architect
 related  : docs/architecture/architecture-review/server.md（サーバー側）,
            docs/architecture/architecture-review/client-completed.md（完了済みログ）,
            docs/architecture/architecture-review/client-pending.md（未完項目）
-date     : 2026-08-11（#305後、GDScriptとRust/GDExtension境界を再計測）
+date     : 2026-08-13（#305後、celestial presentation追加後に再計測）
 ---
 
 # Architecture Review — Dawn Client（現行構造評価）
@@ -64,18 +64,20 @@ navigation map cacheはSector内でwrite-onceに近いpresentation cacheとし�
 | `client/scripts/hud_manager.gd` | 877 | 🟡 C-9。typed refsとpanel build/updateが同一責務。独立変更理由が分かれるまで保留 |
 | `client/scripts/ship_controller.gd` | 437 | 🟢 motion adapterとvisual effectの一つのShip presentation boundary |
 | `client/scripts/connection.gd` | 394 | 🟢 WebSocket接続・reconnect・typed outcome受け渡し |
-| `client/scripts/world_presentation.gd` | 337 | 🟢 marker・floating-origin presentation |
+| `client/scripts/world_presentation.gd` | 452 | 🟢 marker・floating-origin・celestial lighting presentation |
 | `client/scripts/market_surface.gd` | 270 | 🟢 Market panel surface |
 | `client/scripts/hud_surface.gd` | 266 | 🟢 HUD reference ownership・dirty tracking |
-| `client/scripts/navigation_marker_renderer.gd` | 227 | 🟢 navigation marker rendering |
+| `client/scripts/navigation_marker_renderer.gd` | 286 | 🟢 navigation marker・planet surface・EVE-style bracket rendering |
+| `client/scripts/sky_catalog.gd` | 57 | 🟢 fixed bright-star landmark data |
 | `client/scripts/camera_controller.gd` | 145 | 🟢 camera orbit input |
 | `client/scripts/input_decoder.gd` | 118 | 🟢 raw inputからtyped intentへの変換 |
-| `client/scripts/ship_picking.gd` | 104 | 🟢 screen-space picking |
+| `client/scripts/ship_picking.gd` | 117 | 🟢 screen-space picking |
 | `client/scripts/world_interaction.gd` | 103 | 🟢 selection・click/key intent |
 | `client/scripts/tactical_overlay.gd` | 93 | 🟢 tactical overlay |
 | `client/scripts/inventory_row.gd` | 87 | 🟢 typed inventory row presentation |
 | `client/scripts/hud_hit_test.gd` | 80 | 🟢 HUD hit-test geometry |
 | `client/scripts/billboard_ring.gd` | 65 | 🟢 selection/lock ring visual |
+| `client/scripts/billboard_bracket.gd` | 67 | 🟢 fixed-size navigation bracket visual |
 | `client/scripts/unit_format.gd` | 38 | 🟢 unit formatting |
 | `client/scripts/warp_tunnel_effect.gd` | 10 | 🟢 warp tunnel visual |
 
