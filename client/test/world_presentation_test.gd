@@ -141,6 +141,34 @@ func test_warp_arrival_frame_hitch_cannot_clear_the_tunnel_in_one_step() -> void
 	assert_float(amount).is_equal_approx(0.95, 0.0001)
 
 
+func test_screen_flow_direction_follows_velocity_projection() -> void:
+	var direction := WorldPresentationScript.screen_flow_direction(
+		Vector3.RIGHT, Vector3.RIGHT, Vector3.UP)
+
+	assert_vector(direction).is_equal_approx(Vector2.RIGHT, Vector2(0.0001, 0.0001))
+
+
+func test_screen_flow_direction_falls_back_when_velocity_points_into_view() -> void:
+	var direction := WorldPresentationScript.screen_flow_direction(
+		Vector3.FORWARD, Vector3.RIGHT, Vector3.UP)
+
+	assert_vector(direction).is_equal_approx(Vector2(0.0, -1.0), Vector2(0.0001, 0.0001))
+
+
+func test_screen_flow_confidence_is_full_for_sideways_velocity() -> void:
+	var confidence := WorldPresentationScript.screen_flow_confidence(
+		Vector3.RIGHT, Vector3.RIGHT, Vector3.UP)
+
+	assert_float(confidence).is_equal_approx(1.0, 0.0001)
+
+
+func test_screen_flow_confidence_is_zero_for_depth_only_velocity() -> void:
+	var confidence := WorldPresentationScript.screen_flow_confidence(
+		Vector3.FORWARD, Vector3.RIGHT, Vector3.UP)
+
+	assert_float(confidence).is_equal_approx(0.0, 0.0001)
+
+
 func test_sun_state_returns_inactive_when_no_star_exists() -> void:
 	var state: Dictionary = WorldPresentationScript.sun_state([
 		_body(2, "Planet", "Forge", _position(100.0, 0.0, 0.0), 200.0, 0.1),

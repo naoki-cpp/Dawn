@@ -291,6 +291,10 @@ func get_speed_server() -> float:
 func get_speed_godot() -> float:
 	return _motion.render_speed()
 
+## Godot-space velocity used by screen-space effects such as the warp tunnel.
+func get_velocity_godot() -> Vector3:
+	return _motion.render_velocity() if _motion_ready else _velocity
+
 ## Server-space form of the bounded render track used by floating-origin logic.
 func server_position() -> PackedFloat64Array:
 	return _motion.server_position()
