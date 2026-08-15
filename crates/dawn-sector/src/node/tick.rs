@@ -481,13 +481,31 @@ impl SimulationNode {
         let position = self.simulation.world.get::<PositionComp>(entity)?.0;
         let velocity = self.simulation.world.get::<VelocityComp>(entity)?.0;
         let hull = self.simulation.world.get::<HullComp>(entity)?;
-        let fitting = self.simulation.world.get::<FittingComp>(entity);
+
+        // One read of every optional component (ADR-0049, issue #312). The
+        // exhaustive destructure means a component dawn-ecs adds to its
+        // declared list fails this function to compile instead of silently
+        // going uncaptured.
+        let dawn_ecs::OptionalShipComponents {
+            capacitor,
+            weapon,
+            lock,
+            fitting,
+            inventory,
+            approach,
+            orbit,
+            keep_at_range,
+            warp,
+            tackled,
+            thrust,
+        } = self.simulation.world.capture_optional_components(entity);
+
         let fitting_snapshot = fitting
-            .as_deref()
+            .as_ref()
             .map(FittingComp::to_snapshot)
             .unwrap_or_else(dawn_core::fitting::FittingSnapshot::empty);
         let fitting_state = fitting
-            .as_deref()
+            .as_ref()
             .map(Self::capture_tick_fitting)
             .unwrap_or_else(|| TickFittingState {
                 high: Vec::new(),
@@ -495,6 +513,8 @@ impl SimulationNode {
                 low: Vec::new(),
                 rig: Vec::new(),
             });
+        let fitting_present = fitting.is_some();
+        let inventory_present = inventory.is_some();
         let snapshot = ShipSnapshot {
             ship_id,
             ship_type_id: self
@@ -516,106 +536,68 @@ impl SimulationNode {
             current_armor: hull.armor(),
             current_hull: hull.hull(),
             is_destroyed: hull.is_destroyed(),
-            capacitor: self
-                .simulation
-                .world
-                .get::<CapacitorComp>(entity)
-                .map(|capacitor| capacitor.current),
+            capacitor: capacitor.map(|capacitor| capacitor.current),
             fitting: fitting_snapshot,
-            tackled_by: self
-                .simulation
-                .world
-                .get::<TackledComp>(entity)
-                .map(|tackled| tackled.tacklers.clone())
-                .unwrap_or_default(),
-            inventory: self
-                .simulation
-                .world
-                .get::<InventoryComp>(entity)
-                .map(|inventory| inventory.items.clone())
+            tackled_by: tackled.map(|tackled| tackled.tacklers).unwrap_or_default(),
+            inventory: inventory
+                .map(|inventory| inventory.items)
                 .unwrap_or_default(),
         };
         let movement = TickMovementState {
-            thrust: self
-                .simulation
-                .world
-                .get::<dawn_ecs::components::ThrustComp>(entity)
-                .map(|thrust| crate::transition::StopThrustState {
-                    direction: thrust.direction,
-                    is_braking: thrust.is_braking,
-                }),
-            approach: self
-                .simulation
-                .world
-                .get::<ApproachComp>(entity)
-                .map(|approach| TickApproachState {
-                    target: approach.target,
-                    auto_jump_gate: approach.auto_jump_gate,
-                }),
-            orbit: self
-                .simulation
-                .world
-                .get::<OrbitComp>(entity)
-                .map(|orbit| TickOrbitState {
-                    target: orbit.target,
-                    radius: orbit.radius,
-                }),
-            keep_at_range: self.simulation.world.get::<KeepAtRangeComp>(entity).map(
-                |keep_at_range| TickKeepAtRangeState {
-                    target: keep_at_range.target,
-                    range: keep_at_range.range,
+            thrust: thrust.map(|thrust| crate::transition::StopThrustState {
+                direction: thrust.direction,
+                is_braking: thrust.is_braking,
+            }),
+            approach: approach.map(|approach| TickApproachState {
+                target: approach.target,
+                auto_jump_gate: approach.auto_jump_gate,
+            }),
+            orbit: orbit.map(|orbit| TickOrbitState {
+                target: orbit.target,
+                radius: orbit.radius,
+            }),
+            keep_at_range: keep_at_range.map(|keep_at_range| TickKeepAtRangeState {
+                target: keep_at_range.target,
+                range: keep_at_range.range,
+            }),
+            warp: warp.map(|warp| TickWarpState {
+                target: warp.target,
+                phase: match warp.phase {
+                    WarpPhase::Aligning => TickWarpPhase::Aligning,
+                    WarpPhase::Warping => TickWarpPhase::Warping,
                 },
-            ),
-            warp: self
-                .simulation
-                .world
-                .get::<WarpComp>(entity)
-                .map(|warp| TickWarpState {
-                    target: warp.target,
-                    phase: match warp.phase {
-                        WarpPhase::Aligning => TickWarpPhase::Aligning,
-                        WarpPhase::Warping => TickWarpPhase::Warping,
-                    },
-                    auto_jump: warp.auto_jump,
-                    warp_start_abs: warp.warp_start_abs,
-                    warp_total: warp.warp_total,
-                    warp_elapsed: warp.warp_elapsed,
-                    warp_arrival_abs: warp.warp_arrival_abs,
-                    warp_start_vel: warp.warp_start_vel,
-                }),
+                auto_jump: warp.auto_jump,
+                warp_start_abs: warp.warp_start_abs,
+                warp_total: warp.warp_total,
+                warp_elapsed: warp.warp_elapsed,
+                warp_arrival_abs: warp.warp_arrival_abs,
+                warp_start_vel: warp.warp_start_vel,
+            }),
         };
-        let locks = self
-            .simulation
-            .world
-            .get::<LockComp>(entity)
-            .map(|lock| TickLockState {
-                entries: lock
-                    .entries
-                    .iter()
-                    .map(|entry| TickLockEntry {
-                        target_id: entry.target_id,
-                        state: match entry.state {
-                            LockState::Locking { remaining_ticks } => {
-                                TickLockPhase::Locking { remaining_ticks }
-                            }
-                            LockState::Locked => TickLockPhase::Locked,
-                        },
-                    })
-                    .collect(),
-            });
+        let locks = lock.map(|lock| TickLockState {
+            entries: lock
+                .entries
+                .into_iter()
+                .map(|entry| TickLockEntry {
+                    target_id: entry.target_id,
+                    state: match entry.state {
+                        LockState::Locking { remaining_ticks } => {
+                            TickLockPhase::Locking { remaining_ticks }
+                        }
+                        LockState::Locked => TickLockPhase::Locked,
+                    },
+                })
+                .collect(),
+        });
 
         Some(TickShipState {
             snapshot,
-            fitting_present: fitting.is_some(),
-            inventory_present: self.simulation.world.get::<InventoryComp>(entity).is_some(),
+            fitting_present,
+            inventory_present,
             movement,
             fitting: fitting_state,
             locks,
-            weapon_last_fired_tick: self
-                .simulation
-                .world
-                .get::<WeaponComp>(entity)
-                .map(|weapon| weapon.last_fired_tick),
+            weapon_last_fired_tick: weapon.map(|weapon| weapon.last_fired_tick),
         })
     }
 
@@ -700,98 +682,67 @@ impl SimulationNode {
                 .insert_one(entity, VelocityComp(ship.velocity));
         }
 
-        if state.fitting_present {
+        let fitting = if state.fitting_present {
             let mut fitting =
                 FittingComp::from_snapshot(&ship.fitting, &self.game_data.module_registry);
             if !Self::restore_tick_fitting(&mut fitting, &state.fitting) {
                 return Err(TransitionApplyError::InvalidTickShipState(ship.ship_id));
             }
-            let _ = self.simulation.world.insert_one(entity, fitting);
-            self.reapply_fitting(ship.ship_id);
+            Some(fitting)
         } else {
-            let _ = self.simulation.world.remove_one::<FittingComp>(entity);
-        }
+            None
+        };
         if let Some(mut hull) = self.simulation.world.get_mut::<HullComp>(entity) {
             hull.set_hp(ship.current_shield, ship.current_armor, ship.current_hull);
         }
-        match ship.capacitor {
-            Some(current) => {
-                let _ = self
-                    .simulation
-                    .world
-                    .insert_one(entity, CapacitorComp { current });
-            }
-            None => {
-                let _ = self.simulation.world.remove_one::<CapacitorComp>(entity);
-            }
-        }
-        if ship.tackled_by.is_empty() {
-            let _ = self.simulation.world.remove_one::<TackledComp>(entity);
-        } else {
-            let _ = self.simulation.world.insert_one(
-                entity,
-                TackledComp {
-                    tacklers: ship.tackled_by.clone(),
-                },
-            );
-        }
-        if state.inventory_present {
-            let _ = self.simulation.world.insert_one(
-                entity,
-                InventoryComp {
-                    items: ship.inventory.clone(),
-                },
-            );
-        } else {
-            let _ = self.simulation.world.remove_one::<InventoryComp>(entity);
-        }
 
-        let _ = self.simulation.world.remove_one::<WarpComp>(entity);
-        self.clear_steering_modes(entity);
-        let _ = self
-            .simulation
-            .world
-            .remove_one::<dawn_ecs::components::ThrustComp>(entity);
-        if let Some(thrust) = state.movement.thrust {
-            let _ = self.simulation.world.insert_one(
-                entity,
-                dawn_ecs::components::ThrustComp {
-                    direction: thrust.direction,
-                    is_braking: thrust.is_braking,
-                },
-            );
-        }
-        if let Some(approach) = state.movement.approach {
-            let _ = self.simulation.world.insert_one(
-                entity,
-                ApproachComp {
+        // One write of every optional component (ADR-0049, issue #312):
+        // capacitor/tackled/inventory/fitting come from `ship` (the durable
+        // ShipSnapshot); movement/lock/weapon come from this Tick's extras.
+        // Replaces what used to be up to eleven individual
+        // remove_one/insert_one pairs with one call.
+        self.simulation.world.restore_optional_components(
+            entity,
+            &dawn_ecs::OptionalShipComponents {
+                capacitor: ship.capacitor.map(|current| CapacitorComp { current }),
+                weapon: state
+                    .weapon_last_fired_tick
+                    .map(|last_fired_tick| WeaponComp { last_fired_tick }),
+                lock: state.locks.as_ref().map(|lock| LockComp {
+                    entries: lock
+                        .entries
+                        .iter()
+                        .map(|entry| LockEntry {
+                            target_id: entry.target_id,
+                            state: match entry.state {
+                                TickLockPhase::Locking { remaining_ticks } => {
+                                    LockState::Locking { remaining_ticks }
+                                }
+                                TickLockPhase::Locked => LockState::Locked,
+                            },
+                        })
+                        .collect(),
+                }),
+                fitting,
+                inventory: state.inventory_present.then(|| InventoryComp {
+                    items: ship.inventory.clone(),
+                }),
+                approach: state.movement.approach.map(|approach| ApproachComp {
                     target: approach.target,
                     auto_jump_gate: approach.auto_jump_gate,
-                },
-            );
-        }
-        if let Some(orbit) = state.movement.orbit {
-            let _ = self.simulation.world.insert_one(
-                entity,
-                OrbitComp {
+                }),
+                orbit: state.movement.orbit.map(|orbit| OrbitComp {
                     target: orbit.target,
                     radius: orbit.radius,
-                },
-            );
-        }
-        if let Some(keep_at_range) = state.movement.keep_at_range {
-            let _ = self.simulation.world.insert_one(
-                entity,
-                KeepAtRangeComp {
-                    target: keep_at_range.target,
-                    range: keep_at_range.range,
-                },
-            );
-        }
-        if let Some(warp) = state.movement.warp {
-            let _ = self.simulation.world.insert_one(
-                entity,
-                WarpComp {
+                }),
+                keep_at_range: state
+                    .movement
+                    .keep_at_range
+                    .map(|keep_at_range| KeepAtRangeComp {
+                        target: keep_at_range.target,
+                        range: keep_at_range.range,
+                    }),
+                warp: state.movement.warp.map(|warp| WarpComp {
                     target: warp.target,
                     phase: match warp.phase {
                         TickWarpPhase::Aligning => WarpPhase::Aligning,
@@ -803,46 +754,24 @@ impl SimulationNode {
                     warp_elapsed: warp.warp_elapsed,
                     warp_arrival_abs: warp.warp_arrival_abs,
                     warp_start_vel: warp.warp_start_vel,
-                },
-            );
+                }),
+                tackled: (!ship.tackled_by.is_empty()).then(|| TackledComp {
+                    tacklers: ship.tackled_by.clone(),
+                }),
+                thrust: state
+                    .movement
+                    .thrust
+                    .map(|thrust| dawn_ecs::components::ThrustComp {
+                        direction: thrust.direction,
+                        is_braking: thrust.is_braking,
+                    }),
+            },
+        );
+
+        if state.fitting_present {
+            self.reapply_fitting(ship.ship_id);
         }
 
-        match &state.locks {
-            Some(lock) => {
-                let _ = self.simulation.world.insert_one(
-                    entity,
-                    LockComp {
-                        entries: lock
-                            .entries
-                            .iter()
-                            .map(|entry| LockEntry {
-                                target_id: entry.target_id,
-                                state: match entry.state {
-                                    TickLockPhase::Locking { remaining_ticks } => {
-                                        LockState::Locking { remaining_ticks }
-                                    }
-                                    TickLockPhase::Locked => LockState::Locked,
-                                },
-                            })
-                            .collect(),
-                    },
-                );
-            }
-            None => {
-                let _ = self.simulation.world.remove_one::<LockComp>(entity);
-            }
-        }
-        match state.weapon_last_fired_tick {
-            Some(last_fired_tick) => {
-                let _ = self
-                    .simulation
-                    .world
-                    .insert_one(entity, WeaponComp { last_fired_tick });
-            }
-            None => {
-                let _ = self.simulation.world.remove_one::<WeaponComp>(entity);
-            }
-        }
         Ok(())
     }
 
