@@ -45,6 +45,8 @@ static func decode_key(
 			return ClientIntent.warp_to_gate(selection.id())
 		if selection.is_body():
 			return ClientIntent.warp_to_body(selection.id())
+		if selection.is_station():
+			return ClientIntent.warp_to_station(selection.id())
 		return ClientIntent.none()
 
 	if keycode == KEY_O and player_ship_id >= 0:

@@ -24,7 +24,8 @@ use super::{
 };
 
 impl SimulationNode {
-    /// Begin an intra-Sector warp toward a Jump Gate (short-range Fold, ADR-0022).
+    /// Begin an intra-Sector warp toward a gate, body, or station
+    /// (short-range Fold, ADR-0022).
     ///
     /// Attaches a `WarpComp` in the `Aligning` phase if `can_propose_warp`
     /// accepts the request; `process_warp()` then advances the alignment and,
@@ -143,7 +144,8 @@ impl SimulationNode {
 
         for (entity, ship_id, warp, pos, vel, max_speed) in warpers {
             // Resolve destination, arrival distance, auto-jump gate, and the
-            // destination anchor (Body warps rebase onto that body on arrival,
+            // destination anchor (Body/Station warps rebase onto the nearest
+            // local body anchor on arrival,
             // ADR-0029; Gate warps stay on the current anchor).
             let resolved = match warp.target {
                 // Gate arrival is now symmetric with Body (ADR-0029 R1 remnant):
@@ -172,6 +174,22 @@ impl SimulationNode {
                         )
                     })
                 }
+                WarpTarget::Station(station_id) => self
+                    .topology
+                    .sector_map
+                    .stations
+                    .get(&station_id)
+                    .map(|station| {
+                        (
+                            station.position,
+                            station.docking_radius * WARP_ARRIVAL_FACTOR,
+                            None,
+                            self.topology
+                                .anchor_table
+                                .nearest_anchor(station.sector, station.abs_m),
+                            station.abs_m,
+                        )
+                    }),
             };
             let Some((dest_world, arrival, auto_jump_gate, dest_anchor, target_abs)) = resolved
             else {
@@ -1199,5 +1217,63 @@ mod tests {
             false,
         );
         assert!(!ok, "warp to body in another sector should be rejected");
+    }
+
+    #[test]
+    fn warp_to_station_arrives_inside_the_docking_radius() {
+        let mut node = mem_node();
+        let (player, ship_id) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        let station_id = dawn_core::StationId(0);
+        let station = node
+            .station(station_id)
+            .expect("demo station exists")
+            .clone();
+
+        assert!(
+            node.apply_warp_command_owned(
+                player,
+                ship_id,
+                dawn_core::WarpCommand {
+                    target: WarpTarget::Station(station_id),
+                },
+            ),
+            "warp to a local station should be accepted"
+        );
+
+        for _ in 0..5_000 {
+            node.tick();
+            if node.warp_phase(ship_id).is_none() {
+                break;
+            }
+        }
+
+        assert!(node.warp_phase(ship_id).is_none(), "warp should complete");
+        let ship_abs = node.ship_absolute(ship_id).expect("ship exists");
+        assert!(
+            station.is_in_range_abs(ship_abs),
+            "station warp should arrive inside the docking radius"
+        );
+        let distance = station.distance_abs(ship_abs);
+        let expected = station.docking_radius * WARP_ARRIVAL_FACTOR;
+        let tolerance = 1e-6_f64.max(expected * 1e-8);
+        assert!(
+            (distance - expected).abs() < tolerance,
+            "station arrival distance should match the docking ring: got {distance}, expected {expected}"
+        );
+    }
+
+    #[test]
+    fn warp_to_station_is_rejected_for_a_station_not_in_this_sector() {
+        let mut node = mem_node();
+        let ship_id = node.spawn_ship(
+            dawn_core::ShipTypeId(1),
+            Position::new(0.0, 0.0, 0.0),
+            Velocity::ZERO,
+        );
+        assert!(!node.apply_warp_command(
+            ship_id,
+            WarpTarget::Station(dawn_core::StationId(2)),
+            false,
+        ));
     }
 }

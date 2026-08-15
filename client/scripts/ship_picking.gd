@@ -115,3 +115,21 @@ static func pick_body_at(camera: Camera3D, screen_pos: Vector2, bodies_root: Nod
 			closest_dist = dt.x
 			closest_id   = marker.get_meta("body_id") as int
 	return closest_id
+
+
+## Returns the station_id of the station marker closest to the click position
+## on screen, or -1. Station markers share the body root but carry a distinct
+## metadata key so a station cannot be mistaken for a celestial body.
+static func pick_station_at(camera: Camera3D, screen_pos: Vector2, bodies_root: Node) -> int:
+	var closest_id: int = -1
+	var closest_dist: float = 1e9
+	for marker: Node in bodies_root.get_children():
+		if not marker.has_meta("station_id"):
+			continue
+		var p: Vector3 = (marker as Node3D).global_position
+		var dt: Vector2 = screen_point_distance(camera, screen_pos, p)
+		var pick_radius := _screen_pick_radius(marker, PICK_RADIUS_BODY_PX)
+		if dt.x < pick_radius and dt.y > 0.0 and dt.x < closest_dist:
+			closest_dist = dt.x
+			closest_id = marker.get_meta("station_id") as int
+	return closest_id

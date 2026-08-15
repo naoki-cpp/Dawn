@@ -250,6 +250,8 @@ func _input(event: InputEvent) -> void:
 			_connection.send_warp_command(intent.gate_id() as int)
 		elif intent.is_warp_to_body():
 			_connection.send_warp_to_body_command(intent.body_id() as int)
+		elif intent.is_warp_to_station():
+			_connection.send_warp_to_station_command(intent.station_id() as int)
 		elif intent.is_orbit_gate():
 			_connection.send_orbit_gate_command(intent.gate_id() as int)
 		elif intent.is_orbit_ship():
@@ -329,10 +331,13 @@ func _input(event: InputEvent) -> void:
 					var hit_ship: int = _pick_ship_at(mb.position)
 					var hit_gate: int = -1
 					var hit_body: int = -1
+					var hit_station: int = -1
 					if hit_ship < 0:
 						hit_gate = _pick_gate_at(mb.position)
 						if hit_gate < 0:
-							hit_body = _pick_body_at(mb.position)
+							hit_station = _pick_station_at(mb.position)
+							if hit_station < 0:
+								hit_body = _pick_body_at(mb.position)
 					var click_intent: ClientIntent = _interaction.interpret_primary_click(
 						mb.position,
 						Time.get_ticks_msec() / 1000.0,
@@ -340,7 +345,8 @@ func _input(event: InputEvent) -> void:
 						_player_ship_id,
 						hit_ship,
 						hit_gate,
-						hit_body)
+						hit_body,
+						hit_station)
 					if click_intent.is_double_click_move():
 						_on_double_click(mb.position)
 					elif click_intent.is_selection_changed():
@@ -381,6 +387,12 @@ func _pick_body_at(screen_pos: Vector2) -> int:
 	if _player_ship_id < 0:
 		return -1
 	return ShipPicking.pick_body_at(_camera, screen_pos, _bodies_root)
+
+## Returns the station_id of the station marker closest to the click position.
+func _pick_station_at(screen_pos: Vector2) -> int:
+	if _player_ship_id < 0:
+		return -1
+	return ShipPicking.pick_station_at(_camera, screen_pos, _bodies_root)
 
 ## Server-unit distance from the player ship to the selected gate, or -1 if
 ## there is no player ship or no selected gate (ADR-0022 warp gating / HUD).
@@ -1044,6 +1056,7 @@ func _update_hud() -> void:
 	var approach_line: String = ""
 	var selected_gate_id: int = _interaction.selected_gate_id()
 	var selected_body_id: int = _interaction.selected_body_id()
+	var selected_station_id: int = _interaction.selected_station_id()
 	var selected_target_id: int = _interaction.selected_target_id()
 	if selected_gate_id >= 0:
 		approach_line = "\n[A] Approach Gate #%d" % selected_gate_id + keep_at_range_hint
@@ -1062,6 +1075,8 @@ func _update_hud() -> void:
 				body_name = body.name
 				break
 		approach_line = "\n[W] Warp to %s" % body_name
+	elif selected_station_id >= 0:
+		approach_line = "\n[W] Warp to %s" % _station_name(selected_station_id)
 	elif selected_target_id >= 0:
 		approach_line = "\n[A] Approach #%d" % selected_target_id + keep_at_range_hint
 

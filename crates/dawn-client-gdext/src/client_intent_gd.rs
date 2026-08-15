@@ -13,6 +13,7 @@ enum ClientIntentKind {
     ApproachShip,
     WarpToGate,
     WarpToBody,
+    WarpToStation,
     OrbitGate,
     OrbitShip,
     KeepAtRangeGate,
@@ -102,6 +103,11 @@ impl ClientIntent {
     #[func]
     fn warp_to_body(body_id: i64) -> Gd<Self> {
         Self::with_id(ClientIntentKind::WarpToBody, body_id)
+    }
+
+    #[func]
+    fn warp_to_station(station_id: i64) -> Gd<Self> {
+        Self::with_id(ClientIntentKind::WarpToStation, station_id)
     }
 
     #[func]
@@ -228,6 +234,11 @@ impl ClientIntent {
     }
 
     #[func]
+    fn is_warp_to_station(&self) -> bool {
+        self.kind == ClientIntentKind::WarpToStation
+    }
+
+    #[func]
     fn is_orbit_gate(&self) -> bool {
         self.kind == ClientIntentKind::OrbitGate
     }
@@ -344,6 +355,7 @@ enum SelectionKind {
     Ship,
     Gate,
     Body,
+    Station,
 }
 
 /// Mutually exclusive world selection state shared by keyboard and mouse
@@ -387,6 +399,11 @@ impl ClientSelection {
     }
 
     #[func]
+    fn station(station_id: i64) -> Gd<Self> {
+        Self::new(SelectionKind::Station, Some(station_id))
+    }
+
+    #[func]
     fn is_none(&self) -> bool {
         self.kind == SelectionKind::None
     }
@@ -404,6 +421,11 @@ impl ClientSelection {
     #[func]
     fn is_body(&self) -> bool {
         self.kind == SelectionKind::Body
+    }
+
+    #[func]
+    fn is_station(&self) -> bool {
+        self.kind == SelectionKind::Station
     }
 
     #[func]

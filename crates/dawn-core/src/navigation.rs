@@ -70,12 +70,14 @@ impl From<CelestialBodyId> for AnchorId {
 
 // -- WarpTarget --------------------------------------------------------------
 
-/// The destination of a `WarpCommand` (ADR-0025).
+/// The destination of a `WarpCommand`: a jump gate, celestial body, or station
+/// within the current Sector (ADR-0025).
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum WarpTarget {
     Gate(JumpGateId),
     Body(CelestialBodyId),
+    Station(StationId),
 }
 
 // -- StarSystemId ------------------------------------------------------------

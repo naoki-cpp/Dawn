@@ -158,6 +158,10 @@ func send_warp_command(p_gate_id: int) -> void:
 func send_warp_to_body_command(p_body_id: int) -> void:
 	_send_request(_cmd.warp_to_body_command(p_body_id))
 
+## [W key] Warp (short-range Fold) to an NPC station.
+func send_warp_to_station_command(p_station_id: int) -> void:
+	_send_request(_cmd.warp_to_station_command(p_station_id))
+
 ## [O key] Orbit a selected ship at its weapon range (server-side default, ADR-0031).
 func send_orbit_command(p_target_id: int) -> void:
 	_send_request(_cmd.orbit_command(p_target_id, -1.0))

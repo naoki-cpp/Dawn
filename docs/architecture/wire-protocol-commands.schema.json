@@ -687,6 +687,18 @@
           "required": [
             "Body"
           ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Station": {
+              "$ref": "#/$defs/StationId"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Station"
+          ]
         }
       ]
     }
