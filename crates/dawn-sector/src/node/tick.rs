@@ -44,19 +44,13 @@ fn lock_event_touches_transit(event: &DomainEvent, transit_ids: &HashSet<ShipId>
     }
 }
 
-/// Components whose per-tick mutation is suspended while ownership transfer is
-/// pending. Removing them from the ECS query surface keeps the existing systems
-/// simple; the exact values are restored after the tick.
-struct FrozenTransitComponents {
-    entity: Entity,
-    capacitor: Option<CapacitorComp>,
-    fitting: Option<FittingComp>,
-    tackled: Option<TackledComp>,
-    warp: Option<WarpComp>,
-    approach: Option<ApproachComp>,
-    orbit: Option<OrbitComp>,
-    keep_at_range: Option<KeepAtRangeComp>,
-}
+/// `(InTransit ship ids, their frozen optional components, related ships'
+/// LockComp frozen for consistency)` -- see `freeze_transit_components`.
+type FrozenTransitState = (
+    HashSet<ShipId>,
+    Vec<(Entity, dawn_ecs::OptionalShipComponents)>,
+    Vec<(Entity, LockComp)>,
+);
 
 impl SimulationNode {
     /// Prepare the logical Tick counter without changing the live state.
@@ -386,13 +380,7 @@ impl SimulationNode {
         ));
     }
 
-    fn freeze_transit_components(
-        &mut self,
-    ) -> (
-        HashSet<ShipId>,
-        Vec<FrozenTransitComponents>,
-        Vec<(Entity, LockComp)>,
-    ) {
+    fn freeze_transit_components(&mut self) -> FrozenTransitState {
         let transit: Vec<(ShipId, Entity)> = self
             .simulation
             .ships
@@ -424,15 +412,33 @@ impl SimulationNode {
             .collect();
         let components = transit
             .into_iter()
-            .map(|(_, entity)| FrozenTransitComponents {
-                entity,
-                capacitor: self.simulation.world.remove_one::<CapacitorComp>(entity),
-                fitting: self.simulation.world.remove_one::<FittingComp>(entity),
-                tackled: self.simulation.world.remove_one::<TackledComp>(entity),
-                warp: self.simulation.world.remove_one::<WarpComp>(entity),
-                approach: self.simulation.world.remove_one::<ApproachComp>(entity),
-                orbit: self.simulation.world.remove_one::<OrbitComp>(entity),
-                keep_at_range: self.simulation.world.remove_one::<KeepAtRangeComp>(entity),
+            .map(|(_, entity)| {
+                // Explicit subset of the canonical optional-component list
+                // (dawn_ecs::OptionalShipComponents, ADR-0049 / issue #312):
+                // only these seven need removing from an InTransit ship's
+                // ECS query surface. Lock/Weapon/Thrust/Inventory are
+                // deliberately left in place -- Movement/Combat already
+                // skip InTransit ships via TransitComp, so those four
+                // components being present is harmless, and restoring them
+                // here would cost a remove/reinsert every tick for no
+                // behavioural gain. If dawn-ecs adds a new optional
+                // component, this struct literal fails to compile until
+                // this list explicitly decides whether it needs freezing
+                // too.
+                let frozen = dawn_ecs::OptionalShipComponents {
+                    capacitor: self.simulation.world.remove_one::<CapacitorComp>(entity),
+                    fitting: self.simulation.world.remove_one::<FittingComp>(entity),
+                    tackled: self.simulation.world.remove_one::<TackledComp>(entity),
+                    warp: self.simulation.world.remove_one::<WarpComp>(entity),
+                    approach: self.simulation.world.remove_one::<ApproachComp>(entity),
+                    orbit: self.simulation.world.remove_one::<OrbitComp>(entity),
+                    keep_at_range: self.simulation.world.remove_one::<KeepAtRangeComp>(entity),
+                    weapon: None,
+                    lock: None,
+                    inventory: None,
+                    thrust: None,
+                };
+                (entity, frozen)
             })
             .collect();
         (ids, components, related_locks)
@@ -440,30 +446,43 @@ impl SimulationNode {
 
     fn restore_transit_components(
         &mut self,
-        frozen: Vec<FrozenTransitComponents>,
+        frozen: Vec<(Entity, dawn_ecs::OptionalShipComponents)>,
         related_locks: Vec<(Entity, LockComp)>,
     ) {
-        for frozen in frozen {
+        for (entity, frozen) in frozen {
+            // Only reinsert what freeze_transit_components actually removed
+            // (see its comment). weapon/lock/inventory/thrust are always
+            // None here; restore_optional_components would treat that as
+            // "remove", which would incorrectly clear components this
+            // freeze never touched -- so this stays a manual per-field
+            // insert rather than one restore_optional_components call.
+            debug_assert!(
+                frozen.weapon.is_none()
+                    && frozen.lock.is_none()
+                    && frozen.inventory.is_none()
+                    && frozen.thrust.is_none(),
+                "freeze_transit_components must not populate fields it doesn't freeze"
+            );
             if let Some(component) = frozen.capacitor {
-                let _ = self.simulation.world.insert_one(frozen.entity, component);
+                let _ = self.simulation.world.insert_one(entity, component);
             }
             if let Some(component) = frozen.fitting {
-                let _ = self.simulation.world.insert_one(frozen.entity, component);
+                let _ = self.simulation.world.insert_one(entity, component);
             }
             if let Some(component) = frozen.tackled {
-                let _ = self.simulation.world.insert_one(frozen.entity, component);
+                let _ = self.simulation.world.insert_one(entity, component);
             }
             if let Some(component) = frozen.warp {
-                let _ = self.simulation.world.insert_one(frozen.entity, component);
+                let _ = self.simulation.world.insert_one(entity, component);
             }
             if let Some(component) = frozen.approach {
-                let _ = self.simulation.world.insert_one(frozen.entity, component);
+                let _ = self.simulation.world.insert_one(entity, component);
             }
             if let Some(component) = frozen.orbit {
-                let _ = self.simulation.world.insert_one(frozen.entity, component);
+                let _ = self.simulation.world.insert_one(entity, component);
             }
             if let Some(component) = frozen.keep_at_range {
-                let _ = self.simulation.world.insert_one(frozen.entity, component);
+                let _ = self.simulation.world.insert_one(entity, component);
             }
         }
         for (entity, component) in related_locks {
