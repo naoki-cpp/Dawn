@@ -32,6 +32,9 @@ related  : ./README.md, ../roadmap-history.md, ../../adr/
 - 10-2/10-4: `InitialState` / `PlayerLoadout` / `AoiEnter` 固定型移行とpostcard WebSocket移行の段階2を完了（ADR-0042）。`register_ship`のJSON往復排除（#178）、`connection.gd`のdead text-frame fallback削除（#179）。
 - 10-6: 絶対座標・floating origin・client motionの再評価と `ShipMotion` への統合完了。Godot editorでの実機確認は pending に残す。
 - Godotの自動テストは通過。実行DLL生成と手動プレイテストは [pending.md](./pending.md) に残す。
+- Phase 11 celestial presentation: topology-derived fresh spawn, physical body radii,
+  synchronized star lighting, deterministic planet surfaces, and bright-star sky
+  landmarks (ADR-0053).
 
 ## 記録先
 

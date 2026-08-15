@@ -126,6 +126,39 @@ func test_pick_body_at_returns_the_body_whose_marker_is_on_screen_at_the_click()
 	assert_int(picked).is_equal(9)
 
 
+func test_pick_body_at_accepts_a_click_on_the_marker_bracket() -> void:
+	var camera: Camera3D = _make_camera()
+	var bodies_root: Node = auto_free(Node.new())
+	add_child(bodies_root)
+
+	var marker := Node3D.new()
+	marker.set_meta("body_id", 9)
+	marker.set_meta("nav_pick_radius_px", 16.0)
+	bodies_root.add_child(marker)
+	marker.global_position = Vector3.ZERO
+
+	var picked: int = ShipPicking.pick_body_at(
+		camera, _screen_center() + Vector2(14.0, 0.0), bodies_root)
+	assert_int(picked).is_equal(9)
+
+
+func test_pick_gate_at_accepts_a_click_on_the_marker_bracket() -> void:
+	var camera: Camera3D = _make_camera()
+	camera.far = 100000.0
+	var gates_root: Node = auto_free(Node.new())
+	add_child(gates_root)
+
+	var marker := Node3D.new()
+	marker.set_meta("gate_id", 3)
+	marker.set_meta("nav_pick_radius_px", 16.0)
+	gates_root.add_child(marker)
+	marker.global_position = Vector3(0.0, 0.0, -50000.0)
+
+	var picked: int = ShipPicking.pick_gate_at(
+		camera, _screen_center() + Vector2(14.0, 0.0), gates_root)
+	assert_int(picked).is_equal(3)
+
+
 func test_pick_body_at_ignores_children_without_a_body_id_meta() -> void:
 	var camera: Camera3D = _make_camera()
 	var bodies_root: Node = auto_free(Node.new())

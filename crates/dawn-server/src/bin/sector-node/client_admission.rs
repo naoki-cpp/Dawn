@@ -5,7 +5,7 @@
 //! begin/commit/abort lifecycle and every rollback decision.
 
 use dawn_actor::ws_server;
-use dawn_core::{Position, SectorId};
+use dawn_core::SectorId;
 use dawn_sector::client_admission::{
     ClientAdmissionAttempt, ClientAdmissionIntent, ClientAdmissionRefusal, CommittedClientAdmission,
 };
@@ -82,7 +82,7 @@ impl ClientAdmission {
                     resume_ticket: resume,
                 },
                 None => ClientAdmissionIntent::Fresh {
-                    spawn_position: Position::new(30_000.0, 0.0, 0.0),
+                    spawn_position: node.default_player_spawn_position(),
                 },
             };
 
@@ -185,6 +185,7 @@ fn finish_admission<T>(
 mod tests {
     use super::*;
     use dawn_core::NodeId;
+    use dawn_core::Position;
     use dawn_core::SectorBounds;
 
     const AOI_CELL_SIZE: f64 = 1_000.0;

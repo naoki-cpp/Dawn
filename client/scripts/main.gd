@@ -19,6 +19,7 @@ extends Node
 @onready var _stats_label  : Label       = $HUD/StatsLabel
 @onready var _hud          : CanvasLayer = $HUD
 @onready var _camera       : Camera3D    = $World/Camera3D
+@onready var _directional_light : DirectionalLight3D = $World/DirectionalLight3D
 @onready var _warp_tunnel  : ColorRect   = $HUD/WarpTunnel
 
 # -- Constants ----------------------------------------------------------------
@@ -124,6 +125,7 @@ func _assert_scene_tree_refs() -> void:
 	if _stats_label  == null: missing.append("Stats label ($HUD/StatsLabel)")
 	if _hud          == null: missing.append("HUD ($HUD)")
 	if _camera       == null: missing.append("Camera ($World/Camera3D)")
+	if _directional_light == null: missing.append("Directional light ($World/DirectionalLight3D)")
 	if _warp_tunnel  == null: missing.append("Warp tunnel ($HUD/WarpTunnel)")
 	if not missing.is_empty():
 		push_error("main.tscn is missing expected node(s): %s. Check the scene tree against the @onready paths in main.gd." % ", ".join(missing))
@@ -139,7 +141,7 @@ func _ready() -> void:
 	_connection.module_activated.connect(_on_module_activated)
 	_connection.module_deactivated.connect(_on_module_deactivated)
 	_connection.market_snapshot_received.connect(_on_market_snapshot)
-	_presentation.build(self, _camera, _warp_tunnel, _gates_root, _bodies_root, _world)
+	_presentation.build(self, _camera, _warp_tunnel, _gates_root, _bodies_root, _world, _directional_light)
 	_hud_surface.build(self, _hud, _stats_label)
 	_market_surface.build(
 		_hud,

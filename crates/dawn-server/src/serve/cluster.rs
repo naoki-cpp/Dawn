@@ -10,7 +10,7 @@ use crate::runtime_frame::{
     RuntimeNodeView,
 };
 use crate::{cluster, ws_server};
-use dawn_core::{DomainEvent, NodeId, PlayerId, Position, SectorBounds, SectorId, ShipId};
+use dawn_core::{DomainEvent, NodeId, PlayerId, SectorBounds, SectorId, ShipId};
 use dawn_protocol::ServerMessage;
 use dawn_sector::client_admission::{
     ClientAdmissionAttempt, ClientAdmissionIntent, ClientAdmissionRefusal, CommittedClientAdmission,
@@ -31,16 +31,6 @@ type HandshakeCompletion = (
 
 pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
     const SECTORS: usize = 3;
-    /// 2x the Alpha star (Helios) radius from Sector origin (matches
-    /// SimulationNode::DEFAULT_PLAYER_SPAWN): clear of the star body itself,
-    /// far short of Gate 0 (600,000 units, at the Sector edge), and well beyond
-    /// the 3,000u warp minimum, so warp/approach to the gate both work (ADR-0022).
-    const PLAYER_SPAWN: Position = Position {
-        x: 30_000.0,
-        y: 0.0,
-        z: 0.0,
-    };
-
     println!("═══════════════════════════════════════════");
     println!("  Phase 7.5 — Raft cluster WebSocket server ");
     println!("═══════════════════════════════════════════");
@@ -52,7 +42,9 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
         1000 / P4_TICK_MS
     );
     println!("  travel   : select Gate 0 (click its ring), press W to warp (or A to approach),");
-    println!("             then J to jump once in range (player spawns at the Sector origin)");
+    println!(
+        "             then J to jump once in range (fresh players begin at the local station)"
+    );
     println!();
     println!("  Open Godot client and press Play (F5)");
     println!("  Press Ctrl-C to stop");
@@ -170,12 +162,12 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                         },
                     )
                 }
-                None => (
-                    0,
-                    ClientAdmissionIntent::Fresh {
-                        spawn_position: PLAYER_SPAWN,
-                    },
-                ),
+                None => {
+                    let sector = 0;
+                    let spawn_position =
+                        hosts[sector].with_node_mut(|node| node.default_player_spawn_position());
+                    (sector, ClientAdmissionIntent::Fresh { spawn_position })
+                }
             };
             let mut attempt = match hosts[sector]
                 .with_node_mut(|node| node.begin_client_admission(intent, AOI_CELL_SIZE))
@@ -408,6 +400,7 @@ fn finish_cluster_admission<T>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dawn_core::Position;
 
     fn node_at(sector: u8) -> SimulationNode {
         SimulationNode::new(

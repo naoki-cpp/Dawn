@@ -33,6 +33,7 @@ When adding a new ADR, register it here too (the `/new-adr` skill does both).
 | [ADR-0050](ADR-0050-peer-transport.md) | Shared Versioned Peer Transport | Proposed |
 | [ADR-0051](ADR-0051-server-composition-boundary.md) | One Server Composition Boundary for Production and Local Runs | Accepted |
 | [ADR-0052](ADR-0052-workspace-boundaries.md) | Final workspace boundaries for protocol, storage, distributed coordination, and server composition | Accepted |
+| [ADR-0053](ADR-0053-celestial-presentation-boundary.md) | Physically grounded celestial presentation boundary | Accepted |
 
 ### Client / Communication
 

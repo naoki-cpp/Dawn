@@ -70,7 +70,7 @@ pub(crate) async fn run_phase4_server(
     // Duel-mode player spawn: close enough to the Bot to be within weapon
     // range (Small Railgun: 3000 range + 2000 falloff = 5000) from the
     // moment the human connects, instead of the universe-wide
-    // DEFAULT_PLAYER_SPAWN (30_000 units away -- so far from the Bot's
+    // station-derived spawn (so far from the Bot's
     // fixed spawn that every weapon activation was rejected as out-of-range
     // immediately after Lock, which looked to the player like the turret
     // flickering on then instantly off).
@@ -157,7 +157,7 @@ pub(crate) async fn run_phase4_server(
             let spawn_position = if duel_mode {
                 duel_player_spawn
             } else {
-                Position::new(30_000.0, 0.0, 0.0)
+                host.node().default_player_spawn_position()
             };
             let intent = match request.resume {
                 Some(resume) => ClientAdmissionIntent::Resume {

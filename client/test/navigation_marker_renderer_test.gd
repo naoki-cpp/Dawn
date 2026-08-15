@@ -7,6 +7,19 @@
 extends GdUnitTestSuite
 
 const __source: String = "res://scripts/navigation_marker_renderer.gd"
+const BracketScript = preload("res://scripts/billboard_bracket.gd")
+
+
+func test_billboard_bracket_is_a_fixed_size_four_corner_indicator() -> void:
+	var bracket: Sprite3D = auto_free(BracketScript.build(
+		Color(0.0, 1.0, 1.0), NavigationMarkerRenderer.BRACKET_PIXEL_SIZE))
+
+	assert_bool(bracket.fixed_size).is_true()
+	assert_bool(bracket.billboard == BaseMaterial3D.BILLBOARD_ENABLED).is_true()
+	assert_object(bracket.texture).is_not_null()
+	assert_float(BracketScript.HALF_EXTENT).is_equal(0.35)
+	assert_float(NavigationMarkerRenderer.BRACKET_PIXEL_SIZE).is_equal(0.0002)
+	assert_float(BracketScript.PICK_RADIUS_PX).is_equal(16.0)
 
 
 ## Canonical f64 WorldSpace rendering seam at world_scale=0.1.
@@ -15,6 +28,22 @@ func _to_godot_components(x: float, y: float, z: float) -> Vector3:
 
 func _position(x: float, y: float, z: float) -> PackedFloat64Array:
 	return PackedFloat64Array([x, y, z])
+
+
+func test_planet_profiles_are_deterministic_but_not_uniform() -> void:
+	var forge := NavigationMarkerRenderer.planet_profile(1, "Forge")
+	var meridian := NavigationMarkerRenderer.planet_profile(6, "Meridian")
+
+	assert_bool(forge.base != meridian.base).is_true()
+	assert_float(forge.seed).is_equal_approx(1.462, 0.0001)
+	assert_float(meridian.seed).is_equal_approx(5.117, 0.0001)
+
+
+func test_planet_material_uses_the_procedural_surface_shader() -> void:
+	var material := NavigationMarkerRenderer.planet_material(1, "Forge")
+
+	assert_object(material.shader).is_not_null()
+	assert_bool(material.get_shader_parameter("base_color") is Color).is_true()
 
 
 ## Typed fixture builders. The renderer takes `GateRecord`/`CelestialBodyRecord`/
@@ -29,21 +58,21 @@ func _gate(gate_id: int, pos: PackedFloat64Array, activation_radius: float, to_s
 	return g
 
 
-func _body(body_id: int, kind: String, name: String, pos: PackedFloat64Array, radius: float, spectral_type: float) -> CelestialBodyRecord:
+func _body(body_id: int, kind: String, body_name: String, pos: PackedFloat64Array, radius: float, spectral_type: float) -> CelestialBodyRecord:
 	var b := CelestialBodyRecord.new()
 	b.body_id = body_id
 	b.kind = kind
-	b.name = name
+	b.name = body_name
 	b.position = pos
 	b.radius = radius
 	b.spectral_type = spectral_type
 	return b
 
 
-func _station(station_id: int, name: String, pos: PackedFloat64Array, docking_radius: float) -> StationRecord:
+func _station(station_id: int, station_name: String, pos: PackedFloat64Array, docking_radius: float) -> StationRecord:
 	var st := StationRecord.new()
 	st.station_id = station_id
-	st.name = name
+	st.name = station_name
 	st.position = pos
 	st.docking_radius = docking_radius
 	return st
@@ -95,9 +124,12 @@ func test_spawn_gate_markers_builds_one_marker_per_gate_with_position_and_label(
 	assert_int(gates_root.get_child_count()).is_equal(1)
 	var marker: Node3D = gates_root.get_child(0) as Node3D
 	assert_vector(marker.position).is_equal_approx(Vector3(1.0, 0.0, -2.0), Vector3(0.0001, 0.0001, 0.0001))
+	assert_float(marker.get_meta("nav_pick_radius_px") as float).is_equal(BracketScript.PICK_RADIUS_PX)
 
 	var label: Label3D = marker.get_child(1) as Label3D
 	assert_str(label.text).is_equal("Gate #5 -> Beta")
+	var bracket: Sprite3D = marker.get_child(2) as Sprite3D
+	assert_bool(bracket.fixed_size).is_true()
 
 
 func test_spawn_gate_markers_builds_one_marker_per_array_entry() -> void:
@@ -131,6 +163,7 @@ func test_spawn_body_markers_skips_stars_and_only_tags_planet_markers() -> void:
 	var planet_marker: Node3D = bodies_root.get_child(0) as Node3D
 	assert_int(planet_marker.get_meta("body_id") as int).is_equal(2)
 	assert_str(planet_marker.get_meta("body_kind") as String).is_equal("Planet")
+	assert_float(planet_marker.get_meta("nav_pick_radius_px") as float).is_equal(BracketScript.PICK_RADIUS_PX)
 
 
 func test_spawn_body_markers_uses_the_body_name_as_the_label_text() -> void:
