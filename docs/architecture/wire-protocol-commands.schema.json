@@ -662,7 +662,7 @@
       ]
     },
     "WarpTarget": {
-      "description": "The destination of a `WarpCommand` (ADR-0025).",
+      "description": "The destination of a `WarpCommand`: a jump gate, celestial body, or station\nwithin the current Sector (ADR-0025).",
       "oneOf": [
         {
           "type": "object",
