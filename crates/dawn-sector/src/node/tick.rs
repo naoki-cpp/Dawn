@@ -186,13 +186,22 @@ impl SimulationNode {
 
         // Restore node-level maps before materialising a ship so a newly
         // admitted player ship receives PLAYER stats rather than NPC stats.
-        self.players.active_ship = delta.active_ships.clone().into_iter().collect();
-        self.players.owners = delta.owners.clone().into_iter().collect();
-        self.stations
-            .restore(delta.docked_ships.clone(), delta.docked_players.clone());
-        self.simulation.id_counter = delta.id_counter;
-        self.players.player_id_counter = delta.player_id_counter;
-        self.transit.transit_attempt_counter = delta.transit_attempt_counter;
+        // Same restore function take_snapshot's checkpoint path uses
+        // (ADR-0049, issue #312); transit_saga is restored separately below
+        // via restore_transit_saga's Saga reconciliation.
+        self.restore_node_state(&crate::transition::NodeState {
+            id_counter: delta.id_counter,
+            player_id_counter: delta.player_id_counter,
+            transit_attempt_counter: delta.transit_attempt_counter,
+            active_ships: delta.active_ships.clone(),
+            owners: delta.owners.clone(),
+            docked_ships: delta.docked_ships.clone(),
+            docked_players: delta.docked_players.clone(),
+            pending_bot_lock_commands: delta.pending_bot_lock_commands.clone(),
+            pending_auto_jumps: delta.pending_auto_jumps.clone(),
+            applied_market_settlements: delta.applied_market_settlements.clone(),
+            transit_saga: delta.transit_saga.clone(),
+        });
 
         for state in &delta.ship_states {
             if !self
@@ -208,8 +217,8 @@ impl SimulationNode {
         for ship_id in &delta.removed_ships {
             self.remove_ship(*ship_id);
         }
-        self.simulation.pending_bot_lock_commands = delta.pending_bot_lock_commands;
-        self.frame_outputs.pending_auto_jumps = delta.pending_auto_jumps;
+        // pending_bot_lock_commands/pending_auto_jumps were already restored
+        // above via restore_node_state.
         self.frame_outputs.completed_warps = delta.completed_warps;
         self.restore_transit_saga(delta.transit_saga)
             .map_err(TransitionApplyError::InvalidTransitSaga)?;
@@ -281,33 +290,41 @@ impl SimulationNode {
             })
             .copied()
             .collect();
+        // Node-level scalars/maps this Sector must reproduce exactly
+        // (ADR-0049, issue #312), shared with take_snapshot_at's
+        // construction (snapshot_io.rs) through the same capture function.
+        let crate::transition::NodeState {
+            id_counter,
+            player_id_counter,
+            transit_attempt_counter,
+            active_ships,
+            owners,
+            docked_ships,
+            docked_players,
+            pending_bot_lock_commands,
+            pending_auto_jumps,
+            applied_market_settlements,
+            transit_saga,
+        } = self.capture_node_state();
+
         let delta = TickRecoveryDelta {
             from: before_tick,
             to: result.tick,
             mode: TickRecoveryMode::Full,
             ship_states,
             removed_ships,
-            pending_bot_lock_commands: self.simulation.pending_bot_lock_commands.clone(),
-            pending_auto_jumps: self.frame_outputs.pending_auto_jumps.clone(),
+            pending_bot_lock_commands,
+            pending_auto_jumps,
             completed_warps: self.frame_outputs.completed_warps.clone(),
-            transit_attempt_counter: self.transit.transit_attempt_counter,
-            id_counter: self.simulation.id_counter,
-            player_id_counter: self.players.player_id_counter,
-            active_ships: self
-                .players
-                .active_ship
-                .iter()
-                .map(|(&player, &ship)| (player, ship))
-                .collect(),
-            owners: self
-                .players
-                .owners
-                .iter()
-                .map(|(&ship, &player)| (ship, player))
-                .collect(),
-            docked_ships: self.stations.snapshot_docked_ships(),
-            docked_players: self.stations.snapshot_docked_players(),
-            transit_saga: self.transit_saga_snapshot(),
+            transit_attempt_counter,
+            id_counter,
+            player_id_counter,
+            active_ships,
+            owners,
+            docked_ships,
+            docked_players,
+            applied_market_settlements,
+            transit_saga,
         };
 
         self.simulation.current_tick = before_tick;
@@ -1070,6 +1087,55 @@ mod tests {
             .ships
             .index
             .contains_key(&destroyed_ship));
+    }
+
+    /// ADR-0049 / issue #312: `applied_market_settlements` used to be
+    /// present in `StateSnapshot` but missing from `TickRecoveryDelta`, so a
+    /// settlement dedup guard survived a checkpoint restore but not a
+    /// tick-rollback recovery replay. `capture_node_state`/`restore_node_state`
+    /// close that gap for both.
+    #[test]
+    fn applied_market_settlements_survive_a_full_tick_recovery_replay() {
+        let mut node = mem_node();
+        node.simulation.applied_market_settlements.insert(99);
+
+        let mut journal = InMemoryJournal::new();
+        crate::transit::commit_tick_state_transition(
+            &mut node,
+            &mut journal,
+            &[],
+            SectorTransitionId(1),
+            4,
+            DurabilityMode::Synced,
+        )
+        .expect("durable full Tick should apply");
+
+        let record = journal.records()[0].clone();
+        let delta = crate::transition::decode_recovery_delta(&record.payload)
+            .expect("journal payload should contain the full Tick delta");
+        assert!(
+            matches!(&delta, SectorRecoveryDelta::Tick(delta)
+                if delta.applied_market_settlements.contains(&99)),
+            "the delta must carry the settlement dedup guard, not just the checkpoint"
+        );
+
+        let mut recovered = mem_node();
+        recovered
+            .apply_recovery_delta(
+                delta,
+                TransitionContext {
+                    sector_id: record.context.sector_id,
+                    owner_epoch: record.context.owner_epoch,
+                },
+            )
+            .expect("full Tick delta should replay");
+        assert!(
+            recovered
+                .simulation
+                .applied_market_settlements
+                .contains(&99),
+            "a settlement dedup guard must survive a tick-rollback recovery replay"
+        );
     }
 
     #[test]

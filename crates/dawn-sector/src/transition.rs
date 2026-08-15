@@ -16,7 +16,35 @@ use thiserror::Error;
 use crate::persistence::ShipSnapshot;
 
 /// Version of the recovery-delta payload produced by this module.
-pub const RECOVERY_DELTA_VERSION: u16 = 1;
+///
+/// Bumped 1 -> 2 (ADR-0049, issue #312): added `applied_market_settlements`,
+/// which was already in `StateSnapshot` but missing from
+/// `TickRecoveryDelta` -- a lost settlement ACK became replayable after a
+/// tick-rollback but not after a full checkpoint restore. Pre-release; no
+/// upcaster required.
+pub const RECOVERY_DELTA_VERSION: u16 = 2;
+
+/// Node-level scalar/collection authoritative state that both a tick's
+/// recovery delta and a checkpoint must reproduce exactly (ADR-0049, issue
+/// #312) -- captured and restored through one function pair
+/// (`SimulationNode::capture_node_state`/`restore_node_state`) instead of
+/// `TickRecoveryDelta` and `StateSnapshot` construction/restoration each
+/// hand-duplicating the same field list. Ship-level state is `ShipState`,
+/// captured separately.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NodeState {
+    pub id_counter: u64,
+    pub player_id_counter: u64,
+    pub transit_attempt_counter: u64,
+    pub active_ships: BTreeMap<PlayerId, ShipId>,
+    pub owners: BTreeMap<ShipId, PlayerId>,
+    pub docked_ships: BTreeMap<ShipId, StationId>,
+    pub docked_players: BTreeMap<PlayerId, StationId>,
+    pub pending_bot_lock_commands: Vec<LockOnCommand>,
+    pub pending_auto_jumps: Vec<(ShipId, JumpGateId)>,
+    pub applied_market_settlements: Vec<u64>,
+    pub transit_saga: crate::persistence::TransitSagaSnapshot,
+}
 
 /// Opaque identity for one logical Sector transition.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -97,6 +125,10 @@ pub struct TickRecoveryDelta {
     pub owners: BTreeMap<ShipId, PlayerId>,
     pub docked_ships: BTreeMap<ShipId, StationId>,
     pub docked_players: BTreeMap<PlayerId, StationId>,
+    /// Market settlement identities already applied to ship cargo. Keeping
+    /// these in the delta makes a lost settlement ACK safe to retry, the
+    /// same guarantee the checkpoint already gave (ADR-0049, issue #312).
+    pub applied_market_settlements: Vec<u64>,
     pub transit_saga: crate::persistence::TransitSagaSnapshot,
 }
 
@@ -124,6 +156,7 @@ impl TickRecoveryDelta {
             owners: BTreeMap::new(),
             docked_ships: BTreeMap::new(),
             docked_players: BTreeMap::new(),
+            applied_market_settlements: Vec::new(),
             transit_saga: crate::persistence::TransitSagaSnapshot::default(),
         }
     }

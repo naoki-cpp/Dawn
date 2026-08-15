@@ -1,7 +1,7 @@
 use crate::persistence::StateSnapshot;
 
 use super::{
-    state::{FrameOutputs, GameData, PlayerState, SectorTopology, SimulationState, TransitState},
+    state::{GameData, SectorTopology, SimulationState},
     SimulationNode,
 };
 
@@ -26,12 +26,14 @@ impl SimulationNode {
             sector_id,
             bounds,
             simulation,
-            players,
-            stations,
-            transit,
+            // Covered by capture_node_state() below.
+            players: _,
+            stations: _,
+            transit: _,
             topology,
             game_data,
-            frame_outputs,
+            // Covered by capture_node_state() below.
+            frame_outputs: _,
             persistence: _,
         } = self;
         let SimulationState {
@@ -42,23 +44,10 @@ impl SimulationNode {
             id_counter,
             ships: ship_registry,
             base_stats: _,
-            pending_bot_lock_commands,
-            applied_market_settlements,
+            // Covered by capture_node_state() below.
+            pending_bot_lock_commands: _,
+            applied_market_settlements: _,
         } = simulation;
-        let PlayerState {
-            player_id_counter,
-            active_ship,
-            owners,
-            pending_fresh_admissions: _,
-            pending_resume_admissions: _,
-            population_cap: _,
-        } = players;
-        let docked_ships = stations.snapshot_docked_ships();
-        let docked_players = stations.snapshot_docked_players();
-        let TransitState {
-            transit_attempt_counter,
-            transit_journal,
-        } = transit;
         let SectorTopology {
             sector_map: _,
             anchor_table: _,
@@ -68,17 +57,11 @@ impl SimulationNode {
             ship_type_registry: _,
             catalog_fingerprint,
         } = game_data;
-        let FrameOutputs {
-            pending_events: _,
-            pending_auto_jumps,
-            completed_warps: _,
-        } = frame_outputs;
 
-        let mut applied_market_settlements = applied_market_settlements
-            .iter()
-            .copied()
-            .collect::<Vec<_>>();
-        applied_market_settlements.sort_unstable();
+        // Node-level scalars/maps this Sector must reproduce exactly
+        // (ADR-0049, issue #312), shared with TickRecoveryDelta's
+        // construction (tick.rs) through the same capture function.
+        let node_state = self.capture_node_state();
 
         // One capture per ship, through the same optional-component list the
         // tick-prepare rollback and TickRecoveryDelta use (ADR-0049, issue
@@ -98,6 +81,24 @@ impl SimulationNode {
         // `ShipId: Ord` is canonical id order (node_id then counter).
         ships.sort_by_key(|s| s.snapshot.ship_id);
 
+        let crate::transition::NodeState {
+            id_counter: node_id_counter,
+            player_id_counter,
+            transit_attempt_counter,
+            active_ships,
+            owners,
+            docked_ships,
+            docked_players,
+            pending_bot_lock_commands,
+            pending_auto_jumps,
+            applied_market_settlements,
+            transit_saga,
+        } = node_state;
+        debug_assert_eq!(
+            node_id_counter, *id_counter,
+            "capture_node_state must read the same id_counter as this destructure"
+        );
+
         StateSnapshot {
             node_id: *node_id,
             sector_id: *sector_id,
@@ -105,25 +106,98 @@ impl SimulationNode {
             covered_recovery_index,
             tick: *current_tick,
             id_counter: *id_counter,
-            player_id_counter: *player_id_counter,
+            player_id_counter,
             catalog_fingerprint: *catalog_fingerprint,
-            transit_attempt_counter: *transit_attempt_counter,
+            transit_attempt_counter,
             ships,
-            owners: owners
-                .iter()
-                .map(|(&ship, &player)| (ship, player))
-                .collect(),
+            owners,
             docked_ships,
             docked_players,
-            transit_saga: transit_journal.snapshot(),
-            active_ships: active_ship
+            transit_saga,
+            active_ships,
+            pending_bot_lock_commands,
+            pending_auto_jumps,
+            applied_market_settlements,
+        }
+    }
+
+    /// Capture every node-level scalar/collection this Sector must reproduce
+    /// exactly after a tick rollback or a checkpoint restore (ADR-0049,
+    /// issue #312) -- the single function `take_snapshot_at` and
+    /// `prepare_tick_state_transition_with_result` (tick.rs) both call,
+    /// instead of each re-deriving the same fields by hand. `transit_saga`
+    /// is captured here for completeness but restored separately by
+    /// `restore_transit_saga`, which does Saga reconciliation beyond a plain
+    /// field copy.
+    pub(super) fn capture_node_state(&self) -> crate::transition::NodeState {
+        let mut applied_market_settlements: Vec<u64> = self
+            .simulation
+            .applied_market_settlements
+            .iter()
+            .copied()
+            .collect();
+        applied_market_settlements.sort_unstable();
+
+        crate::transition::NodeState {
+            id_counter: self.simulation.id_counter,
+            player_id_counter: self.players.player_id_counter,
+            transit_attempt_counter: self.transit.transit_attempt_counter,
+            active_ships: self
+                .players
+                .active_ship
                 .iter()
                 .map(|(&player, &ship)| (player, ship))
                 .collect(),
-            pending_bot_lock_commands: pending_bot_lock_commands.clone(),
-            pending_auto_jumps: pending_auto_jumps.clone(),
+            owners: self
+                .players
+                .owners
+                .iter()
+                .map(|(&ship, &player)| (ship, player))
+                .collect(),
+            docked_ships: self.stations.snapshot_docked_ships(),
+            docked_players: self.stations.snapshot_docked_players(),
+            pending_bot_lock_commands: self.simulation.pending_bot_lock_commands.clone(),
+            pending_auto_jumps: self.frame_outputs.pending_auto_jumps.clone(),
             applied_market_settlements,
+            transit_saga: self.transit_saga_snapshot(),
         }
+    }
+
+    /// Restore every field `capture_node_state` captures except
+    /// `transit_saga`, which the caller applies separately via
+    /// `restore_transit_saga`.
+    pub(super) fn restore_node_state(&mut self, node: &crate::transition::NodeState) {
+        let crate::transition::NodeState {
+            id_counter,
+            player_id_counter,
+            transit_attempt_counter,
+            active_ships,
+            owners,
+            docked_ships,
+            docked_players,
+            pending_bot_lock_commands,
+            pending_auto_jumps,
+            applied_market_settlements,
+            transit_saga: _,
+        } = node;
+
+        self.simulation.id_counter = *id_counter;
+        self.players.player_id_counter = *player_id_counter;
+        self.transit.transit_attempt_counter = *transit_attempt_counter;
+        self.players.active_ship = active_ships
+            .iter()
+            .map(|(&player, &ship)| (player, ship))
+            .collect();
+        self.players.owners = owners
+            .iter()
+            .map(|(&ship, &player)| (ship, player))
+            .collect();
+        self.stations
+            .restore(docked_ships.clone(), docked_players.clone());
+        self.simulation.pending_bot_lock_commands = pending_bot_lock_commands.clone();
+        self.frame_outputs.pending_auto_jumps = pending_auto_jumps.clone();
+        self.simulation.applied_market_settlements =
+            applied_market_settlements.iter().copied().collect();
     }
 
     /// Apply the node-level scalars and maps carried by `snapshot`.
@@ -166,28 +240,29 @@ impl SimulationNode {
         self.sector_id = *sector_id;
         self.bounds = *bounds;
         self.simulation.current_tick = *tick;
-        self.simulation.id_counter = *id_counter;
-        self.players.player_id_counter = *player_id_counter;
-        self.transit.transit_attempt_counter = *transit_attempt_counter;
-        self.stations
-            .restore(docked_ships.clone(), docked_players.clone());
-        self.players.owners = owners
-            .iter()
-            .map(|(&ship, &player)| (ship, player))
-            .collect();
-        self.players.active_ship = active_ships
-            .iter()
-            .map(|(&player, &ship)| (player, ship))
-            .collect();
+
+        // Same restore function TickRecoveryDelta application uses
+        // (ADR-0049, issue #312) for every node-level field except
+        // transit_saga, applied below through the Saga's own reconciling
+        // restore rather than a plain field copy.
+        self.restore_node_state(&crate::transition::NodeState {
+            id_counter: *id_counter,
+            player_id_counter: *player_id_counter,
+            transit_attempt_counter: *transit_attempt_counter,
+            active_ships: active_ships.clone(),
+            owners: owners.clone(),
+            docked_ships: docked_ships.clone(),
+            docked_players: docked_players.clone(),
+            pending_bot_lock_commands: pending_bot_lock_commands.clone(),
+            pending_auto_jumps: pending_auto_jumps.clone(),
+            applied_market_settlements: applied_market_settlements.clone(),
+            transit_saga: transit_saga.clone(),
+        });
         self.transit.transit_journal = crate::transit::handoff::TransitJournal::from_snapshot(
             *sector_id,
             transit_saga.clone(),
         )
         .expect("checkpoint contains an invalid Transit Saga for this Sector");
-        self.simulation.pending_bot_lock_commands = pending_bot_lock_commands.clone();
-        self.simulation.applied_market_settlements =
-            applied_market_settlements.iter().copied().collect();
-        self.frame_outputs.pending_auto_jumps = pending_auto_jumps.clone();
     }
 }
 
