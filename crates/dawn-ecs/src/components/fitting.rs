@@ -7,7 +7,7 @@ use dawn_core::ShipId;
 use std::collections::BTreeMap;
 
 /// One fitted slot (module definition + runtime activation state).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FittedSlot {
     pub def: ModuleDefinition,
     /// Active modules only.  Passive modules are always effective.
@@ -55,7 +55,7 @@ impl FittedSlot {
 ///
 /// 装備変更または活性化状態変更後は必ず `apply_fitting()` を呼び出し
 /// `ShipStatsComp` を再集計すること。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FittingComp {
     pub high: Vec<FittedSlot>,
     pub mid: Vec<FittedSlot>,

@@ -28,10 +28,12 @@
 #![warn(missing_debug_implementations)]
 
 pub mod components;
+pub mod ship_optional_state;
 pub mod systems;
 pub mod world;
 
 pub use components::{ShipStatsComp, ThrustComp, TransitComp, TransitState};
+pub use ship_optional_state::OptionalShipComponents;
 pub use world::SimWorld;
 // Re-export so upper crates don't need a direct hecs dependency.
 pub use hecs::Entity;
