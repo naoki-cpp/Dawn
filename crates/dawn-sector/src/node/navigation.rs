@@ -44,8 +44,9 @@ impl SimulationNode {
         gate.is_in_range_abs(self.entity_absolute_f64(entity, offset))
     }
 
-    /// Whether a `WarpCommand` for `ship_id` toward `target` would currently be
-    /// accepted (INV-006 Validation, before attaching `WarpComp`):
+    /// Whether a `WarpCommand` for `ship_id` toward a gate, body, or station
+    /// would currently be accepted (INV-006 Validation, before attaching
+    /// `WarpComp`):
     /// the Ship exists, is not in transit, is not already warping, not tackled,
     /// the target belongs to this Sector, and is at least `MIN_WARP_DISTANCE` away.
     pub fn can_propose_warp(&self, ship_id: ShipId, target: WarpTarget) -> bool {
@@ -94,6 +95,12 @@ impl SimulationNode {
                     ship_abs[2] - body.abs_m[2],
                 ];
                 (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt() >= min
+            }
+            WarpTarget::Station(station_id) => {
+                let Some(station) = self.topology.sector_map.stations.get(&station_id) else {
+                    return false;
+                };
+                station.distance_abs(ship_abs) >= min
             }
         }
     }

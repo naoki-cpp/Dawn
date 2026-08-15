@@ -17,7 +17,7 @@ const WARP_TUNNEL_THRESHOLD : float = 2_000.0
 const WARP_TUNNEL_FADE_IN_RATE : float = 3.0
 const WARP_TUNNEL_FADE_OUT_RATE : float = 0.5
 const WARP_TUNNEL_MAX_VISUAL_DELTA : float = 0.1
-const WARP_TUNNEL_FOV_BOOST : float = 15.0
+const WARP_TUNNEL_FOV_BOOST : float = 7.0
 const SUN_MIN_RENDER_ANGULAR_RADIUS : float = 0.0001
 const SUN_DIRECTION_EPSILON : float = 1.0
 const SUN_FAR_DIRECTION : Vector3 = Vector3(0.62, 0.31, 0.72)
@@ -197,6 +197,33 @@ static func next_warp_tunnel_amount(
 	return move_toward(current, target, visual_delta * fade_out_rate)
 
 
+static func screen_flow_direction(
+	velocity: Vector3,
+	camera_right: Vector3,
+	camera_up: Vector3
+) -> Vector2:
+	if velocity.length_squared() <= 0.0001:
+		return Vector2(0.0, -1.0)
+	var projected := Vector2(
+		velocity.dot(camera_right),
+		-velocity.dot(camera_up))
+	return projected.normalized() if projected.length_squared() > 0.0001 else Vector2(0.0, -1.0)
+
+
+static func screen_flow_confidence(
+	velocity: Vector3,
+	camera_right: Vector3,
+	camera_up: Vector3
+) -> float:
+	var speed := velocity.length()
+	if speed <= 0.0001:
+		return 0.0
+	var projected := Vector2(
+		velocity.dot(camera_right),
+		-velocity.dot(camera_up))
+	return clampf(projected.length() / speed, 0.0, 1.0)
+
+
 static func sun_state(
 	bodies: Array,
 	player_server: PackedFloat64Array,
@@ -322,11 +349,22 @@ func _update_body_lod(marker: Node3D, is_physically_visible: bool) -> void:
 
 func _update_warp_tunnel_effect(delta: float, player_ship_id: int, ships: Dictionary) -> void:
 	var speed_godot := 0.0
+	var flow_direction := Vector2(0.0, -1.0)
+	var flow_confidence := 0.0
 	if player_ship_id >= 0 and ships.has(player_ship_id):
-		speed_godot = (ships[player_ship_id] as Node3D).call("get_speed_godot") as float
+		var player_ship: Node3D = ships[player_ship_id] as Node3D
+		speed_godot = player_ship.call("get_speed_godot") as float
+		if _camera != null and player_ship.has_method("get_velocity_godot"):
+			var velocity: Vector3 = player_ship.call("get_velocity_godot") as Vector3
+			flow_direction = screen_flow_direction(
+				velocity, _camera.global_basis.x, _camera.global_basis.y)
+			flow_confidence = screen_flow_confidence(
+				velocity, _camera.global_basis.x, _camera.global_basis.y)
 	_warp_tunnel_amount = next_warp_tunnel_amount(_warp_tunnel_amount, speed_godot, delta)
 	if _warp_tunnel != null:
 		_warp_tunnel.call("set_intensity", _warp_tunnel_amount)
+		_warp_tunnel.call("set_flow_direction", flow_direction)
+		_warp_tunnel.call("set_direction_confidence", flow_confidence)
 	if _camera != null:
 		_camera.fov = _camera_base_fov + WARP_TUNNEL_FOV_BOOST * _warp_tunnel_amount
 

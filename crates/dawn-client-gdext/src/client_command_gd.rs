@@ -275,6 +275,15 @@ impl ClientCommand {
     }
 
     #[func]
+    fn warp_to_station_command(&self, station_id: i64) -> Gd<ClientCommandResult> {
+        request_result((|| {
+            Ok(ClientRequest::Warp {
+                target: WarpTarget::Station(StationId(u32_id(station_id, "station_id")?)),
+            })
+        })())
+    }
+
+    #[func]
     fn orbit_command(&self, target_id: i64, radius: f64) -> Gd<ClientCommandResult> {
         request_result((|| {
             Ok(ClientRequest::Orbit {

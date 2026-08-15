@@ -39,6 +39,15 @@ func test_primary_click_selects_body_when_it_is_the_only_hit() -> void:
 	assert_int(_interaction.selected_gate_id()).is_equal(-1)
 
 
+func test_primary_click_selects_station_when_it_is_the_only_navigation_hit() -> void:
+	var intent := _interaction.interpret_primary_click(
+		Vector2(100.0, 50.0), 1.0, false, 7, -1, -1, -1, 3)
+
+	assert_bool(intent.is_selection_changed()).is_true()
+	assert_int(_interaction.selected_station_id()).is_equal(3)
+	assert_int(_interaction.selected_body_id()).is_equal(-1)
+
+
 func test_double_click_returns_move_intent_without_changing_typed_selection() -> void:
 	_interaction.interpret_primary_click(Vector2(100.0, 50.0), 1.0, false, 7, 12, -1, -1)
 

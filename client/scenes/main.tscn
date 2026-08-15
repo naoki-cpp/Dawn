@@ -9,8 +9,14 @@
 [sub_resource type="ShaderMaterial" id="SM_warptunnel"]
 shader = ExtResource("5_warpshader")
 shader_parameter/intensity = 0.0
+shader_parameter/opacity = 0.42
 shader_parameter/scroll_speed = 6.0
-shader_parameter/tunnel_color = Color(0.55, 0.75, 1.0, 1.0)
+shader_parameter/pulse_speed = 2.4
+shader_parameter/flow_direction = Vector2(0, -1)
+shader_parameter/direction_confidence = 0.0
+shader_parameter/tunnel_color = Color(0.30, 0.48, 0.76, 1)
+shader_parameter/accent_color = Color(0.72, 0.57, 0.36, 1)
+shader_parameter/core_color = Color(0.78, 0.84, 0.92, 1)
 
 [node name="Main" type="Node"]
 script = ExtResource("1_main")

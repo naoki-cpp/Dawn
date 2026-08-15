@@ -42,10 +42,11 @@ pub struct CelestialBodyDef {
     pub spectral_type: f32,
 }
 
-/// ワープターゲット。ゲートまたは天体を指定できる（ADR-0022 の拡張）。
+/// ワープターゲット。ゲート、天体、またはステーションを指定できる（ADR-0022 の拡張）。
 pub enum WarpTarget {
     Gate(JumpGateId),
     Body(CelestialBodyId),
+    Station(StationId),
 }
 ```
 
@@ -111,8 +112,9 @@ pub enum WarpTarget {
 
 - `Gate` ターゲット：従来どおり `activation_radius × 0.75` で停止。
 - `Body` ターゲット：`body.radius × 1.5` の地点で停止（`BODY_WARP_ARRIVAL_FACTOR = 1.5`）。
+- `Station` ターゲット：`docking_radius × 0.8` の地点で停止し、そのまま入港可能な範囲に入る。
 
-`auto_jump` は `Gate` ターゲット専用。`Body` ターゲットでは無視する。
+`auto_jump` は `Gate` ターゲット専用。`Body` と `Station` ターゲットでは無視する。
 
 ### 4. 空シェーダーの太陽方向（space_sky.gdshader）
 
@@ -166,6 +168,7 @@ uniform float sun_angular_radius; // 観測距離に応じた見かけの半径�
 ```json
 {"type":"WarpCommand","ship_id":1,"target":{"Gate":2}}
 {"type":"WarpCommand","ship_id":1,"target":{"Body":1}}
+{"type":"WarpCommand","ship_id":1,"target":{"Station":0}}
 ```
 
 旧形式 `{"gate_id":N}` も後方互換として受け付ける（`protocol.rs` の `parse_client_command`）。

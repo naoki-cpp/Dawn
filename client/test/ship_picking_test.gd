@@ -184,3 +184,32 @@ func test_pick_body_at_returns_minus_one_when_marker_is_behind_the_camera() -> v
 
 	var picked: int = ShipPicking.pick_body_at(camera, _screen_center(), bodies_root)
 	assert_int(picked).is_equal(-1)
+
+
+func test_pick_station_at_returns_station_marker_id() -> void:
+	var camera: Camera3D = _make_camera()
+	var bodies_root: Node = auto_free(Node.new())
+	add_child(bodies_root)
+	var marker := Node3D.new()
+	marker.set_meta("station_id", 12)
+	marker.set_meta("nav_pick_radius_px", 12.0)
+	marker.position = Vector3(0.0, 0.0, -10.0)
+	bodies_root.add_child(marker)
+
+	var picked: int = ShipPicking.pick_station_at(camera, _screen_center(), bodies_root)
+
+	assert_int(picked).is_equal(12)
+
+
+func test_pick_station_at_ignores_body_markers() -> void:
+	var camera: Camera3D = _make_camera()
+	var bodies_root: Node = auto_free(Node.new())
+	add_child(bodies_root)
+	var marker := Node3D.new()
+	marker.set_meta("body_id", 12)
+	marker.position = Vector3(0.0, 0.0, -10.0)
+	bodies_root.add_child(marker)
+
+	var picked: int = ShipPicking.pick_station_at(camera, _screen_center(), bodies_root)
+
+	assert_int(picked).is_equal(-1)

@@ -390,14 +390,15 @@ pub struct JumpCommand {
     pub gate_id: JumpGateId,
 }
 
-/// Request to warp the caller's active ship toward a Jump Gate or a celestial
-/// body within its current Sector (intra-Sector short-range Fold,
+/// Request to warp the caller's active ship toward a Jump Gate, celestial body,
+/// or station within its current Sector (intra-Sector short-range Fold,
 /// ADR-0022/ADR-0025).
 ///
 /// An accepted warp is a persistent two-phase steering mode (`WarpComp`):
 /// an interruptible alignment phase, then a committed warping phase.
 /// For Gate targets, the ship stops inside the gate's `activation_radius`.
 /// For Body targets, the ship stops at `body.radius * 1.5` from the centre.
+/// For Station targets, the ship stops inside the station's `docking_radius`.
 ///
 /// May be rejected (`can_propose_warp`) if:
 /// - The Ship does not exist, is in transit, or is already warping.

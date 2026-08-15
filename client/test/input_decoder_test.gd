@@ -70,6 +70,10 @@ func test_warp_and_orbit_keep_navigation_targets_typed() -> void:
 	assert_bool(intent.is_warp_to_body()).is_true()
 	assert_int(intent.body_id()).is_equal(3)
 
+	intent = _decode(KEY_W, 1, ClientSelection.station(4))
+	assert_bool(intent.is_warp_to_station()).is_true()
+	assert_int(intent.station_id()).is_equal(4)
+
 	intent = _decode(KEY_O, 1, ClientSelection.gate(5))
 	assert_bool(intent.is_orbit_gate()).is_true()
 	assert_int(intent.gate_id()).is_equal(5)

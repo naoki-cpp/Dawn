@@ -27,6 +27,13 @@ func test_sector_builder_reports_invalid_input_without_a_byte_sentinel() -> void
 	assert_bool(result.error_message.is_empty()).is_false()
 
 
+func test_station_warp_builder_returns_typed_success_result() -> void:
+	var result: ClientCommandResult = _command.warp_to_station_command(4)
+
+	assert_bool(result.ok).is_true()
+	assert_bool(result.bytes.is_empty()).is_false()
+
+
 func test_market_builders_are_dedicated_typed_methods() -> void:
 	assert_bool(_command.has_method("market_build")).is_false()
 

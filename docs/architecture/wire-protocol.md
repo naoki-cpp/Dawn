@@ -107,7 +107,7 @@ or direction strings for the server to parse.
 Navigation targets are closed enums:
 
 - `Approach`, `Orbit`, and `KeepAtRange`: `ApproachTarget::{Ship, Gate}`
-- `Warp`: `WarpTarget::{Gate, Body}`
+- `Warp`: `WarpTarget::{Gate, Body, Station}`
 
 `TransferCargo` carries one canonical `ItemId` and a typed
 `TransferDirection::{ToStation, ToShip}`. ID-bearing `ItemId` variants reject

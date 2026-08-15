@@ -31,12 +31,16 @@ func selected_body_id() -> int:
 	return _selection.id() if _selection.is_body() else -1
 
 
+func selected_station_id() -> int:
+	return _selection.id() if _selection.is_station() else -1
+
+
 func clear_selection() -> void:
 	_selection = ClientSelection.none()
 
 
 func clear_navigation_selection() -> void:
-	if _selection.is_gate() or _selection.is_body():
+	if _selection.is_gate() or _selection.is_body() or _selection.is_station():
 		_selection = ClientSelection.none()
 
 
@@ -69,7 +73,8 @@ func interpret_primary_click(
 	player_ship_id: int,
 	hit_ship_id: int,
 	hit_gate_id: int,
-	hit_body_id: int
+	hit_body_id: int,
+	hit_station_id: int = -1
 ) -> ClientIntent:
 	if player_ship_id < 0:
 		return ClientIntent.none()
@@ -90,6 +95,9 @@ func interpret_primary_click(
 		return ClientIntent.selection_changed()
 	if hit_gate_id >= 0:
 		_selection = ClientSelection.gate(hit_gate_id)
+		return ClientIntent.selection_changed()
+	if hit_station_id >= 0:
+		_selection = ClientSelection.station(hit_station_id)
 		return ClientIntent.selection_changed()
 	if hit_body_id >= 0:
 		_selection = ClientSelection.body(hit_body_id)
