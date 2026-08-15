@@ -739,6 +739,130 @@ mod tests {
         );
     }
 
+    /// ADR-0049 / issue #312: a checkpoint must reproduce flight-mode state,
+    /// lock countdowns, and module cycle counters exactly
+    /// (recovery-contract.md rows 193/196/198), not just position/velocity/
+    /// HP/fitting-without-cycle (covered by the test above). `StateSnapshot`
+    /// currently builds its own `ShipSnapshot` list by hand
+    /// (`take_snapshot_at`) instead of routing through the shared
+    /// optional-component capture from #312 step 1/2, so none of these three
+    /// survive a restore today.
+    #[test]
+    fn warp_lock_and_module_cycle_state_survive_snapshot_restore() {
+        use crate::{modules, ship_types};
+        use dawn_core::events::ShipFitted;
+        use dawn_core::fitting::{FittingSnapshot, SlotEntry};
+        use dawn_core::navigation::WarpTarget;
+        use dawn_core::{AbsolutePosition, DomainEvent, JumpGateId};
+        use dawn_ecs::components::{
+            FittingComp, LockComp, LockEntry, LockState, WarpComp, WarpPhase,
+        };
+
+        let mut node = mem_node();
+
+        let ship_id = node.spawn_ship(
+            ship_types::SHIP_TYPE_MAGPIE,
+            Position::ORIGIN,
+            Velocity::ZERO,
+        );
+        let target_id = node.spawn_ship(
+            ship_types::SHIP_TYPE_MAGPIE,
+            Position::new(500.0, 0.0, 0.0),
+            Velocity::ZERO,
+        );
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
+
+        // Mid-warp.
+        node.simulation.world.insert_one(
+            entity,
+            WarpComp {
+                target: WarpTarget::Gate(JumpGateId(1)),
+                phase: WarpPhase::Warping,
+                auto_jump: false,
+                warp_start_abs: AbsolutePosition([0.0, 0.0, 0.0]),
+                warp_total: 20,
+                warp_elapsed: 7,
+                warp_arrival_abs: AbsolutePosition([1000.0, 0.0, 0.0]),
+                warp_start_vel: Velocity::ZERO,
+            },
+        );
+
+        // Active lock on target_id.
+        node.simulation.world.insert_one(
+            entity,
+            LockComp {
+                entries: vec![LockEntry {
+                    target_id,
+                    state: LockState::Locked,
+                }],
+            },
+        );
+
+        // Fitted, active, partially-cycled module.
+        node.apply_event_pub(DomainEvent::ShipFitted(ShipFitted {
+            ship_id,
+            fitting: FittingSnapshot {
+                high: vec![SlotEntry {
+                    module_id: modules::MODULE_AFTERBURNER,
+                    is_active: true,
+                }],
+                mid: vec![],
+                low: vec![],
+                rig: vec![],
+            },
+            inventory: vec![],
+            market_settlement_id: None,
+            tick: Tick(1),
+        }));
+        {
+            let mut fitting = node
+                .simulation
+                .world
+                .get_mut::<FittingComp>(entity)
+                .expect("fitting was just set by ShipFitted");
+            fitting.high[0].cycle_remaining = 3;
+        }
+
+        let snap = node.take_snapshot();
+        let node2 = SimulationNode::restore_from(
+            &snap,
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
+            crate::game_data::test_catalog_arc(),
+        );
+
+        assert_eq!(
+            node2.warp_phase(ship_id),
+            Some(WarpPhase::Warping),
+            "warp state must survive a checkpoint restore (recovery-contract.md row 193)"
+        );
+
+        let entity2 = *node2
+            .simulation
+            .ships
+            .index
+            .get(&ship_id)
+            .expect("ship must exist after restore");
+        let lock = node2.simulation.world.get::<LockComp>(entity2);
+        assert!(
+            lock.as_deref().is_some_and(|lock| lock
+                .entries
+                .iter()
+                .any(|entry| entry.target_id == target_id
+                    && matches!(entry.state, LockState::Locked))),
+            "an active lock must survive a checkpoint restore (recovery-contract.md row 198)"
+        );
+
+        let fitting2 = node2
+            .simulation
+            .world
+            .get::<FittingComp>(entity2)
+            .expect("fitting must survive a checkpoint restore");
+        assert_eq!(
+            fitting2.high[0].cycle_remaining, 3,
+            "module cycle_remaining must survive a checkpoint restore (recovery-contract.md row 196)"
+        );
+    }
+
     /// INV-002 / ADR-0029 — a warp-to-body rebases the ship onto the body's
     /// anchor via an authoritative `AnchorRebased` event, leaving its raw
     /// `PositionComp` body-relative. The snapshot must capture that anchor (not
