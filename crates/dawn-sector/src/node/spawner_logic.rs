@@ -689,8 +689,9 @@ mod tests {
         assert_eq!(
             snap.ships
                 .iter()
-                .find(|s| s.ship_id == ship)
+                .find(|s| s.snapshot.ship_id == ship)
                 .unwrap()
+                .snapshot
                 .anchor,
             AnchorId(1),
             "snapshot must capture the rebased anchor"

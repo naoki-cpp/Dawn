@@ -423,7 +423,9 @@ impl SimulationNode {
         node.apply_snapshot(snapshot);
 
         for ship in &snapshot.ships {
-            node.restore_ship_from_snapshot(ship);
+            node.restore_ship_from_snapshot(&ship.snapshot);
+            node.apply_tick_ship_state(ship)
+                .expect("checkpoint ship state must be internally consistent");
         }
 
         node.restore_transit_saga(snapshot.transit_saga.clone())

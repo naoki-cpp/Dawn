@@ -588,7 +588,9 @@ fn duplicate_commit_after_checkpoint_does_not_resurrect_removed_ship() {
     ));
 
     let mut checkpoint = destination.take_snapshot();
-    checkpoint.ships.retain(|ship| ship.ship_id != ship_id);
+    checkpoint
+        .ships
+        .retain(|ship| ship.snapshot.ship_id != ship_id);
     let mut restored = SimulationNode::restore_from_test(
         InMemoryEventStore::new(),
         &checkpoint,

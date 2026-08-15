@@ -3,11 +3,11 @@ use std::collections::{BTreeMap, HashSet};
 use super::{SimulationNode, TickResult};
 use crate::persistence::ShipSnapshot;
 use crate::transition::{
-    PreparedSectorTransition, SectorEngine, SectorRecoveryDelta, SectorTransitionId,
+    PreparedSectorTransition, SectorEngine, SectorRecoveryDelta, SectorTransitionId, ShipState,
     TickApproachState, TickCommandState, TickFittingState, TickKeepAtRangeState, TickLockEntry,
     TickLockPhase, TickLockState, TickMovementState, TickOrbitState, TickRecoveryDelta,
-    TickRecoveryMode, TickShipState, TickSlotState, TickWarpPhase, TickWarpState,
-    TransitionApplyError, TransitionContext, TransitionError,
+    TickRecoveryMode, TickSlotState, TickWarpPhase, TickWarpState, TransitionApplyError,
+    TransitionContext, TransitionError,
 };
 use dawn_core::{DomainEvent, ItemId, ShipId};
 use dawn_ecs::{
@@ -476,7 +476,7 @@ impl SimulationNode {
         }
     }
 
-    fn capture_tick_ship_state(&self, ship_id: ShipId) -> Option<TickShipState> {
+    pub(super) fn capture_tick_ship_state(&self, ship_id: ShipId) -> Option<ShipState> {
         let entity = *self.simulation.ships.index.get(&ship_id)?;
         let position = self.simulation.world.get::<PositionComp>(entity)?.0;
         let velocity = self.simulation.world.get::<VelocityComp>(entity)?.0;
@@ -590,7 +590,7 @@ impl SimulationNode {
                 .collect(),
         });
 
-        Some(TickShipState {
+        Some(ShipState {
             snapshot,
             fitting_present,
             inventory_present,
@@ -601,7 +601,7 @@ impl SimulationNode {
         })
     }
 
-    fn capture_tick_write_set(&self) -> BTreeMap<ShipId, TickShipState> {
+    fn capture_tick_write_set(&self) -> BTreeMap<ShipId, ShipState> {
         self.simulation
             .ships
             .index
@@ -636,7 +636,10 @@ impl SimulationNode {
             && restore_slots(&mut fitting.rig, &state.rig)
     }
 
-    fn apply_tick_ship_state(&mut self, state: &TickShipState) -> Result<(), TransitionApplyError> {
+    pub(super) fn apply_tick_ship_state(
+        &mut self,
+        state: &ShipState,
+    ) -> Result<(), TransitionApplyError> {
         let ship = &state.snapshot;
         let entity = self
             .simulation
@@ -692,9 +695,6 @@ impl SimulationNode {
         } else {
             None
         };
-        if let Some(mut hull) = self.simulation.world.get_mut::<HullComp>(entity) {
-            hull.set_hp(ship.current_shield, ship.current_armor, ship.current_hull);
-        }
 
         // One write of every optional component (ADR-0049, issue #312):
         // capacitor/tackled/inventory/fitting come from `ship` (the durable
@@ -769,7 +769,13 @@ impl SimulationNode {
         );
 
         if state.fitting_present {
+            // reapply_fitting recomputes ShipStatsComp and rescales HullComp
+            // (max shield/armor/hull may have changed); restore the exact HP
+            // layers afterwards, same as restore_ship_from_snapshot does.
             self.reapply_fitting(ship.ship_id);
+        }
+        if let Some(mut hull) = self.simulation.world.get_mut::<HullComp>(entity) {
+            hull.set_hp(ship.current_shield, ship.current_armor, ship.current_hull);
         }
 
         Ok(())
@@ -777,7 +783,7 @@ impl SimulationNode {
 
     fn restore_tick_write_set(
         &mut self,
-        states: &BTreeMap<ShipId, TickShipState>,
+        states: &BTreeMap<ShipId, ShipState>,
     ) -> Result<(), TransitionApplyError> {
         for state in states.values() {
             self.apply_tick_ship_state(state)?;
@@ -1292,15 +1298,17 @@ mod tests {
             .take_snapshot()
             .ships
             .into_iter()
-            .find(|ship| ship.ship_id == ship_id)
-            .unwrap();
+            .find(|ship| ship.snapshot.ship_id == ship_id)
+            .unwrap()
+            .snapshot;
         let tick_result = node.tick();
         let after = node
             .take_snapshot()
             .ships
             .into_iter()
-            .find(|ship| ship.ship_id == ship_id)
-            .unwrap();
+            .find(|ship| ship.snapshot.ship_id == ship_id)
+            .unwrap()
+            .snapshot;
 
         assert_eq!(after.position, before.position);
         assert_eq!(after.velocity, before.velocity);

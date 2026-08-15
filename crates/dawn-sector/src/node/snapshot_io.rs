@@ -1,7 +1,4 @@
-use crate::persistence::{ShipSnapshot, StateSnapshot};
-use dawn_ecs::components::{
-    CapacitorComp, FittingComp, HullComp, InventoryComp, PositionComp, TackledComp, VelocityComp,
-};
+use crate::persistence::StateSnapshot;
 
 use super::{
     state::{FrameOutputs, GameData, PlayerState, SectorTopology, SimulationState, TransitState},
@@ -38,7 +35,9 @@ impl SimulationNode {
             persistence: _,
         } = self;
         let SimulationState {
-            world,
+            // Read again inside capture_tick_ship_state below (via `self`),
+            // which needs the full `&SimulationNode` for anchor resolution.
+            world: _,
             current_tick,
             id_counter,
             ships: ship_registry,
@@ -81,56 +80,23 @@ impl SimulationNode {
             .collect::<Vec<_>>();
         applied_market_settlements.sort_unstable();
 
-        let mut ships: Vec<ShipSnapshot> = ship_registry
+        // One capture per ship, through the same optional-component list the
+        // tick-prepare rollback and TickRecoveryDelta use (ADR-0049, issue
+        // #312) -- this used to be a fourth independent hand-rolled reader
+        // that only captured capacitor/fitting-without-cycle/tackled/
+        // inventory, silently dropping flight-mode state, lock countdowns,
+        // and module cycle counters on every checkpoint restore.
+        let mut ships: Vec<crate::transition::ShipState> = ship_registry
             .index
-            .iter()
-            .filter_map(|(&ship_id, &entity)| {
-                let pos = world.get::<PositionComp>(entity)?.0;
-                let vel = world.get::<VelocityComp>(entity)?.0;
-                let hull = world.get::<HullComp>(entity)?;
-                let capacitor = world.get::<CapacitorComp>(entity).map(|c| c.current);
-                let fitting = world
-                    .get::<FittingComp>(entity)
-                    .map(|f| f.to_snapshot())
-                    .unwrap_or_else(dawn_core::fitting::FittingSnapshot::empty);
-                let tackled_by = world
-                    .get::<TackledComp>(entity)
-                    .map(|t| t.tacklers.clone())
-                    .unwrap_or_default();
-                let inventory = world
-                    .get::<InventoryComp>(entity)
-                    .map(|inv| inv.items.clone())
-                    .unwrap_or_default();
-                let ship_type_id = ship_registry
-                    .type_ids
-                    .get(&ship_id)
-                    .copied()
-                    .unwrap_or(dawn_core::ShipTypeId(0));
-                let anchor = world.ship_anchor(entity).unwrap_or_default();
-                Some(ShipSnapshot {
-                    ship_id,
-                    ship_type_id,
-                    absolute_position: self.ship_absolute_pos(ship_id),
-                    position: pos,
-                    anchor,
-                    velocity: vel,
-                    current_shield: hull.shield(),
-                    current_armor: hull.armor(),
-                    current_hull: hull.hull(),
-                    is_destroyed: hull.is_destroyed(),
-                    capacitor,
-                    fitting,
-                    tackled_by,
-                    inventory,
-                })
-            })
+            .keys()
+            .filter_map(|&ship_id| self.capture_tick_ship_state(ship_id))
             .collect();
 
         // Canonical ordering: a snapshot of a given state must serialise
         // identically regardless of HashMap iteration order, so it can be
         // byte-compared (INV-002: verifiable snapshot / round-trip).
         // `ShipId: Ord` is canonical id order (node_id then counter).
-        ships.sort_by_key(|s| s.ship_id);
+        ships.sort_by_key(|s| s.snapshot.ship_id);
 
         StateSnapshot {
             node_id: *node_id,
@@ -231,7 +197,7 @@ impl SimulationNode {
 mod tests {
     use super::*;
     use crate::node::station::StationOperationOutcome;
-    use crate::persistence::StateSnapshot;
+    use crate::persistence::{ShipSnapshot, StateSnapshot};
     use dawn_core::{NodeId, PlayerId, Position, SectorBounds, SectorId, ShipId, Tick, Velocity};
     use dawn_storage::{store::EventStore, FileEventStore, InMemoryEventStore};
 
@@ -349,21 +315,43 @@ mod tests {
             player_id_counter: 3,
             catalog_fingerprint: crate::game_data::test_catalog().fingerprint(),
             transit_attempt_counter: 0,
-            ships: vec![ShipSnapshot {
-                ship_id: ShipId::new(NodeId(0), 0),
-                ship_type_id: dawn_core::ShipTypeId(1),
-                absolute_position: Some(dawn_core::AbsolutePosition::new(100.0, 200.0, 300.0)),
-                position: Position::new(100.0, 200.0, 300.0),
-                anchor: dawn_core::AnchorId(0),
-                velocity: Velocity::new(1.0, 2.0, 3.0),
-                current_shield: 50.0,
-                current_armor: 60.0,
-                current_hull: 70.0,
-                is_destroyed: false,
-                capacitor: Some(250.0),
-                fitting: dawn_core::fitting::FittingSnapshot::empty(),
-                tackled_by: vec![ShipId::new(NodeId(0), 1)],
-                inventory: std::collections::BTreeMap::from([(dawn_core::ItemId::ScrapMetal, 4)]),
+            ships: vec![crate::transition::ShipState {
+                snapshot: ShipSnapshot {
+                    ship_id: ShipId::new(NodeId(0), 0),
+                    ship_type_id: dawn_core::ShipTypeId(1),
+                    absolute_position: Some(dawn_core::AbsolutePosition::new(100.0, 200.0, 300.0)),
+                    position: Position::new(100.0, 200.0, 300.0),
+                    anchor: dawn_core::AnchorId(0),
+                    velocity: Velocity::new(1.0, 2.0, 3.0),
+                    current_shield: 50.0,
+                    current_armor: 60.0,
+                    current_hull: 70.0,
+                    is_destroyed: false,
+                    capacitor: Some(250.0),
+                    fitting: dawn_core::fitting::FittingSnapshot::empty(),
+                    tackled_by: vec![ShipId::new(NodeId(0), 1)],
+                    inventory: std::collections::BTreeMap::from([(
+                        dawn_core::ItemId::ScrapMetal,
+                        4,
+                    )]),
+                },
+                fitting_present: false,
+                inventory_present: true,
+                movement: crate::transition::TickMovementState {
+                    thrust: None,
+                    approach: None,
+                    orbit: None,
+                    keep_at_range: None,
+                    warp: None,
+                },
+                fitting: crate::transition::TickFittingState {
+                    high: Vec::new(),
+                    mid: Vec::new(),
+                    low: Vec::new(),
+                    rig: Vec::new(),
+                },
+                locks: None,
+                weapon_last_fired_tick: None,
             }],
             owners: std::collections::BTreeMap::new(),
             transit_saga: crate::persistence::TransitSagaSnapshot::default(),

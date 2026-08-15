@@ -76,7 +76,7 @@ pub struct TickRecoveryDelta {
     pub mode: TickRecoveryMode,
     /// Changed ship state after the tick. Unchanged ships are omitted so the
     /// durable record is a write set rather than a whole-world snapshot.
-    pub ship_states: Vec<TickShipState>,
+    pub ship_states: Vec<ShipState>,
     /// Ships whose entities are removed by the committed tick.
     pub removed_ships: Vec<ShipId>,
     /// Cross-tick authoritative queues produced by the Bot and Warp systems.
@@ -129,11 +129,14 @@ impl TickRecoveryDelta {
     }
 }
 
-/// Authoritative state of one ship after a Tick. The snapshot contains the
-/// established persistent fields; the additional values cover Tick-mutated
-/// ECS components that the legacy snapshot deliberately omits.
+/// Canonical authoritative state of one ship (ADR-0049, issue #312): the
+/// single type used to capture and restore a ship for the tick-prepare
+/// rollback, `TickRecoveryDelta`, and `StateSnapshot` alike, so all three
+/// read the same optional-component list (`dawn_ecs::OptionalShipComponents`,
+/// via `SimulationNode::capture_tick_ship_state`/`apply_tick_ship_state`)
+/// instead of each maintaining its own.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct TickShipState {
+pub struct ShipState {
     pub snapshot: ShipSnapshot,
     pub fitting_present: bool,
     pub inventory_present: bool,
