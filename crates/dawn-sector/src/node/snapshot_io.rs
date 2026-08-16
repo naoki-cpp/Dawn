@@ -14,7 +14,8 @@ impl SimulationNode {
     /// field to `SimulationNode` breaks this function until someone decides
     /// whether it survives a restart. Deciding by memory is what silently lost
     /// `player_id_counter` before. `apply_snapshot` is the matching read side.
-    pub fn take_snapshot(&self) -> StateSnapshot {
+    #[cfg(test)]
+    pub(crate) fn take_snapshot(&self) -> StateSnapshot {
         self.take_snapshot_at(0)
     }
 

@@ -40,7 +40,7 @@ impl SimulationNode {
     }
 
     /// Prepare Stop without changing the live ECS world.
-    pub fn prepare_stop_transition(
+    pub(crate) fn prepare_stop_transition(
         &self,
         ship_id: ShipId,
         transition_id: SectorTransitionId,
@@ -57,7 +57,7 @@ impl SimulationNode {
     }
 
     /// Apply the exact Stop delta after its durable transition is committed.
-    pub fn apply_stop_transition(
+    pub(crate) fn apply_stop_transition(
         &mut self,
         delta: StopRecoveryDelta,
     ) -> Result<(), TransitionApplyError> {
@@ -90,7 +90,7 @@ impl SimulationNode {
 
     /// Steer `ship_id` toward `target`. Cancels any active warp/approach.
     /// No-op if the ship is unknown, in transit, or in committed warp.
-    pub fn apply_move_command(&mut self, ship_id: ShipId, target: Position) {
+    pub(crate) fn apply_move_command(&mut self, ship_id: ShipId, target: Position) {
         if self.is_ship_docked(ship_id) {
             return;
         }
@@ -128,7 +128,7 @@ impl SimulationNode {
     /// this only checks ownership, not dock state (`resolve_flight_command`
     /// would additionally reject on dock state, which would flip this
     /// method's return value for a docked ship and break that contract).
-    pub fn apply_move_command_owned(
+    pub(crate) fn apply_move_command_owned(
         &mut self,
         player_id: PlayerId,
         ship_id: ShipId,
@@ -145,7 +145,7 @@ impl SimulationNode {
     ///
     /// The movement system applies thrust opposite to velocity each tick until
     /// the ship stops. Cancels any active thrust direction.
-    pub fn apply_stop_command(&mut self, ship_id: ShipId) {
+    pub(crate) fn apply_stop_command(&mut self, ship_id: ShipId) {
         let Ok(prepared) = self.prepare_stop_transition(ship_id, SectorTransitionId(0), 0) else {
             return;
         };

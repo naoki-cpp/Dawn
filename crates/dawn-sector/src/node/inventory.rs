@@ -18,7 +18,7 @@ impl SimulationNode {
     /// internal spawn-time path), this enforces the module's own slot kind,
     /// the ship type's slot capacity, and that the module is actually present
     /// in `InventoryComp` -- rejecting (no state change) otherwise.
-    pub fn fit_module_owned(&mut self, player_id: PlayerId, cmd: FitModuleCommand) -> bool {
+    pub(crate) fn fit_module_owned(&mut self, player_id: PlayerId, cmd: FitModuleCommand) -> bool {
         // ADR-0032 amendment (2026-07-08): the §2 "anywhere, MVP" trigger
         // fired now that Station exists (ADR-0034/0037) -- refitting
         // requires being docked. resolve_fitting_command (ship_command.rs)
@@ -85,7 +85,11 @@ impl SimulationNode {
 
     /// Move one fitted instance of `cmd.module_id` out of `cmd.slot` and back
     /// into the owning player's inventory (ADR-0032).
-    pub fn unfit_module_owned(&mut self, player_id: PlayerId, cmd: UnfitModuleCommand) -> bool {
+    pub(crate) fn unfit_module_owned(
+        &mut self,
+        player_id: PlayerId,
+        cmd: UnfitModuleCommand,
+    ) -> bool {
         // See fit_module_owned above: resolve_fitting_command checks
         // ownership and dock state (ADR-0032 amendment, 2026-07-08).
         let Ok(resolved) = self.resolve_fitting_command(player_id, cmd.ship_id) else {
@@ -123,7 +127,7 @@ impl SimulationNode {
     /// hotkey F-numbers -- reuses `ShipFitted` (via `apply_fitting_and_emit`)
     /// the same way Fit/Unfit do, since that event already carries the full
     /// `FittingSnapshot` and a pure reorder doesn't need its own event type.
-    pub fn reorder_fitted_module_owned(
+    pub(crate) fn reorder_fitted_module_owned(
         &mut self,
         player_id: PlayerId,
         cmd: ReorderFittedModuleCommand,

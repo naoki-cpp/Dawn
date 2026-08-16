@@ -14,7 +14,7 @@ impl SimulationNode {
     /// Computes the desired tackle state from active Fold Disruptors + locked
     /// targets in range, diffs against the current `TackledComp` state, emits
     /// `TackleApplied`/`TackleReleased` events for changes, and updates the ECS.
-    pub fn process_tackle(&mut self, tick: Tick) -> Vec<DomainEvent> {
+    pub(crate) fn process_tackle(&mut self, tick: Tick) -> Vec<DomainEvent> {
         // Collect ships with at least one active Tackle module.
         let tacklers: Vec<(ShipId, f32, Vec<ShipId>)> = self
             .simulation

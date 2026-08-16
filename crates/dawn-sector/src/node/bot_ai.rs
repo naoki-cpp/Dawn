@@ -17,7 +17,7 @@ impl SimulationNode {
     /// Bots issue the exact same commands as a human player:
     /// `MoveCommand`, `LockOnCommand`, `ActivateModuleCommand`.
     /// Called each tick after Combat System.
-    pub fn process_bots(&mut self) {
+    pub(crate) fn process_bots(&mut self) {
         // ── 1. Snapshot bot state (read-only pass) ────────────────────────────
         struct BotState {
             player_id: PlayerId,

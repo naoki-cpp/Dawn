@@ -11,12 +11,12 @@ use super::{
 
 impl SimulationNode {
     /// True when `player_id`'s ship is currently docked at `station_id`.
-    pub fn can_use_station(&self, player_id: PlayerId, station_id: StationId) -> bool {
+    pub(crate) fn can_use_station(&self, player_id: PlayerId, station_id: StationId) -> bool {
         self.stations.docked_station_for_player(player_id) == Some(station_id)
     }
 
     /// True when `ship_id` is spatially eligible to dock at `station_id`.
-    pub fn can_dock_station(&self, ship_id: ShipId, station_id: StationId) -> bool {
+    pub(crate) fn can_dock_station(&self, ship_id: ShipId, station_id: StationId) -> bool {
         let station = match self.station(station_id) {
             Some(station) => station,
             None => return false,
@@ -32,7 +32,7 @@ impl SimulationNode {
         self.stations.docked_station_for_ship(ship_id)
     }
 
-    pub fn is_ship_docked(&self, ship_id: ShipId) -> bool {
+    pub(crate) fn is_ship_docked(&self, ship_id: ShipId) -> bool {
         self.stations.is_ship_docked(ship_id)
     }
 
@@ -46,7 +46,7 @@ impl SimulationNode {
     /// a resume begins. `docked_ships` is still authoritative after replay; use
     /// it here to repair the player-facing Station context once identity is
     /// re-established.
-    pub fn resume_player_ship(&mut self, ship_id: ShipId, player_id: PlayerId) -> bool {
+    pub(crate) fn resume_player_ship(&mut self, ship_id: ShipId, player_id: PlayerId) -> bool {
         if !self.adopt_player_ship(ship_id, player_id) {
             return false;
         }
@@ -204,7 +204,7 @@ impl SimulationNode {
         Ok(ship_id)
     }
 
-    pub fn clear_docked_lock_targets(&mut self, tick: dawn_core::Tick) -> Vec<DomainEvent> {
+    pub(crate) fn clear_docked_lock_targets(&mut self, tick: dawn_core::Tick) -> Vec<DomainEvent> {
         let mut events: Vec<DomainEvent> = Vec::new();
         let ship_ids: Vec<ShipId> = self.simulation.ships.index.keys().copied().collect();
         for ship_id in ship_ids {

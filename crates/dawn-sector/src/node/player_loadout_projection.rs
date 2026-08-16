@@ -146,7 +146,7 @@ impl SimulationNode {
     /// projected from `(player_id, ship_id)` and the ship's persisted dock
     /// state. This keeps `PlayerLoadout` inside the await-sent handshake while
     /// leaving authoritative ownership untouched until commit.
-    pub fn build_player_loadout_json_for_admission(
+    pub(crate) fn build_player_loadout_json_for_admission(
         &self,
         player_id: PlayerId,
         ship_id: ShipId,

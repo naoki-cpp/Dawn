@@ -54,7 +54,7 @@ type FrozenTransitState = (
 
 impl SimulationNode {
     /// Prepare the logical Tick counter without changing the live state.
-    pub fn prepare_tick_transition(
+    pub(crate) fn prepare_tick_transition(
         &self,
         transition_id: SectorTransitionId,
         owner_epoch: u64,
@@ -72,7 +72,7 @@ impl SimulationNode {
     }
 
     /// Apply a committed logical Tick counter delta during recovery or catch-up.
-    pub fn apply_tick_transition(
+    pub(crate) fn apply_tick_transition(
         &mut self,
         delta: TickRecoveryDelta,
         context: TransitionContext,
@@ -224,7 +224,8 @@ impl SimulationNode {
     /// authoritative state. The legacy systems execute once against a
     /// bounded ship-state image, then the image is restored before the
     /// transition is returned to the runtime.
-    pub fn prepare_tick_state_transition(
+    #[cfg(test)]
+    pub(crate) fn prepare_tick_state_transition(
         &mut self,
         lock_commands: &[dawn_core::LockOnCommand],
         transition_id: SectorTransitionId,

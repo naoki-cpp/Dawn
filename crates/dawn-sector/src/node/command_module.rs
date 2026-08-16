@@ -66,7 +66,7 @@ fn module_activation_rejection_from_flight(
 impl SimulationNode {
     // ── Module commands ───────────────────────────────────────────────────────
 
-    pub fn activate_module(
+    pub(crate) fn activate_module(
         &mut self,
         ship_id: ShipId,
         cmd: dawn_core::ActivateModuleCommand,
@@ -74,7 +74,7 @@ impl SimulationNode {
         self.set_module_active(ship_id, cmd.module_id, cmd.slot, true, cmd.target_ship_id)
     }
 
-    pub fn deactivate_module(
+    pub(crate) fn deactivate_module(
         &mut self,
         ship_id: ShipId,
         cmd: dawn_core::DeactivateModuleCommand,
@@ -84,7 +84,7 @@ impl SimulationNode {
 
     /// `activate_module` wrapped with the shared flight-command seam
     /// (active-ship + undocked, ADR-0037; `ship_command.rs`).
-    pub fn activate_module_owned(
+    pub(crate) fn activate_module_owned(
         &mut self,
         player_id: PlayerId,
         ship_id: ShipId,
@@ -98,7 +98,7 @@ impl SimulationNode {
 
     /// `deactivate_module` wrapped with the shared flight-command seam
     /// (active-ship + undocked, ADR-0037; `ship_command.rs`).
-    pub fn deactivate_module_owned(
+    pub(crate) fn deactivate_module_owned(
         &mut self,
         player_id: PlayerId,
         ship_id: ShipId,

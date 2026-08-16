@@ -349,7 +349,7 @@ impl SimulationNode {
 
     /// Public test wrapper for `apply_event`.
     #[cfg(test)]
-    pub fn apply_event_pub(&mut self, event: DomainEvent) {
+    pub(crate) fn apply_event_pub(&mut self, event: DomainEvent) {
         self.apply_event(&event);
     }
 }
