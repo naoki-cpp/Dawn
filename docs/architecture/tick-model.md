@@ -27,15 +27,15 @@ The production node and local runtime adapters now use the prepared Tick
 transition described below: they durably append the RecoveryDelta before
 applying the same delta locally, run the required reconciliation hook, and
 publish their public/reliable outputs only after that hook succeeds. The legacy
-call shapes named above are retained only for deterministic unit fixtures, not
-as an alternative production commit contract.
+mutation calls inside `SimulationNode` remain implementation details, not an
+alternative production commit contract.
 
 The #272 migration now exposes both the logical counter seam and a complete
 Tick seam. `SimulationNode::prepare_tick_state_transition` executes the legacy
 systems against a ship-level write-set image, restores the live state, and
 returns the complete post-tick ship image, node routing/maps, queues, public
 events, and recovery context. `RuntimeFrameHost` delegates to
-`run_durable_runtime_tick_with_consensus_and_health`, which appends that
+`run_durable_runtime_frame`, which appends that
 transition before applying the same delta and publishing outputs. Its
 consensus port has a Raft adapter for production/cluster deployments and a
 local adapter for single-sector simulation. Its policy port validates local or
@@ -43,8 +43,8 @@ replicated durability evidence, and its reconciliation hook and health gate run
 before publication. This keeps the durable ordering in one implementation while
 allowing deployment-specific consensus, journal, quorum, and repository
 adapters. It does not clone the whole ECS world. The older
-`tick_with_lock_commands` / `run_runtime_tick` path remains only for
-deterministic unit fixtures, not as a runtime adapter contract. Recovery applies
+`tick_with_lock_commands` path remains an engine-level implementation detail,
+not a runtime adapter contract. Recovery applies
 the persisted delta together with its journal `TransitionContext`; the node
 validates the Sector identity, while owner-epoch fencing remains the runtime
 orchestration responsibility of #278.
@@ -308,7 +308,7 @@ Step 11: Runtime/consensus pacing after local commit
 
 The shared runtime frame drains committed entries through its injected
 `RuntimeConsensus` port before `node.tick`. The Raft adapter applies the same
-Transit pipeline that the older `transit::run_runtime_tick()` path exposed:
+Transit pipeline that the shared durable runtime frame exposes:
 
 ```
 TransitOp::Request -> current owner marks InTransit, appends SectorTransitRequested,
@@ -460,7 +460,7 @@ before calling a `dawn-server::runtime_frame::RuntimeFrameHost` for exactly one
 Sector frame. The Host owns the authoritative `SimulationNode`, journal,
 consensus adapter, runtime health, and selected durability policy, then delegates
 the prepare -> durable -> live-apply -> reconciliation boundary to
-`transit::run_durable_runtime_tick_with_consensus_and_health`.
+`transit::run_durable_runtime_frame`.
 
 The Host returns typed frame output to its caller. Network delivery, AoI
 delivery, cross-Sector handoff, and external acknowledgements remain adapter or
