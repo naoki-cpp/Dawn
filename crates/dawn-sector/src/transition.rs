@@ -6,14 +6,119 @@
 //! apply the same recovery delta.
 
 use dawn_core::{
-    ApproachTarget, DomainEvent, JumpGateId, LockOnCommand, PlayerId, SectorId, ShipId, StationId,
-    Tick, Velocity, WarpTarget,
+    ApproachTarget, CreditItemCommand, DomainEvent, JumpGateId, LockOnCommand, PlayerId,
+    RemoveItemCommand, ReturnItemCommand, SectorId, ShipId, StationId, Tick, Velocity, WarpTarget,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use thiserror::Error;
 
 use crate::persistence::ShipSnapshot;
+
+/// One composition-adapter mutation admitted into a Tick's prepare/durable/
+/// apply pipeline alongside lock commands (issue #315). Each variant mirrors
+/// one of the item-mutation commands `SimulationNode` already exposes
+/// (`ship_cargo.rs`); Market settlement delivery constructs these instead of
+/// calling those methods directly outside the pipeline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarketSettlementInput {
+    RemoveItem(RemoveItemCommand),
+    ReturnItem(ReturnItemCommand),
+    CreditItem(CreditItemCommand),
+}
+
+impl MarketSettlementInput {
+    pub fn settlement_id(&self) -> u64 {
+        match self {
+            Self::RemoveItem(cmd) => cmd.settlement_id,
+            Self::ReturnItem(cmd) => cmd.settlement_id,
+            Self::CreditItem(cmd) => cmd.settlement_id,
+        }
+    }
+
+    /// The `(owner, destination ship)` this settlement mutates.
+    pub fn identity(&self) -> (PlayerId, ShipId) {
+        match self {
+            Self::RemoveItem(cmd) => (cmd.player_id, cmd.ship_id),
+            Self::ReturnItem(cmd) => (cmd.player_id, cmd.ship_id),
+            Self::CreditItem(cmd) => (cmd.player_id, cmd.ship_id),
+        }
+    }
+}
+
+/// How a Sector disposed of one `MarketSettlementInput` admitted into a
+/// Tick's write set (issue #315).
+///
+/// The three states are deliberately distinct: only `Rejected` is a verdict
+/// on the settlement's merits and may be reported back to the Market ledger
+/// as permanently refused. `Unavailable` means this Sector simply could not
+/// act on it right now, so the caller must leave the outbox row pending for
+/// a later tick -- possibly in a different Sector -- rather than triggering
+/// compensation. Collapsing these two into one "not applied" boolean caused
+/// a ship that merely changed Sector mid-frame to have its legitimate order
+/// permanently reversed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarketSettlementStatus {
+    /// The mutation is in this tick's write set, or a previously committed
+    /// tick already applied it (the idempotency guard short-circuited).
+    Applied,
+    /// The destination ship is not this Sector's to mutate right now (it is
+    /// in transit, was handed off, or is not materialized here). Transient:
+    /// leave the settlement pending.
+    Unavailable,
+    /// The Sector refused the mutation on its merits (malformed identity,
+    /// insufficient cargo, quantity overflow). Terminal: the Market ledger
+    /// should compensate.
+    Rejected,
+}
+
+impl MarketSettlementStatus {
+    pub fn is_applied(self) -> bool {
+        matches!(self, Self::Applied)
+    }
+}
+
+/// Result of admitting one `MarketSettlementInput` into a Tick's write set
+/// (issue #315).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MarketSettlementOutcome {
+    pub settlement_id: u64,
+    pub status: MarketSettlementStatus,
+}
+
+/// Frame-scoped input to one Tick's prepare/durable/apply pipeline (issue
+/// #315). Bundles the existing lock-command input with Market settlement
+/// mutations so both are captured in the same durable `TickRecoveryDelta`
+/// rather than Market settlement mutating live state outside any tick
+/// boundary.
+#[derive(Debug, Clone, Copy)]
+pub struct FrameInput<'a> {
+    pub lock_commands: &'a [LockOnCommand],
+    pub market_settlements: &'a [MarketSettlementInput],
+    /// Settlement identities the Market ledger has durably acknowledged (or
+    /// rejected) since the last frame. Retiring them from the Sector's
+    /// idempotency guard is itself authoritative state, so it enters through
+    /// the same prepare/durable/apply boundary as everything else rather
+    /// than being applied to live state directly.
+    ///
+    /// A decided settlement is never redelivered, so its guard entry is dead
+    /// weight; without this the guard -- which is serialized in full into
+    /// every `TickRecoveryDelta` and checkpoint -- grows without bound for
+    /// the life of the Sector.
+    pub acknowledged_settlements: &'a [u64],
+}
+
+impl<'a> FrameInput<'a> {
+    /// A frame with no Market settlement input, e.g. tests and non-Market
+    /// runtime call sites that only ever carried lock commands.
+    pub fn lock_only(lock_commands: &'a [LockOnCommand]) -> Self {
+        Self {
+            lock_commands,
+            market_settlements: &[],
+            acknowledged_settlements: &[],
+        }
+    }
+}
 
 /// Version of the recovery-delta payload produced by this module.
 ///

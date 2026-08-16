@@ -82,12 +82,12 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
     let mut market = MarketRuntime::open("data/market.sqlite")
         .expect("failed to open Market database at data/market.sqlite");
 
-    hosts[0].with_node_mut(|node| node.spawn_npc_frigates(ship_count));
+    hosts[0].spawn_npc_frigates(ship_count);
 
     // Warm up: tick until a Raft leader is elected (election timeout ≤ 20 ticks).
     for _ in 0..30 {
         for host in &mut hosts {
-            let _ = host.run_frame(&[]);
+            let _ = host.run_frame(dawn_sector::transition::FrameInput::lock_only(&[]));
         }
     }
     println!("  [Server] Raft warm-up complete. Waiting for players...");
@@ -119,6 +119,9 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
     let mut player_sector: HashMap<PlayerId, usize> = HashMap::new();
     let mut ship_player: HashMap<ShipId, PlayerId> = HashMap::new();
     let mut aoi_delivery = AoiDelivery::new(AOI_CELL_SIZE);
+    // Per-Sector settlement identities the Market ledger decided last tick
+    // (issue #315), retired from each Sector's idempotency guard next frame.
+    let mut decided_settlements: Vec<Vec<u64>> = vec![Vec::new(); SECTORS];
 
     let mut interval = tokio::time::interval(std::time::Duration::from_millis(P4_TICK_MS));
 
@@ -164,14 +167,11 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                 }
                 None => {
                     let sector = 0;
-                    let spawn_position =
-                        hosts[sector].with_node_mut(|node| node.default_player_spawn_position());
+                    let spawn_position = hosts[sector].default_player_spawn_position();
                     (sector, ClientAdmissionIntent::Fresh { spawn_position })
                 }
             };
-            let mut attempt = match hosts[sector]
-                .with_node_mut(|node| node.begin_client_admission(intent, AOI_CELL_SIZE))
-            {
+            let mut attempt = match hosts[sector].begin_client_admission(intent, AOI_CELL_SIZE) {
                 Ok(attempt) => attempt,
                 Err(refusal) => {
                     log_cluster_refusal(request.peer_addr, refusal);
@@ -205,7 +205,7 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
             let sector = *player_sector.get(&sess.player_id).unwrap_or(&0);
             while let Some(market_command) = sess.try_recv_market_command() {
                 let snapshot =
-                    market.handle_cluster(sess.player_id, market_command, sector, &mut hosts);
+                    market.handle_cluster(sess.player_id, market_command, sector, &hosts);
                 sess.send_message(&ServerMessage::MarketSnapshot(snapshot));
             }
             let dispatches = hosts[sector].collect_runtime_commands(
@@ -285,6 +285,8 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                 player_sector: &mut player_sector,
                 ship_player: &ship_player,
                 aoi_delivery: &mut aoi_delivery,
+                market: &mut market,
+                decided_settlements: &mut decided_settlements,
             },
             &lock_commands,
         );

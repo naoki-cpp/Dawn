@@ -8,9 +8,13 @@
 #![allow(dead_code)]
 
 use dawn_core::{
-    DomainEvent, JumpGateId, LockOnCommand, Position, SectorId, ShipId, ShipTypeId, Velocity,
+    DomainEvent, JumpGateId, LockOnCommand, PlayerId, Position, SectorId, ShipId, ShipTypeId,
+    Velocity,
 };
 use dawn_distributed::RaftActorHandle;
+use dawn_sector::client_admission::{
+    ClientAdmissionAttempt, ClientAdmissionIntent, ClientAdmissionRefusal,
+};
 use dawn_sector::node::{JumpOutcome, RuntimeCommandDispatch, SimulationNode};
 use dawn_sector::transit::{
     reconcile_runtime_repositories,
@@ -277,6 +281,59 @@ where
         self.node.drain_pending_events()
     }
 
+    /// Seed initial NPC frigates into the Sector.
+    ///
+    /// Fixture/composition-root use only (initial server population), not a
+    /// per-tick operation.
+    pub(crate) fn spawn_npc_frigates(&mut self, count: usize) {
+        self.with_node_mut(|node| node.spawn_npc_frigates(count));
+    }
+
+    /// Spawn a duel-mode Bot ship and its owning player identity.
+    pub(crate) fn spawn_bot_ship(&mut self, position: Position) -> (PlayerId, ShipId) {
+        self.with_node_mut(|node| node.spawn_bot_ship(position))
+    }
+
+    /// The Sector's topology-derived default spawn point for a fresh player.
+    pub(crate) fn default_player_spawn_position(&self) -> Position {
+        self.node.default_player_spawn_position()
+    }
+
+    /// Begin a client admission attempt against the owned node.
+    ///
+    /// Admission identity reservation is durable through its own
+    /// repository-backed transaction (see
+    /// `dawn_sector::node::admission_provisional`), independent of the tick
+    /// pipeline, so this narrow bridge is admission's typed entry point
+    /// rather than a correctness gap.
+    pub(crate) fn begin_client_admission(
+        &mut self,
+        intent: ClientAdmissionIntent,
+        aoi_cell_size: f64,
+    ) -> Result<ClientAdmissionAttempt, ClientAdmissionRefusal> {
+        self.with_node_mut(|node| node.begin_client_admission(intent, aoi_cell_size))
+    }
+
+    /// Adopt a ship that just jumped into this Sector under `player_id`'s
+    /// ownership. Returns `false` if the ship is not (yet) present in this
+    /// Sector's ECS.
+    pub(crate) fn adopt_player_ship(&mut self, ship_id: ShipId, player_id: PlayerId) -> bool {
+        self.with_node_mut(|node| node.adopt_player_ship(ship_id, player_id))
+    }
+
+    /// Spawn a ship outside the tick pipeline, for deterministic fixture
+    /// setup (test/demo actor callers of `SectorRuntimeDriver`). Production
+    /// runtime mutations must enter through `run_frame` once a frame has
+    /// started; this is not that path.
+    pub(crate) fn spawn_fixture_ship(
+        &mut self,
+        ship_type_id: ShipTypeId,
+        position: Position,
+        velocity: Velocity,
+    ) -> ShipId {
+        self.with_node_mut(|node| node.spawn_ship(ship_type_id, position, velocity))
+    }
+
     /// Admit requests through the Sector's single typed request seam.
     pub(crate) fn collect_runtime_commands<S, Player, Request>(
         &mut self,
@@ -327,18 +384,20 @@ where
     /// Run exactly one authoritative frame for this Sector.
     pub(crate) fn run_frame(
         &mut self,
-        lock_commands: &[LockOnCommand],
+        input: dawn_sector::transition::FrameInput<'_>,
     ) -> Result<RuntimeTickOutput, RuntimeFrameHostError> {
-        self.run_frame_with_output(lock_commands, |_, _, _| {})
+        self.run_frame_with_output(input, |_, _, _| {})
     }
 
     /// Run one frame and invoke `after_commit` after reconciliation succeeds.
     ///
     /// The callback is still before the consensus adapter advances its logical
     /// clock, so publication cannot be mistaken for an acknowledged frame.
+    /// `after_commit`'s `TickResult` carries `market_settlement_outcomes` for
+    /// any settlement admitted through `input` (issue #315).
     pub(crate) fn run_frame_with_output<F>(
         &mut self,
-        lock_commands: &[LockOnCommand],
+        input: dawn_sector::transition::FrameInput<'_>,
         after_commit: F,
     ) -> Result<RuntimeTickOutput, RuntimeFrameHostError>
     where
@@ -358,7 +417,7 @@ where
             &mut self.consensus,
             &self.policy.durability_policy,
             &mut self.health,
-            lock_commands,
+            input,
             DurableRuntimeTickContext {
                 transition_id,
                 owner_epoch: self.policy.owner_epoch,
@@ -460,7 +519,8 @@ mod tests {
         host.bootstrap_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO)
             .expect("bootstrap should be available");
 
-        host.run_frame(&[]).expect("local frame should commit");
+        host.run_frame(dawn_sector::transition::FrameInput::lock_only(&[]))
+            .expect("local frame should commit");
 
         assert_eq!(host.phase(), RuntimeFramePhase::Running);
         assert!(matches!(
@@ -472,7 +532,9 @@ mod tests {
     #[test]
     fn host_returns_the_committed_tick_output() {
         let mut host = host();
-        let output = host.run_frame(&[]).expect("local frame should commit");
+        let output = host
+            .run_frame(dawn_sector::transition::FrameInput::lock_only(&[]))
+            .expect("local frame should commit");
 
         assert_eq!(output.tick_result.tick.value(), 1);
         assert_eq!(host.phase(), RuntimeFramePhase::Running);
@@ -485,9 +547,12 @@ mod tests {
         let mut observed = None;
 
         let output = host
-            .run_frame_with_output(&[], |node, tick_result, events| {
-                observed = Some((node.current_tick(), tick_result.tick, events.len()));
-            })
+            .run_frame_with_output(
+                dawn_sector::transition::FrameInput::lock_only(&[]),
+                |node, tick_result, events| {
+                    observed = Some((node.current_tick(), tick_result.tick, events.len()));
+                },
+            )
             .expect("local frame should commit");
 
         let (current_tick, observed_tick, event_count) = observed.expect("output hook should run");
@@ -505,7 +570,7 @@ mod tests {
             RejectingPolicy,
         ));
 
-        let result = host.run_frame(&[]);
+        let result = host.run_frame(dawn_sector::transition::FrameInput::lock_only(&[]));
 
         assert!(matches!(
             result,

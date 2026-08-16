@@ -168,6 +168,9 @@ pub struct TickResult {
     pub events: Vec<DomainEvent>,
     /// Ships whose active module was force-deactivated by cap shortage this tick.
     pub cap_depletions: Vec<dawn_core::ShipId>,
+    /// Outcome of each `FrameInput::market_settlements` entry admitted this
+    /// tick, in input order (issue #315).
+    pub market_settlement_outcomes: Vec<crate::transition::MarketSettlementOutcome>,
 }
 
 /// Test-facing snapshot of one fitted module's identity and activation state.

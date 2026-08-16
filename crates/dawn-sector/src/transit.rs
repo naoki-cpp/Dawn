@@ -159,13 +159,13 @@ pub fn commit_stop_transition<J: DurableJournal>(
 pub fn commit_tick_state_transition<J: DurableJournal>(
     node: &mut SimulationNode,
     journal: &mut J,
-    lock_commands: &[dawn_core::LockOnCommand],
+    input: crate::transition::FrameInput<'_>,
     transition_id: crate::transition::SectorTransitionId,
     owner_epoch: u64,
     durability: DurabilityMode,
 ) -> Result<AppendReceipt, TickTransitionError> {
     let (prepared, _) =
-        node.prepare_tick_state_transition_with_result(lock_commands, transition_id, owner_epoch)?;
+        node.prepare_tick_state_transition_with_result(input, transition_id, owner_epoch)?;
     let crate::transition::SectorRecoveryDelta::Tick(ref delta) = prepared.recovery_delta else {
         unreachable!("prepare_tick_state_transition always produces a Tick delta")
     };
@@ -767,7 +767,7 @@ where
         consensus,
         &policy,
         health,
-        lock_commands,
+        crate::transition::FrameInput::lock_only(lock_commands),
         context,
         reconcile_runtime_repositories,
         after_events_collected,
@@ -801,7 +801,7 @@ where
         consensus,
         policy,
         &mut health,
-        lock_commands,
+        crate::transition::FrameInput::lock_only(lock_commands),
         context,
         reconcile_runtime_repositories,
         after_events_collected,
@@ -844,7 +844,7 @@ where
         consensus,
         policy,
         &mut health,
-        lock_commands,
+        crate::transition::FrameInput::lock_only(lock_commands),
         context,
         reconcile,
         after_events_collected,
@@ -863,7 +863,7 @@ pub fn run_durable_runtime_tick_with_policy_and_reconciliation_and_health<J, C, 
     consensus: &mut C,
     policy: &P,
     health: &mut RuntimeHealth,
-    lock_commands: &[dawn_core::LockOnCommand],
+    input: crate::transition::FrameInput<'_>,
     context: DurableRuntimeTickContext,
     reconcile: R,
     after_events_collected: F,
@@ -887,7 +887,7 @@ where
     // journal append has succeeded so a failed append can restore the buffer.
     let prior_events = node.drain_pending_events();
     let (prepared, result) = match node.prepare_tick_state_transition_with_result(
-        lock_commands,
+        input,
         context.transition_id,
         context.owner_epoch,
     ) {

@@ -66,7 +66,7 @@ pub(crate) async fn run_phase4_server(
     let mut market = MarketRuntime::open("data/market.sqlite")
         .expect("failed to open Market database at data/market.sqlite");
 
-    host.with_node_mut(|node| node.spawn_npc_frigates(ship_count));
+    host.spawn_npc_frigates(ship_count);
     // Duel-mode player spawn: close enough to the Bot to be within weapon
     // range (Small Railgun: 3000 range + 2000 falloff = 5000) from the
     // moment the human connects, instead of the universe-wide
@@ -82,7 +82,7 @@ pub(crate) async fn run_phase4_server(
         // (e.g. to practice locking/engaging more than one target at once).
         for i in 0..enemy_count.max(1) {
             let bot_pos = Position::new(1200.0, i as f64 * 800.0, 0.0);
-            let (_, bot_ship_id) = host.with_node_mut(|node| node.spawn_bot_ship(bot_pos));
+            let (_, bot_ship_id) = host.spawn_bot_ship(bot_pos);
             println!(
                 "  [Server] Duel mode: Bot ship #{} ready at {:?}",
                 bot_ship_id.raw(),
@@ -123,6 +123,9 @@ pub(crate) async fn run_phase4_server(
     let mut duel_metrics: Option<DuelMetrics> = None;
     let mut player_ship_id: Option<ShipId> = None;
     let mut tidi = dilation::DilationController::new(TIDI_BUDGET);
+    // Settlement identities the Market ledger decided last tick, retired
+    // from the Sector's idempotency guard by the next frame (issue #315).
+    let mut decided_settlements: Vec<u64> = Vec::new();
 
     loop {
         interval.tick().await;
@@ -130,9 +133,7 @@ pub(crate) async fn run_phase4_server(
         // Resolve socket outcomes on the tick-loop thread. A session is not
         // visible to AoI delivery or command routing until its Sector attempt
         // commits successfully.
-        for (sess, _committed) in
-            host.with_node_mut(|node| drain_single_admission_completions(node, &mut completion_rx))
-        {
+        for (sess, _committed) in host.drain_single_admission_completions(&mut completion_rx) {
             println!(
                 "  [Server] {} joined with ship #{}",
                 sess.player_id,
@@ -166,9 +167,7 @@ pub(crate) async fn run_phase4_server(
                 None => ClientAdmissionIntent::Fresh { spawn_position },
             };
 
-            let mut attempt = match host
-                .with_node_mut(|node| node.begin_client_admission(intent, AOI_CELL_SIZE))
-            {
+            let mut attempt = match host.begin_client_admission(intent, AOI_CELL_SIZE) {
                 Ok(attempt) => attempt,
                 Err(refusal) => {
                     log_single_refusal(request.peer_addr, refusal);
@@ -206,9 +205,7 @@ pub(crate) async fn run_phase4_server(
         let mut lock_commands: Vec<dawn_core::LockOnCommand> = Vec::new();
         for sess in sessions.iter_mut() {
             while let Some(market_command) = sess.try_recv_market_command() {
-                let snapshot = host.with_node_mut(|node| {
-                    market.handle_single(sess.player_id, market_command, node)
-                });
+                let snapshot = market.handle_single(sess.player_id, market_command, host.node());
                 sess.send_message(&ServerMessage::MarketSnapshot(snapshot));
             }
         }
@@ -254,10 +251,39 @@ pub(crate) async fn run_phase4_server(
             }
         }
 
+        // Drain still-pending Market settlements against the live node once
+        // per tick, right before the frame that will carry them (issue
+        // #315): this keeps a settlement's cargo mutation inside the same
+        // durable write set as everything else in the tick instead of
+        // mutating live state synchronously outside any tick boundary.
+        let queued_settlements = market.drain_settlements(host.node());
+        let market_settlements: Vec<dawn_sector::transition::MarketSettlementInput> =
+            queued_settlements
+                .iter()
+                .map(|queued| queued.input())
+                .collect();
+
         let output = host
-            .run_frame(&lock_commands)
+            .run_frame(dawn_sector::transition::FrameInput {
+                lock_commands: &lock_commands,
+                market_settlements: &market_settlements,
+                acknowledged_settlements: &decided_settlements,
+            })
             .expect("in-memory single-sector runtime must accept durable Tick");
         let tick_result = output.tick_result;
+        let acknowledgement = market
+            .acknowledge_settlements(&queued_settlements, &tick_result.market_settlement_outcomes);
+        // Retired on the next frame, through the same durable boundary as
+        // everything else (issue #315).
+        decided_settlements = acknowledgement.decided_settlement_ids;
+        // The client was told "settlement pending" when it placed the order;
+        // now that the outcome is known, say so instead of leaving it there.
+        for player_id in acknowledgement.rejected_players {
+            let snapshot = market.settlement_rejected_snapshot(player_id);
+            if let Some(session) = sessions.iter_mut().find(|s| s.player_id == player_id) {
+                session.send_message(&ServerMessage::MarketSnapshot(snapshot));
+            }
+        }
         all_new_events.extend(output.events);
 
         for sess in &sessions {
@@ -354,6 +380,17 @@ fn drain_single_admission_completions(
         }
     }
     ready
+}
+
+impl RuntimeFrameHost<InMemoryJournal, LocalRuntimeConsensus> {
+    /// Resolve async handshake outcomes against the owned node, promoting
+    /// each committed attempt to a ready session.
+    fn drain_single_admission_completions(
+        &mut self,
+        completion_rx: &mut mpsc::UnboundedReceiver<HandshakeCompletion>,
+    ) -> Vec<(ws_server::PlayerSession, CommittedClientAdmission)> {
+        self.with_node_mut(|node| drain_single_admission_completions(node, completion_rx))
+    }
 }
 
 fn finish_single_admission<T>(

@@ -227,17 +227,17 @@ impl SimulationNode {
     #[cfg(test)]
     pub(crate) fn prepare_tick_state_transition(
         &mut self,
-        lock_commands: &[dawn_core::LockOnCommand],
+        input: crate::transition::FrameInput<'_>,
         transition_id: SectorTransitionId,
         owner_epoch: u64,
     ) -> Result<PreparedSectorTransition, TickPreparationError> {
-        self.prepare_tick_state_transition_with_result(lock_commands, transition_id, owner_epoch)
+        self.prepare_tick_state_transition_with_result(input, transition_id, owner_epoch)
             .map(|(prepared, _)| prepared)
     }
 
     pub(crate) fn prepare_tick_state_transition_with_result(
         &mut self,
-        lock_commands: &[dawn_core::LockOnCommand],
+        input: crate::transition::FrameInput<'_>,
         transition_id: SectorTransitionId,
         owner_epoch: u64,
     ) -> Result<(PreparedSectorTransition, TickResult), TickPreparationError> {
@@ -255,8 +255,26 @@ impl SimulationNode {
         let before_transit_attempt_counter = self.transit.transit_attempt_counter;
         let before_transit_saga = self.transit_saga_snapshot();
         let before_transit_journal = self.transit.transit_journal.clone();
+        let before_market_settlements = self.simulation.applied_market_settlements.clone();
 
-        let result = self.tick_with_lock_commands_mode(lock_commands, false, false);
+        // Retire settlement identities the Market ledger has already decided
+        // before admitting new ones, so the idempotency guard stays bounded
+        // (issue #315). Both happen before the write set is captured below,
+        // so they are part of the same durable delta as this tick's other
+        // state and roll back with it if preparation does not lead to a
+        // committed apply.
+        self.retire_acknowledged_settlements(input.acknowledged_settlements);
+
+        let settlement_outcomes: Vec<crate::transition::MarketSettlementOutcome> = input
+            .market_settlements
+            .iter()
+            .map(|settlement| crate::transition::MarketSettlementOutcome {
+                settlement_id: settlement.settlement_id(),
+                status: self.apply_market_settlement_input(*settlement),
+            })
+            .collect();
+
+        let result = self.tick_with_lock_commands_mode(input.lock_commands, false, false);
         let deferred_events = self
             .frame_outputs
             .pending_events
@@ -264,6 +282,7 @@ impl SimulationNode {
         let mut result = result;
         result.events.extend(deferred_events);
         result.events_emitted = result.events.len();
+        result.market_settlement_outcomes = settlement_outcomes;
         let after_states = self.capture_tick_write_set();
         // Keep the complete post-tick ship image. Commands are admitted before
         // this preparation starts, so a diff against `before_states` would
@@ -333,6 +352,7 @@ impl SimulationNode {
         self.frame_outputs.pending_auto_jumps = before_auto_jumps;
         self.frame_outputs.completed_warps = before_completed_warps;
         self.transit.transit_attempt_counter = before_transit_attempt_counter;
+        self.simulation.applied_market_settlements = before_market_settlements;
         self.restore_transit_saga(before_transit_saga)
             .expect("prepared Tick must restore the previous Transit Saga");
         self.frame_outputs
@@ -971,6 +991,7 @@ impl SimulationNode {
             events_emitted: count,
             events: all_events,
             cap_depletions: cap.refitted.clone(),
+            market_settlement_outcomes: Vec::new(),
         }
     }
 }
@@ -1030,6 +1051,170 @@ mod tests {
         ));
     }
 
+    /// issue #315: a Market settlement admitted through `FrameInput` must
+    /// apply inside Tick preparation's rollback window -- live state stays
+    /// untouched until a commit actually applies the delta -- while still
+    /// being captured in the prepared delta so a durable commit persists it.
+    #[test]
+    fn market_settlement_input_applies_within_prepare_rollback_window() {
+        let mut node = mem_node();
+        let player_id = node.next_player_id();
+        let ship_id = node.spawn_player_ship(player_id);
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
+
+        let settlement =
+            crate::transition::MarketSettlementInput::CreditItem(dawn_core::CreditItemCommand {
+                player_id,
+                ship_id,
+                item_id: dawn_core::ItemId::ScrapMetal,
+                quantity: 7,
+                settlement_id: 42,
+            });
+        let market_settlements = [settlement];
+        let input = crate::transition::FrameInput {
+            lock_commands: &[],
+            market_settlements: &market_settlements,
+            acknowledged_settlements: &[],
+        };
+
+        let before_count = node
+            .simulation
+            .world
+            .get::<dawn_ecs::components::InventoryComp>(entity)
+            .map(|inv| inv.item_count(dawn_core::ItemId::ScrapMetal))
+            .unwrap_or(0);
+
+        let (prepared, result) = node
+            .prepare_tick_state_transition_with_result(input, SectorTransitionId(30), 4)
+            .expect("full Tick with a Market settlement should be preparable");
+
+        assert_eq!(
+            result.market_settlement_outcomes,
+            vec![crate::transition::MarketSettlementOutcome {
+                settlement_id: 42,
+                status: crate::transition::MarketSettlementStatus::Applied,
+            }],
+            "the settlement outcome must be reported so the runtime can ACK it"
+        );
+
+        // Live state must be untouched: prepare is a dry run.
+        let after_prepare_count = node
+            .simulation
+            .world
+            .get::<dawn_ecs::components::InventoryComp>(entity)
+            .map(|inv| inv.item_count(dawn_core::ItemId::ScrapMetal))
+            .unwrap_or(0);
+        assert_eq!(
+            after_prepare_count, before_count,
+            "Tick preparation must not mutate live state -- the settlement's \
+             effect must be rolled back with everything else until commit"
+        );
+        assert!(
+            !node.simulation.applied_market_settlements.contains(&42),
+            "the dedup guard must not be live either before a commit"
+        );
+
+        // The prepared delta must carry the settlement's effect so a durable
+        // commit actually persists it.
+        let SectorRecoveryDelta::Tick(delta) = &prepared.recovery_delta else {
+            panic!("full Tick must produce a Tick recovery delta");
+        };
+        assert!(
+            delta.applied_market_settlements.contains(&42),
+            "the prepared delta must carry the settlement dedup guard"
+        );
+        let ship_state = delta
+            .ship_states
+            .iter()
+            .find(|state| state.snapshot.ship_id == ship_id)
+            .expect("the credited ship must be in the prepared write set");
+        assert_eq!(
+            ship_state
+                .snapshot
+                .inventory
+                .get(&dawn_core::ItemId::ScrapMetal)
+                .copied()
+                .unwrap_or(0),
+            before_count + 7,
+            "the prepared delta must carry the credited item count"
+        );
+
+        // A durable commit must actually apply it to live state.
+        let mut journal = InMemoryJournal::new();
+        crate::transit::commit_tick_state_transition(
+            &mut node,
+            &mut journal,
+            input,
+            SectorTransitionId(31),
+            4,
+            DurabilityMode::Synced,
+        )
+        .expect("durable full Tick with a Market settlement should apply");
+        let after_commit_count = node
+            .simulation
+            .world
+            .get::<dawn_ecs::components::InventoryComp>(entity)
+            .map(|inv| inv.item_count(dawn_core::ItemId::ScrapMetal))
+            .unwrap_or(0);
+        assert_eq!(after_commit_count, before_count + 7);
+        assert!(node.simulation.applied_market_settlements.contains(&42));
+    }
+
+    /// A RemoveItem settlement that empties a stack must survive the commit
+    /// in LIVE state, not just in the speculative events prepare emits.
+    #[test]
+    fn a_remove_settlement_that_empties_a_stack_survives_the_commit() {
+        let mut node = mem_node();
+        let player_id = node.next_player_id();
+        let ship_id = node.spawn_player_ship(player_id);
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
+        assert!(node.credit_item_owned(dawn_core::CreditItemCommand {
+            player_id,
+            ship_id,
+            item_id: dawn_core::ItemId::ScrapMetal,
+            quantity: 2,
+            settlement_id: 1,
+        }));
+        let live = |node: &SimulationNode| -> u64 {
+            node.simulation
+                .world
+                .get::<InventoryComp>(entity)
+                .map(|inv| inv.item_count(dawn_core::ItemId::ScrapMetal))
+                .unwrap_or(0)
+        };
+        assert_eq!(live(&node), 2);
+
+        let remove =
+            crate::transition::MarketSettlementInput::RemoveItem(dawn_core::RemoveItemCommand {
+                player_id,
+                ship_id,
+                item_id: dawn_core::ItemId::ScrapMetal,
+                quantity: 2,
+                settlement_id: 55,
+            });
+        let settlements = [remove];
+        let mut journal = InMemoryJournal::new();
+        crate::transit::commit_tick_state_transition(
+            &mut node,
+            &mut journal,
+            crate::transition::FrameInput {
+                lock_commands: &[],
+                market_settlements: &settlements,
+                acknowledged_settlements: &[],
+            },
+            SectorTransitionId(40),
+            4,
+            DurabilityMode::Synced,
+        )
+        .expect("durable Tick with a Remove settlement should apply");
+
+        assert_eq!(
+            live(&node),
+            0,
+            "the reserved stack must be gone from live state after the commit"
+        );
+    }
+
     #[test]
     fn full_tick_prepare_restores_live_state_and_recovery_replays_it() {
         let mut node = mem_node();
@@ -1052,7 +1237,11 @@ mod tests {
         let before = node.capture_tick_write_set();
 
         let prepared = node
-            .prepare_tick_state_transition(&[], SectorTransitionId(23), 4)
+            .prepare_tick_state_transition(
+                crate::transition::FrameInput::lock_only(&[]),
+                SectorTransitionId(23),
+                4,
+            )
             .expect("full Tick should be preparable");
 
         assert_eq!(node.current_tick(), Tick::ZERO);
@@ -1068,7 +1257,7 @@ mod tests {
         crate::transit::commit_tick_state_transition(
             &mut node,
             &mut journal,
-            &[],
+            crate::transition::FrameInput::lock_only(&[]),
             SectorTransitionId(24),
             4,
             DurabilityMode::Synced,
@@ -1123,7 +1312,7 @@ mod tests {
         crate::transit::commit_tick_state_transition(
             &mut node,
             &mut journal,
-            &[],
+            crate::transition::FrameInput::lock_only(&[]),
             SectorTransitionId(1),
             4,
             DurabilityMode::Synced,
@@ -1172,7 +1361,7 @@ mod tests {
         assert!(crate::transit::commit_tick_state_transition(
             &mut node,
             &mut journal,
-            &[],
+            crate::transition::FrameInput::lock_only(&[]),
             SectorTransitionId(25),
             4,
             DurabilityMode::Synced,

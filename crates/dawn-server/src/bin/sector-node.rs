@@ -167,7 +167,7 @@ async fn main() -> anyhow::Result<()> {
         RuntimeFramePolicy::local_durable(0),
     );
     if is_fresh {
-        host.with_node_mut(|node| node.spawn_npc_frigates(cfg.npc_ships));
+        host.spawn_npc_frigates(cfg.npc_ships);
     }
 
     // ── Shared peer transport: replication adapter ────────────────────────────
@@ -209,7 +209,7 @@ async fn main() -> anyhow::Result<()> {
     println!("[Node] Raft warm-up (30 ticks)...");
     for _ in 0..30 {
         let output = host
-            .run_frame(&[])
+            .run_frame(dawn_sector::transition::FrameInput::lock_only(&[]))
             .unwrap_or_else(|error| panic!("durable Raft warm-up tick failed: {error}"));
         event_store.append_batch(output.events);
     }
@@ -240,9 +240,7 @@ async fn main() -> anyhow::Result<()> {
         interval.tick().await;
         let tick_started = std::time::Instant::now();
 
-        runtime.with_node_mut(|node| {
-            admission.advance_handshakes(node, sector_id, AOI_CELL_SIZE);
-        });
+        runtime.advance_handshakes(&mut admission, sector_id, AOI_CELL_SIZE);
 
         // Promote completed handshakes to active sessions.
         while let Some(sess) = admission.try_recv_ready_session() {

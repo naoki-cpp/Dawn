@@ -1,9 +1,7 @@
 //! Serve runtime orchestration shared by clustered serve loops.
 
-use super::{AoiDelivery, AOI_CELL_SIZE};
-use crate::runtime_frame::{
-    OwnedRaftRuntimeConsensus, RuntimeFrameHost, RuntimeNodeMutation, RuntimeNodeView,
-};
+use super::{market::MarketRuntime, AoiDelivery, AOI_CELL_SIZE};
+use crate::runtime_frame::{OwnedRaftRuntimeConsensus, RuntimeFrameHost, RuntimeNodeView};
 use crate::ws_server;
 use dawn_core::{DomainEvent, PlayerId, ShipId};
 use dawn_protocol::{project_domain_event, InitialStateWire, ServerFact, ServerMessage};
@@ -22,21 +20,74 @@ pub(crate) struct ClusterRuntimeTickContext<'a> {
     pub(crate) player_sector: &'a mut HashMap<PlayerId, usize>,
     pub(crate) ship_player: &'a HashMap<ShipId, PlayerId>,
     pub(crate) aoi_delivery: &'a mut AoiDelivery,
+    pub(crate) market: &'a mut MarketRuntime,
+    /// Per-Sector settlement identities the Market ledger decided last tick,
+    /// retired from each Sector's idempotency guard by this frame and
+    /// replaced with what this frame decides (issue #315).
+    pub(crate) decided_settlements: &'a mut Vec<Vec<u64>>,
 }
 
 pub(crate) fn run_cluster_runtime_tick(
     ctx: ClusterRuntimeTickContext<'_>,
     lock_commands: &[Vec<dawn_core::LockOnCommand>],
 ) -> Vec<transit::RuntimeTickOutput> {
+    // Drain Market settlements per host before running any frame: a
+    // settlement's destination ship lives in exactly one Sector, so each
+    // host's `FrameInput` must only ever carry the settlements that host's
+    // own `SimulationNode` currently owns/docks (issue #315). The Market DB
+    // is shared across the whole cluster, so this is one drain call per
+    // host against the same `MarketRuntime`.
+    let queued_settlements: Vec<_> = ctx
+        .hosts
+        .iter()
+        .map(|host| ctx.market.drain_settlements(host))
+        .collect();
+    let market_settlements: Vec<Vec<dawn_sector::transition::MarketSettlementInput>> =
+        queued_settlements
+            .iter()
+            .map(|queued| queued.iter().map(|q| q.input()).collect())
+            .collect();
+
     let tick_outputs: Vec<_> = ctx
         .hosts
         .iter_mut()
         .zip(lock_commands)
-        .map(|(host, lock_commands)| {
-            host.run_frame(lock_commands)
+        .zip(&market_settlements)
+        .zip(&*ctx.decided_settlements)
+        .map(
+            |(((host, lock_commands), market_settlements), acknowledged_settlements)| {
+                host.run_frame(dawn_sector::transition::FrameInput {
+                    lock_commands,
+                    market_settlements,
+                    acknowledged_settlements,
+                })
                 .expect("in-memory clustered runtime must accept durable Tick")
-        })
+            },
+        )
         .collect();
+
+    let mut rejected_players: Vec<PlayerId> = Vec::new();
+    let mut decided: Vec<Vec<u64>> = Vec::with_capacity(tick_outputs.len());
+    for (queued, output) in queued_settlements.iter().zip(&tick_outputs) {
+        let acknowledgement = ctx
+            .market
+            .acknowledge_settlements(queued, &output.tick_result.market_settlement_outcomes);
+        decided.push(acknowledgement.decided_settlement_ids);
+        rejected_players.extend(acknowledgement.rejected_players);
+    }
+    // Carried into the next frame so each Sector retires the ids it settled
+    // through the same durable boundary as the rest of its state.
+    decided.resize(ctx.hosts.len(), Vec::new());
+    *ctx.decided_settlements = decided;
+
+    // Tell players whose deferred settlement was refused; their request was
+    // already answered with "settlement pending".
+    for player_id in rejected_players {
+        let snapshot = ctx.market.settlement_rejected_snapshot(player_id);
+        if let Some(session) = ctx.sessions.iter_mut().find(|s| s.player_id == player_id) {
+            let _ = session.send_message(&ServerMessage::MarketSnapshot(snapshot));
+        }
+    }
 
     let warp_arrivals_by_sector: Vec<Vec<ShipId>> = tick_outputs
         .iter()
@@ -74,8 +125,8 @@ struct JumpHandoff {
     own_events: HashMap<PlayerId, Vec<DomainEvent>>,
 }
 
-fn apply_jump_handoffs<N: RuntimeNodeMutation>(
-    nodes: &mut [N],
+fn apply_jump_handoffs(
+    nodes: &mut [RuntimeFrameHost<InMemoryJournal, OwnedRaftRuntimeConsensus>],
     player_sector: &mut HashMap<PlayerId, usize>,
     ship_player: &HashMap<ShipId, PlayerId>,
     events_by_sector: &[Vec<DomainEvent>],
@@ -89,9 +140,7 @@ fn apply_jump_handoffs<N: RuntimeNodeMutation>(
                 DomainEvent::JumpGateUsed(e) => {
                     if let Some(&player_id) = ship_player.get(&e.ship_id) {
                         let dest = e.to_sector.0 as usize;
-                        nodes[dest].with_runtime_node_mut(|node| {
-                            node.adopt_player_ship(e.ship_id, player_id);
-                        });
+                        nodes[dest].adopt_player_ship(e.ship_id, player_id);
                         player_sector.insert(player_id, dest);
                         jumped_players.push((player_id, dest));
                         own_events.entry(player_id).or_default().push(event.clone());

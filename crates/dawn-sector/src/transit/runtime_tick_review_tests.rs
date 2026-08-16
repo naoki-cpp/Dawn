@@ -368,7 +368,7 @@ fn post_append_failure_fences_a_long_lived_runtime_until_recovery() {
         &mut consensus,
         &LocalRuntimeDurabilityPolicy,
         &mut health,
-        &[],
+        crate::transition::FrameInput::lock_only(&[]),
         DurableRuntimeTickContext {
             transition_id: crate::transition::SectorTransitionId(107),
             owner_epoch: 4,
@@ -396,7 +396,7 @@ fn post_append_failure_fences_a_long_lived_runtime_until_recovery() {
         &mut consensus,
         &LocalRuntimeDurabilityPolicy,
         &mut health,
-        &[],
+        crate::transition::FrameInput::lock_only(&[]),
         DurableRuntimeTickContext {
             transition_id: crate::transition::SectorTransitionId(108),
             owner_epoch: 4,
@@ -421,7 +421,7 @@ fn post_append_failure_fences_a_long_lived_runtime_until_recovery() {
         &mut consensus,
         &LocalRuntimeDurabilityPolicy,
         &mut health,
-        &[],
+        crate::transition::FrameInput::lock_only(&[]),
         DurableRuntimeTickContext {
             transition_id: crate::transition::SectorTransitionId(109),
             owner_epoch: 4,
