@@ -8,9 +8,10 @@
 use std::collections::BTreeMap;
 
 use crate::node::SimulationNode;
+#[cfg(test)]
+use crate::persistence::TransitSagaDiagnostics;
 use crate::persistence::{
-    IncomingTransitReceipt, OutgoingTransitAttempt, TransitAttemptState, TransitSagaDiagnostics,
-    TransitSagaSnapshot,
+    IncomingTransitReceipt, OutgoingTransitAttempt, TransitAttemptState, TransitSagaSnapshot,
 };
 #[cfg(test)]
 use dawn_core::DomainEvent;
@@ -106,6 +107,7 @@ impl TransitJournal {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn diagnostics(&self) -> TransitSagaDiagnostics {
         let mut diagnostics = TransitSagaDiagnostics {
             incoming_receipts: self.incoming.len() as u64,

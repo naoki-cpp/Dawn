@@ -12,40 +12,8 @@ use dawn_core::{events::ClientAdmissionCommitted, ItemId, PlayerId, StationId};
 use super::{station::StationOperationRejection, SimulationNode};
 
 impl SimulationNode {
-    /// Return the next global journal index required by the Station projection.
-    ///
-    /// The runtime should use this cursor when applying a committed
-    /// `RecoveryDelta`; it is intentionally persisted with the projection so
-    /// restart and replay preserve the same contiguous-prefix contract.
-    pub fn station_projection_applied_through(&self) -> Result<u64, super::ProjectionReadError> {
-        self.persistence
-            .station_inventory()
-            .projection_applied_through()
-            .map_err(|error| super::ProjectionReadError::Storage {
-                message: error.to_string(),
-            })
-    }
-
-    /// Apply the Station part of one committed transition exactly once.
-    ///
-    /// Pass `None` for transitions that do not affect Station inventory. The
-    /// caller must invoke this only after the enclosing `RecoveryDelta` has
-    /// been durably committed to the runtime journal.
-    pub fn apply_station_projection(
-        &self,
-        transition_id: &str,
-        journal_index: u64,
-        mutation: Option<super::StationProjectionMutation>,
-    ) -> Result<super::ProjectionApplyResult, super::ProjectionApplyError> {
-        self.persistence.station_inventory().apply_projection(
-            transition_id,
-            journal_index,
-            mutation,
-        )
-    }
-
     /// Read the player's Station projection at one station.
-    pub fn station_inventory(
+    pub(crate) fn station_inventory(
         &self,
         player_id: PlayerId,
         station_id: StationId,
@@ -58,7 +26,7 @@ impl SimulationNode {
     }
 
     /// Count one item stack inside the player's Station projection.
-    pub fn station_item_count(
+    pub(crate) fn station_item_count(
         &self,
         player_id: PlayerId,
         station_id: StationId,
@@ -108,7 +76,7 @@ impl SimulationNode {
     /// use `StationInventoryRepository::apply_projection` after the enclosing
     /// RecoveryDelta is durable; this method remains for existing command
     /// seams until the runtime projection hook is wired by #278.
-    pub fn credit_station_item(
+    pub(crate) fn credit_station_item(
         &mut self,
         player_id: PlayerId,
         station_id: StationId,

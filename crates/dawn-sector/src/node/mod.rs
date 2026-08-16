@@ -404,7 +404,7 @@ impl SimulationNode {
     /// Apply one committed authoritative RecoveryDelta during restart or
     /// replica promotion. Public events are intentionally not involved here:
     /// the delta is the exact state transition selected by ADR-0049.
-    pub fn apply_recovery_delta(
+    pub(crate) fn apply_recovery_delta(
         &mut self,
         delta: crate::transition::SectorRecoveryDelta,
         context: crate::transition::TransitionContext,
@@ -447,7 +447,7 @@ impl SimulationNode {
     /// is not a sound idle signal. Reducing the cost of idle ships belongs in
     /// LoD (8B-3) as lowered fidelity, not in a count that pretends they are
     /// absent.
-    pub fn at_population_cap(&self) -> bool {
+    pub(crate) fn at_population_cap(&self) -> bool {
         self.ship_count()
             .saturating_add(self.players.pending_fresh_admissions.len())
             >= self.players.population_cap
@@ -478,7 +478,7 @@ impl SimulationNode {
     /// The runtime owns when this boundary runs; the repository owns the
     /// transaction and allocator invariants. Station projection mutation
     /// remains a separate idempotent projection port.
-    pub fn reconcile_runtime_repositories(&mut self) -> Result<(), String> {
+    pub(crate) fn reconcile_runtime_repositories(&mut self) -> Result<(), String> {
         self.observe_materialized_identities()?;
         self.reconcile_client_admission_identities()
     }
@@ -498,7 +498,7 @@ impl SimulationNode {
     }
 
     /// Read access to the navigation topology.
-    pub fn galaxy(&self) -> &crate::galaxy::Galaxy {
+    pub(crate) fn galaxy(&self) -> &crate::galaxy::Galaxy {
         &self.topology.sector_map.galaxy
     }
 
@@ -554,7 +554,8 @@ impl SimulationNode {
         self.frame_outputs.pending_events = events;
     }
 
-    pub fn pending_event_count(&self) -> usize {
+    #[cfg(test)]
+    pub(crate) fn pending_event_count(&self) -> usize {
         self.frame_outputs.pending_events.len()
     }
 
@@ -577,7 +578,7 @@ impl SimulationNode {
 
     /// The Ship's current approach target, if any (ADR-0015).
     #[cfg(test)]
-    pub fn approach_target(&self, ship_id: ShipId) -> Option<dawn_core::ApproachTarget> {
+    pub(crate) fn approach_target(&self, ship_id: ShipId) -> Option<dawn_core::ApproachTarget> {
         let entity = self.simulation.ships.index.get(&ship_id)?;
         self.simulation
             .world
@@ -587,7 +588,7 @@ impl SimulationNode {
 
     /// The Ship's current warp phase, if it is warping (ADR-0022).
     #[cfg(test)]
-    pub fn warp_phase(&self, ship_id: ShipId) -> Option<dawn_ecs::components::WarpPhase> {
+    pub(crate) fn warp_phase(&self, ship_id: ShipId) -> Option<dawn_ecs::components::WarpPhase> {
         let entity = self.simulation.ships.index.get(&ship_id)?;
         self.simulation
             .world
@@ -605,13 +606,15 @@ impl SimulationNode {
     }
 
     /// The coordinate anchor a Ship's position is relative to (ADR-0029).
-    pub fn get_ship_anchor(&self, ship_id: ShipId) -> Option<dawn_core::AnchorId> {
+    #[cfg(test)]
+    pub(crate) fn get_ship_anchor(&self, ship_id: ShipId) -> Option<dawn_core::AnchorId> {
         let entity = self.simulation.ships.index.get(&ship_id)?;
         self.simulation.world.ship_anchor(*entity)
     }
 
     /// Read access to this node's per-body anchor table (ADR-0029).
-    pub fn anchor_table(&self) -> &crate::anchor::AnchorTable {
+    #[cfg(test)]
+    pub(crate) fn anchor_table(&self) -> &crate::anchor::AnchorTable {
         &self.topology.anchor_table
     }
 
@@ -619,7 +622,7 @@ impl SimulationNode {
     /// composing its anchor's absolute position with its f64 offset (ADR-0029).
     /// Falls back to treating the raw offset as absolute if the anchor is
     /// unknown (pre-anchor data / tests).
-    pub fn ship_absolute(&self, ship_id: ShipId) -> Option<dawn_core::AbsolutePosition> {
+    pub(crate) fn ship_absolute(&self, ship_id: ShipId) -> Option<dawn_core::AbsolutePosition> {
         let entity = *self.simulation.ships.index.get(&ship_id)?;
         let offset = self.simulation.world.get::<PositionComp>(entity)?.0;
         Some(self.entity_absolute_f64(entity, offset))
@@ -722,7 +725,7 @@ impl SimulationNode {
 
     /// Look up the current `ShipStatsComp` of a Ship by its ID. Test-only.
     #[cfg(test)]
-    pub fn get_ship_stats(&self, ship_id: ShipId) -> Option<ShipStatsComp> {
+    pub(crate) fn get_ship_stats(&self, ship_id: ShipId) -> Option<ShipStatsComp> {
         let entity = self.simulation.ships.index.get(&ship_id)?;
         self.simulation
             .world
@@ -732,7 +735,7 @@ impl SimulationNode {
 
     /// Look up the current HP of a Ship by its ID. Test-only.
     #[cfg(test)]
-    pub fn get_ship_hp(&self, ship_id: ShipId) -> Option<f32> {
+    pub(crate) fn get_ship_hp(&self, ship_id: ShipId) -> Option<f32> {
         let entity = self.simulation.ships.index.get(&ship_id)?;
         self.simulation
             .world
@@ -742,7 +745,7 @@ impl SimulationNode {
 
     /// Look up the current `CapacitorComp.current` of a Ship by its ID.
     #[cfg(test)]
-    pub fn get_ship_capacitor(&self, ship_id: ShipId) -> Option<f32> {
+    pub(crate) fn get_ship_capacitor(&self, ship_id: ShipId) -> Option<f32> {
         let entity = self.simulation.ships.index.get(&ship_id)?;
         self.simulation
             .world
@@ -752,7 +755,7 @@ impl SimulationNode {
 
     /// Module identity and activation state for every fitted module on a Ship.
     #[cfg(test)]
-    pub fn get_fitted_module_ids(&self, ship_id: ShipId) -> Vec<FittedModuleStatus> {
+    pub(crate) fn get_fitted_module_ids(&self, ship_id: ShipId) -> Vec<FittedModuleStatus> {
         let entity = match self.simulation.ships.index.get(&ship_id) {
             Some(&e) => e,
             None => return Vec::new(),

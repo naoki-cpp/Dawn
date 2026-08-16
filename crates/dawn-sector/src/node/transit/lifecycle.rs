@@ -1,8 +1,9 @@
 //! Live Transit lifecycle mutation for `SimulationNode`.
 
+#[cfg(test)]
+use crate::persistence::TransitSagaDiagnostics;
 use crate::persistence::{
-    IncomingTransitReceipt, OutgoingTransitAttempt, TransitAttemptState, TransitSagaDiagnostics,
-    TransitSagaSnapshot,
+    IncomingTransitReceipt, OutgoingTransitAttempt, TransitAttemptState, TransitSagaSnapshot,
 };
 use dawn_core::{
     commands::TransitCommand,
@@ -34,7 +35,8 @@ impl SimulationNode {
     /// Return derived counts for active, retrying, terminal, and incoming
     /// Transit Saga records. The counters are diagnostic output, not recovery
     /// state separate from the Saga snapshot.
-    pub fn transit_saga_diagnostics(&self) -> TransitSagaDiagnostics {
+    #[cfg(test)]
+    pub(crate) fn transit_saga_diagnostics(&self) -> TransitSagaDiagnostics {
         self.transit.transit_journal.diagnostics()
     }
 

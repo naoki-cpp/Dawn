@@ -43,7 +43,11 @@ impl SimulationNode {
     /// Ownership checks are the caller's responsibility. Tackle blocks
     /// auto-jump: CONTEXT.md defines Tackle as preventing escape actions
     /// including jump.
-    pub fn resolve_auto_jump(&self, ship_id: ShipId, gate_id: JumpGateId) -> Option<SectorId> {
+    pub(crate) fn resolve_auto_jump(
+        &self,
+        ship_id: ShipId,
+        gate_id: JumpGateId,
+    ) -> Option<SectorId> {
         if !self.can_propose_jump(ship_id, gate_id) {
             return None;
         }
@@ -59,7 +63,7 @@ impl SimulationNode {
     /// §2). Ownership checks are the caller's responsibility -- this only
     /// knows about the ship and the gate, not which player session issued
     /// the command.
-    pub fn apply_jump_with_fallback(
+    pub(crate) fn apply_jump_with_fallback(
         &mut self,
         ship_id: ShipId,
         gate_id: JumpGateId,

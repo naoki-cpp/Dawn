@@ -17,25 +17,10 @@ impl SimulationNode {
         Position::new(a[0], a[1], a[2])
     }
 
-    /// Absolute (Sector-frame) position of a ship entity, composing its anchor
-    /// with its current `PositionComp` offset (ADR-0029). The single accessor any
-    /// gameplay code should use to compare a ship against Sector-frame data
-    /// (gates, bodies, other ships) — never read the raw anchor-relative offset
-    /// for cross-anchor geometry.
-    pub(super) fn entity_abs_pos(&self, entity: Entity) -> Position {
-        let off = self
-            .simulation
-            .world
-            .get::<PositionComp>(entity)
-            .map(|p| p.0)
-            .unwrap_or(Position::ORIGIN);
-        self.entity_absolute(entity, off)
-    }
-
     /// Absolute (Sector-frame, metres, f64) position of a ship entity, composing
     /// its anchor with its current `PositionComp` offset (ADR-0029). The f64
-    /// counterpart of [`Self::entity_abs_pos`] — the AoI grid input that stays
-    /// precise at true-AU distances (R2).
+    /// input that stays precise at true-AU distances (R2), used as the AoI
+    /// grid input.
     pub(super) fn entity_abs_pos_f64(&self, entity: Entity) -> AbsolutePosition {
         let off = self
             .simulation
@@ -82,20 +67,12 @@ impl SimulationNode {
         rel
     }
 
-    /// Distance from a Ship to a Sector-frame point (a gate/body position),
-    /// composing the ship's anchor (ADR-0029). The accessor gameplay/tests use
-    /// instead of comparing a raw offset to absolute data.
-    pub fn ship_distance_to_point(&self, ship_id: ShipId, point: Position) -> Option<f64> {
-        let entity = *self.simulation.ships.index.get(&ship_id)?;
-        Some(self.entity_abs_pos(entity).distance(point))
-    }
-
     /// True distance (metres) between two Ships, composing each ship's anchor
     /// and offset in f64 so the result is correct even if the two ships are
     /// anchored on different bodies (ADR-0029 step 3 / spike B-3). Resolves
     /// each ship to its `(AnchorId, offset)` and delegates the composition to
     /// `AnchorTable::distance`.
-    pub fn ship_distance(&self, a: ShipId, b: ShipId) -> Option<f64> {
+    pub(crate) fn ship_distance(&self, a: ShipId, b: ShipId) -> Option<f64> {
         let (anchor_a, off_a) = self.ship_anchor_and_offset(a)?;
         let (anchor_b, off_b) = self.ship_anchor_and_offset(b)?;
         self.topology
@@ -129,59 +106,4 @@ pub(super) fn debug_assert_missing_anchor(anchor: dawn_core::AnchorId, site: &st
         "{site}: ship anchored on {anchor:?} which is absent from the AnchorTable \
          — absolute position fell back to the raw offset (wrong frame at true AU)"
     );
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use dawn_core::{
-        AnchorId, DomainEvent, NodeId, SectorBounds, SectorId, ShipTypeId, Tick, Velocity,
-    };
-
-    fn mem_node() -> SimulationNode {
-        SimulationNode::new_test(
-            NodeId(0),
-            SectorId(0),
-            SectorBounds::centered(SectorBounds::DEFAULT_HALF),
-            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-        )
-    }
-
-    #[test]
-    fn ship_distance_to_point_composes_the_ships_anchor() {
-        let mut node = mem_node();
-        let ship = node.spawn_ship(
-            ShipTypeId(1),
-            Position::new(1000.0, 0.0, 0.0),
-            Velocity::ZERO,
-        );
-        // Rebase onto the star (AnchorId(0), abs [0,0,0]) so the expected
-        // absolute position is exactly the offset -- ship_distance_to_point
-        // uses the same f64 composition as production range checks.
-        node.apply_event_pub(DomainEvent::AnchorRebased(
-            dawn_core::events::AnchorRebased {
-                ship_id: ship,
-                anchor: AnchorId(0),
-                offset: Position::new(500.0, 0.0, 0.0),
-                tick: Tick(1),
-            },
-        ));
-
-        let point = Position::new(510.0, 0.0, 0.0);
-        let dist = node.ship_distance_to_point(ship, point).unwrap();
-        assert!(
-            (dist - 10.0).abs() < 0.01,
-            "expected ~10m, got {dist}m -- ship_distance_to_point must compose \
-             the ship's anchor + offset before comparing to the Sector-frame point"
-        );
-    }
-
-    #[test]
-    fn ship_distance_to_point_returns_none_for_an_unknown_ship() {
-        let node = mem_node();
-        assert_eq!(
-            node.ship_distance_to_point(dawn_core::ShipId::new(NodeId(0), 999), Position::ORIGIN),
-            None
-        );
-    }
 }

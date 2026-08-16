@@ -193,6 +193,7 @@ pub enum ProjectionApplyError {
 }
 
 impl ProjectionApplyError {
+    #[cfg(test)]
     fn invalid(reason: &'static str) -> Self {
         Self::InvalidDelta { reason }
     }
@@ -1061,6 +1062,7 @@ impl SectorRepository {
         })
     }
 
+    #[cfg(test)]
     pub(super) fn projection_applied_through(&self) -> rusqlite::Result<u64> {
         self.conn.query_row(
             "SELECT projection_applied_through
@@ -1076,6 +1078,7 @@ impl SectorRepository {
     /// same identity is a no-op, while a gap is rejected so the cursor can only
     /// represent a contiguous global prefix. Non-Station transitions use the
     /// same method with `mutation = None`.
+    #[cfg(test)]
     pub(super) fn apply_station_projection(
         &self,
         transition_id: &str,
@@ -1294,10 +1297,12 @@ impl IdentityRepository<'_> {
 }
 
 impl StationInventoryRepository<'_> {
+    #[cfg(test)]
     pub(super) fn projection_applied_through(&self) -> rusqlite::Result<u64> {
         self.repository.projection_applied_through()
     }
 
+    #[cfg(test)]
     pub(super) fn apply_projection(
         &self,
         transition_id: &str,

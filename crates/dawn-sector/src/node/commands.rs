@@ -28,15 +28,6 @@ pub enum ClientCommandFollowup {
     },
 }
 
-impl ClientCommandFollowup {
-    pub fn loadout_player_id(&self) -> Option<PlayerId> {
-        match self {
-            Self::RefreshPlayerLoadout { player_id } => Some(*player_id),
-            Self::Jump { .. } => None,
-        }
-    }
-}
-
 /// Structured failures before a request reaches gameplay policy.
 #[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
 pub enum ClientRequestAdmissionError {
@@ -131,7 +122,7 @@ impl SimulationNode {
         self.players.owners.get(&ship_id) == Some(&player_id)
     }
 
-    pub fn is_active_ship(&self, player_id: PlayerId, ship_id: ShipId) -> bool {
+    pub(crate) fn is_active_ship(&self, player_id: PlayerId, ship_id: ShipId) -> bool {
         self.players.active_ship.get(&player_id) == Some(&ship_id)
     }
 

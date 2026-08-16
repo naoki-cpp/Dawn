@@ -49,7 +49,7 @@ impl SimulationNode {
     /// `WarpComp`):
     /// the Ship exists, is not in transit, is not already warping, not tackled,
     /// the target belongs to this Sector, and is at least `MIN_WARP_DISTANCE` away.
-    pub fn can_propose_warp(&self, ship_id: ShipId, target: WarpTarget) -> bool {
+    pub(crate) fn can_propose_warp(&self, ship_id: ShipId, target: WarpTarget) -> bool {
         let Some(&entity) = self.simulation.ships.index.get(&ship_id) else {
             return false;
         };

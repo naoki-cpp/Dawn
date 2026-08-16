@@ -28,7 +28,7 @@ impl SimulationNode {
     /// Rejected (returns `false`, no component attached) if the ship is
     /// unknown or in transit, a `Ship` target is unknown or the ship itself,
     /// or a `Gate` target does not originate in this Sector.
-    pub fn apply_orbit_command(
+    pub(crate) fn apply_orbit_command(
         &mut self,
         ship_id: ShipId,
         target: ApproachTarget,
@@ -46,7 +46,7 @@ impl SimulationNode {
 
     /// `apply_orbit_command` wrapped with the shared flight-command seam
     /// (active-ship + undocked, ADR-0037; `ship_command.rs`).
-    pub fn apply_orbit_command_owned(
+    pub(crate) fn apply_orbit_command_owned(
         &mut self,
         player_id: PlayerId,
         ship_id: ShipId,
@@ -63,7 +63,7 @@ impl SimulationNode {
     /// `DEFAULT_MANEUVER_RADIUS` if unarmed, when `range` is `None`.
     ///
     /// Rejection conditions mirror `apply_orbit_command`.
-    pub fn apply_keep_at_range_command(
+    pub(crate) fn apply_keep_at_range_command(
         &mut self,
         ship_id: ShipId,
         target: ApproachTarget,
@@ -81,7 +81,7 @@ impl SimulationNode {
 
     /// `apply_keep_at_range_command` wrapped with the shared flight-command
     /// seam (active-ship + undocked, ADR-0037; `ship_command.rs`).
-    pub fn apply_keep_at_range_command_owned(
+    pub(crate) fn apply_keep_at_range_command_owned(
         &mut self,
         player_id: PlayerId,
         ship_id: ShipId,
@@ -196,7 +196,7 @@ impl SimulationNode {
     /// component if the target has vanished.
     ///
     /// Runs at Step 2.55, after Approach and before Keep at Range / Warp.
-    pub fn process_orbit(&mut self) {
+    pub(crate) fn process_orbit(&mut self) {
         let orbiters: Vec<(Entity, ApproachTarget, f64, Position)> = self
             .simulation
             .world
@@ -228,7 +228,7 @@ impl SimulationNode {
     /// target has vanished.
     ///
     /// Runs at Step 2.56, after Orbit and before Warp.
-    pub fn process_keep_at_range(&mut self) {
+    pub(crate) fn process_keep_at_range(&mut self) {
         let holders: Vec<(Entity, ApproachTarget, f64, Position)> = self
             .simulation
             .world

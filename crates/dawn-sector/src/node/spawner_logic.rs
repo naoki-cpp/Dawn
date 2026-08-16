@@ -193,7 +193,8 @@ impl SimulationNode {
     }
 
     /// Spawn a player ship at the topology-derived starting position.
-    pub fn spawn_player_ship(&mut self, player_id: PlayerId) -> ShipId {
+    #[cfg(test)]
+    pub(crate) fn spawn_player_ship(&mut self, player_id: PlayerId) -> ShipId {
         self.spawn_player_ship_at(player_id, self.default_player_spawn_position())
     }
 
@@ -518,7 +519,7 @@ impl SimulationNode {
     /// Test-only setup helper; the serve path adopts player ships via
     /// `adopt_player_ship`.
     #[cfg(test)]
-    pub fn set_player_ship(&mut self, ship_id: ShipId) {
+    pub(crate) fn set_player_ship(&mut self, ship_id: ShipId) {
         if let Some(&entity) = self.simulation.ships.index.get(&ship_id) {
             self.simulation
                 .base_stats

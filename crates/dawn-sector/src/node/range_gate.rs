@@ -75,7 +75,7 @@ impl SimulationNode {
     }
 
     /// Range Gate System — Step 5.5 (ADR-0035).
-    pub fn process_range_gate(&mut self, tick: Tick) -> Vec<DomainEvent> {
+    pub(crate) fn process_range_gate(&mut self, tick: Tick) -> Vec<DomainEvent> {
         // ── 1. Snapshot Active, targeted slots + their ship's absolute position ──
         let mut candidates: Vec<TargetedSlot> = Vec::new();
         for (&ship_id, &entity) in self.simulation.ships.index.iter() {

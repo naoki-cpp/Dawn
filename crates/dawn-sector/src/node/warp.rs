@@ -31,7 +31,7 @@ impl SimulationNode {
     /// accepts the request; `process_warp()` then advances the alignment and,
     /// once aligned, flies the ship to the gate at warp speed. Returns `false`
     /// (no component attached) on rejection.
-    pub fn apply_warp_command(
+    pub(crate) fn apply_warp_command(
         &mut self,
         ship_id: ShipId,
         target: WarpTarget,
@@ -68,7 +68,7 @@ impl SimulationNode {
 
     /// `apply_warp_command` wrapped with the shared flight-command seam
     /// (active-ship + undocked, ADR-0037; `ship_command.rs`).
-    pub fn apply_warp_command_owned(
+    pub(crate) fn apply_warp_command_owned(
         &mut self,
         player_id: PlayerId,
         ship_id: ShipId,
@@ -88,7 +88,7 @@ impl SimulationNode {
     /// not the durable authority: ADR-0049 requires the Warp transition to
     /// commit a replayable/idempotent continuation obligation, which #276 may
     /// represent as Transit Saga state before this queue is drained.
-    pub fn drain_pending_auto_jumps(&mut self) -> Vec<(ShipId, JumpGateId)> {
+    pub(crate) fn drain_pending_auto_jumps(&mut self) -> Vec<(ShipId, JumpGateId)> {
         std::mem::take(&mut self.frame_outputs.pending_auto_jumps)
     }
 
@@ -98,7 +98,7 @@ impl SimulationNode {
     /// on the true arrival point. This vector is a lossy presentation queue,
     /// cleared after delivery; it is separate from the durable auto-jump
     /// obligation required by ADR-0049.
-    pub fn drain_completed_warps(&mut self) -> Vec<ShipId> {
+    pub(crate) fn drain_completed_warps(&mut self) -> Vec<ShipId> {
         std::mem::take(&mut self.frame_outputs.completed_warps)
     }
 
@@ -122,7 +122,7 @@ impl SimulationNode {
     /// speed and decelerates into its activation radius. Warping ships are
     /// skipped by the Movement System, so this method owns their position,
     /// velocity, and `VelocityChanged` events. Returns those events.
-    pub fn process_warp(&mut self, tick: Tick) -> Vec<DomainEvent> {
+    pub(crate) fn process_warp(&mut self, tick: Tick) -> Vec<DomainEvent> {
         // Collect warpers up front so the ECS query borrow is released before
         // the mutable write pass below.
         let warpers: Vec<(Entity, ShipId, WarpComp, Position, Velocity, f64)> = self

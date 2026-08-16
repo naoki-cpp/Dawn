@@ -60,7 +60,7 @@ fn abs_pos_json(p: AbsolutePosition) -> AbsPosWire {
 impl SimulationNode {
     /// Build the observer-scoped `InitialState` + `PlayerLoadout` pair to
     /// hand a client once its identity (fresh or resumed) has been selected.
-    pub fn build_handoff_payload(
+    pub(crate) fn build_handoff_payload(
         &self,
         ship_id: ShipId,
         aoi_cell_size: f64,
@@ -89,13 +89,14 @@ impl SimulationNode {
 
     /// Full-world state for diagnostics and non-network tests. Admission,
     /// resume, and handoff paths must use the observer-scoped builders above.
-    pub fn build_initial_state_json(&self) -> InitialStateWire {
+    #[cfg(test)]
+    pub(crate) fn build_initial_state_json(&self) -> InitialStateWire {
         self.initial_state_json(self.simulation.ships.index.keys().copied())
     }
 
     /// `InitialState` scoped to an observer's Area of Interest: only ships in the
     /// 27-cell neighborhood of `observer_pos` (ADR-0019).
-    pub fn build_initial_state_json_for(
+    pub(crate) fn build_initial_state_json_for(
         &self,
         observer_abs: dawn_core::AbsolutePosition,
         cell_size: f64,
@@ -200,7 +201,7 @@ impl SimulationNode {
     /// `InitialState` and `AoiEnter` (ADR-0019) -- `AoiEnter` wraps this
     /// directly (`ServerMessage::AoiEnter`), no separate wrapper needed.
     /// `None` if the ship is gone.
-    pub fn ship_state_json(&self, ship_id: ShipId) -> Option<ShipStateWire> {
+    pub(crate) fn ship_state_json(&self, ship_id: ShipId) -> Option<ShipStateWire> {
         let entity = self.simulation.ships.index.get(&ship_id)?;
         // Send the ABSOLUTE position (anchor + offset, f64), not the raw
         // anchor-relative offset (ADR-0029). After a warp rebase the offset is
@@ -249,7 +250,7 @@ impl SimulationNode {
     /// same Sector-frame grid *and* the binning stays precise at true-AU
     /// distances (an f32 absolute would have a ~16 km ulp). `CellGrid` sorts each
     /// bucket, so query results are deterministic.
-    pub fn ship_absolute_positions(&self) -> Vec<(ShipId, dawn_core::AbsolutePosition)> {
+    pub(crate) fn ship_absolute_positions(&self) -> Vec<(ShipId, dawn_core::AbsolutePosition)> {
         self.simulation
             .ships
             .index
@@ -268,7 +269,7 @@ impl SimulationNode {
     /// f64 position): those in the 27-cell neighborhood of its cell (ADR-0019).
     /// Returned in `ShipId` order. The grid is built from absolute f64 positions
     /// so it is correct across anchors and precise at true AU (ADR-0029 R2).
-    pub fn ships_visible_to(
+    pub(crate) fn ships_visible_to(
         &self,
         observer_abs: dawn_core::AbsolutePosition,
         cell_size: f64,

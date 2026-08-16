@@ -22,7 +22,7 @@ impl SimulationNode {
     /// target each tick. Rejected (returns `false`, no component attached) if
     /// the ship is unknown or in transit, a `Ship` target is unknown or the
     /// ship itself, or a `Gate` target does not originate in this Sector.
-    pub fn apply_approach_command(
+    pub(crate) fn apply_approach_command(
         &mut self,
         ship_id: ShipId,
         target: dawn_core::ApproachTarget,
@@ -58,7 +58,7 @@ impl SimulationNode {
 
     /// `apply_approach_command` wrapped with the shared flight-command seam
     /// (active-ship + undocked, ADR-0037; `ship_command.rs`).
-    pub fn apply_approach_command_owned(
+    pub(crate) fn apply_approach_command_owned(
         &mut self,
         player_id: PlayerId,
         ship_id: ShipId,
@@ -78,7 +78,7 @@ impl SimulationNode {
     /// but is driven by a player-issued `ApproachCommand`.
     ///
     /// Removes the component (and brakes) if the target no longer exists.
-    pub fn process_approach(&mut self) {
+    pub(crate) fn process_approach(&mut self) {
         use dawn_core::ApproachTarget;
         /// Stop and hold once within this distance of a Ship target (units).
         const SHIP_ARRIVAL_RADIUS: f64 = 500.0;

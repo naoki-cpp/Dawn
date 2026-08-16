@@ -164,7 +164,7 @@ impl SimulationNode {
     /// The ship itself must be owned by `player_id` and docked at the requested
     /// Station. The transfer is intentionally whole-stack only, matching the
     /// existing `TransferToStationCommand` contract.
-    pub fn transfer_to_station_owned(
+    pub(crate) fn transfer_to_station_owned(
         &mut self,
         player_id: PlayerId,
         cmd: TransferToStationCommand,
