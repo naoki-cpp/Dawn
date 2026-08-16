@@ -82,7 +82,7 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
     let mut market = MarketRuntime::open("data/market.sqlite")
         .expect("failed to open Market database at data/market.sqlite");
 
-    hosts[0].with_node_mut(|node| node.spawn_npc_frigates(ship_count));
+    hosts[0].spawn_npc_frigates(ship_count);
 
     // Warm up: tick until a Raft leader is elected (election timeout ≤ 20 ticks).
     for _ in 0..30 {
@@ -164,14 +164,11 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                 }
                 None => {
                     let sector = 0;
-                    let spawn_position =
-                        hosts[sector].with_node_mut(|node| node.default_player_spawn_position());
+                    let spawn_position = hosts[sector].default_player_spawn_position();
                     (sector, ClientAdmissionIntent::Fresh { spawn_position })
                 }
             };
-            let mut attempt = match hosts[sector]
-                .with_node_mut(|node| node.begin_client_admission(intent, AOI_CELL_SIZE))
-            {
+            let mut attempt = match hosts[sector].begin_client_admission(intent, AOI_CELL_SIZE) {
                 Ok(attempt) => attempt,
                 Err(refusal) => {
                     log_cluster_refusal(request.peer_addr, refusal);

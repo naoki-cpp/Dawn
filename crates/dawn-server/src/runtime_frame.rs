@@ -8,9 +8,13 @@
 #![allow(dead_code)]
 
 use dawn_core::{
-    DomainEvent, JumpGateId, LockOnCommand, Position, SectorId, ShipId, ShipTypeId, Velocity,
+    DomainEvent, JumpGateId, LockOnCommand, PlayerId, Position, SectorId, ShipId, ShipTypeId,
+    Velocity,
 };
 use dawn_distributed::RaftActorHandle;
+use dawn_sector::client_admission::{
+    ClientAdmissionAttempt, ClientAdmissionIntent, ClientAdmissionRefusal,
+};
 use dawn_sector::node::{JumpOutcome, RuntimeCommandDispatch, SimulationNode};
 use dawn_sector::transit::{
     reconcile_runtime_repositories,
@@ -275,6 +279,59 @@ where
 
     pub(crate) fn drain_pending_events(&mut self) -> Vec<DomainEvent> {
         self.node.drain_pending_events()
+    }
+
+    /// Seed initial NPC frigates into the Sector.
+    ///
+    /// Fixture/composition-root use only (initial server population), not a
+    /// per-tick operation.
+    pub(crate) fn spawn_npc_frigates(&mut self, count: usize) {
+        self.with_node_mut(|node| node.spawn_npc_frigates(count));
+    }
+
+    /// Spawn a duel-mode Bot ship and its owning player identity.
+    pub(crate) fn spawn_bot_ship(&mut self, position: Position) -> (PlayerId, ShipId) {
+        self.with_node_mut(|node| node.spawn_bot_ship(position))
+    }
+
+    /// The Sector's topology-derived default spawn point for a fresh player.
+    pub(crate) fn default_player_spawn_position(&self) -> Position {
+        self.node.default_player_spawn_position()
+    }
+
+    /// Begin a client admission attempt against the owned node.
+    ///
+    /// Admission identity reservation is durable through its own
+    /// repository-backed transaction (see
+    /// `dawn_sector::node::admission_provisional`), independent of the tick
+    /// pipeline, so this narrow bridge is admission's typed entry point
+    /// rather than a correctness gap.
+    pub(crate) fn begin_client_admission(
+        &mut self,
+        intent: ClientAdmissionIntent,
+        aoi_cell_size: f64,
+    ) -> Result<ClientAdmissionAttempt, ClientAdmissionRefusal> {
+        self.with_node_mut(|node| node.begin_client_admission(intent, aoi_cell_size))
+    }
+
+    /// Adopt a ship that just jumped into this Sector under `player_id`'s
+    /// ownership. Returns `false` if the ship is not (yet) present in this
+    /// Sector's ECS.
+    pub(crate) fn adopt_player_ship(&mut self, ship_id: ShipId, player_id: PlayerId) -> bool {
+        self.with_node_mut(|node| node.adopt_player_ship(ship_id, player_id))
+    }
+
+    /// Spawn a ship outside the tick pipeline, for deterministic fixture
+    /// setup (test/demo actor callers of `SectorRuntimeDriver`). Production
+    /// runtime mutations must enter through `run_frame` once a frame has
+    /// started; this is not that path.
+    pub(crate) fn spawn_fixture_ship(
+        &mut self,
+        ship_type_id: ShipTypeId,
+        position: Position,
+        velocity: Velocity,
+    ) -> ShipId {
+        self.with_node_mut(|node| node.spawn_ship(ship_type_id, position, velocity))
     }
 
     /// Admit requests through the Sector's single typed request seam.

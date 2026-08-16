@@ -1,9 +1,7 @@
 //! Serve runtime orchestration shared by clustered serve loops.
 
 use super::{market::MarketRuntime, AoiDelivery, AOI_CELL_SIZE};
-use crate::runtime_frame::{
-    OwnedRaftRuntimeConsensus, RuntimeFrameHost, RuntimeNodeMutation, RuntimeNodeView,
-};
+use crate::runtime_frame::{OwnedRaftRuntimeConsensus, RuntimeFrameHost, RuntimeNodeView};
 use crate::ws_server;
 use dawn_core::{DomainEvent, PlayerId, ShipId};
 use dawn_protocol::{project_domain_event, InitialStateWire, ServerFact, ServerMessage};
@@ -101,8 +99,8 @@ struct JumpHandoff {
     own_events: HashMap<PlayerId, Vec<DomainEvent>>,
 }
 
-fn apply_jump_handoffs<N: RuntimeNodeMutation>(
-    nodes: &mut [N],
+fn apply_jump_handoffs(
+    nodes: &mut [RuntimeFrameHost<InMemoryJournal, OwnedRaftRuntimeConsensus>],
     player_sector: &mut HashMap<PlayerId, usize>,
     ship_player: &HashMap<ShipId, PlayerId>,
     events_by_sector: &[Vec<DomainEvent>],
@@ -116,9 +114,7 @@ fn apply_jump_handoffs<N: RuntimeNodeMutation>(
                 DomainEvent::JumpGateUsed(e) => {
                     if let Some(&player_id) = ship_player.get(&e.ship_id) {
                         let dest = e.to_sector.0 as usize;
-                        nodes[dest].with_runtime_node_mut(|node| {
-                            node.adopt_player_ship(e.ship_id, player_id);
-                        });
+                        nodes[dest].adopt_player_ship(e.ship_id, player_id);
                         player_sector.insert(player_id, dest);
                         jumped_players.push((player_id, dest));
                         own_events.entry(player_id).or_default().push(event.clone());

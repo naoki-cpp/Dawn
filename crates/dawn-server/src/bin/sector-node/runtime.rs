@@ -5,6 +5,7 @@
 //! jump proposal fallback, runtime tick stepping, outbound replication,
 //! Redirect handling, and AoI delivery.
 
+use super::client_admission::ClientAdmission;
 use crate::runtime_frame::{OwnedRaftRuntimeConsensus, RuntimeFrameHost};
 use dawn_actor::ws_server;
 use dawn_core::{DomainEvent, SectorId, ShipId};
@@ -18,6 +19,18 @@ use dawn_sector::node::{
 use dawn_storage::{EventStore, FileJournal};
 use std::collections::HashMap;
 use std::net::SocketAddr;
+
+impl RuntimeFrameHost<FileJournal, OwnedRaftRuntimeConsensus> {
+    /// Advance production client-handshake admission against the owned node.
+    fn advance_handshakes(
+        &mut self,
+        admission: &mut ClientAdmission,
+        sector_id: SectorId,
+        aoi_cell_size: f64,
+    ) {
+        self.with_node_mut(|node| admission.advance_handshakes(node, sector_id, aoi_cell_size));
+    }
+}
 
 fn client_request_rejection(
     error: ClientRequestAdmissionError,
@@ -66,11 +79,15 @@ impl SectorNodeRuntime {
         }
     }
 
-    pub(crate) fn with_node_mut<R>(
+    /// Advance production client-handshake admission for this Node.
+    pub(crate) fn advance_handshakes(
         &mut self,
-        operation: impl FnOnce(&mut SimulationNode) -> R,
-    ) -> R {
-        self.host.with_node_mut(operation)
+        admission: &mut ClientAdmission,
+        sector_id: SectorId,
+        aoi_cell_size: f64,
+    ) {
+        self.host
+            .advance_handshakes(admission, sector_id, aoi_cell_size);
     }
 
     pub(crate) fn with_state_mut<R>(
