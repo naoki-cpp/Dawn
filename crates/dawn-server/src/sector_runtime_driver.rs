@@ -141,9 +141,12 @@ impl SectorRuntimeDriver {
                     let replication = &mut self.replication;
                     let output = self
                         .host
-                        .run_frame_with_output(&[], |node, _, events| {
-                            replication.publish_events(node.sector_id(), events);
-                        })
+                        .run_frame_with_output(
+                            dawn_sector::transition::FrameInput::lock_only(&[]),
+                            |node, _, events| {
+                                replication.publish_events(node.sector_id(), events);
+                            },
+                        )
                         .expect("in-memory simulation runtime must accept durable Tick");
                     let summary = TickSummary {
                         tick: output.tick_result.tick,

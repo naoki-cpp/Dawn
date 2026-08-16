@@ -108,10 +108,13 @@ impl SectorNodeRuntime {
         let outbound_replication = &mut self.outbound_replication;
         let output = self
             .host
-            .run_frame_with_output(&lock_commands, |node, _, events| {
-                event_store.append_batch(events.to_vec());
-                outbound_replication.publish_events(node.sector_id(), events);
-            })
+            .run_frame_with_output(
+                dawn_sector::transition::FrameInput::lock_only(&lock_commands),
+                |node, _, events| {
+                    event_store.append_batch(events.to_vec());
+                    outbound_replication.publish_events(node.sector_id(), events);
+                },
+            )
             .map_err(|error| anyhow::anyhow!("authoritative recovery tick failed: {error}"))?;
 
         self.log_auto_jumps(&output.pending_auto_jumps);

@@ -255,7 +255,9 @@ pub(crate) async fn run_phase4_server(
         }
 
         let output = host
-            .run_frame(&lock_commands)
+            .run_frame(dawn_sector::transition::FrameInput::lock_only(
+                &lock_commands,
+            ))
             .expect("in-memory single-sector runtime must accept durable Tick");
         let tick_result = output.tick_result;
         all_new_events.extend(output.events);

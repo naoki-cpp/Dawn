@@ -327,18 +327,20 @@ where
     /// Run exactly one authoritative frame for this Sector.
     pub(crate) fn run_frame(
         &mut self,
-        lock_commands: &[LockOnCommand],
+        input: dawn_sector::transition::FrameInput<'_>,
     ) -> Result<RuntimeTickOutput, RuntimeFrameHostError> {
-        self.run_frame_with_output(lock_commands, |_, _, _| {})
+        self.run_frame_with_output(input, |_, _, _| {})
     }
 
     /// Run one frame and invoke `after_commit` after reconciliation succeeds.
     ///
     /// The callback is still before the consensus adapter advances its logical
     /// clock, so publication cannot be mistaken for an acknowledged frame.
+    /// `after_commit`'s `TickResult` carries `market_settlement_outcomes` for
+    /// any settlement admitted through `input` (issue #315).
     pub(crate) fn run_frame_with_output<F>(
         &mut self,
-        lock_commands: &[LockOnCommand],
+        input: dawn_sector::transition::FrameInput<'_>,
         after_commit: F,
     ) -> Result<RuntimeTickOutput, RuntimeFrameHostError>
     where
@@ -358,7 +360,7 @@ where
             &mut self.consensus,
             &self.policy.durability_policy,
             &mut self.health,
-            lock_commands,
+            input,
             DurableRuntimeTickContext {
                 transition_id,
                 owner_epoch: self.policy.owner_epoch,
@@ -460,7 +462,8 @@ mod tests {
         host.bootstrap_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO)
             .expect("bootstrap should be available");
 
-        host.run_frame(&[]).expect("local frame should commit");
+        host.run_frame(dawn_sector::transition::FrameInput::lock_only(&[]))
+            .expect("local frame should commit");
 
         assert_eq!(host.phase(), RuntimeFramePhase::Running);
         assert!(matches!(
@@ -472,7 +475,9 @@ mod tests {
     #[test]
     fn host_returns_the_committed_tick_output() {
         let mut host = host();
-        let output = host.run_frame(&[]).expect("local frame should commit");
+        let output = host
+            .run_frame(dawn_sector::transition::FrameInput::lock_only(&[]))
+            .expect("local frame should commit");
 
         assert_eq!(output.tick_result.tick.value(), 1);
         assert_eq!(host.phase(), RuntimeFramePhase::Running);
@@ -485,9 +490,12 @@ mod tests {
         let mut observed = None;
 
         let output = host
-            .run_frame_with_output(&[], |node, tick_result, events| {
-                observed = Some((node.current_tick(), tick_result.tick, events.len()));
-            })
+            .run_frame_with_output(
+                dawn_sector::transition::FrameInput::lock_only(&[]),
+                |node, tick_result, events| {
+                    observed = Some((node.current_tick(), tick_result.tick, events.len()));
+                },
+            )
             .expect("local frame should commit");
 
         let (current_tick, observed_tick, event_count) = observed.expect("output hook should run");
@@ -505,7 +513,7 @@ mod tests {
             RejectingPolicy,
         ));
 
-        let result = host.run_frame(&[]);
+        let result = host.run_frame(dawn_sector::transition::FrameInput::lock_only(&[]));
 
         assert!(matches!(
             result,

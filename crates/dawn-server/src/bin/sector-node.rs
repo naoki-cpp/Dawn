@@ -209,7 +209,7 @@ async fn main() -> anyhow::Result<()> {
     println!("[Node] Raft warm-up (30 ticks)...");
     for _ in 0..30 {
         let output = host
-            .run_frame(&[])
+            .run_frame(dawn_sector::transition::FrameInput::lock_only(&[]))
             .unwrap_or_else(|error| panic!("durable Raft warm-up tick failed: {error}"));
         event_store.append_batch(output.events);
     }

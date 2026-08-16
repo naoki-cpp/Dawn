@@ -33,8 +33,10 @@ pub(crate) fn run_cluster_runtime_tick(
         .iter_mut()
         .zip(lock_commands)
         .map(|(host, lock_commands)| {
-            host.run_frame(lock_commands)
-                .expect("in-memory clustered runtime must accept durable Tick")
+            host.run_frame(dawn_sector::transition::FrameInput::lock_only(
+                lock_commands,
+            ))
+            .expect("in-memory clustered runtime must accept durable Tick")
         })
         .collect();
 
