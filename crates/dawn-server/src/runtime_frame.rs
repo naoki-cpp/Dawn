@@ -17,8 +17,7 @@ use dawn_sector::client_admission::{
 };
 use dawn_sector::node::{JumpOutcome, RuntimeCommandDispatch, SimulationNode};
 use dawn_sector::transit::{
-    reconcile_runtime_repositories,
-    run_durable_runtime_tick_with_policy_and_reconciliation_and_health, DurableRuntimeTickContext,
+    reconcile_runtime_repositories, run_durable_runtime_frame, DurableRuntimeTickContext,
     LocalRuntimeDurabilityPolicy, RuntimeConsensus, RuntimeDurabilityPolicy,
     RuntimeDurabilityProfile, RuntimeHealth, RuntimeTickOutput, TransitOp,
 };
@@ -411,7 +410,7 @@ where
         }
 
         let transition_id = dawn_sector::transit::runtime_transition_id(&self.node);
-        let output = run_durable_runtime_tick_with_policy_and_reconciliation_and_health(
+        let output = run_durable_runtime_frame(
             &mut self.node,
             &mut self.journal,
             &mut self.consensus,
@@ -457,7 +456,11 @@ mod tests {
         galaxy::Galaxy,
         game_data::{GameDataCatalog, PRODUCTION_MODULES_PATH, PRODUCTION_SHIP_TYPES_PATH},
     };
-    use dawn_storage::InMemoryJournal;
+    use dawn_storage::{
+        AppendReceipt, DurableJournal, InMemoryJournal, JournalBatch, JournalError, JournalIndex,
+        JournalRecord,
+    };
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::{path::Path, sync::Arc};
 
     #[derive(Debug, Clone, Copy)]
@@ -492,9 +495,10 @@ mod tests {
         )
     }
 
-    fn host_with_policy<P: RuntimeDurabilityPolicy>(
+    fn host_with_journal<J: DurableJournal, P: RuntimeDurabilityPolicy>(
+        journal: J,
         policy: RuntimeFramePolicy<P>,
-    ) -> RuntimeFrameHost<InMemoryJournal, dawn_sector::transit::LocalRuntimeConsensus, P> {
+    ) -> RuntimeFrameHost<J, dawn_sector::transit::LocalRuntimeConsensus, P> {
         RuntimeFrameHost::new(
             SimulationNode::new(
                 NodeId(0),
@@ -503,10 +507,16 @@ mod tests {
                 Arc::new(Galaxy::demo()),
                 catalog(),
             ),
-            InMemoryJournal::new(),
+            journal,
             dawn_sector::transit::LocalRuntimeConsensus,
             policy,
         )
+    }
+
+    fn host_with_policy<P: RuntimeDurabilityPolicy>(
+        policy: RuntimeFramePolicy<P>,
+    ) -> RuntimeFrameHost<InMemoryJournal, dawn_sector::transit::LocalRuntimeConsensus, P> {
+        host_with_journal(InMemoryJournal::new(), policy)
     }
 
     fn host() -> RuntimeFrameHost<InMemoryJournal, dawn_sector::transit::LocalRuntimeConsensus> {
@@ -562,6 +572,27 @@ mod tests {
     }
 
     #[test]
+    fn durable_append_is_complete_before_the_output_hook_runs() {
+        let appended = std::sync::Arc::new(AtomicBool::new(false));
+        let mut host = host_with_journal(
+            RecordingJournal::new(std::sync::Arc::clone(&appended)),
+            RuntimeFramePolicy::local_durable(0),
+        );
+
+        host.run_frame_with_output(
+            dawn_sector::transition::FrameInput::lock_only(&[]),
+            |_, _, _| {
+                assert!(
+                    appended.load(Ordering::SeqCst),
+                    "the output hook must run after the journal append"
+                );
+            },
+        )
+        .expect("local frame should commit");
+        assert_eq!(host.journal.records().len(), 1);
+    }
+
+    #[test]
     fn composition_policy_is_checked_before_the_frame_mutates_state() {
         let mut host = host_with_policy(RuntimeFramePolicy::new(
             0,
@@ -583,5 +614,127 @@ mod tests {
         ));
         assert_eq!(host.node().current_tick().value(), 0);
         assert!(!host.health().is_fenced());
+    }
+
+    #[test]
+    fn invalid_durability_profile_is_rejected_before_state_change() {
+        let mut local_host = host_with_policy(RuntimeFramePolicy::new(
+            0,
+            DurabilityMode::Buffered,
+            RuntimeDurabilityProfile::LocalDurable,
+            LocalRuntimeDurabilityPolicy,
+        ));
+        let local_result =
+            local_host.run_frame(dawn_sector::transition::FrameInput::lock_only(&[]));
+        assert!(matches!(
+            local_result,
+            Err(RuntimeFrameHostError::Tick(
+                dawn_sector::transit::TickTransitionError::Policy(
+                    dawn_sector::transit::RuntimeDurabilityPolicyError::LocalDurableRequiresSync
+                )
+            ))
+        ));
+        assert_eq!(local_host.node().current_tick().value(), 0);
+        assert!(local_host.journal.records().is_empty());
+
+        let mut replicated_host = host_with_policy(RuntimeFramePolicy::new(
+            0,
+            DurabilityMode::Synced,
+            RuntimeDurabilityProfile::ReplicatedDurable,
+            LocalRuntimeDurabilityPolicy,
+        ));
+        let replicated_result =
+            replicated_host.run_frame(dawn_sector::transition::FrameInput::lock_only(&[]));
+        assert!(matches!(
+            replicated_result,
+            Err(RuntimeFrameHostError::Tick(
+                dawn_sector::transit::TickTransitionError::Policy(
+                    dawn_sector::transit::RuntimeDurabilityPolicyError::ReplicatedDurableUnavailable
+                )
+            ))
+        ));
+        assert_eq!(replicated_host.node().current_tick().value(), 0);
+        assert!(replicated_host.journal.records().is_empty());
+    }
+
+    #[test]
+    fn append_failure_fences_the_host_and_preserves_pending_output() {
+        let mut host = host_with_journal(FailingJournal, RuntimeFramePolicy::local_durable(0));
+        host.bootstrap_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO)
+            .expect("bootstrap should be available");
+        let expected_events = host.node().pending_events().to_vec();
+
+        let result = host.run_frame(dawn_sector::transition::FrameInput::lock_only(&[]));
+
+        assert!(matches!(
+            result,
+            Err(RuntimeFrameHostError::Tick(
+                dawn_sector::transit::TickTransitionError::Durable(_)
+            ))
+        ));
+        assert_eq!(host.node().current_tick().value(), 0);
+        assert_eq!(host.node().pending_events(), expected_events.as_slice());
+        assert_eq!(host.phase(), RuntimeFramePhase::Fenced);
+        assert!(host.health().is_fenced());
+    }
+
+    struct RecordingJournal {
+        inner: InMemoryJournal,
+        appended: std::sync::Arc<AtomicBool>,
+    }
+
+    impl RecordingJournal {
+        fn new(appended: std::sync::Arc<AtomicBool>) -> Self {
+            Self {
+                inner: InMemoryJournal::new(),
+                appended,
+            }
+        }
+
+        fn records(&self) -> &[JournalRecord] {
+            self.inner.records()
+        }
+    }
+
+    impl DurableJournal for RecordingJournal {
+        fn append_batch(&mut self, batch: JournalBatch) -> Result<AppendReceipt, JournalError> {
+            let receipt = self.inner.append_batch(batch)?;
+            self.appended.store(true, Ordering::SeqCst);
+            Ok(receipt)
+        }
+
+        fn read_from(
+            &self,
+            index: JournalIndex,
+        ) -> Result<Box<dyn Iterator<Item = Result<JournalRecord, JournalError>> + '_>, JournalError>
+        {
+            self.inner.read_from(index)
+        }
+
+        fn next_index(&self) -> Result<JournalIndex, JournalError> {
+            self.inner.next_index()
+        }
+    }
+
+    struct FailingJournal;
+
+    impl DurableJournal for FailingJournal {
+        fn append_batch(&mut self, _batch: JournalBatch) -> Result<AppendReceipt, JournalError> {
+            Err(JournalError::Io(std::io::Error::other(
+                "injected append failure",
+            )))
+        }
+
+        fn read_from(
+            &self,
+            _index: JournalIndex,
+        ) -> Result<Box<dyn Iterator<Item = Result<JournalRecord, JournalError>> + '_>, JournalError>
+        {
+            Ok(Box::new(std::iter::empty()))
+        }
+
+        fn next_index(&self) -> Result<JournalIndex, JournalError> {
+            Ok(JournalIndex::ZERO)
+        }
     }
 }

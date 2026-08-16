@@ -2,7 +2,7 @@ use super::*;
 use crate::client_admission::{ClientAdmissionIntent, ClientAdmissionRefusal};
 use dawn_core::fitting::FittingSnapshot;
 use dawn_core::{NodeId, Position, SectorBounds, ShipTypeId, Velocity};
-use dawn_storage::{EventStore, InMemoryEventStore};
+use dawn_storage::{EventStore, InMemoryEventStore, InMemoryJournal};
 
 fn node(node_id: u8, sector_id: u8) -> SimulationNode {
     SimulationNode::new_test(
@@ -638,11 +638,23 @@ fn runtime_tick_owns_replication_raft_and_transient_order() {
     let (_committed_tx, mut committed_rx) = mpsc::unbounded_channel();
     let mut replication_hook_called = false;
 
-    let output = run_runtime_tick(
+    let mut journal = InMemoryJournal::new();
+    let mut consensus = RaftRuntimeConsensus::new(&raft, &mut committed_rx);
+    let mut health = RuntimeHealth::new();
+    let output = run_durable_runtime_frame(
         &mut node,
-        &raft,
-        &mut committed_rx,
-        &[],
+        &mut journal,
+        &mut consensus,
+        &LocalRuntimeDurabilityPolicy,
+        &mut health,
+        crate::transition::FrameInput::lock_only(&[]),
+        DurableRuntimeTickContext {
+            transition_id: crate::transition::SectorTransitionId(100),
+            owner_epoch: 0,
+            durability: DurabilityMode::Synced,
+            profile: RuntimeDurabilityProfile::LocalDurable,
+        },
+        reconcile_runtime_repositories,
         |_, tick_result, events| {
             replication_hook_called = true;
             assert!(
@@ -655,7 +667,8 @@ fn runtime_tick_owns_replication_raft_and_transient_order() {
                 "hook receives the explicit transition output"
             );
         },
-    );
+    )
+    .expect("durable runtime frame should succeed");
 
     assert!(replication_hook_called);
     assert_eq!(output.pending_auto_jumps, vec![(ship, JumpGateId(0))]);

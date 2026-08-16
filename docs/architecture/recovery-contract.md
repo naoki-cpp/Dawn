@@ -141,7 +141,7 @@ drain committed consensus input through RuntimeConsensus
 `dawn-server::runtime_frame::RuntimeFrameHost` is the shared one-Sector owner
 boundary. It owns the `SimulationNode`, journal, consensus adapter, runtime
 health, and selected durability policy, and delegates the actual transition to
-`dawn-sector::transit::run_durable_runtime_tick_with_consensus_and_health`.
+`dawn-sector::transit::run_durable_runtime_frame`.
 `dawn-server --bin sector-node` supplies the Raft/FileJournal production adapters;
 single-sector serve supplies `LocalRuntimeConsensus`/InMemoryJournal; clustered
 serve and `SectorRuntimeDriver` supply Raft/InMemoryJournal adapters. The latter
