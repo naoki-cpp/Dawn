@@ -1,6 +1,6 @@
 //! Serve runtime orchestration shared by clustered serve loops.
 
-use super::{AoiDelivery, AOI_CELL_SIZE};
+use super::{market::MarketRuntime, AoiDelivery, AOI_CELL_SIZE};
 use crate::runtime_frame::{
     OwnedRaftRuntimeConsensus, RuntimeFrameHost, RuntimeNodeMutation, RuntimeNodeView,
 };
@@ -22,23 +22,48 @@ pub(crate) struct ClusterRuntimeTickContext<'a> {
     pub(crate) player_sector: &'a mut HashMap<PlayerId, usize>,
     pub(crate) ship_player: &'a HashMap<ShipId, PlayerId>,
     pub(crate) aoi_delivery: &'a mut AoiDelivery,
+    pub(crate) market: &'a mut MarketRuntime,
 }
 
 pub(crate) fn run_cluster_runtime_tick(
     ctx: ClusterRuntimeTickContext<'_>,
     lock_commands: &[Vec<dawn_core::LockOnCommand>],
 ) -> Vec<transit::RuntimeTickOutput> {
+    // Drain Market settlements per host before running any frame: a
+    // settlement's destination ship lives in exactly one Sector, so each
+    // host's `FrameInput` must only ever carry the settlements that host's
+    // own `SimulationNode` currently owns/docks (issue #315). The Market DB
+    // is shared across the whole cluster, so this is one drain call per
+    // host against the same `MarketRuntime`.
+    let queued_settlements: Vec<_> = ctx
+        .hosts
+        .iter()
+        .map(|host| ctx.market.drain_settlements(host))
+        .collect();
+    let market_settlements: Vec<Vec<dawn_sector::transition::MarketSettlementInput>> =
+        queued_settlements
+            .iter()
+            .map(|queued| queued.iter().map(|q| q.input()).collect())
+            .collect();
+
     let tick_outputs: Vec<_> = ctx
         .hosts
         .iter_mut()
         .zip(lock_commands)
-        .map(|(host, lock_commands)| {
-            host.run_frame(dawn_sector::transition::FrameInput::lock_only(
+        .zip(&market_settlements)
+        .map(|((host, lock_commands), market_settlements)| {
+            host.run_frame(dawn_sector::transition::FrameInput {
                 lock_commands,
-            ))
+                market_settlements,
+            })
             .expect("in-memory clustered runtime must accept durable Tick")
         })
         .collect();
+
+    for (queued, output) in queued_settlements.iter().zip(&tick_outputs) {
+        ctx.market
+            .acknowledge_settlements(queued, &output.tick_result.market_settlement_outcomes);
+    }
 
     let warp_arrivals_by_sector: Vec<Vec<ShipId>> = tick_outputs
         .iter()

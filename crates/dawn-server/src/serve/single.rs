@@ -206,9 +206,7 @@ pub(crate) async fn run_phase4_server(
         let mut lock_commands: Vec<dawn_core::LockOnCommand> = Vec::new();
         for sess in sessions.iter_mut() {
             while let Some(market_command) = sess.try_recv_market_command() {
-                let snapshot = host.with_node_mut(|node| {
-                    market.handle_single(sess.player_id, market_command, node)
-                });
+                let snapshot = market.handle_single(sess.player_id, market_command, host.node());
                 sess.send_message(&ServerMessage::MarketSnapshot(snapshot));
             }
         }
@@ -254,12 +252,27 @@ pub(crate) async fn run_phase4_server(
             }
         }
 
+        // Drain still-pending Market settlements against the live node once
+        // per tick, right before the frame that will carry them (issue
+        // #315): this keeps a settlement's cargo mutation inside the same
+        // durable write set as everything else in the tick instead of
+        // mutating live state synchronously outside any tick boundary.
+        let queued_settlements = market.drain_settlements(host.node());
+        let market_settlements: Vec<dawn_sector::transition::MarketSettlementInput> =
+            queued_settlements
+                .iter()
+                .map(|queued| queued.input())
+                .collect();
+
         let output = host
-            .run_frame(dawn_sector::transition::FrameInput::lock_only(
-                &lock_commands,
-            ))
+            .run_frame(dawn_sector::transition::FrameInput {
+                lock_commands: &lock_commands,
+                market_settlements: &market_settlements,
+            })
             .expect("in-memory single-sector runtime must accept durable Tick");
         let tick_result = output.tick_result;
+        market
+            .acknowledge_settlements(&queued_settlements, &tick_result.market_settlement_outcomes);
         all_new_events.extend(output.events);
 
         for sess in &sessions {

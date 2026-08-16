@@ -205,7 +205,7 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
             let sector = *player_sector.get(&sess.player_id).unwrap_or(&0);
             while let Some(market_command) = sess.try_recv_market_command() {
                 let snapshot =
-                    market.handle_cluster(sess.player_id, market_command, sector, &mut hosts);
+                    market.handle_cluster(sess.player_id, market_command, sector, &hosts);
                 sess.send_message(&ServerMessage::MarketSnapshot(snapshot));
             }
             let dispatches = hosts[sector].collect_runtime_commands(
@@ -285,6 +285,7 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                 player_sector: &mut player_sector,
                 ship_player: &ship_player,
                 aoi_delivery: &mut aoi_delivery,
+                market: &mut market,
             },
             &lock_commands,
         );

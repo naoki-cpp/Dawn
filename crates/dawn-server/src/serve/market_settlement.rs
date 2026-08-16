@@ -1,27 +1,41 @@
 //! Market-to-Sector settlement delivery adapter.
 //!
 //! `dawn-market` emits durable value intents. This module is the only place
-//! that translates those intents into Sector-local inventory mutations and
-//! acknowledges them back to the Market database. Missing cluster nodes leave
-//! the outbox row pending; a duplicate acknowledgement is harmless because
-//! the Market policy treats non-pending settlement rows as already decided.
+//! that translates those intents into Sector-local inventory mutations. Since
+//! issue #315, that translation runs through the Sector's own Tick pipeline
+//! (`dawn_sector::transition::FrameInput::market_settlements`) rather than a
+//! synchronous mutation outside any tick boundary, so a settlement's effect
+//! is captured in the same durable journal append as the tick that applies
+//! it. This is a two-phase outbox drain:
+//!
+//! 1. [`MarketSettlement::drain_pending_inputs`] reads pending settlement
+//!    intents from the Market DB and translates the ones whose destination
+//!    ship is owned/docked in this Sector into `MarketSettlementInput`s for
+//!    this tick's `FrameInput`. Intents for ships not owned/docked here are
+//!    left pending for a future tick (matching the previous "Unavailable"
+//!    semantics — e.g. the ship jumped away or undocked).
+//! 2. After the tick commits, [`MarketSettlement::acknowledge_outcomes`]
+//!    reports each `MarketSettlementOutcome` back to the Market DB.
+//!
+//! `MarketSettlement::place`/`cancel` no longer touch Sector state at all:
+//! they only place/cancel the order in the Market ledger. Settlement is
+//! always deferred to the next tick's drain — never synchronous within the
+//! same request.
 
 use dawn_core::{
     CreditItemCommand, ItemId, PlayerId, RemoveItemCommand, ReturnItemCommand, ShipId,
 };
 use dawn_market::{
-    MarketCommand, MarketDb, MarketError, MarketTransition, OrderId, OrderSide, SettlementEffect,
+    MarketCommand, MarketDb, MarketError, OrderId, OrderSide, SettlementEffect, SettlementId,
     SettlementIntent,
 };
 use dawn_sector::node::SimulationNode;
-
-use crate::runtime_frame::{RuntimeNodeMutation, RuntimeNodeView};
+use dawn_sector::transition::{MarketSettlementInput, MarketSettlementOutcome};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum MarketSettlementResult {
     Completed(String),
     Rejected(String),
-    NeedsAttention(String),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -36,114 +50,34 @@ pub(super) struct ParsedOrder {
 impl MarketSettlementResult {
     pub(super) fn notice(&self) -> &str {
         match self {
-            Self::Completed(notice) | Self::Rejected(notice) | Self::NeedsAttention(notice) => {
-                notice
-            }
+            Self::Completed(notice) | Self::Rejected(notice) => notice,
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SettlementDelivery {
-    Applied,
-    Unavailable,
-    Rejected(&'static str),
+/// One settlement intent that has been translated into Sector input and is
+/// waiting on a Tick to admit it, plus enough of its Market identity to
+/// acknowledge (or reject) it back into the Market DB once a
+/// `MarketSettlementOutcome` comes back.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct QueuedSettlement {
+    settlement_id: SettlementId,
+    input: MarketSettlementInput,
 }
 
-trait SettlementTarget {
-    fn deliver(&mut self, intent: SettlementIntent) -> SettlementDelivery;
-}
-
-struct SingleTarget<'a, N: RuntimeNodeMutation> {
-    node: &'a mut N,
-}
-
-struct ClusterTarget<'a, N: RuntimeNodeMutation> {
-    nodes: &'a mut [N],
-}
-
-impl<N: RuntimeNodeMutation> SettlementTarget for SingleTarget<'_, N> {
-    fn deliver(&mut self, intent: SettlementIntent) -> SettlementDelivery {
-        let (player_id, ship_id) = intent_identity(intent);
-        self.node.with_runtime_node_mut(|node| {
-            if !owns_docked_ship(node, player_id, ship_id) {
-                return SettlementDelivery::Unavailable;
-            }
-            apply_intent(node, intent)
-        })
-    }
-}
-
-impl<N: RuntimeNodeMutation> SettlementTarget for ClusterTarget<'_, N> {
-    fn deliver(&mut self, intent: SettlementIntent) -> SettlementDelivery {
-        let (player_id, ship_id) = intent_identity(intent);
-        let Some(index) = find_node_index(self.nodes, player_id, ship_id) else {
-            return SettlementDelivery::Unavailable;
-        };
-        self.nodes[index].with_runtime_node_mut(|node| apply_intent(node, intent))
-    }
-}
-
-impl<'a, N: RuntimeNodeMutation> ClusterTarget<'a, N> {
-    fn new(nodes: &'a mut [N]) -> Self {
-        Self { nodes }
-    }
-}
-
-impl<'a, N: RuntimeNodeMutation> SingleTarget<'a, N> {
-    fn new(node: &'a mut N) -> Self {
-        Self { node }
+impl QueuedSettlement {
+    pub(super) fn input(&self) -> MarketSettlementInput {
+        self.input
     }
 }
 
 pub(super) struct MarketSettlement;
 
 impl MarketSettlement {
-    pub(super) fn place_single<N: RuntimeNodeMutation>(
+    pub(super) fn place(
         db: &mut MarketDb,
         player_id: PlayerId,
         order: ParsedOrder,
-        node: &mut N,
-    ) -> MarketSettlementResult {
-        let mut target = SingleTarget::new(node);
-        Self::place(db, player_id, order, &mut target)
-    }
-
-    pub(super) fn place_cluster<N: RuntimeNodeMutation>(
-        db: &mut MarketDb,
-        player_id: PlayerId,
-        order: ParsedOrder,
-        nodes: &mut [N],
-    ) -> MarketSettlementResult {
-        let mut target = ClusterTarget::new(nodes);
-        Self::place(db, player_id, order, &mut target)
-    }
-
-    pub(super) fn cancel_single<N: RuntimeNodeMutation>(
-        db: &mut MarketDb,
-        player_id: PlayerId,
-        order_id: OrderId,
-        node: &mut N,
-    ) -> MarketSettlementResult {
-        let mut target = SingleTarget::new(node);
-        Self::cancel(db, player_id, order_id, &mut target)
-    }
-
-    pub(super) fn cancel_cluster<N: RuntimeNodeMutation>(
-        db: &mut MarketDb,
-        player_id: PlayerId,
-        order_id: OrderId,
-        nodes: &mut [N],
-    ) -> MarketSettlementResult {
-        let mut target = ClusterTarget::new(nodes);
-        Self::cancel(db, player_id, order_id, &mut target)
-    }
-
-    fn place<T: SettlementTarget>(
-        db: &mut MarketDb,
-        player_id: PlayerId,
-        order: ParsedOrder,
-        target: &mut T,
     ) -> MarketSettlementResult {
         let command = MarketCommand::PlaceOrder {
             player_id,
@@ -154,101 +88,146 @@ impl MarketSettlement {
             quantity: order.quantity,
         };
         match db.execute(command) {
-            Ok(transition) => settle_transition(db, target, transition, "Order placed"),
+            Ok(_transition) => {
+                MarketSettlementResult::Completed("Order placed; settlement pending".to_owned())
+            }
             Err(error) => rejected(error),
         }
     }
 
-    fn cancel<T: SettlementTarget>(
+    pub(super) fn cancel(
         db: &mut MarketDb,
         player_id: PlayerId,
         order_id: OrderId,
-        target: &mut T,
     ) -> MarketSettlementResult {
         match db.execute(MarketCommand::CancelOrder {
             player_id,
             order_id,
         }) {
-            Ok(transition) => settle_transition(db, target, transition, "Order cancelled"),
+            Ok(_transition) => {
+                MarketSettlementResult::Completed("Order cancelled; settlement pending".to_owned())
+            }
             Err(error) => rejected(error),
+        }
+    }
+
+    /// Drain pending settlement intents from `db`, translating the ones
+    /// whose destination ship is owned/docked in `node` into
+    /// `MarketSettlementInput`s for this tick's `FrameInput`. Intents for a
+    /// ship that isn't owned/docked here are left pending (e.g. it jumped
+    /// away or undocked in the meantime) so a later tick — possibly in a
+    /// different Sector for a clustered runtime — can pick them up.
+    ///
+    /// An intent whose `SettlementId` can't be represented as the Tick
+    /// pipeline's `u64` is surfaced anyway (rather than silently dropped
+    /// forever) so the caller's `acknowledge_outcomes` — or an immediate
+    /// direct reject — can clear it out of the queue. Since such an intent
+    /// never becomes a valid `MarketSettlementInput`, this function rejects
+    /// it in the DB immediately and does not include it in the returned
+    /// queue.
+    pub(super) fn drain_pending_inputs(
+        db: &mut MarketDb,
+        node: &SimulationNode,
+    ) -> Vec<QueuedSettlement> {
+        let pending = match db.pending_settlements() {
+            Ok(pending) => pending,
+            Err(error) => {
+                eprintln!("[Server] Market settlement drain failed: {error}");
+                return Vec::new();
+            }
+        };
+
+        let mut queued = Vec::with_capacity(pending.len());
+        for intent in pending {
+            let (player_id, ship_id) = intent_identity(intent);
+            if !owns_docked_ship(node, player_id, ship_id) {
+                continue;
+            }
+            let Ok(settlement_id) = u64::try_from(intent.id.0).map(|id| (id, id > 0)) else {
+                reject_invalid_settlement(db, intent.id);
+                continue;
+            };
+            let (settlement_id, is_valid) = settlement_id;
+            if !is_valid {
+                reject_invalid_settlement(db, intent.id);
+                continue;
+            }
+            queued.push(QueuedSettlement {
+                settlement_id: intent.id,
+                input: to_market_settlement_input(intent, settlement_id),
+            });
+        }
+        queued
+    }
+
+    /// Report each `MarketSettlementOutcome` from a committed Tick back to
+    /// the Market DB: acknowledge the ones that applied, reject the ones
+    /// that didn't. A queued settlement without a matching outcome, or a
+    /// `db.execute` failure while acknowledging/rejecting, is logged and
+    /// skipped rather than treated as fatal — the settlement simply stays
+    /// pending and is retried on a later drain.
+    pub(super) fn acknowledge_outcomes(
+        db: &mut MarketDb,
+        queued: &[QueuedSettlement],
+        outcomes: &[MarketSettlementOutcome],
+    ) {
+        for settlement in queued {
+            let expected_id = settlement.input.settlement_id();
+            let Some(outcome) = outcomes
+                .iter()
+                .find(|outcome| outcome.settlement_id == expected_id)
+            else {
+                eprintln!(
+                    "[Server] Market settlement {:?} had no matching Tick outcome",
+                    settlement.settlement_id
+                );
+                continue;
+            };
+            let result = if outcome.applied {
+                db.execute(MarketCommand::AcknowledgeSettlement {
+                    settlement_id: settlement.settlement_id,
+                })
+            } else {
+                db.execute(MarketCommand::RejectSettlement {
+                    settlement_id: settlement.settlement_id,
+                    reason: "Sector rejected the inventory settlement".to_owned(),
+                })
+            };
+            if let Err(error) = result {
+                eprintln!(
+                    "[Server] failed to record Market settlement outcome for {:?}: {error}",
+                    settlement.settlement_id
+                );
+            }
         }
     }
 }
 
-fn settle_transition<T: SettlementTarget>(
-    db: &mut MarketDb,
-    target: &mut T,
-    _transition: MarketTransition,
-    success_notice: &str,
-) -> MarketSettlementResult {
-    let mut saw_rejection = false;
-    for _ in 0..32 {
-        let pending = match db.pending_settlements() {
-            Ok(pending) => pending,
-            Err(error) => return MarketSettlementResult::NeedsAttention(error.to_string()),
-        };
-        if pending.is_empty() {
-            return if saw_rejection {
-                MarketSettlementResult::NeedsAttention(format!(
-                    "{success_notice}; settlement compensation required"
-                ))
-            } else {
-                MarketSettlementResult::Completed(success_notice.to_owned())
-            };
-        }
-
-        let mut made_progress = false;
-        for intent in pending {
-            match target.deliver(intent) {
-                SettlementDelivery::Applied => {
-                    if let Err(error) = db.execute(MarketCommand::AcknowledgeSettlement {
-                        settlement_id: intent.id,
-                    }) {
-                        return MarketSettlementResult::NeedsAttention(error.to_string());
-                    }
-                    made_progress = true;
-                }
-                SettlementDelivery::Unavailable => {}
-                SettlementDelivery::Rejected(reason) => {
-                    saw_rejection = true;
-                    if let Err(error) = db.execute(MarketCommand::RejectSettlement {
-                        settlement_id: intent.id,
-                        reason: reason.to_owned(),
-                    }) {
-                        return MarketSettlementResult::NeedsAttention(error.to_string());
-                    }
-                    made_progress = true;
-                }
-            }
-        }
-        if !made_progress {
-            return MarketSettlementResult::Completed(format!(
-                "{success_notice}; settlement pending"
-            ));
-        }
+fn reject_invalid_settlement(db: &mut MarketDb, settlement_id: SettlementId) {
+    if let Err(error) = db.execute(MarketCommand::RejectSettlement {
+        settlement_id,
+        reason: "invalid settlement identity".to_owned(),
+    }) {
+        eprintln!("[Server] failed to reject invalid Market settlement {settlement_id:?}: {error}");
     }
-    MarketSettlementResult::NeedsAttention(format!(
-        "{success_notice}; settlement retry limit reached"
-    ))
 }
 
 fn rejected(error: MarketError) -> MarketSettlementResult {
     MarketSettlementResult::Rejected(error.to_string())
 }
 
-fn apply_intent(node: &mut SimulationNode, intent: SettlementIntent) -> SettlementDelivery {
-    let settlement_id = match u64::try_from(intent.id.0) {
-        Ok(id) if id > 0 => id,
-        _ => return SettlementDelivery::Rejected("invalid settlement identity"),
-    };
-    let applied = match intent.effect {
+fn to_market_settlement_input(
+    intent: SettlementIntent,
+    settlement_id: u64,
+) -> MarketSettlementInput {
+    match intent.effect {
         SettlementEffect::ReserveAsk {
             player_id,
             ship_id,
             item_id,
             quantity,
             ..
-        } => node.remove_item_owned(RemoveItemCommand {
+        } => MarketSettlementInput::RemoveItem(RemoveItemCommand {
             player_id,
             ship_id,
             item_id,
@@ -260,7 +239,7 @@ fn apply_intent(node: &mut SimulationNode, intent: SettlementIntent) -> Settleme
             ship_id,
             item_id,
             quantity,
-        } => node.return_item_owned(ReturnItemCommand {
+        } => MarketSettlementInput::ReturnItem(ReturnItemCommand {
             player_id,
             ship_id,
             item_id,
@@ -273,18 +252,13 @@ fn apply_intent(node: &mut SimulationNode, intent: SettlementIntent) -> Settleme
             item_id,
             quantity,
             ..
-        } => node.credit_item_owned(CreditItemCommand {
+        } => MarketSettlementInput::CreditItem(CreditItemCommand {
             player_id: buyer,
             ship_id: buyer_ship_id,
             item_id,
             quantity,
             settlement_id,
         }),
-    };
-    if applied {
-        SettlementDelivery::Applied
-    } else {
-        SettlementDelivery::Rejected("Sector rejected the inventory settlement")
     }
 }
 
@@ -304,16 +278,6 @@ fn intent_identity(intent: SettlementIntent) -> (PlayerId, ShipId) {
     }
 }
 
-fn find_node_index<N: RuntimeNodeView>(
-    nodes: &[N],
-    player_id: PlayerId,
-    ship_id: ShipId,
-) -> Option<usize> {
-    nodes
-        .iter()
-        .position(|node| owns_docked_ship(node.runtime_node(), player_id, ship_id))
-}
-
 fn owns_docked_ship(node: &SimulationNode, player_id: PlayerId, ship_id: ShipId) -> bool {
     node.owns_ship(player_id, ship_id) && node.docked_station(ship_id).is_some()
 }
@@ -321,11 +285,10 @@ fn owns_docked_ship(node: &SimulationNode, player_id: PlayerId, ship_id: ShipId)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dawn_core::NodeId;
-
-    fn ship(raw: u64) -> ShipId {
-        ShipId::new(NodeId(0), raw)
-    }
+    use crate::runtime_frame::{RuntimeFrameHost, RuntimeFramePolicy};
+    use dawn_core::{ClientRequest, DomainEvent, NodeId, SectorBounds, SectorId, StationId};
+    use dawn_sector::transit::LocalRuntimeConsensus;
+    use dawn_storage::InMemoryJournal;
 
     fn order(ship_id: ShipId, side: OrderSide, quantity: u64) -> ParsedOrder {
         ParsedOrder {
@@ -337,162 +300,253 @@ mod tests {
         }
     }
 
-    #[derive(Default)]
-    struct FakeTarget {
-        owned_ships: Vec<(PlayerId, ShipId)>,
-        cargo: Vec<(PlayerId, ShipId, ItemId, u64)>,
-        fail_credit_after: Option<usize>,
-        credit_attempts: usize,
+    fn node_with_docked_ship(player_id: PlayerId) -> (SimulationNode, ShipId) {
+        let mut node = SimulationNode::new(
+            NodeId(0),
+            SectorId(0),
+            SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            std::sync::Arc::new(dawn_sector::galaxy::Galaxy::demo()),
+            crate::test_catalog(),
+        );
+        let station_position = node
+            .station(StationId(0))
+            .expect("demo station exists")
+            .position;
+        let ship_id = node.spawn_player_ship_at_pub(player_id, station_position);
+        node.apply_client_request(
+            player_id,
+            ClientRequest::Dock {
+                station: StationId(0),
+            },
+            &mut Vec::new(),
+        )
+        .unwrap();
+        (node, ship_id)
     }
 
-    impl FakeTarget {
-        fn count(&self, player_id: PlayerId, ship_id: ShipId, item_id: ItemId) -> u64 {
-            self.cargo
-                .iter()
-                .find(|(owner, ship, item, _)| {
-                    *owner == player_id && *ship == ship_id && *item == item_id
-                })
-                .map(|(_, _, _, count)| *count)
-                .unwrap_or(0)
-        }
-
-        fn add(&mut self, player_id: PlayerId, ship_id: ShipId, item_id: ItemId, quantity: u64) {
-            if let Some((_, _, _, count)) = self.cargo.iter_mut().find(|(owner, ship, item, _)| {
-                *owner == player_id && *ship == ship_id && *item == item_id
-            }) {
-                *count += quantity;
-            } else {
-                self.cargo.push((player_id, ship_id, item_id, quantity));
-            }
-        }
+    /// Number of `item_id` units present in `ship_id`'s cargo, read off the
+    /// `ShipFitted` snapshot event that every cargo mutation emits (the one
+    /// externally-visible source of truth for cargo contents outside the
+    /// `dawn-sector` crate).
+    fn cargo_count_from_events(events: &[DomainEvent], ship_id: ShipId, item_id: ItemId) -> usize {
+        events
+            .iter()
+            .rev()
+            .find_map(|event| match event {
+                DomainEvent::ShipFitted(fitted) if fitted.ship_id == ship_id => Some(
+                    fitted
+                        .inventory
+                        .iter()
+                        .filter(|item| **item == item_id)
+                        .count(),
+                ),
+                _ => None,
+            })
+            .unwrap_or(0)
     }
 
-    impl SettlementTarget for FakeTarget {
-        fn deliver(&mut self, intent: SettlementIntent) -> SettlementDelivery {
-            let (player_id, ship_id) = intent_identity(intent);
-            if !self.owned_ships.contains(&(player_id, ship_id)) {
-                return SettlementDelivery::Rejected("destination ship is unavailable");
+    fn host_with_docked_ship(
+        player_id: PlayerId,
+    ) -> (
+        RuntimeFrameHost<InMemoryJournal, LocalRuntimeConsensus>,
+        ShipId,
+    ) {
+        let (node, ship_id) = node_with_docked_ship(player_id);
+        let host = RuntimeFrameHost::new(
+            node,
+            InMemoryJournal::new(),
+            LocalRuntimeConsensus,
+            RuntimeFramePolicy::local_durable(0),
+        );
+        (host, ship_id)
+    }
+
+    #[test]
+    fn drain_translates_pending_intents_for_owned_docked_ships() {
+        let mut db = MarketDb::open_in_memory().unwrap();
+        let seller = PlayerId(1);
+        let (mut node, seller_ship) = node_with_docked_ship(seller);
+        assert!(node.credit_item_owned(CreditItemCommand {
+            player_id: seller,
+            ship_id: seller_ship,
+            item_id: ItemId::ScrapMetal,
+            quantity: 5,
+            settlement_id: 1,
+        }));
+
+        MarketSettlement::place(&mut db, seller, order(seller_ship, OrderSide::Ask, 5));
+
+        let queued = MarketSettlement::drain_pending_inputs(&mut db, &node);
+        assert_eq!(queued.len(), 1);
+        match queued[0].input() {
+            MarketSettlementInput::RemoveItem(cmd) => {
+                assert_eq!(cmd.player_id, seller);
+                assert_eq!(cmd.ship_id, seller_ship);
+                assert_eq!(cmd.quantity, 5);
             }
-            match intent.effect {
-                SettlementEffect::ReserveAsk {
-                    item_id, quantity, ..
-                } => {
-                    let Some((_, _, _, count)) =
-                        self.cargo.iter_mut().find(|(owner, ship, item, _)| {
-                            *owner == player_id && *ship == ship_id && *item == item_id
-                        })
-                    else {
-                        return SettlementDelivery::Rejected("item is unavailable");
-                    };
-                    if *count < quantity {
-                        return SettlementDelivery::Rejected("item quantity is unavailable");
-                    }
-                    *count -= quantity;
-                }
-                SettlementEffect::ReturnItem {
-                    item_id, quantity, ..
-                } => self.add(player_id, ship_id, item_id, quantity),
-                SettlementEffect::CreditItem {
-                    buyer,
-                    buyer_ship_id,
-                    item_id,
-                    quantity,
-                    ..
-                } => {
-                    self.credit_attempts += 1;
-                    if self
-                        .fail_credit_after
-                        .is_some_and(|limit| self.credit_attempts > limit)
-                    {
-                        return SettlementDelivery::Rejected("credit rejected");
-                    }
-                    self.add(buyer, buyer_ship_id, item_id, quantity);
-                }
-            }
-            SettlementDelivery::Applied
+            other => panic!("expected RemoveItem, got {other:?}"),
         }
     }
 
     #[test]
-    fn placing_an_ask_reserves_cargo_before_it_rests() {
+    fn drain_skips_intents_for_ships_not_owned_or_docked_here() {
         let mut db = MarketDb::open_in_memory().unwrap();
         let seller = PlayerId(1);
-        let seller_ship = ship(1);
-        let mut target = FakeTarget {
-            owned_ships: vec![(seller, seller_ship)],
-            cargo: vec![(seller, seller_ship, ItemId::ScrapMetal, 5)],
-            ..Default::default()
-        };
+        let (mut node, seller_ship) = node_with_docked_ship(seller);
+        assert!(node.credit_item_owned(CreditItemCommand {
+            player_id: seller,
+            ship_id: seller_ship,
+            item_id: ItemId::ScrapMetal,
+            quantity: 5,
+            settlement_id: 1,
+        }));
+        MarketSettlement::place(&mut db, seller, order(seller_ship, OrderSide::Ask, 5));
 
-        let result = MarketSettlement::place(
-            &mut db,
-            seller,
-            order(seller_ship, OrderSide::Ask, 5),
-            &mut target,
+        // A different (empty) node has no owned/docked ships at all, so the
+        // pending intent above must be left pending rather than translated.
+        let other_node = SimulationNode::new(
+            NodeId(1),
+            SectorId(1),
+            SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            std::sync::Arc::new(dawn_sector::galaxy::Galaxy::demo()),
+            crate::test_catalog(),
         );
+
+        let queued = MarketSettlement::drain_pending_inputs(&mut db, &other_node);
+        assert!(queued.is_empty());
+        // Still pending in the DB, not rejected.
+        assert_eq!(db.pending_settlements().unwrap().len(), 1);
+
+        // A later drain against the real owning node still finds it.
+        let queued = MarketSettlement::drain_pending_inputs(&mut db, &node);
+        assert_eq!(queued.len(), 1);
+    }
+
+    #[test]
+    fn acknowledge_outcomes_acks_applied_and_rejects_unapplied() {
+        let mut db = MarketDb::open_in_memory().unwrap();
+        let seller = PlayerId(1);
+        let (node, seller_ship) = node_with_docked_ship(seller);
+        MarketSettlement::place(&mut db, seller, order(seller_ship, OrderSide::Ask, 5));
+        let queued = MarketSettlement::drain_pending_inputs(&mut db, &node);
+        assert_eq!(queued.len(), 1);
+        let settlement_id = queued[0].input().settlement_id();
+
+        MarketSettlement::acknowledge_outcomes(
+            &mut db,
+            &queued,
+            &[MarketSettlementOutcome {
+                settlement_id,
+                applied: false,
+            }],
+        );
+
+        assert!(db.pending_settlements().unwrap().is_empty());
+        // The settlement is already terminal (rejected); re-acknowledging it
+        // is a harmless duplicate, not an error -- the Market policy treats
+        // non-pending settlement rows as already decided.
+        assert!(db
+            .execute(MarketCommand::AcknowledgeSettlement {
+                settlement_id: queued[0].settlement_id,
+            })
+            .is_ok());
+    }
+
+    #[test]
+    fn placing_an_ask_reserves_cargo_only_after_a_committed_tick() {
+        // Full round trip: place -> drain -> real RuntimeFrameHost Tick
+        // pipeline apply -> acknowledge. This is the durability property
+        // issue #315 is about: the settlement's cargo mutation only exists
+        // once it has gone through `run_frame_with_output`'s
+        // prepare/durable-journal/apply pipeline, i.e. it is captured by the
+        // same durable write set as everything else in that tick, never
+        // applied synchronously outside of a tick boundary.
+        let mut db = MarketDb::open_in_memory().unwrap();
+        let seller = PlayerId(1);
+        let (mut host, seller_ship) = host_with_docked_ship(seller);
+        host.with_node_mut(|node| {
+            node.credit_item_owned(CreditItemCommand {
+                player_id: seller,
+                ship_id: seller_ship,
+                item_id: ItemId::ScrapMetal,
+                quantity: 5,
+                settlement_id: 1,
+            })
+        });
+        let _ = host.drain_pending_events();
+
+        MarketSettlement::place(&mut db, seller, order(seller_ship, OrderSide::Ask, 5));
+        let queued = MarketSettlement::drain_pending_inputs(&mut db, host.node());
+        assert_eq!(queued.len(), 1);
+
+        let inputs: Vec<MarketSettlementInput> =
+            queued.iter().map(QueuedSettlement::input).collect();
+
+        let mut acknowledged_outcomes = Vec::new();
+        let output = host
+            .run_frame_with_output(
+                dawn_sector::transition::FrameInput {
+                    lock_commands: &[],
+                    market_settlements: &inputs,
+                },
+                |_node, tick_result, _events| {
+                    acknowledged_outcomes = tick_result.market_settlement_outcomes.clone();
+                },
+            )
+            .expect("Tick with a queued Market settlement must be preparable and durable");
 
         assert_eq!(
-            result,
-            MarketSettlementResult::Completed("Order placed".to_owned())
+            cargo_count_from_events(&output.events, seller_ship, ItemId::ScrapMetal),
+            0,
+            "the Ask reservation must remove the item from cargo once the tick commits"
         );
-        assert_eq!(target.count(seller, seller_ship, ItemId::ScrapMetal), 0);
+
+        MarketSettlement::acknowledge_outcomes(&mut db, &queued, &acknowledged_outcomes);
+        assert!(db.pending_settlements().unwrap().is_empty());
         assert_eq!(db.open_orders_for(seller).unwrap().len(), 1);
     }
 
     #[test]
-    fn failed_credit_refunds_currency_and_returns_reserved_item() {
-        let mut db = MarketDb::open_in_memory().unwrap();
-        let seller = PlayerId(1);
-        let buyer = PlayerId(2);
-        let seller_ship = ship(1);
-        let buyer_ship = ship(2);
-        let mut target = FakeTarget {
-            owned_ships: vec![(seller, seller_ship), (buyer, buyer_ship)],
-            cargo: vec![(seller, seller_ship, ItemId::ScrapMetal, 2)],
-            fail_credit_after: Some(0),
-            ..Default::default()
-        };
-        MarketSettlement::place(
-            &mut db,
-            seller,
-            order(seller_ship, OrderSide::Ask, 2),
-            &mut target,
+    fn failed_credit_comes_back_as_an_unapplied_outcome_for_a_committed_tick() {
+        // Mirrors the previous immediate-apply test's coverage: a credit the
+        // Sector can't apply comes back from a real, committed Tick as an
+        // `applied: false` outcome rather than being silently dropped or the
+        // client being told it completed. Using an invalid (zero)
+        // `settlement_id` is the cleanest deterministic way to force
+        // `apply_market_settlement_input` to reject without touching cargo
+        // at all (`apply_market_item_mutation` rejects `settlement_id == 0`
+        // up front). The DB side of turning that outcome into a rejection is
+        // already covered by
+        // `acknowledge_outcomes_acks_applied_and_rejects_unapplied`.
+        let buyer = PlayerId(1);
+        let (mut host, buyer_ship) = host_with_docked_ship(buyer);
+
+        let credit_input = MarketSettlementInput::CreditItem(CreditItemCommand {
+            player_id: buyer,
+            ship_id: buyer_ship,
+            item_id: ItemId::ScrapMetal,
+            quantity: 2,
+            settlement_id: 0,
+        });
+
+        let mut outcomes = Vec::new();
+        host.run_frame_with_output(
+            dawn_sector::transition::FrameInput {
+                lock_commands: &[],
+                market_settlements: &[credit_input],
+            },
+            |_node, tick_result, _events| {
+                outcomes = tick_result.market_settlement_outcomes.clone();
+            },
+        )
+        .expect("Tick preparation must still succeed even though the settlement is rejected");
+
+        assert_eq!(
+            outcomes,
+            vec![MarketSettlementOutcome {
+                settlement_id: 0,
+                applied: false,
+            }]
         );
-        db.credit_currency(buyer, 200).unwrap();
-
-        let result = MarketSettlement::place(
-            &mut db,
-            buyer,
-            order(buyer_ship, OrderSide::Bid, 2),
-            &mut target,
-        );
-
-        assert!(matches!(result, MarketSettlementResult::NeedsAttention(_)));
-        assert_eq!(db.currency_balance(buyer).unwrap(), 200);
-        assert_eq!(target.count(seller, seller_ship, ItemId::ScrapMetal), 2);
-    }
-
-    #[test]
-    fn cancel_reports_when_sector_cannot_return_the_ask() {
-        let mut db = MarketDb::open_in_memory().unwrap();
-        let seller = PlayerId(1);
-        let seller_ship = ship(1);
-        let mut target = FakeTarget {
-            owned_ships: vec![(seller, seller_ship)],
-            cargo: vec![(seller, seller_ship, ItemId::ScrapMetal, 1)],
-            ..Default::default()
-        };
-        MarketSettlement::place(
-            &mut db,
-            seller,
-            order(seller_ship, OrderSide::Ask, 1),
-            &mut target,
-        );
-        let order_id = db.open_orders_for(seller).unwrap()[0].order_id;
-        target.owned_ships.clear();
-
-        let result = MarketSettlement::cancel(&mut db, seller, order_id, &mut target);
-        assert!(matches!(result, MarketSettlementResult::NeedsAttention(_)));
-        assert!(db.open_orders_for(seller).unwrap().is_empty());
     }
 }

@@ -14,8 +14,9 @@ use dawn_protocol::{
 };
 use dawn_sector::node::SimulationNode;
 
-use super::market_settlement::{MarketSettlement, ParsedOrder};
-use crate::runtime_frame::RuntimeNodeMutation;
+use super::market_settlement::{MarketSettlement, ParsedOrder, QueuedSettlement};
+use crate::runtime_frame::RuntimeNodeView;
+use dawn_sector::transition::MarketSettlementOutcome;
 
 const MAX_MARKET_ORDERS: usize = 200;
 const MARKET_DOCK_REQUIRED_NOTICE: &str = "Dock at a station to use the Market";
@@ -39,11 +40,11 @@ impl MarketRuntime {
         }
     }
 
-    pub(crate) fn handle_single<N: RuntimeNodeMutation>(
+    pub(crate) fn handle_single<N: RuntimeNodeView>(
         &mut self,
         player_id: PlayerId,
         command: MarketCommandWire,
-        node: &mut N,
+        node: &N,
     ) -> MarketSnapshotWire {
         if node
             .runtime_node()
@@ -65,17 +66,17 @@ impl MarketRuntime {
                 None => self.snapshot(player_id, "Market order rejected"),
             },
             MarketCommandWire::CancelMarketOrderCommand { order_id } => {
-                self.cancel_single(player_id, order_id, node)
+                self.cancel(player_id, order_id)
             }
         }
     }
 
-    pub(crate) fn handle_cluster<N: RuntimeNodeMutation>(
+    pub(crate) fn handle_cluster<N: RuntimeNodeView>(
         &mut self,
         player_id: PlayerId,
         command: MarketCommandWire,
         player_sector: usize,
-        nodes: &mut [N],
+        nodes: &[N],
     ) -> MarketSnapshotWire {
         if nodes.get(player_sector).is_none_or(|node| {
             node.runtime_node()
@@ -97,30 +98,30 @@ impl MarketRuntime {
                 None => self.snapshot(player_id, "Market order rejected"),
             },
             MarketCommandWire::CancelMarketOrderCommand { order_id } => {
-                self.cancel_cluster(player_id, order_id, nodes)
+                self.cancel(player_id, order_id)
             }
         }
     }
 
-    fn place_single<N: RuntimeNodeMutation>(
+    fn place_single<N: RuntimeNodeView>(
         &mut self,
         player_id: PlayerId,
         order: ParsedOrder,
-        node: &mut N,
+        node: &N,
     ) -> MarketSnapshotWire {
         if !can_place_order(node.runtime_node(), player_id, order.ship_id) {
             return self.snapshot(player_id, "Market order rejected");
         }
-        let result = MarketSettlement::place_single(&mut self.db, player_id, order, node);
+        let result = MarketSettlement::place(&mut self.db, player_id, order);
         self.snapshot(player_id, result.notice())
     }
 
-    fn place_cluster<N: RuntimeNodeMutation>(
+    fn place_cluster<N: RuntimeNodeView>(
         &mut self,
         player_id: PlayerId,
         order: ParsedOrder,
         player_sector: usize,
-        nodes: &mut [N],
+        nodes: &[N],
     ) -> MarketSnapshotWire {
         if !nodes
             .get(player_sector)
@@ -128,34 +129,36 @@ impl MarketRuntime {
         {
             return self.snapshot(player_id, "Market order rejected");
         }
-        let result = MarketSettlement::place_cluster(&mut self.db, player_id, order, nodes);
+        let result = MarketSettlement::place(&mut self.db, player_id, order);
         self.snapshot(player_id, result.notice())
     }
 
-    fn cancel_single<N: RuntimeNodeMutation>(
-        &mut self,
-        player_id: PlayerId,
-        raw_order_id: u64,
-        node: &mut N,
-    ) -> MarketSnapshotWire {
+    fn cancel(&mut self, player_id: PlayerId, raw_order_id: u64) -> MarketSnapshotWire {
         let Some(order_id) = order_id_from_wire(raw_order_id) else {
             return self.snapshot(player_id, "Market order rejected");
         };
-        let result = MarketSettlement::cancel_single(&mut self.db, player_id, order_id, node);
+        let result = MarketSettlement::cancel(&mut self.db, player_id, order_id);
         self.snapshot(player_id, result.notice())
     }
 
-    fn cancel_cluster<N: RuntimeNodeMutation>(
+    /// Drain pending Market settlement intents whose destination ship
+    /// `node` currently owns/docks into inputs for this tick's `FrameInput`
+    /// (issue #315). Call once per tick, per Sector, before `run_frame`.
+    pub(crate) fn drain_settlements<N: RuntimeNodeView>(
         &mut self,
-        player_id: PlayerId,
-        raw_order_id: u64,
-        nodes: &mut [N],
-    ) -> MarketSnapshotWire {
-        let Some(order_id) = order_id_from_wire(raw_order_id) else {
-            return self.snapshot(player_id, "Market order rejected");
-        };
-        let result = MarketSettlement::cancel_cluster(&mut self.db, player_id, order_id, nodes);
-        self.snapshot(player_id, result.notice())
+        node: &N,
+    ) -> Vec<QueuedSettlement> {
+        MarketSettlement::drain_pending_inputs(&mut self.db, node.runtime_node())
+    }
+
+    /// Report a committed tick's `MarketSettlementOutcome`s back to the
+    /// Market ledger for the settlements this Sector drained into it.
+    pub(crate) fn acknowledge_settlements(
+        &mut self,
+        queued: &[QueuedSettlement],
+        outcomes: &[MarketSettlementOutcome],
+    ) {
+        MarketSettlement::acknowledge_outcomes(&mut self.db, queued, outcomes);
     }
 
     fn snapshot(&self, player_id: PlayerId, notice: &str) -> MarketSnapshotWire {
@@ -281,7 +284,7 @@ mod tests {
     #[test]
     fn market_requests_are_rejected_when_the_player_is_not_docked() {
         let mut runtime = MarketRuntime::open_in_memory();
-        let mut node = SimulationNode::new(
+        let node = SimulationNode::new(
             dawn_core::NodeId(0),
             dawn_core::SectorId(0),
             dawn_core::SectorBounds::centered(dawn_core::SectorBounds::DEFAULT_HALF),
@@ -292,7 +295,7 @@ mod tests {
         let snapshot = runtime.handle_single(
             PlayerId(1),
             MarketCommandWire::RefreshMarketCommand {},
-            &mut node,
+            &node,
         );
 
         assert_eq!(snapshot.notice, MARKET_DOCK_REQUIRED_NOTICE);
@@ -322,7 +325,7 @@ mod tests {
                 price: 100,
                 quantity: 1,
             },
-            &mut node,
+            &node,
         );
 
         assert_eq!(result.notice, "Market order rejected");
@@ -365,7 +368,7 @@ mod tests {
                 price: 100,
                 quantity: 1,
             },
-            &mut node,
+            &node,
         );
 
         assert_eq!(result.notice, "Market order rejected");
