@@ -201,7 +201,7 @@ mod tests {
         crate::transit::commit_tick_state_transition(
             &mut source,
             &mut journal,
-            &[],
+            crate::transition::FrameInput::lock_only(&[]),
             SectorTransitionId(2),
             0,
             DurabilityMode::Synced,

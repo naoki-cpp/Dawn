@@ -6,14 +6,48 @@
 //! apply the same recovery delta.
 
 use dawn_core::{
-    ApproachTarget, DomainEvent, JumpGateId, LockOnCommand, PlayerId, SectorId, ShipId, StationId,
-    Tick, Velocity, WarpTarget,
+    ApproachTarget, CreditItemCommand, DomainEvent, JumpGateId, LockOnCommand, PlayerId,
+    RemoveItemCommand, ReturnItemCommand, SectorId, ShipId, StationId, Tick, Velocity, WarpTarget,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use thiserror::Error;
 
 use crate::persistence::ShipSnapshot;
+
+/// One composition-adapter mutation admitted into a Tick's prepare/durable/
+/// apply pipeline alongside lock commands (issue #315). Each variant mirrors
+/// one of the item-mutation commands `SimulationNode` already exposes
+/// (`ship_cargo.rs`); Market settlement delivery constructs these instead of
+/// calling those methods directly outside the pipeline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarketSettlementInput {
+    RemoveItem(RemoveItemCommand),
+    ReturnItem(ReturnItemCommand),
+    CreditItem(CreditItemCommand),
+}
+
+/// Frame-scoped input to one Tick's prepare/durable/apply pipeline (issue
+/// #315). Bundles the existing lock-command input with Market settlement
+/// mutations so both are captured in the same durable `TickRecoveryDelta`
+/// rather than Market settlement mutating live state outside any tick
+/// boundary.
+#[derive(Debug, Clone, Copy)]
+pub struct FrameInput<'a> {
+    pub lock_commands: &'a [LockOnCommand],
+    pub market_settlements: &'a [MarketSettlementInput],
+}
+
+impl<'a> FrameInput<'a> {
+    /// A frame with no Market settlement input, e.g. tests and non-Market
+    /// runtime call sites that only ever carried lock commands.
+    pub fn lock_only(lock_commands: &'a [LockOnCommand]) -> Self {
+        Self {
+            lock_commands,
+            market_settlements: &[],
+        }
+    }
+}
 
 /// Version of the recovery-delta payload produced by this module.
 ///

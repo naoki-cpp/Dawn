@@ -227,17 +227,17 @@ impl SimulationNode {
     #[cfg(test)]
     pub(crate) fn prepare_tick_state_transition(
         &mut self,
-        lock_commands: &[dawn_core::LockOnCommand],
+        input: crate::transition::FrameInput<'_>,
         transition_id: SectorTransitionId,
         owner_epoch: u64,
     ) -> Result<PreparedSectorTransition, TickPreparationError> {
-        self.prepare_tick_state_transition_with_result(lock_commands, transition_id, owner_epoch)
+        self.prepare_tick_state_transition_with_result(input, transition_id, owner_epoch)
             .map(|(prepared, _)| prepared)
     }
 
     pub(crate) fn prepare_tick_state_transition_with_result(
         &mut self,
-        lock_commands: &[dawn_core::LockOnCommand],
+        input: crate::transition::FrameInput<'_>,
         transition_id: SectorTransitionId,
         owner_epoch: u64,
     ) -> Result<(PreparedSectorTransition, TickResult), TickPreparationError> {
@@ -256,7 +256,7 @@ impl SimulationNode {
         let before_transit_saga = self.transit_saga_snapshot();
         let before_transit_journal = self.transit.transit_journal.clone();
 
-        let result = self.tick_with_lock_commands_mode(lock_commands, false, false);
+        let result = self.tick_with_lock_commands_mode(input.lock_commands, false, false);
         let deferred_events = self
             .frame_outputs
             .pending_events
@@ -1052,7 +1052,11 @@ mod tests {
         let before = node.capture_tick_write_set();
 
         let prepared = node
-            .prepare_tick_state_transition(&[], SectorTransitionId(23), 4)
+            .prepare_tick_state_transition(
+                crate::transition::FrameInput::lock_only(&[]),
+                SectorTransitionId(23),
+                4,
+            )
             .expect("full Tick should be preparable");
 
         assert_eq!(node.current_tick(), Tick::ZERO);
@@ -1068,7 +1072,7 @@ mod tests {
         crate::transit::commit_tick_state_transition(
             &mut node,
             &mut journal,
-            &[],
+            crate::transition::FrameInput::lock_only(&[]),
             SectorTransitionId(24),
             4,
             DurabilityMode::Synced,
@@ -1123,7 +1127,7 @@ mod tests {
         crate::transit::commit_tick_state_transition(
             &mut node,
             &mut journal,
-            &[],
+            crate::transition::FrameInput::lock_only(&[]),
             SectorTransitionId(1),
             4,
             DurabilityMode::Synced,
@@ -1172,7 +1176,7 @@ mod tests {
         assert!(crate::transit::commit_tick_state_transition(
             &mut node,
             &mut journal,
-            &[],
+            crate::transition::FrameInput::lock_only(&[]),
             SectorTransitionId(25),
             4,
             DurabilityMode::Synced,
