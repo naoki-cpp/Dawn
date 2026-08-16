@@ -14,7 +14,9 @@ use dawn_protocol::{
 };
 use dawn_sector::node::SimulationNode;
 
-use super::market_settlement::{MarketSettlement, ParsedOrder, QueuedSettlement};
+use super::market_settlement::{
+    MarketSettlement, ParsedOrder, QueuedSettlement, SettlementAcknowledgement,
+};
 use crate::runtime_frame::RuntimeNodeView;
 use dawn_sector::transition::MarketSettlementOutcome;
 
@@ -24,12 +26,23 @@ const MARKET_DOCK_REQUIRED_NOTICE: &str = "Dock at a station to use the Market";
 /// Owns the persistent Market database for one serve process.
 pub(crate) struct MarketRuntime {
     db: MarketDb,
+    /// Whether the settlement outbox may hold work for a Sector to drain.
+    ///
+    /// `drain_settlements` runs on every tick of the serve loop, and its
+    /// first act is a SQLite query. Ledger mutations are the only thing that
+    /// can enqueue a settlement, so an idle Market can skip the query
+    /// entirely instead of paying it 10x/sec/Sector forever. It stays set
+    /// while any settlement is still pending (e.g. its ship is elsewhere),
+    /// so a deferred one is never stranded.
+    settlements_possible: bool,
 }
 
 impl MarketRuntime {
     pub(crate) fn open(path: &str) -> rusqlite::Result<Self> {
         Ok(Self {
             db: MarketDb::open(path)?,
+            // A restart inherits whatever the durable outbox already holds.
+            settlements_possible: true,
         })
     }
 
@@ -37,6 +50,7 @@ impl MarketRuntime {
     fn open_in_memory() -> Self {
         Self {
             db: MarketDb::open_in_memory().expect("in-memory Market DB"),
+            settlements_possible: true,
         }
     }
 
@@ -113,6 +127,7 @@ impl MarketRuntime {
             return self.snapshot(player_id, "Market order rejected");
         }
         let result = MarketSettlement::place(&mut self.db, player_id, order);
+        self.settlements_possible = true;
         self.snapshot(player_id, result.notice())
     }
 
@@ -130,6 +145,7 @@ impl MarketRuntime {
             return self.snapshot(player_id, "Market order rejected");
         }
         let result = MarketSettlement::place(&mut self.db, player_id, order);
+        self.settlements_possible = true;
         self.snapshot(player_id, result.notice())
     }
 
@@ -138,27 +154,53 @@ impl MarketRuntime {
             return self.snapshot(player_id, "Market order rejected");
         };
         let result = MarketSettlement::cancel(&mut self.db, player_id, order_id);
+        self.settlements_possible = true;
         self.snapshot(player_id, result.notice())
     }
 
     /// Drain pending Market settlement intents whose destination ship
     /// `node` currently owns/docks into inputs for this tick's `FrameInput`
     /// (issue #315). Call once per tick, per Sector, before `run_frame`.
+    ///
+    /// Returns immediately without touching SQLite when no ledger mutation
+    /// has happened since the outbox was last observed empty.
     pub(crate) fn drain_settlements<N: RuntimeNodeView>(
         &mut self,
         node: &N,
     ) -> Vec<QueuedSettlement> {
-        MarketSettlement::drain_pending_inputs(&mut self.db, node.runtime_node())
+        if !self.settlements_possible {
+            return Vec::new();
+        }
+        let queued = MarketSettlement::drain_pending_inputs(&mut self.db, node.runtime_node());
+        // Only stand down once the outbox is genuinely empty. A settlement
+        // this Sector skipped (its ship is elsewhere) is still pending, so
+        // keep polling until some Sector takes it.
+        if queued.is_empty() && !MarketSettlement::has_pending(&self.db) {
+            self.settlements_possible = false;
+        }
+        queued
     }
 
     /// Report a committed tick's `MarketSettlementOutcome`s back to the
     /// Market ledger for the settlements this Sector drained into it.
+    ///
+    /// Returns the identities the ledger durably decided -- feed them into
+    /// the next frame's `FrameInput::acknowledged_settlements` so the Sector
+    /// retires them from its idempotency guard -- plus the players whose
+    /// settlement was refused, so the caller can tell them.
     pub(crate) fn acknowledge_settlements(
         &mut self,
         queued: &[QueuedSettlement],
         outcomes: &[MarketSettlementOutcome],
-    ) {
-        MarketSettlement::acknowledge_outcomes(&mut self.db, queued, outcomes);
+    ) -> SettlementAcknowledgement {
+        MarketSettlement::acknowledge_outcomes(&mut self.db, queued, outcomes)
+    }
+
+    /// A fresh snapshot carrying a deferred settlement outcome's notice, for
+    /// pushing to a player whose settlement resolved after their request had
+    /// already been answered with "settlement pending".
+    pub(crate) fn settlement_rejected_snapshot(&self, player_id: PlayerId) -> MarketSnapshotWire {
+        self.snapshot(player_id, "Market settlement failed; order compensated")
     }
 
     fn snapshot(&self, player_id: PlayerId, notice: &str) -> MarketSnapshotWire {

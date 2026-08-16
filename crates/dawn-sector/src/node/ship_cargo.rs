@@ -96,20 +96,62 @@ impl SimulationNode {
     /// set is captured, so the mutation is part of the durable delta and is
     /// rolled back with everything else if preparation does not lead to a
     /// committed apply.
+    ///
+    /// Distinguishes "this Sector cannot act on it right now"
+    /// (`Unavailable`, leave it pending) from "this Sector refuses it"
+    /// (`Rejected`, compensate) so a ship that changed Sector between the
+    /// caller's drain and this apply does not have its order reversed.
     pub(crate) fn apply_market_settlement_input(
         &mut self,
         input: crate::transition::MarketSettlementInput,
-    ) -> bool {
-        match input {
-            crate::transition::MarketSettlementInput::RemoveItem(cmd) => {
-                self.remove_item_owned(cmd)
-            }
-            crate::transition::MarketSettlementInput::ReturnItem(cmd) => {
-                self.return_item_owned(cmd)
-            }
-            crate::transition::MarketSettlementInput::CreditItem(cmd) => {
-                self.credit_item_owned(cmd)
-            }
+    ) -> crate::transition::MarketSettlementStatus {
+        use crate::transition::{MarketSettlementInput, MarketSettlementStatus};
+
+        let settlement_id = input.settlement_id();
+        // An already-committed settlement stays Applied even if the ship has
+        // since left: the mutation is durable, only the ACK was lost.
+        if self
+            .simulation
+            .applied_market_settlements
+            .contains(&settlement_id)
+        {
+            return MarketSettlementStatus::Applied;
+        }
+
+        // Transient: not this Sector's ship to mutate (handed off by a
+        // committed Transit, in transit, or not materialized here). The
+        // owning Sector picks it up on a later drain.
+        let (player_id, ship_id) = input.identity();
+        if !self.owns_ship(player_id, ship_id)
+            || !self.simulation.ships.index.contains_key(&ship_id)
+        {
+            return MarketSettlementStatus::Unavailable;
+        }
+
+        let applied = match input {
+            MarketSettlementInput::RemoveItem(cmd) => self.remove_item_owned(cmd),
+            MarketSettlementInput::ReturnItem(cmd) => self.return_item_owned(cmd),
+            MarketSettlementInput::CreditItem(cmd) => self.credit_item_owned(cmd),
+        };
+        if applied {
+            MarketSettlementStatus::Applied
+        } else {
+            MarketSettlementStatus::Rejected
+        }
+    }
+
+    /// Retire settlement identities the Market ledger has durably decided,
+    /// so the idempotency guard does not grow without bound (issue #315).
+    ///
+    /// A decided settlement is never redelivered, so keeping its id only
+    /// inflates every subsequent `TickRecoveryDelta` and checkpoint. Called
+    /// from Tick preparation, inside the same rollback window as the rest of
+    /// the write set.
+    pub(crate) fn retire_acknowledged_settlements(&mut self, settlement_ids: &[u64]) {
+        for settlement_id in settlement_ids {
+            self.simulation
+                .applied_market_settlements
+                .remove(settlement_id);
         }
     }
 

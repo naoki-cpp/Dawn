@@ -119,6 +119,9 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
     let mut player_sector: HashMap<PlayerId, usize> = HashMap::new();
     let mut ship_player: HashMap<ShipId, PlayerId> = HashMap::new();
     let mut aoi_delivery = AoiDelivery::new(AOI_CELL_SIZE);
+    // Per-Sector settlement identities the Market ledger decided last tick
+    // (issue #315), retired from each Sector's idempotency guard next frame.
+    let mut decided_settlements: Vec<Vec<u64>> = vec![Vec::new(); SECTORS];
 
     let mut interval = tokio::time::interval(std::time::Duration::from_millis(P4_TICK_MS));
 
@@ -283,6 +286,7 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                 ship_player: &ship_player,
                 aoi_delivery: &mut aoi_delivery,
                 market: &mut market,
+                decided_settlements: &mut decided_settlements,
             },
             &lock_commands,
         );

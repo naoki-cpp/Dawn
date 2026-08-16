@@ -257,16 +257,20 @@ impl SimulationNode {
         let before_transit_journal = self.transit.transit_journal.clone();
         let before_market_settlements = self.simulation.applied_market_settlements.clone();
 
-        // Market settlement mutations (issue #315) apply before the write set
-        // is captured below, so they are part of the same durable delta as
-        // this tick's other state and roll back with it if preparation does
-        // not lead to a committed apply.
+        // Retire settlement identities the Market ledger has already decided
+        // before admitting new ones, so the idempotency guard stays bounded
+        // (issue #315). Both happen before the write set is captured below,
+        // so they are part of the same durable delta as this tick's other
+        // state and roll back with it if preparation does not lead to a
+        // committed apply.
+        self.retire_acknowledged_settlements(input.acknowledged_settlements);
+
         let settlement_outcomes: Vec<crate::transition::MarketSettlementOutcome> = input
             .market_settlements
             .iter()
             .map(|settlement| crate::transition::MarketSettlementOutcome {
                 settlement_id: settlement.settlement_id(),
-                applied: self.apply_market_settlement_input(*settlement),
+                status: self.apply_market_settlement_input(*settlement),
             })
             .collect();
 
@@ -1070,6 +1074,7 @@ mod tests {
         let input = crate::transition::FrameInput {
             lock_commands: &[],
             market_settlements: &market_settlements,
+            acknowledged_settlements: &[],
         };
 
         let before_count = node
@@ -1087,7 +1092,7 @@ mod tests {
             result.market_settlement_outcomes,
             vec![crate::transition::MarketSettlementOutcome {
                 settlement_id: 42,
-                applied: true,
+                status: crate::transition::MarketSettlementStatus::Applied,
             }],
             "the settlement outcome must be reported so the runtime can ACK it"
         );
@@ -1153,6 +1158,61 @@ mod tests {
             .unwrap_or(0);
         assert_eq!(after_commit_count, before_count + 7);
         assert!(node.simulation.applied_market_settlements.contains(&42));
+    }
+
+    /// A RemoveItem settlement that empties a stack must survive the commit
+    /// in LIVE state, not just in the speculative events prepare emits.
+    #[test]
+    fn a_remove_settlement_that_empties_a_stack_survives_the_commit() {
+        let mut node = mem_node();
+        let player_id = node.next_player_id();
+        let ship_id = node.spawn_player_ship(player_id);
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
+        assert!(node.credit_item_owned(dawn_core::CreditItemCommand {
+            player_id,
+            ship_id,
+            item_id: dawn_core::ItemId::ScrapMetal,
+            quantity: 2,
+            settlement_id: 1,
+        }));
+        let live = |node: &SimulationNode| -> u64 {
+            node.simulation
+                .world
+                .get::<InventoryComp>(entity)
+                .map(|inv| inv.item_count(dawn_core::ItemId::ScrapMetal))
+                .unwrap_or(0)
+        };
+        assert_eq!(live(&node), 2);
+
+        let remove =
+            crate::transition::MarketSettlementInput::RemoveItem(dawn_core::RemoveItemCommand {
+                player_id,
+                ship_id,
+                item_id: dawn_core::ItemId::ScrapMetal,
+                quantity: 2,
+                settlement_id: 55,
+            });
+        let settlements = [remove];
+        let mut journal = InMemoryJournal::new();
+        crate::transit::commit_tick_state_transition(
+            &mut node,
+            &mut journal,
+            crate::transition::FrameInput {
+                lock_commands: &[],
+                market_settlements: &settlements,
+                acknowledged_settlements: &[],
+            },
+            SectorTransitionId(40),
+            4,
+            DurabilityMode::Synced,
+        )
+        .expect("durable Tick with a Remove settlement should apply");
+
+        assert_eq!(
+            live(&node),
+            0,
+            "the reserved stack must be gone from live state after the commit"
+        );
     }
 
     #[test]

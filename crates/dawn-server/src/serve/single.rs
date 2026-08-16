@@ -123,6 +123,9 @@ pub(crate) async fn run_phase4_server(
     let mut duel_metrics: Option<DuelMetrics> = None;
     let mut player_ship_id: Option<ShipId> = None;
     let mut tidi = dilation::DilationController::new(TIDI_BUDGET);
+    // Settlement identities the Market ledger decided last tick, retired
+    // from the Sector's idempotency guard by the next frame (issue #315).
+    let mut decided_settlements: Vec<u64> = Vec::new();
 
     loop {
         interval.tick().await;
@@ -264,11 +267,23 @@ pub(crate) async fn run_phase4_server(
             .run_frame(dawn_sector::transition::FrameInput {
                 lock_commands: &lock_commands,
                 market_settlements: &market_settlements,
+                acknowledged_settlements: &decided_settlements,
             })
             .expect("in-memory single-sector runtime must accept durable Tick");
         let tick_result = output.tick_result;
-        market
+        let acknowledgement = market
             .acknowledge_settlements(&queued_settlements, &tick_result.market_settlement_outcomes);
+        // Retired on the next frame, through the same durable boundary as
+        // everything else (issue #315).
+        decided_settlements = acknowledgement.decided_settlement_ids;
+        // The client was told "settlement pending" when it placed the order;
+        // now that the outcome is known, say so instead of leaving it there.
+        for player_id in acknowledgement.rejected_players {
+            let snapshot = market.settlement_rejected_snapshot(player_id);
+            if let Some(session) = sessions.iter_mut().find(|s| s.player_id == player_id) {
+                session.send_message(&ServerMessage::MarketSnapshot(snapshot));
+            }
+        }
         all_new_events.extend(output.events);
 
         for sess in &sessions {

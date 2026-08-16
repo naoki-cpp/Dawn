@@ -21,6 +21,10 @@ pub(crate) struct ClusterRuntimeTickContext<'a> {
     pub(crate) ship_player: &'a HashMap<ShipId, PlayerId>,
     pub(crate) aoi_delivery: &'a mut AoiDelivery,
     pub(crate) market: &'a mut MarketRuntime,
+    /// Per-Sector settlement identities the Market ledger decided last tick,
+    /// retired from each Sector's idempotency guard by this frame and
+    /// replaced with what this frame decides (issue #315).
+    pub(crate) decided_settlements: &'a mut Vec<Vec<u64>>,
 }
 
 pub(crate) fn run_cluster_runtime_tick(
@@ -49,18 +53,40 @@ pub(crate) fn run_cluster_runtime_tick(
         .iter_mut()
         .zip(lock_commands)
         .zip(&market_settlements)
-        .map(|((host, lock_commands), market_settlements)| {
-            host.run_frame(dawn_sector::transition::FrameInput {
-                lock_commands,
-                market_settlements,
-            })
-            .expect("in-memory clustered runtime must accept durable Tick")
-        })
+        .zip(&*ctx.decided_settlements)
+        .map(
+            |(((host, lock_commands), market_settlements), acknowledged_settlements)| {
+                host.run_frame(dawn_sector::transition::FrameInput {
+                    lock_commands,
+                    market_settlements,
+                    acknowledged_settlements,
+                })
+                .expect("in-memory clustered runtime must accept durable Tick")
+            },
+        )
         .collect();
 
+    let mut rejected_players: Vec<PlayerId> = Vec::new();
+    let mut decided: Vec<Vec<u64>> = Vec::with_capacity(tick_outputs.len());
     for (queued, output) in queued_settlements.iter().zip(&tick_outputs) {
-        ctx.market
+        let acknowledgement = ctx
+            .market
             .acknowledge_settlements(queued, &output.tick_result.market_settlement_outcomes);
+        decided.push(acknowledgement.decided_settlement_ids);
+        rejected_players.extend(acknowledgement.rejected_players);
+    }
+    // Carried into the next frame so each Sector retires the ids it settled
+    // through the same durable boundary as the rest of its state.
+    decided.resize(ctx.hosts.len(), Vec::new());
+    *ctx.decided_settlements = decided;
+
+    // Tell players whose deferred settlement was refused; their request was
+    // already answered with "settlement pending".
+    for player_id in rejected_players {
+        let snapshot = ctx.market.settlement_rejected_snapshot(player_id);
+        if let Some(session) = ctx.sessions.iter_mut().find(|s| s.player_id == player_id) {
+            let _ = session.send_message(&ServerMessage::MarketSnapshot(snapshot));
+        }
     }
 
     let warp_arrivals_by_sector: Vec<Vec<ShipId>> = tick_outputs
