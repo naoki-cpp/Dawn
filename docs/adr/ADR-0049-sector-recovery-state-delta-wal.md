@@ -31,6 +31,34 @@ related : ADR-0001 (Event Sourcing), ADR-0014 (Raft / Transit), ADR-0017 (snapsh
 > required). This is an implementation fix, not a new decision -- the
 > recovery contract this ADR already committed to is unchanged.
 
+> **Implementation correction (2026-08-16, issue #315):** this ADR's
+> accepted contract requires committed Sector state to enter through the
+> prepare → durable-journal-append → apply ordering that `RuntimeFrameHost`
+> (`dawn-server`) exists to enforce. Market settlement delivery
+> (`serve/market_settlement.rs`) did not satisfy this: it mutated
+> `SimulationNode` cargo state synchronously via a generic `with_node_mut`
+> closure, entirely outside any tick boundary, and only became durable
+> retroactively once the *next* tick happened to capture the already-mutated
+> live state. A crash in that window (up to ~100ms at 10Hz) could silently
+> lose a settlement the client had already been told succeeded.
+>
+> Issue #315 closes this gap by extending the Tick pipeline's input with
+> `FrameInput::market_settlements`: `SimulationNode::prepare_tick_state_transition_with_result`
+> now applies queued Market settlements before capturing the tick's write
+> set, so a settlement's effect is captured in the same `TickRecoveryDelta`
+> and durable journal append as the rest of that tick, and rolls back with
+> everything else if preparation does not lead to a committed apply.
+> `serve/market_settlement.rs` was rewritten from a synchronous
+> apply-and-acknowledge loop into a two-phase outbox drain
+> (`drain_pending_inputs` before the tick, `acknowledge_outcomes` after it
+> commits) built on this substrate. Admission and fixture/NPC spawn, which
+> already have their own durability story independent of the tick pipeline
+> (see `dawn_sector::node::admission_provisional`), were left on a narrowed
+> but still-synchronous typed `RuntimeFrameHost` surface -- that was an
+> interface-leak cleanup, not a correctness fix. This is an implementation
+> fix, not a new decision -- the recovery contract this ADR already
+> committed to is unchanged.
+
 ## Context
 
 The current Sector runtime mutates authoritative ECS and aggregate state during a
