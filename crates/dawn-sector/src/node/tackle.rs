@@ -342,9 +342,13 @@ mod tests {
         );
 
         let snapshot = node.take_snapshot();
-        let ship_b_snap = snapshot.ships.iter().find(|s| s.ship_id == ship_b).unwrap();
+        let ship_b_snap = snapshot
+            .ships
+            .iter()
+            .find(|s| s.snapshot.ship_id == ship_b)
+            .unwrap();
         assert!(
-            ship_b_snap.tackled_by.contains(&ship_a),
+            ship_b_snap.snapshot.tackled_by.contains(&ship_a),
             "snapshot must record the tackler"
         );
 

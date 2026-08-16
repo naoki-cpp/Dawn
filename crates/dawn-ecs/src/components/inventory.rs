@@ -9,7 +9,7 @@ use dawn_core::{fitting::ModuleId, ItemId};
 ///
 /// Only attached to player ships (NPCs have no Fit/Unfit UI and never need
 /// one).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct InventoryComp {
     pub items: BTreeMap<ItemId, u64>,
 }

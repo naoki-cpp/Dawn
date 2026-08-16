@@ -11,10 +11,12 @@ use dawn_core::{
 /// Movement System integrates position), braking once the ship arrives.
 /// The target is either another Ship (dynamic position) or a static Jump Gate.
 ///
-/// Like `ThrustComp`, this is derived steering intent — it is NOT persisted in
-/// `ShipSnapshot` and never produces its own event (the resulting velocity
-/// change is recorded by `VelocityChanged`, ADR-0008).
-#[derive(Debug, Clone, Copy)]
+/// Like `ThrustComp`, this is derived steering intent that never produces its
+/// own event (the resulting velocity change is recorded by `VelocityChanged`,
+/// ADR-0008). It IS persisted in checkpoints and tick-rollback state (ADR-0049,
+/// issue #312) so a restart or restore does not silently drop in-progress
+/// steering.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ApproachComp {
     pub target: ApproachTarget,
     /// Internal follow-up used when a JumpCommand is close enough that warp is
@@ -30,9 +32,10 @@ pub struct ApproachComp {
 /// re-aims `ThrustComp` every tick at a point on the circle of `radius` around
 /// `target`'s latest position, leading the orbit tangentially so the ship
 /// sweeps around it rather than just closing distance. Like `ApproachComp`,
-/// this is derived steering intent — NOT persisted in `ShipSnapshot` and never
-/// produces its own event (ADR-0008).
-#[derive(Debug, Clone, Copy)]
+/// this is derived steering intent that never produces its own event
+/// (ADR-0008), but IS persisted in checkpoints and tick-rollback state
+/// (ADR-0049, issue #312).
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct OrbitComp {
     pub target: ApproachTarget,
     pub radius: f64,
@@ -43,9 +46,10 @@ pub struct OrbitComp {
 /// While a ship carries this component, the node's `process_keep_at_range()`
 /// step steers directly away from `target` whenever closer than `range`, and
 /// brakes once at or beyond it. Unlike `OrbitComp` this has no tangential
-/// component. Like `ApproachComp`, this is derived steering intent — NOT
-/// persisted in `ShipSnapshot` and never produces its own event (ADR-0008).
-#[derive(Debug, Clone, Copy)]
+/// component. Like `ApproachComp`, this is derived steering intent that never
+/// produces its own event (ADR-0008), but IS persisted in checkpoints and
+/// tick-rollback state (ADR-0049, issue #312).
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct KeepAtRangeComp {
     pub target: ApproachTarget,
     pub range: f64,
@@ -56,9 +60,9 @@ pub struct KeepAtRangeComp {
 /// `Aligning` is the interruptible spin-up (the tackle window, ADR-0023);
 /// `Warping` is committed — the node's `process_warp()` step controls the
 /// ship's position/velocity at warp speed and the Movement System skips it.
-/// Like `ApproachComp`, this is derived steering state: NOT persisted in
-/// `ShipSnapshot` and never its own event (motion is recorded by
-/// `VelocityChanged`, ADR-0008).
+/// Like `ApproachComp`, this is derived steering state that never produces
+/// its own event (motion is recorded by `VelocityChanged`, ADR-0008), but IS
+/// persisted in checkpoints and tick-rollback state (ADR-0049, issue #312).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum WarpPhase {
     /// Aligning: the ship points at the target and accelerates; warp engages
@@ -70,7 +74,7 @@ pub enum WarpPhase {
     Warping,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WarpComp {
     pub target: WarpTarget,
     pub phase: WarpPhase,
@@ -122,7 +126,7 @@ impl WarpComp {
 /// Tackled ships cannot warp or jump. Unlike `WarpComp`/`ApproachComp`, this
 /// IS persisted in `ShipSnapshot` because losing tackle state on restart would
 /// allow the tackled ship to escape.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TackledComp {
     pub tacklers: Vec<dawn_core::ShipId>,
 }
@@ -147,7 +151,7 @@ pub struct VelocityComp(pub Velocity);
 /// When `is_braking` is true, the direction stored in the inner `Velocity` is
 /// ignored. The movement system instead applies thrust opposite to the current
 /// velocity, decelerating the ship until it stops.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ThrustComp {
     pub direction: Velocity,
     pub is_braking: bool,

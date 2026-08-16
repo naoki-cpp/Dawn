@@ -3,11 +3,11 @@ use std::collections::{BTreeMap, HashSet};
 use super::{SimulationNode, TickResult};
 use crate::persistence::ShipSnapshot;
 use crate::transition::{
-    PreparedSectorTransition, SectorEngine, SectorRecoveryDelta, SectorTransitionId,
+    PreparedSectorTransition, SectorEngine, SectorRecoveryDelta, SectorTransitionId, ShipState,
     TickApproachState, TickCommandState, TickFittingState, TickKeepAtRangeState, TickLockEntry,
     TickLockPhase, TickLockState, TickMovementState, TickOrbitState, TickRecoveryDelta,
-    TickRecoveryMode, TickShipState, TickSlotState, TickWarpPhase, TickWarpState,
-    TransitionApplyError, TransitionContext, TransitionError,
+    TickRecoveryMode, TickSlotState, TickWarpPhase, TickWarpState, TransitionApplyError,
+    TransitionContext, TransitionError,
 };
 use dawn_core::{DomainEvent, ItemId, ShipId};
 use dawn_ecs::{
@@ -44,19 +44,13 @@ fn lock_event_touches_transit(event: &DomainEvent, transit_ids: &HashSet<ShipId>
     }
 }
 
-/// Components whose per-tick mutation is suspended while ownership transfer is
-/// pending. Removing them from the ECS query surface keeps the existing systems
-/// simple; the exact values are restored after the tick.
-struct FrozenTransitComponents {
-    entity: Entity,
-    capacitor: Option<CapacitorComp>,
-    fitting: Option<FittingComp>,
-    tackled: Option<TackledComp>,
-    warp: Option<WarpComp>,
-    approach: Option<ApproachComp>,
-    orbit: Option<OrbitComp>,
-    keep_at_range: Option<KeepAtRangeComp>,
-}
+/// `(InTransit ship ids, their frozen optional components, related ships'
+/// LockComp frozen for consistency)` -- see `freeze_transit_components`.
+type FrozenTransitState = (
+    HashSet<ShipId>,
+    Vec<(Entity, dawn_ecs::OptionalShipComponents)>,
+    Vec<(Entity, LockComp)>,
+);
 
 impl SimulationNode {
     /// Prepare the logical Tick counter without changing the live state.
@@ -186,13 +180,22 @@ impl SimulationNode {
 
         // Restore node-level maps before materialising a ship so a newly
         // admitted player ship receives PLAYER stats rather than NPC stats.
-        self.players.active_ship = delta.active_ships.clone().into_iter().collect();
-        self.players.owners = delta.owners.clone().into_iter().collect();
-        self.stations
-            .restore(delta.docked_ships.clone(), delta.docked_players.clone());
-        self.simulation.id_counter = delta.id_counter;
-        self.players.player_id_counter = delta.player_id_counter;
-        self.transit.transit_attempt_counter = delta.transit_attempt_counter;
+        // Same restore function take_snapshot's checkpoint path uses
+        // (ADR-0049, issue #312); transit_saga is restored separately below
+        // via restore_transit_saga's Saga reconciliation.
+        self.restore_node_state(&crate::transition::NodeState {
+            id_counter: delta.id_counter,
+            player_id_counter: delta.player_id_counter,
+            transit_attempt_counter: delta.transit_attempt_counter,
+            active_ships: delta.active_ships.clone(),
+            owners: delta.owners.clone(),
+            docked_ships: delta.docked_ships.clone(),
+            docked_players: delta.docked_players.clone(),
+            pending_bot_lock_commands: delta.pending_bot_lock_commands.clone(),
+            pending_auto_jumps: delta.pending_auto_jumps.clone(),
+            applied_market_settlements: delta.applied_market_settlements.clone(),
+            transit_saga: delta.transit_saga.clone(),
+        });
 
         for state in &delta.ship_states {
             if !self
@@ -208,8 +211,8 @@ impl SimulationNode {
         for ship_id in &delta.removed_ships {
             self.remove_ship(*ship_id);
         }
-        self.simulation.pending_bot_lock_commands = delta.pending_bot_lock_commands;
-        self.frame_outputs.pending_auto_jumps = delta.pending_auto_jumps;
+        // pending_bot_lock_commands/pending_auto_jumps were already restored
+        // above via restore_node_state.
         self.frame_outputs.completed_warps = delta.completed_warps;
         self.restore_transit_saga(delta.transit_saga)
             .map_err(TransitionApplyError::InvalidTransitSaga)?;
@@ -281,33 +284,41 @@ impl SimulationNode {
             })
             .copied()
             .collect();
+        // Node-level scalars/maps this Sector must reproduce exactly
+        // (ADR-0049, issue #312), shared with take_snapshot_at's
+        // construction (snapshot_io.rs) through the same capture function.
+        let crate::transition::NodeState {
+            id_counter,
+            player_id_counter,
+            transit_attempt_counter,
+            active_ships,
+            owners,
+            docked_ships,
+            docked_players,
+            pending_bot_lock_commands,
+            pending_auto_jumps,
+            applied_market_settlements,
+            transit_saga,
+        } = self.capture_node_state();
+
         let delta = TickRecoveryDelta {
             from: before_tick,
             to: result.tick,
             mode: TickRecoveryMode::Full,
             ship_states,
             removed_ships,
-            pending_bot_lock_commands: self.simulation.pending_bot_lock_commands.clone(),
-            pending_auto_jumps: self.frame_outputs.pending_auto_jumps.clone(),
+            pending_bot_lock_commands,
+            pending_auto_jumps,
             completed_warps: self.frame_outputs.completed_warps.clone(),
-            transit_attempt_counter: self.transit.transit_attempt_counter,
-            id_counter: self.simulation.id_counter,
-            player_id_counter: self.players.player_id_counter,
-            active_ships: self
-                .players
-                .active_ship
-                .iter()
-                .map(|(&player, &ship)| (player, ship))
-                .collect(),
-            owners: self
-                .players
-                .owners
-                .iter()
-                .map(|(&ship, &player)| (ship, player))
-                .collect(),
-            docked_ships: self.stations.snapshot_docked_ships(),
-            docked_players: self.stations.snapshot_docked_players(),
-            transit_saga: self.transit_saga_snapshot(),
+            transit_attempt_counter,
+            id_counter,
+            player_id_counter,
+            active_ships,
+            owners,
+            docked_ships,
+            docked_players,
+            applied_market_settlements,
+            transit_saga,
         };
 
         self.simulation.current_tick = before_tick;
@@ -369,13 +380,7 @@ impl SimulationNode {
         ));
     }
 
-    fn freeze_transit_components(
-        &mut self,
-    ) -> (
-        HashSet<ShipId>,
-        Vec<FrozenTransitComponents>,
-        Vec<(Entity, LockComp)>,
-    ) {
+    fn freeze_transit_components(&mut self) -> FrozenTransitState {
         let transit: Vec<(ShipId, Entity)> = self
             .simulation
             .ships
@@ -407,15 +412,33 @@ impl SimulationNode {
             .collect();
         let components = transit
             .into_iter()
-            .map(|(_, entity)| FrozenTransitComponents {
-                entity,
-                capacitor: self.simulation.world.remove_one::<CapacitorComp>(entity),
-                fitting: self.simulation.world.remove_one::<FittingComp>(entity),
-                tackled: self.simulation.world.remove_one::<TackledComp>(entity),
-                warp: self.simulation.world.remove_one::<WarpComp>(entity),
-                approach: self.simulation.world.remove_one::<ApproachComp>(entity),
-                orbit: self.simulation.world.remove_one::<OrbitComp>(entity),
-                keep_at_range: self.simulation.world.remove_one::<KeepAtRangeComp>(entity),
+            .map(|(_, entity)| {
+                // Explicit subset of the canonical optional-component list
+                // (dawn_ecs::OptionalShipComponents, ADR-0049 / issue #312):
+                // only these seven need removing from an InTransit ship's
+                // ECS query surface. Lock/Weapon/Thrust/Inventory are
+                // deliberately left in place -- Movement/Combat already
+                // skip InTransit ships via TransitComp, so those four
+                // components being present is harmless, and restoring them
+                // here would cost a remove/reinsert every tick for no
+                // behavioural gain. If dawn-ecs adds a new optional
+                // component, this struct literal fails to compile until
+                // this list explicitly decides whether it needs freezing
+                // too.
+                let frozen = dawn_ecs::OptionalShipComponents {
+                    capacitor: self.simulation.world.remove_one::<CapacitorComp>(entity),
+                    fitting: self.simulation.world.remove_one::<FittingComp>(entity),
+                    tackled: self.simulation.world.remove_one::<TackledComp>(entity),
+                    warp: self.simulation.world.remove_one::<WarpComp>(entity),
+                    approach: self.simulation.world.remove_one::<ApproachComp>(entity),
+                    orbit: self.simulation.world.remove_one::<OrbitComp>(entity),
+                    keep_at_range: self.simulation.world.remove_one::<KeepAtRangeComp>(entity),
+                    weapon: None,
+                    lock: None,
+                    inventory: None,
+                    thrust: None,
+                };
+                (entity, frozen)
             })
             .collect();
         (ids, components, related_locks)
@@ -423,30 +446,43 @@ impl SimulationNode {
 
     fn restore_transit_components(
         &mut self,
-        frozen: Vec<FrozenTransitComponents>,
+        frozen: Vec<(Entity, dawn_ecs::OptionalShipComponents)>,
         related_locks: Vec<(Entity, LockComp)>,
     ) {
-        for frozen in frozen {
+        for (entity, frozen) in frozen {
+            // Only reinsert what freeze_transit_components actually removed
+            // (see its comment). weapon/lock/inventory/thrust are always
+            // None here; restore_optional_components would treat that as
+            // "remove", which would incorrectly clear components this
+            // freeze never touched -- so this stays a manual per-field
+            // insert rather than one restore_optional_components call.
+            debug_assert!(
+                frozen.weapon.is_none()
+                    && frozen.lock.is_none()
+                    && frozen.inventory.is_none()
+                    && frozen.thrust.is_none(),
+                "freeze_transit_components must not populate fields it doesn't freeze"
+            );
             if let Some(component) = frozen.capacitor {
-                let _ = self.simulation.world.insert_one(frozen.entity, component);
+                let _ = self.simulation.world.insert_one(entity, component);
             }
             if let Some(component) = frozen.fitting {
-                let _ = self.simulation.world.insert_one(frozen.entity, component);
+                let _ = self.simulation.world.insert_one(entity, component);
             }
             if let Some(component) = frozen.tackled {
-                let _ = self.simulation.world.insert_one(frozen.entity, component);
+                let _ = self.simulation.world.insert_one(entity, component);
             }
             if let Some(component) = frozen.warp {
-                let _ = self.simulation.world.insert_one(frozen.entity, component);
+                let _ = self.simulation.world.insert_one(entity, component);
             }
             if let Some(component) = frozen.approach {
-                let _ = self.simulation.world.insert_one(frozen.entity, component);
+                let _ = self.simulation.world.insert_one(entity, component);
             }
             if let Some(component) = frozen.orbit {
-                let _ = self.simulation.world.insert_one(frozen.entity, component);
+                let _ = self.simulation.world.insert_one(entity, component);
             }
             if let Some(component) = frozen.keep_at_range {
-                let _ = self.simulation.world.insert_one(frozen.entity, component);
+                let _ = self.simulation.world.insert_one(entity, component);
             }
         }
         for (entity, component) in related_locks {
@@ -476,18 +512,36 @@ impl SimulationNode {
         }
     }
 
-    fn capture_tick_ship_state(&self, ship_id: ShipId) -> Option<TickShipState> {
+    pub(super) fn capture_tick_ship_state(&self, ship_id: ShipId) -> Option<ShipState> {
         let entity = *self.simulation.ships.index.get(&ship_id)?;
         let position = self.simulation.world.get::<PositionComp>(entity)?.0;
         let velocity = self.simulation.world.get::<VelocityComp>(entity)?.0;
         let hull = self.simulation.world.get::<HullComp>(entity)?;
-        let fitting = self.simulation.world.get::<FittingComp>(entity);
+
+        // One read of every optional component (ADR-0049, issue #312). The
+        // exhaustive destructure means a component dawn-ecs adds to its
+        // declared list fails this function to compile instead of silently
+        // going uncaptured.
+        let dawn_ecs::OptionalShipComponents {
+            capacitor,
+            weapon,
+            lock,
+            fitting,
+            inventory,
+            approach,
+            orbit,
+            keep_at_range,
+            warp,
+            tackled,
+            thrust,
+        } = self.simulation.world.capture_optional_components(entity);
+
         let fitting_snapshot = fitting
-            .as_deref()
+            .as_ref()
             .map(FittingComp::to_snapshot)
             .unwrap_or_else(dawn_core::fitting::FittingSnapshot::empty);
         let fitting_state = fitting
-            .as_deref()
+            .as_ref()
             .map(Self::capture_tick_fitting)
             .unwrap_or_else(|| TickFittingState {
                 high: Vec::new(),
@@ -495,6 +549,8 @@ impl SimulationNode {
                 low: Vec::new(),
                 rig: Vec::new(),
             });
+        let fitting_present = fitting.is_some();
+        let inventory_present = inventory.is_some();
         let snapshot = ShipSnapshot {
             ship_id,
             ship_type_id: self
@@ -516,110 +572,72 @@ impl SimulationNode {
             current_armor: hull.armor(),
             current_hull: hull.hull(),
             is_destroyed: hull.is_destroyed(),
-            capacitor: self
-                .simulation
-                .world
-                .get::<CapacitorComp>(entity)
-                .map(|capacitor| capacitor.current),
+            capacitor: capacitor.map(|capacitor| capacitor.current),
             fitting: fitting_snapshot,
-            tackled_by: self
-                .simulation
-                .world
-                .get::<TackledComp>(entity)
-                .map(|tackled| tackled.tacklers.clone())
-                .unwrap_or_default(),
-            inventory: self
-                .simulation
-                .world
-                .get::<InventoryComp>(entity)
-                .map(|inventory| inventory.items.clone())
+            tackled_by: tackled.map(|tackled| tackled.tacklers).unwrap_or_default(),
+            inventory: inventory
+                .map(|inventory| inventory.items)
                 .unwrap_or_default(),
         };
         let movement = TickMovementState {
-            thrust: self
-                .simulation
-                .world
-                .get::<dawn_ecs::components::ThrustComp>(entity)
-                .map(|thrust| crate::transition::StopThrustState {
-                    direction: thrust.direction,
-                    is_braking: thrust.is_braking,
-                }),
-            approach: self
-                .simulation
-                .world
-                .get::<ApproachComp>(entity)
-                .map(|approach| TickApproachState {
-                    target: approach.target,
-                    auto_jump_gate: approach.auto_jump_gate,
-                }),
-            orbit: self
-                .simulation
-                .world
-                .get::<OrbitComp>(entity)
-                .map(|orbit| TickOrbitState {
-                    target: orbit.target,
-                    radius: orbit.radius,
-                }),
-            keep_at_range: self.simulation.world.get::<KeepAtRangeComp>(entity).map(
-                |keep_at_range| TickKeepAtRangeState {
-                    target: keep_at_range.target,
-                    range: keep_at_range.range,
+            thrust: thrust.map(|thrust| crate::transition::StopThrustState {
+                direction: thrust.direction,
+                is_braking: thrust.is_braking,
+            }),
+            approach: approach.map(|approach| TickApproachState {
+                target: approach.target,
+                auto_jump_gate: approach.auto_jump_gate,
+            }),
+            orbit: orbit.map(|orbit| TickOrbitState {
+                target: orbit.target,
+                radius: orbit.radius,
+            }),
+            keep_at_range: keep_at_range.map(|keep_at_range| TickKeepAtRangeState {
+                target: keep_at_range.target,
+                range: keep_at_range.range,
+            }),
+            warp: warp.map(|warp| TickWarpState {
+                target: warp.target,
+                phase: match warp.phase {
+                    WarpPhase::Aligning => TickWarpPhase::Aligning,
+                    WarpPhase::Warping => TickWarpPhase::Warping,
                 },
-            ),
-            warp: self
-                .simulation
-                .world
-                .get::<WarpComp>(entity)
-                .map(|warp| TickWarpState {
-                    target: warp.target,
-                    phase: match warp.phase {
-                        WarpPhase::Aligning => TickWarpPhase::Aligning,
-                        WarpPhase::Warping => TickWarpPhase::Warping,
-                    },
-                    auto_jump: warp.auto_jump,
-                    warp_start_abs: warp.warp_start_abs,
-                    warp_total: warp.warp_total,
-                    warp_elapsed: warp.warp_elapsed,
-                    warp_arrival_abs: warp.warp_arrival_abs,
-                    warp_start_vel: warp.warp_start_vel,
-                }),
+                auto_jump: warp.auto_jump,
+                warp_start_abs: warp.warp_start_abs,
+                warp_total: warp.warp_total,
+                warp_elapsed: warp.warp_elapsed,
+                warp_arrival_abs: warp.warp_arrival_abs,
+                warp_start_vel: warp.warp_start_vel,
+            }),
         };
-        let locks = self
-            .simulation
-            .world
-            .get::<LockComp>(entity)
-            .map(|lock| TickLockState {
-                entries: lock
-                    .entries
-                    .iter()
-                    .map(|entry| TickLockEntry {
-                        target_id: entry.target_id,
-                        state: match entry.state {
-                            LockState::Locking { remaining_ticks } => {
-                                TickLockPhase::Locking { remaining_ticks }
-                            }
-                            LockState::Locked => TickLockPhase::Locked,
-                        },
-                    })
-                    .collect(),
-            });
+        let locks = lock.map(|lock| TickLockState {
+            entries: lock
+                .entries
+                .into_iter()
+                .map(|entry| TickLockEntry {
+                    target_id: entry.target_id,
+                    state: match entry.state {
+                        LockState::Locking { remaining_ticks } => {
+                            TickLockPhase::Locking { remaining_ticks }
+                        }
+                        LockState::Locked => TickLockPhase::Locked,
+                    },
+                })
+                .collect(),
+        });
 
-        Some(TickShipState {
+        Some(ShipState {
             snapshot,
-            fitting_present: fitting.is_some(),
-            inventory_present: self.simulation.world.get::<InventoryComp>(entity).is_some(),
+            fitting_present,
+            inventory_present,
             movement,
             fitting: fitting_state,
             locks,
-            weapon_last_fired_tick: self
-                .simulation
-                .world
-                .get::<WeaponComp>(entity)
-                .map(|weapon| weapon.last_fired_tick),
+            weapon_last_fired_tick: weapon.map(|weapon| weapon.last_fired_tick),
         })
     }
 
-    fn capture_tick_write_set(&self) -> BTreeMap<ShipId, TickShipState> {
+    fn capture_tick_write_set(&self) -> BTreeMap<ShipId, ShipState> {
         self.simulation
             .ships
             .index
@@ -654,7 +672,10 @@ impl SimulationNode {
             && restore_slots(&mut fitting.rig, &state.rig)
     }
 
-    fn apply_tick_ship_state(&mut self, state: &TickShipState) -> Result<(), TransitionApplyError> {
+    pub(super) fn apply_tick_ship_state(
+        &mut self,
+        state: &ShipState,
+    ) -> Result<(), TransitionApplyError> {
         let ship = &state.snapshot;
         let entity = self
             .simulation
@@ -700,98 +721,64 @@ impl SimulationNode {
                 .insert_one(entity, VelocityComp(ship.velocity));
         }
 
-        if state.fitting_present {
+        let fitting = if state.fitting_present {
             let mut fitting =
                 FittingComp::from_snapshot(&ship.fitting, &self.game_data.module_registry);
             if !Self::restore_tick_fitting(&mut fitting, &state.fitting) {
                 return Err(TransitionApplyError::InvalidTickShipState(ship.ship_id));
             }
-            let _ = self.simulation.world.insert_one(entity, fitting);
-            self.reapply_fitting(ship.ship_id);
+            Some(fitting)
         } else {
-            let _ = self.simulation.world.remove_one::<FittingComp>(entity);
-        }
-        if let Some(mut hull) = self.simulation.world.get_mut::<HullComp>(entity) {
-            hull.set_hp(ship.current_shield, ship.current_armor, ship.current_hull);
-        }
-        match ship.capacitor {
-            Some(current) => {
-                let _ = self
-                    .simulation
-                    .world
-                    .insert_one(entity, CapacitorComp { current });
-            }
-            None => {
-                let _ = self.simulation.world.remove_one::<CapacitorComp>(entity);
-            }
-        }
-        if ship.tackled_by.is_empty() {
-            let _ = self.simulation.world.remove_one::<TackledComp>(entity);
-        } else {
-            let _ = self.simulation.world.insert_one(
-                entity,
-                TackledComp {
-                    tacklers: ship.tackled_by.clone(),
-                },
-            );
-        }
-        if state.inventory_present {
-            let _ = self.simulation.world.insert_one(
-                entity,
-                InventoryComp {
-                    items: ship.inventory.clone(),
-                },
-            );
-        } else {
-            let _ = self.simulation.world.remove_one::<InventoryComp>(entity);
-        }
+            None
+        };
 
-        let _ = self.simulation.world.remove_one::<WarpComp>(entity);
-        self.clear_steering_modes(entity);
-        let _ = self
-            .simulation
-            .world
-            .remove_one::<dawn_ecs::components::ThrustComp>(entity);
-        if let Some(thrust) = state.movement.thrust {
-            let _ = self.simulation.world.insert_one(
-                entity,
-                dawn_ecs::components::ThrustComp {
-                    direction: thrust.direction,
-                    is_braking: thrust.is_braking,
-                },
-            );
-        }
-        if let Some(approach) = state.movement.approach {
-            let _ = self.simulation.world.insert_one(
-                entity,
-                ApproachComp {
+        // One write of every optional component (ADR-0049, issue #312):
+        // capacitor/tackled/inventory/fitting come from `ship` (the durable
+        // ShipSnapshot); movement/lock/weapon come from this Tick's extras.
+        // Replaces what used to be up to eleven individual
+        // remove_one/insert_one pairs with one call.
+        self.simulation.world.restore_optional_components(
+            entity,
+            &dawn_ecs::OptionalShipComponents {
+                capacitor: ship.capacitor.map(|current| CapacitorComp { current }),
+                weapon: state
+                    .weapon_last_fired_tick
+                    .map(|last_fired_tick| WeaponComp { last_fired_tick }),
+                lock: state.locks.as_ref().map(|lock| LockComp {
+                    entries: lock
+                        .entries
+                        .iter()
+                        .map(|entry| LockEntry {
+                            target_id: entry.target_id,
+                            state: match entry.state {
+                                TickLockPhase::Locking { remaining_ticks } => {
+                                    LockState::Locking { remaining_ticks }
+                                }
+                                TickLockPhase::Locked => LockState::Locked,
+                            },
+                        })
+                        .collect(),
+                }),
+                fitting,
+                inventory: state.inventory_present.then(|| InventoryComp {
+                    items: ship.inventory.clone(),
+                }),
+                approach: state.movement.approach.map(|approach| ApproachComp {
                     target: approach.target,
                     auto_jump_gate: approach.auto_jump_gate,
-                },
-            );
-        }
-        if let Some(orbit) = state.movement.orbit {
-            let _ = self.simulation.world.insert_one(
-                entity,
-                OrbitComp {
+                }),
+                orbit: state.movement.orbit.map(|orbit| OrbitComp {
                     target: orbit.target,
                     radius: orbit.radius,
-                },
-            );
-        }
-        if let Some(keep_at_range) = state.movement.keep_at_range {
-            let _ = self.simulation.world.insert_one(
-                entity,
-                KeepAtRangeComp {
-                    target: keep_at_range.target,
-                    range: keep_at_range.range,
-                },
-            );
-        }
-        if let Some(warp) = state.movement.warp {
-            let _ = self.simulation.world.insert_one(
-                entity,
-                WarpComp {
+                }),
+                keep_at_range: state
+                    .movement
+                    .keep_at_range
+                    .map(|keep_at_range| KeepAtRangeComp {
+                        target: keep_at_range.target,
+                        range: keep_at_range.range,
+                    }),
+                warp: state.movement.warp.map(|warp| WarpComp {
                     target: warp.target,
                     phase: match warp.phase {
                         TickWarpPhase::Aligning => WarpPhase::Aligning,
@@ -803,52 +790,36 @@ impl SimulationNode {
                     warp_elapsed: warp.warp_elapsed,
                     warp_arrival_abs: warp.warp_arrival_abs,
                     warp_start_vel: warp.warp_start_vel,
-                },
-            );
+                }),
+                tackled: (!ship.tackled_by.is_empty()).then(|| TackledComp {
+                    tacklers: ship.tackled_by.clone(),
+                }),
+                thrust: state
+                    .movement
+                    .thrust
+                    .map(|thrust| dawn_ecs::components::ThrustComp {
+                        direction: thrust.direction,
+                        is_braking: thrust.is_braking,
+                    }),
+            },
+        );
+
+        if state.fitting_present {
+            // reapply_fitting recomputes ShipStatsComp and rescales HullComp
+            // (max shield/armor/hull may have changed); restore the exact HP
+            // layers afterwards, same as restore_ship_from_snapshot does.
+            self.reapply_fitting(ship.ship_id);
+        }
+        if let Some(mut hull) = self.simulation.world.get_mut::<HullComp>(entity) {
+            hull.set_hp(ship.current_shield, ship.current_armor, ship.current_hull);
         }
 
-        match &state.locks {
-            Some(lock) => {
-                let _ = self.simulation.world.insert_one(
-                    entity,
-                    LockComp {
-                        entries: lock
-                            .entries
-                            .iter()
-                            .map(|entry| LockEntry {
-                                target_id: entry.target_id,
-                                state: match entry.state {
-                                    TickLockPhase::Locking { remaining_ticks } => {
-                                        LockState::Locking { remaining_ticks }
-                                    }
-                                    TickLockPhase::Locked => LockState::Locked,
-                                },
-                            })
-                            .collect(),
-                    },
-                );
-            }
-            None => {
-                let _ = self.simulation.world.remove_one::<LockComp>(entity);
-            }
-        }
-        match state.weapon_last_fired_tick {
-            Some(last_fired_tick) => {
-                let _ = self
-                    .simulation
-                    .world
-                    .insert_one(entity, WeaponComp { last_fired_tick });
-            }
-            None => {
-                let _ = self.simulation.world.remove_one::<WeaponComp>(entity);
-            }
-        }
         Ok(())
     }
 
     fn restore_tick_write_set(
         &mut self,
-        states: &BTreeMap<ShipId, TickShipState>,
+        states: &BTreeMap<ShipId, ShipState>,
     ) -> Result<(), TransitionApplyError> {
         for state in states.values() {
             self.apply_tick_ship_state(state)?;
@@ -1137,6 +1108,55 @@ mod tests {
             .contains_key(&destroyed_ship));
     }
 
+    /// ADR-0049 / issue #312: `applied_market_settlements` used to be
+    /// present in `StateSnapshot` but missing from `TickRecoveryDelta`, so a
+    /// settlement dedup guard survived a checkpoint restore but not a
+    /// tick-rollback recovery replay. `capture_node_state`/`restore_node_state`
+    /// close that gap for both.
+    #[test]
+    fn applied_market_settlements_survive_a_full_tick_recovery_replay() {
+        let mut node = mem_node();
+        node.simulation.applied_market_settlements.insert(99);
+
+        let mut journal = InMemoryJournal::new();
+        crate::transit::commit_tick_state_transition(
+            &mut node,
+            &mut journal,
+            &[],
+            SectorTransitionId(1),
+            4,
+            DurabilityMode::Synced,
+        )
+        .expect("durable full Tick should apply");
+
+        let record = journal.records()[0].clone();
+        let delta = crate::transition::decode_recovery_delta(&record.payload)
+            .expect("journal payload should contain the full Tick delta");
+        assert!(
+            matches!(&delta, SectorRecoveryDelta::Tick(delta)
+                if delta.applied_market_settlements.contains(&99)),
+            "the delta must carry the settlement dedup guard, not just the checkpoint"
+        );
+
+        let mut recovered = mem_node();
+        recovered
+            .apply_recovery_delta(
+                delta,
+                TransitionContext {
+                    sector_id: record.context.sector_id,
+                    owner_epoch: record.context.owner_epoch,
+                },
+            )
+            .expect("full Tick delta should replay");
+        assert!(
+            recovered
+                .simulation
+                .applied_market_settlements
+                .contains(&99),
+            "a settlement dedup guard must survive a tick-rollback recovery replay"
+        );
+    }
+
     #[test]
     fn failed_full_tick_append_leaves_live_state_and_clock_unchanged() {
         let mut node = mem_node();
@@ -1363,15 +1383,17 @@ mod tests {
             .take_snapshot()
             .ships
             .into_iter()
-            .find(|ship| ship.ship_id == ship_id)
-            .unwrap();
+            .find(|ship| ship.snapshot.ship_id == ship_id)
+            .unwrap()
+            .snapshot;
         let tick_result = node.tick();
         let after = node
             .take_snapshot()
             .ships
             .into_iter()
-            .find(|ship| ship.ship_id == ship_id)
-            .unwrap();
+            .find(|ship| ship.snapshot.ship_id == ship_id)
+            .unwrap()
+            .snapshot;
 
         assert_eq!(after.position, before.position);
         assert_eq!(after.velocity, before.velocity);

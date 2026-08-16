@@ -230,7 +230,12 @@ pub struct TransitSagaSnapshot {
 /// The version is encoded in the checkpoint envelope rather than in the state
 /// payload so an incompatible payload can be rejected before postcard tries to
 /// interpret it as a different struct layout.
-pub const CHECKPOINT_FORMAT_VERSION: u16 = 1;
+///
+/// Bumped 1 -> 2 (ADR-0049, issue #312): `ships` changed from
+/// `Vec<ShipSnapshot>` to `Vec<ShipState>`, adding flight-mode state, lock
+/// countdowns, and module cycle counters that were previously dropped on
+/// every checkpoint restore. Pre-release; no upcaster required.
+pub const CHECKPOINT_FORMAT_VERSION: u16 = 2;
 
 const CHECKPOINT_MAGIC: [u8; 8] = *b"DAWNCKP1";
 const CHECKPOINT_HEADER_LEN: usize = CHECKPOINT_MAGIC.len() + size_of::<u16>() + size_of::<u64>();
@@ -294,8 +299,14 @@ pub struct StateSnapshot {
     pub catalog_fingerprint: u64,
     /// Next source-local sequence for opaque Transit attempt identities.
     pub transit_attempt_counter: u64,
-    /// State of every Ship in the Sector at the snapshot instant.
-    pub ships: Vec<ShipSnapshot>,
+    /// State of every Ship in the Sector at the snapshot instant. `ShipState`
+    /// (ADR-0049, issue #312) is the same type `TickRecoveryDelta` and the
+    /// tick-prepare rollback use, so flight-mode state, lock countdowns, and
+    /// module cycle counters survive a checkpoint restore exactly like they
+    /// already survived a tick-rollback restore -- not just the narrower
+    /// position/velocity/HP/fitting-without-cycle subset the old
+    /// checkpoint-only `ShipSnapshot` list carried.
+    pub ships: Vec<crate::transition::ShipState>,
     /// Authoritative Ship -> Player ownership bindings, including Ships that
     /// arrived through Transit after their original Sector log was compacted.
     pub owners: BTreeMap<dawn_core::ShipId, dawn_core::PlayerId>,
@@ -985,24 +996,43 @@ mod tests {
             player_id_counter: 3,
             catalog_fingerprint: 0x1234,
             transit_attempt_counter: 0,
-            ships: vec![ShipSnapshot {
-                ship_id: ShipId::new(NodeId(0), 0),
-                ship_type_id: ShipTypeId(1),
-                absolute_position: Some(AbsolutePosition::new(100.0, 200.0, 300.0)),
-                position: Position::new(100.0, 200.0, 300.0),
-                anchor: dawn_core::AnchorId(0),
-                velocity: dawn_core::Velocity::new(1.0, 0.0, 0.0),
-                current_shield: 50.0,
-                current_armor: 60.0,
-                current_hull: 70.0,
-                is_destroyed: false,
-                capacitor: Some(250.0),
-                fitting: FittingSnapshot::empty(),
-                tackled_by: vec![],
-                inventory: std::collections::BTreeMap::from([(
-                    dawn_core::ItemId::Module(dawn_core::ModuleId(7)),
-                    1,
-                )]),
+            ships: vec![crate::transition::ShipState {
+                snapshot: ShipSnapshot {
+                    ship_id: ShipId::new(NodeId(0), 0),
+                    ship_type_id: ShipTypeId(1),
+                    absolute_position: Some(AbsolutePosition::new(100.0, 200.0, 300.0)),
+                    position: Position::new(100.0, 200.0, 300.0),
+                    anchor: dawn_core::AnchorId(0),
+                    velocity: dawn_core::Velocity::new(1.0, 0.0, 0.0),
+                    current_shield: 50.0,
+                    current_armor: 60.0,
+                    current_hull: 70.0,
+                    is_destroyed: false,
+                    capacitor: Some(250.0),
+                    fitting: FittingSnapshot::empty(),
+                    tackled_by: vec![],
+                    inventory: std::collections::BTreeMap::from([(
+                        dawn_core::ItemId::Module(dawn_core::ModuleId(7)),
+                        1,
+                    )]),
+                },
+                fitting_present: false,
+                inventory_present: true,
+                movement: crate::transition::TickMovementState {
+                    thrust: None,
+                    approach: None,
+                    orbit: None,
+                    keep_at_range: None,
+                    warp: None,
+                },
+                fitting: crate::transition::TickFittingState {
+                    high: Vec::new(),
+                    mid: Vec::new(),
+                    low: Vec::new(),
+                    rig: Vec::new(),
+                },
+                locks: None,
+                weapon_last_fired_tick: None,
             }],
             owners: BTreeMap::new(),
             transit_saga: TransitSagaSnapshot::default(),

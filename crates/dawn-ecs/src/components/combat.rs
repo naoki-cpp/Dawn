@@ -10,7 +10,7 @@ use dawn_core::{ShipId, Tick};
 /// The maximum and recharge rate are stored in `ShipStatsComp`; this component
 /// tracks only the current charge level so it can be modified each tick without
 /// touching the stat block.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CapacitorComp {
     /// Current capacitor charge (GJ).  Clamped to `[0, cap_max]` each tick.
     pub current: f32,
@@ -145,7 +145,7 @@ impl HullComp {
 }
 
 /// 武器クールダウン追跡コンポーネント。
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WeaponComp {
     /// 最後に発射した Tick。`Tick::ZERO` は未発射。
     pub last_fired_tick: Tick,
@@ -182,7 +182,7 @@ pub enum LockState {
 }
 
 /// 1ターゲットへのロックエントリ。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LockEntry {
     pub target_id: ShipId,
     pub state: LockState,
@@ -191,7 +191,7 @@ pub struct LockEntry {
 /// Ship のロックオン状態全体を保持するコンポーネント。
 ///
 /// 最大エントリ数は `ShipStatsComp::max_locks` で決まる。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LockComp {
     pub entries: Vec<LockEntry>,
 }
