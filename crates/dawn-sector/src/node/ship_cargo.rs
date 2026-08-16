@@ -91,6 +91,28 @@ impl SimulationNode {
         )
     }
 
+    /// Dispatch one Market settlement mutation admitted through a `FrameInput`
+    /// (issue #315). Called from within Tick preparation, before the write
+    /// set is captured, so the mutation is part of the durable delta and is
+    /// rolled back with everything else if preparation does not lead to a
+    /// committed apply.
+    pub(crate) fn apply_market_settlement_input(
+        &mut self,
+        input: crate::transition::MarketSettlementInput,
+    ) -> bool {
+        match input {
+            crate::transition::MarketSettlementInput::RemoveItem(cmd) => {
+                self.remove_item_owned(cmd)
+            }
+            crate::transition::MarketSettlementInput::ReturnItem(cmd) => {
+                self.return_item_owned(cmd)
+            }
+            crate::transition::MarketSettlementInput::CreditItem(cmd) => {
+                self.credit_item_owned(cmd)
+            }
+        }
+    }
+
     fn apply_market_item_mutation(
         &mut self,
         player_id: PlayerId,

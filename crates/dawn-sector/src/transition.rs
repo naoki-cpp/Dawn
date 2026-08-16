@@ -27,6 +27,25 @@ pub enum MarketSettlementInput {
     CreditItem(CreditItemCommand),
 }
 
+impl MarketSettlementInput {
+    pub fn settlement_id(&self) -> u64 {
+        match self {
+            Self::RemoveItem(cmd) => cmd.settlement_id,
+            Self::ReturnItem(cmd) => cmd.settlement_id,
+            Self::CreditItem(cmd) => cmd.settlement_id,
+        }
+    }
+}
+
+/// Result of admitting one `MarketSettlementInput` into a Tick's write set
+/// (issue #315). `applied` mirrors the ownership/idempotency checks the
+/// underlying `SimulationNode::*_item_owned` method already performs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MarketSettlementOutcome {
+    pub settlement_id: u64,
+    pub applied: bool,
+}
+
 /// Frame-scoped input to one Tick's prepare/durable/apply pipeline (issue
 /// #315). Bundles the existing lock-command input with Market settlement
 /// mutations so both are captured in the same durable `TickRecoveryDelta`
