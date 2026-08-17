@@ -133,9 +133,10 @@ debug-only typed record factories for focused UI tests and
 
 ## WorldSession test boundary
 
-`WorldSession` has one server-driven mutation surface in both production and
-tests: `ServerMessageOutcome::dispatch`, which converts decoded wire values to
-`WorldSessionUpdate` before applying them to `WorldSessionState`. GdUnit tests
+The server-driven mutation surface is `ClientState::apply`: production
+`ServerMessageOutcome::dispatch` converts decoded wire values to `ClientFact`
+and applies them through `ClientState` to `WorldSessionState`, while pure Rust
+tests call the same surface directly. GdUnit tests
 must not add or use public `WorldSession` setters for health, locks, ship
 lifecycle, system, server ticks, or dock/loadout state.
 

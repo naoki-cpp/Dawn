@@ -58,6 +58,6 @@ pub use world_session::{
     BuildableShipTypeInput, BuildableShipTypeRecord, CelestialBodyInput, CelestialBodyRecord,
     DestructionOutcome, GateInput, GateRecord, HealthState, NavigationInput, PositionInput,
     ShipInput, ShipRegistration, ShipState, StationInput, StationRecord, SystemNameInput,
-    WorldSessionEffect, WorldSessionState, WorldSessionUpdate,
+    WorldSessionEffect, WorldSessionState,
 };
 pub use world_space::{WorldSpace, REBASE_THRESHOLD, WORLD_SCALE};
