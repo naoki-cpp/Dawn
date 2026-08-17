@@ -180,22 +180,10 @@ impl SimulationNode {
 
         // Restore node-level maps before materialising a ship so a newly
         // admitted player ship receives PLAYER stats rather than NPC stats.
-        // Same restore function take_snapshot's checkpoint path uses
-        // (ADR-0049, issue #312); transit_saga is restored separately below
-        // via restore_transit_saga's Saga reconciliation.
-        self.restore_node_state(&crate::transition::NodeState {
-            id_counter: delta.id_counter,
-            player_id_counter: delta.player_id_counter,
-            transit_attempt_counter: delta.transit_attempt_counter,
-            active_ships: delta.active_ships.clone(),
-            owners: delta.owners.clone(),
-            docked_ships: delta.docked_ships.clone(),
-            docked_players: delta.docked_players.clone(),
-            pending_bot_lock_commands: delta.pending_bot_lock_commands.clone(),
-            pending_auto_jumps: delta.pending_auto_jumps.clone(),
-            applied_market_settlements: delta.applied_market_settlements.clone(),
-            transit_saga: delta.transit_saga.clone(),
-        });
+        // Restore the canonical node state before materialising a ship so a
+        // newly admitted player ship receives PLAYER stats rather than NPC
+        // stats. Transit Saga reconciliation remains below, after ships.
+        self.restore_node_state(&delta.node_state);
 
         for state in &delta.ship_states {
             if !self
@@ -211,10 +199,8 @@ impl SimulationNode {
         for ship_id in &delta.removed_ships {
             self.remove_ship(*ship_id);
         }
-        // pending_bot_lock_commands/pending_auto_jumps were already restored
-        // above via restore_node_state.
         self.frame_outputs.completed_warps = delta.completed_warps;
-        self.restore_transit_saga(delta.transit_saga)
+        self.restore_transit_saga(delta.node_state.transit_saga.clone())
             .map_err(TransitionApplyError::InvalidTransitSaga)?;
         self.simulation.current_tick = delta.to;
         Ok(())
@@ -304,41 +290,14 @@ impl SimulationNode {
             })
             .copied()
             .collect();
-        // Node-level scalars/maps this Sector must reproduce exactly
-        // (ADR-0049, issue #312), shared with take_snapshot_at's
-        // construction (snapshot_io.rs) through the same capture function.
-        let crate::transition::NodeState {
-            id_counter,
-            player_id_counter,
-            transit_attempt_counter,
-            active_ships,
-            owners,
-            docked_ships,
-            docked_players,
-            pending_bot_lock_commands,
-            pending_auto_jumps,
-            applied_market_settlements,
-            transit_saga,
-        } = self.capture_node_state();
-
         let delta = TickRecoveryDelta {
             from: before_tick,
             to: result.tick,
             mode: TickRecoveryMode::Full,
             ship_states,
             removed_ships,
-            pending_bot_lock_commands,
-            pending_auto_jumps,
             completed_warps: self.frame_outputs.completed_warps.clone(),
-            transit_attempt_counter,
-            id_counter,
-            player_id_counter,
-            active_ships,
-            owners,
-            docked_ships,
-            docked_players,
-            applied_market_settlements,
-            transit_saga,
+            node_state: self.capture_node_state(),
         };
 
         self.simulation.current_tick = before_tick;
@@ -1120,7 +1079,7 @@ mod tests {
             panic!("full Tick must produce a Tick recovery delta");
         };
         assert!(
-            delta.applied_market_settlements.contains(&42),
+            delta.node_state.applied_market_settlements.contains(&42),
             "the prepared delta must carry the settlement dedup guard"
         );
         let ship_state = delta
@@ -1324,7 +1283,7 @@ mod tests {
             .expect("journal payload should contain the full Tick delta");
         assert!(
             matches!(&delta, SectorRecoveryDelta::Tick(delta)
-                if delta.applied_market_settlements.contains(&99)),
+                if delta.node_state.applied_market_settlements.contains(&99)),
             "the delta must carry the settlement dedup guard, not just the checkpoint"
         );
 

@@ -122,12 +122,10 @@ impl<'a> FrameInput<'a> {
 
 /// Version of the recovery-delta payload produced by this module.
 ///
-/// Bumped 1 -> 2 (ADR-0049, issue #312): added `applied_market_settlements`,
-/// which was already in `StateSnapshot` but missing from
-/// `TickRecoveryDelta` -- a lost settlement ACK became replayable after a
-/// tick-rollback but not after a full checkpoint restore. Pre-release; no
+/// Bumped 2 -> 3: `TickRecoveryDelta` now carries the canonical `NodeState`
+/// directly instead of flattening its fields into the delta. Pre-release; no
 /// upcaster required.
-pub const RECOVERY_DELTA_VERSION: u16 = 2;
+pub const RECOVERY_DELTA_VERSION: u16 = 3;
 
 /// Node-level scalar/collection authoritative state that both a tick's
 /// recovery delta and a checkpoint must reproduce exactly (ADR-0049, issue
@@ -136,7 +134,7 @@ pub const RECOVERY_DELTA_VERSION: u16 = 2;
 /// `TickRecoveryDelta` and `StateSnapshot` construction/restoration each
 /// hand-duplicating the same field list. Ship-level state is `ShipState`,
 /// captured separately.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct NodeState {
     pub id_counter: u64,
     pub player_id_counter: u64,
@@ -212,29 +210,14 @@ pub struct TickRecoveryDelta {
     pub ship_states: Vec<ShipState>,
     /// Ships whose entities are removed by the committed tick.
     pub removed_ships: Vec<ShipId>,
-    /// Cross-tick authoritative queues produced by the Bot and Warp systems.
-    pub pending_bot_lock_commands: Vec<LockOnCommand>,
-    pub pending_auto_jumps: Vec<(ShipId, JumpGateId)>,
     /// Presentation corrections are carried with the transition output so a
     /// runtime can publish them after the durable commit.
     pub completed_warps: Vec<ShipId>,
-    /// Source-local Transit attempt allocator watermark.
-    pub transit_attempt_counter: u64,
-    /// Node-level authority captured after the tick. These fields make the
-    /// delta include command mutations that happened before the tick runner
-    /// prepared its write set, so a successful tick is a complete recovery
-    /// boundary rather than only a movement diff.
-    pub id_counter: u64,
-    pub player_id_counter: u64,
-    pub active_ships: BTreeMap<PlayerId, ShipId>,
-    pub owners: BTreeMap<ShipId, PlayerId>,
-    pub docked_ships: BTreeMap<ShipId, StationId>,
-    pub docked_players: BTreeMap<PlayerId, StationId>,
-    /// Market settlement identities already applied to ship cargo. Keeping
-    /// these in the delta makes a lost settlement ACK safe to retry, the
-    /// same guarantee the checkpoint already gave (ADR-0049, issue #312).
-    pub applied_market_settlements: Vec<u64>,
-    pub transit_saga: crate::persistence::TransitSagaSnapshot,
+    /// Node-level authority captured after the tick. This includes command
+    /// mutations that happened before the tick runner prepared its write set,
+    /// so a successful tick is a complete recovery boundary rather than only
+    /// a movement diff.
+    pub node_state: NodeState,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -251,18 +234,8 @@ impl TickRecoveryDelta {
             mode: TickRecoveryMode::Logical,
             ship_states: Vec::new(),
             removed_ships: Vec::new(),
-            pending_bot_lock_commands: Vec::new(),
-            pending_auto_jumps: Vec::new(),
             completed_warps: Vec::new(),
-            transit_attempt_counter: 0,
-            id_counter: 0,
-            player_id_counter: 0,
-            active_ships: BTreeMap::new(),
-            owners: BTreeMap::new(),
-            docked_ships: BTreeMap::new(),
-            docked_players: BTreeMap::new(),
-            applied_market_settlements: Vec::new(),
-            transit_saga: crate::persistence::TransitSagaSnapshot::default(),
+            node_state: NodeState::default(),
         }
     }
 }
@@ -618,6 +591,41 @@ mod tests {
     fn tick_recovery_delta_round_trips_through_the_version_gate() {
         let delta =
             SectorRecoveryDelta::Tick(Box::new(TickRecoveryDelta::logical(Tick(41), Tick(42))));
+        let payload = encode_recovery_delta(&delta).expect("delta should encode");
+
+        assert_eq!(decode_recovery_delta(&payload), Ok(delta));
+    }
+
+    #[test]
+    fn full_tick_recovery_delta_round_trips_canonical_node_state() {
+        let ship_id = ship();
+        let player_id = PlayerId(9);
+        let node_state = NodeState {
+            id_counter: 17,
+            player_id_counter: 11,
+            transit_attempt_counter: 23,
+            active_ships: std::collections::BTreeMap::from([(player_id, ship_id)]),
+            owners: std::collections::BTreeMap::from([(ship_id, player_id)]),
+            docked_ships: std::collections::BTreeMap::from([(ship_id, StationId(4))]),
+            docked_players: std::collections::BTreeMap::from([(player_id, StationId(4))]),
+            pending_bot_lock_commands: vec![LockOnCommand {
+                ship_id,
+                target_id: ShipId::new(NodeId(0), 2),
+            }],
+            pending_auto_jumps: vec![(ship_id, JumpGateId(7))],
+            applied_market_settlements: vec![31, 47],
+            transit_saga: crate::persistence::TransitSagaSnapshot::default(),
+        };
+        let delta = SectorRecoveryDelta::Tick(Box::new(TickRecoveryDelta {
+            from: Tick(41),
+            to: Tick(42),
+            mode: TickRecoveryMode::Full,
+            ship_states: Vec::new(),
+            removed_ships: Vec::new(),
+            completed_warps: vec![ship_id],
+            node_state,
+        }));
+
         let payload = encode_recovery_delta(&delta).expect("delta should encode");
 
         assert_eq!(decode_recovery_delta(&payload), Ok(delta));

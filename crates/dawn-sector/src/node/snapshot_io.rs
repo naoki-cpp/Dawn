@@ -42,10 +42,10 @@ impl SimulationNode {
             // which needs the full `&SimulationNode` for anchor resolution.
             world: _,
             current_tick,
-            id_counter,
+            // Covered by capture_node_state() below.
+            id_counter: _,
             ships: ship_registry,
             base_stats: _,
-            // Covered by capture_node_state() below.
             pending_bot_lock_commands: _,
             applied_market_settlements: _,
         } = simulation;
@@ -58,11 +58,6 @@ impl SimulationNode {
             ship_type_registry: _,
             catalog_fingerprint,
         } = game_data;
-
-        // Node-level scalars/maps this Sector must reproduce exactly
-        // (ADR-0049, issue #312), shared with TickRecoveryDelta's
-        // construction (tick.rs) through the same capture function.
-        let node_state = self.capture_node_state();
 
         // One capture per ship, through the same optional-component list the
         // tick-prepare rollback and TickRecoveryDelta use (ADR-0049, issue
@@ -82,43 +77,15 @@ impl SimulationNode {
         // `ShipId: Ord` is canonical id order (node_id then counter).
         ships.sort_by_key(|s| s.snapshot.ship_id);
 
-        let crate::transition::NodeState {
-            id_counter: node_id_counter,
-            player_id_counter,
-            transit_attempt_counter,
-            active_ships,
-            owners,
-            docked_ships,
-            docked_players,
-            pending_bot_lock_commands,
-            pending_auto_jumps,
-            applied_market_settlements,
-            transit_saga,
-        } = node_state;
-        debug_assert_eq!(
-            node_id_counter, *id_counter,
-            "capture_node_state must read the same id_counter as this destructure"
-        );
-
         StateSnapshot {
             node_id: *node_id,
             sector_id: *sector_id,
             bounds: *bounds,
             covered_recovery_index,
             tick: *current_tick,
-            id_counter: *id_counter,
-            player_id_counter,
             catalog_fingerprint: *catalog_fingerprint,
-            transit_attempt_counter,
             ships,
-            owners,
-            docked_ships,
-            docked_players,
-            transit_saga,
-            active_ships,
-            pending_bot_lock_commands,
-            pending_auto_jumps,
-            applied_market_settlements,
+            node_state: self.capture_node_state(),
         }
     }
 
@@ -218,18 +185,8 @@ impl SimulationNode {
             sector_id,
             bounds,
             tick,
-            id_counter,
-            player_id_counter,
             catalog_fingerprint: _,
-            transit_attempt_counter,
-            transit_saga,
-            docked_ships,
-            docked_players,
-            owners,
-            active_ships,
-            pending_bot_lock_commands,
-            pending_auto_jumps,
-            applied_market_settlements,
+            node_state,
             // `ships` needs the module and ship-type registries in place first.
             // `covered_recovery_index` is external journal coverage, not an event cursor for
             // this storage-independent restore operation.
@@ -242,26 +199,13 @@ impl SimulationNode {
         self.bounds = *bounds;
         self.simulation.current_tick = *tick;
 
-        // Same restore function TickRecoveryDelta application uses
-        // (ADR-0049, issue #312) for every node-level field except
-        // transit_saga, applied below through the Saga's own reconciling
-        // restore rather than a plain field copy.
-        self.restore_node_state(&crate::transition::NodeState {
-            id_counter: *id_counter,
-            player_id_counter: *player_id_counter,
-            transit_attempt_counter: *transit_attempt_counter,
-            active_ships: active_ships.clone(),
-            owners: owners.clone(),
-            docked_ships: docked_ships.clone(),
-            docked_players: docked_players.clone(),
-            pending_bot_lock_commands: pending_bot_lock_commands.clone(),
-            pending_auto_jumps: pending_auto_jumps.clone(),
-            applied_market_settlements: applied_market_settlements.clone(),
-            transit_saga: transit_saga.clone(),
-        });
+        // Restore the canonical node state first. Transit Saga reconciliation
+        // remains a separate step because it validates and rebuilds the
+        // handoff journal rather than copying fields blindly.
+        self.restore_node_state(node_state);
         self.transit.transit_journal = crate::transit::handoff::TransitJournal::from_snapshot(
             *sector_id,
-            transit_saga.clone(),
+            node_state.transit_saga.clone(),
         )
         .expect("checkpoint contains an invalid Transit Saga for this Sector");
     }
@@ -359,9 +303,9 @@ mod tests {
         assert!(error.contains("catalog fingerprint"));
     }
 
-    /// Every field non-default, so a field that fails to survive the round
-    /// trip above actually changes the encoded bytes. Exhaustive by
-    /// construction: a struct literal cannot omit a field.
+    /// Representative NodeState fields are non-default so an omitted value
+    /// changes the encoded bytes. The exhaustive StateSnapshot and NodeState
+    /// literals also catch newly added fields at compile time.
     fn snapshot_fixture(covered_recovery_index: u64) -> StateSnapshot {
         StateSnapshot {
             node_id: NodeId(0),
@@ -369,10 +313,7 @@ mod tests {
             bounds: SectorBounds::centered(SectorBounds::DEFAULT_HALF),
             covered_recovery_index,
             tick: Tick(17),
-            id_counter: 5,
-            player_id_counter: 3,
             catalog_fingerprint: crate::game_data::test_catalog().fingerprint(),
-            transit_attempt_counter: 0,
             ships: vec![crate::transition::ShipState {
                 snapshot: ShipSnapshot {
                     ship_id: ShipId::new(NodeId(0), 0),
@@ -411,23 +352,34 @@ mod tests {
                 locks: None,
                 weapon_last_fired_tick: None,
             }],
-            owners: std::collections::BTreeMap::new(),
-            transit_saga: crate::persistence::TransitSagaSnapshot::default(),
-            docked_ships: std::collections::BTreeMap::from([(
-                ShipId::new(NodeId(0), 0),
-                dawn_core::StationId(0),
-            )]),
-            docked_players: std::collections::BTreeMap::from([(
-                dawn_core::PlayerId(9),
-                dawn_core::StationId(0),
-            )]),
-            active_ships: std::collections::BTreeMap::from([(
-                dawn_core::PlayerId(9),
-                ShipId::new(NodeId(0), 0),
-            )]),
-            pending_bot_lock_commands: Vec::new(),
-            pending_auto_jumps: Vec::new(),
-            applied_market_settlements: vec![7, 11],
+            node_state: crate::transition::NodeState {
+                id_counter: 5,
+                player_id_counter: 3,
+                transit_attempt_counter: 8,
+                active_ships: std::collections::BTreeMap::from([(
+                    dawn_core::PlayerId(9),
+                    ShipId::new(NodeId(0), 0),
+                )]),
+                owners: std::collections::BTreeMap::from([(
+                    ShipId::new(NodeId(0), 0),
+                    dawn_core::PlayerId(9),
+                )]),
+                docked_ships: std::collections::BTreeMap::from([(
+                    ShipId::new(NodeId(0), 0),
+                    dawn_core::StationId(0),
+                )]),
+                docked_players: std::collections::BTreeMap::from([(
+                    dawn_core::PlayerId(9),
+                    dawn_core::StationId(0),
+                )]),
+                pending_bot_lock_commands: vec![dawn_core::LockOnCommand {
+                    ship_id: ShipId::new(NodeId(0), 0),
+                    target_id: ShipId::new(NodeId(0), 1),
+                }],
+                pending_auto_jumps: vec![(ShipId::new(NodeId(0), 0), dawn_core::JumpGateId(7))],
+                applied_market_settlements: vec![7, 11],
+                transit_saga: crate::persistence::TransitSagaSnapshot::default(),
+            },
         }
     }
 
@@ -705,14 +657,11 @@ mod tests {
         );
     }
 
-    /// ADR-0049 / issue #312: a checkpoint must reproduce flight-mode state,
-    /// lock countdowns, and module cycle counters exactly
-    /// (recovery-contract.md rows 193/196/198), not just position/velocity/
-    /// HP/fitting-without-cycle (covered by the test above). `StateSnapshot`
-    /// currently builds its own `ShipSnapshot` list by hand
-    /// (`take_snapshot_at`) instead of routing through the shared
-    /// optional-component capture from #312 step 1/2, so none of these three
-    /// survive a restore today.
+    /// ADR-0049 / issue #312: this regression test proves that a checkpoint
+    /// reproduces flight-mode state, lock countdowns, and module cycle
+    /// counters exactly (recovery-contract.md rows 193/196/198), alongside
+    /// the position/velocity/HP/fitting state covered by the surrounding
+    /// snapshot restore tests.
     #[test]
     fn warp_lock_and_module_cycle_state_survive_snapshot_restore() {
         use crate::{modules, ship_types};

@@ -31,6 +31,13 @@ related : ADR-0001 (Event Sourcing), ADR-0014 (Raft / Transit), ADR-0017 (snapsh
 > required). This is an implementation fix, not a new decision -- the
 > recovery contract this ADR already committed to is unchanged.
 
+> **Implementation correction (2026-08-17):** `TickRecoveryDelta` and
+> `StateSnapshot` now carry one nested canonical `NodeState` directly. Tick
+> transition metadata and checkpoint identity/context plus ship images remain
+> outside that node-level payload. The postcard layouts are incompatible with
+> the prior flattened fields, so both explicit format versions were bumped;
+> no pre-release upcaster is required.
+
 > **Implementation correction (2026-08-16, issue #315):** this ADR's
 > accepted contract requires committed Sector state to enter through the
 > prepare → durable-journal-append → apply ordering that `RuntimeFrameHost`

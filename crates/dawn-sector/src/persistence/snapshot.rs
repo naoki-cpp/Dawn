@@ -42,7 +42,6 @@
 //! issues. Old pre-release snapshot compatibility is not required.
 
 use std::{
-    collections::BTreeMap,
     ffi::OsString,
     fs::{self, File, OpenOptions},
     io::{self, Read, Seek, SeekFrom, Write},
@@ -56,9 +55,8 @@ use std::{
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 
 use dawn_core::{
-    fitting::FittingSnapshot, AbsolutePosition, JumpGateId, LockOnCommand, NodeId, PlayerId,
-    Position, SectorBounds, SectorId, ShipId, ShipTypeId, Tick, TransitAttemptId,
-    TransitHandoffState, Velocity,
+    fitting::FittingSnapshot, AbsolutePosition, JumpGateId, NodeId, Position, SectorBounds,
+    SectorId, ShipId, ShipTypeId, Tick, TransitAttemptId, TransitHandoffState, Velocity,
 };
 use serde::{Deserialize, Serialize};
 
@@ -215,11 +213,10 @@ pub struct TransitSagaSnapshot {
 /// payload so an incompatible payload can be rejected before postcard tries to
 /// interpret it as a different struct layout.
 ///
-/// Bumped 1 -> 2 (ADR-0049, issue #312): `ships` changed from
-/// `Vec<ShipSnapshot>` to `Vec<ShipState>`, adding flight-mode state, lock
-/// countdowns, and module cycle counters that were previously dropped on
-/// every checkpoint restore. Pre-release; no upcaster required.
-pub const CHECKPOINT_FORMAT_VERSION: u16 = 2;
+/// Bumped 2 -> 3: node-level authority is carried as one canonical
+/// `NodeState` member instead of a flattened field list. Pre-release; no
+/// upcaster required.
+pub const CHECKPOINT_FORMAT_VERSION: u16 = 3;
 
 const CHECKPOINT_MAGIC: [u8; 8] = *b"DAWNCKP1";
 const CHECKPOINT_HEADER_LEN: usize = CHECKPOINT_MAGIC.len() + size_of::<u16>() + size_of::<u64>();
@@ -250,12 +247,8 @@ fn checkpoint_checksum(payload: &[u8]) -> u64 {
 /// compatibility; the replacement format must instead reject incompatible data
 /// clearly using explicit version/fingerprint metadata.
 ///
-/// Which fields belong in this current struct is enforced from both sides:
-/// `SimulationNode::take_snapshot` destructures the node exhaustively, and
-/// `SimulationNode::apply_snapshot` destructures this struct exhaustively, so
-/// adding a field to either is a compile error until it is handled. #284/#275
-/// replace this broad manual boundary with the final authority inventory/state
-/// owners.
+/// Checkpoint identity/context and ship images remain outside the canonical
+/// node-level authority payload, which is carried by `NodeState`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateSnapshot {
     /// The node that produced this snapshot.
@@ -270,19 +263,9 @@ pub struct StateSnapshot {
     pub covered_recovery_index: u64,
     /// Logical tick at the time of the snapshot.
     pub tick: Tick,
-    /// Next value for `SimulationNode::id_counter`.
-    /// Must be restored to prevent EntityId reuse (INV-004).
-    pub id_counter: u64,
-    /// Next value for `SimulationNode::player_id_counter`.
-    ///
-    /// Must be restored so a freshly-admitted client cannot receive a
-    /// `PlayerId` already handed out before restart.
-    pub player_id_counter: u64,
     /// Content fingerprint of the validated module/ship catalog used to
     /// materialize this checkpoint.
     pub catalog_fingerprint: u64,
-    /// Next source-local sequence for opaque Transit attempt identities.
-    pub transit_attempt_counter: u64,
     /// State of every Ship in the Sector at the snapshot instant. `ShipState`
     /// (ADR-0049, issue #312) is the same type `TickRecoveryDelta` and the
     /// tick-prepare rollback use, so flight-mode state, lock countdowns, and
@@ -291,26 +274,10 @@ pub struct StateSnapshot {
     /// position/velocity/HP/fitting-without-cycle subset the old
     /// checkpoint-only `ShipSnapshot` list carried.
     pub ships: Vec<crate::transition::ShipState>,
-    /// Authoritative Ship -> Player ownership bindings, including Ships that
-    /// arrived through Transit after their original Sector log was compacted.
-    pub owners: BTreeMap<dawn_core::ShipId, dawn_core::PlayerId>,
-    /// Durable Transit attempt/receipt state. Event history is a public fact
-    /// stream and is not used as the recovery index for this member.
-    pub transit_saga: TransitSagaSnapshot,
-    /// Current docked station per ship.
-    pub docked_ships: BTreeMap<dawn_core::ShipId, dawn_core::StationId>,
-    /// Current docked station context per player.
-    pub docked_players: BTreeMap<dawn_core::PlayerId, dawn_core::StationId>,
-    /// Player -> currently routable ship mapping (ADR-0037).
-    pub active_ships: BTreeMap<PlayerId, ShipId>,
-    /// Cross-tick bot commands that have not yet been consumed.
-    pub pending_bot_lock_commands: Vec<LockOnCommand>,
-    /// Auto-jump obligations produced by a committed warp and awaiting the
-    /// runtime's transit proposal.
-    pub pending_auto_jumps: Vec<(ShipId, JumpGateId)>,
-    /// Market settlement identities already applied to ship cargo. Keeping
-    /// these in the checkpoint makes a lost settlement ACK safe to retry.
-    pub applied_market_settlements: Vec<u64>,
+    /// Canonical node-level authoritative state shared with full recovery
+    /// deltas, including allocators, ownership/docking maps, queues,
+    /// settlement guards, and Transit Saga state.
+    pub node_state: crate::transition::NodeState,
 }
 
 impl StateSnapshot {
@@ -963,6 +930,7 @@ fn publish_snapshot(
 mod tests {
     use super::*;
     use dawn_core::Position;
+    use std::collections::BTreeMap;
 
     #[cfg(unix)]
     fn file_mode(path: &Path) -> u32 {
@@ -976,10 +944,7 @@ mod tests {
             bounds: SectorBounds::centered(SectorBounds::DEFAULT_HALF),
             covered_recovery_index: 42,
             tick: Tick(10),
-            id_counter: 5,
-            player_id_counter: 3,
             catalog_fingerprint: 0x1234,
-            transit_attempt_counter: 0,
             ships: vec![crate::transition::ShipState {
                 snapshot: ShipSnapshot {
                     ship_id: ShipId::new(NodeId(0), 0),
@@ -1018,14 +983,25 @@ mod tests {
                 locks: None,
                 weapon_last_fired_tick: None,
             }],
-            owners: BTreeMap::new(),
-            transit_saga: TransitSagaSnapshot::default(),
-            docked_ships: BTreeMap::from([(ShipId::new(NodeId(0), 0), dawn_core::StationId(0))]),
-            docked_players: BTreeMap::from([(dawn_core::PlayerId(9), dawn_core::StationId(0))]),
-            active_ships: BTreeMap::from([(dawn_core::PlayerId(9), ShipId::new(NodeId(0), 0))]),
-            pending_bot_lock_commands: Vec::new(),
-            pending_auto_jumps: Vec::new(),
-            applied_market_settlements: vec![7, 11],
+            node_state: crate::transition::NodeState {
+                id_counter: 5,
+                player_id_counter: 3,
+                transit_attempt_counter: 8,
+                active_ships: BTreeMap::from([(dawn_core::PlayerId(9), ShipId::new(NodeId(0), 0))]),
+                owners: BTreeMap::from([(ShipId::new(NodeId(0), 0), dawn_core::PlayerId(9))]),
+                docked_ships: BTreeMap::from([(
+                    ShipId::new(NodeId(0), 0),
+                    dawn_core::StationId(0),
+                )]),
+                docked_players: BTreeMap::from([(dawn_core::PlayerId(9), dawn_core::StationId(0))]),
+                pending_bot_lock_commands: vec![dawn_core::LockOnCommand {
+                    ship_id: ShipId::new(NodeId(0), 0),
+                    target_id: ShipId::new(NodeId(0), 1),
+                }],
+                pending_auto_jumps: vec![(ShipId::new(NodeId(0), 0), dawn_core::JumpGateId(7))],
+                applied_market_settlements: vec![7, 11],
+                transit_saga: TransitSagaSnapshot::default(),
+            },
         }
     }
 
@@ -1079,6 +1055,7 @@ mod tests {
             postcard::to_stdvec(&restored).unwrap(),
             postcard::to_stdvec(&original).unwrap()
         );
+        assert_eq!(restored.node_state, original.node_state);
     }
 
     /// postcard is not self-describing: struct fields are read positionally.
@@ -1136,7 +1113,10 @@ mod tests {
             original.covered_recovery_index
         );
         assert_eq!(restored.tick, original.tick);
-        assert_eq!(restored.id_counter, original.id_counter);
+        assert_eq!(
+            restored.node_state.id_counter,
+            original.node_state.id_counter
+        );
         #[cfg(unix)]
         assert_eq!(file_mode(&path), INITIAL_SNAPSHOT_MODE);
         assert_no_publication_artifacts(dir.path());
