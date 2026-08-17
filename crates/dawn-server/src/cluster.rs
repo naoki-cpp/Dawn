@@ -14,7 +14,7 @@
 //! No sleep, no flush, no barrier is required.
 
 use crate::sector_runtime_driver::{
-    NodeStats, SectorRuntimeConfig, SectorRuntimeHandle, TickSummary,
+    FixtureSpawnError, NodeStats, SectorRuntimeConfig, SectorRuntimeHandle, TickSummary,
 };
 use dawn_core::{NodeId, SectorBounds, SectorId};
 use dawn_distributed::InMemoryReplicationBus;
@@ -171,14 +171,20 @@ impl MultiNodeCluster {
     /// Spawn `count` ships on every node using the given config.
     ///
     /// Counter offsets are staggered per node so `ShipId`s remain globally unique.
-    pub async fn spawn_ships_on_all(&self, count: usize, config: &SpawnConfig) {
+    /// This fixture helper must complete before any node receives its first Tick.
+    pub async fn spawn_ships_on_all(
+        &self,
+        count: usize,
+        config: &SpawnConfig,
+    ) -> Result<(), FixtureSpawnError> {
         for (idx, node) in self.nodes.iter().enumerate() {
             let offset = (idx * count) as u64;
             let ships = generate_ships(count, config, offset);
             for (_, pos, vel) in ships {
-                node.spawn_ship(pos, vel).await;
+                node.spawn_ship(pos, vel).await?;
             }
         }
+        Ok(())
     }
 
     /// Tick every node once and return the per-node summaries.
@@ -247,7 +253,10 @@ mod tests {
     #[tokio::test]
     async fn three_nodes_all_events_are_replicated_to_the_shared_bus() {
         let cluster = MultiNodeCluster::new(NODES);
-        cluster.spawn_ships_on_all(SHIPS, &config()).await;
+        cluster
+            .spawn_ships_on_all(SHIPS, &config())
+            .await
+            .expect("fixtures must be inserted before ticking");
 
         for _ in 0..TICKS {
             cluster.tick_all().await;
@@ -296,7 +305,10 @@ mod tests {
     #[tokio::test]
     async fn tick_counter_advances_independently_per_node() {
         let cluster = MultiNodeCluster::new(NODES);
-        cluster.spawn_ships_on_all(5, &config()).await;
+        cluster
+            .spawn_ships_on_all(5, &config())
+            .await
+            .expect("fixtures must be inserted before ticking");
 
         for _ in 0..TICKS {
             cluster.tick_all().await;
@@ -355,15 +367,15 @@ mod tests {
         use dawn_core::{Position, Velocity};
 
         let cluster = MultiNodeCluster::new(NODES);
+        let ship_id = cluster.nodes[0]
+            .spawn_ship(Position::ORIGIN, Velocity::new(1.0, 0.0, 0.0))
+            .await
+            .expect("fixture must be inserted before leader-election ticks");
 
         // Elect a leader first so proposals are not dropped.
         for _ in 0..30 {
             cluster.tick_all().await;
         }
-
-        let ship_id = cluster.nodes[0]
-            .spawn_ship(Position::ORIGIN, Velocity::new(1.0, 0.0, 0.0))
-            .await;
 
         let accepted = cluster.nodes[0].transit(ship_id, SectorId(1)).await;
         assert!(accepted, "transit command must pass up-front validation");
@@ -408,11 +420,6 @@ mod tests {
 
         let cluster = MultiNodeCluster::new(NODES);
 
-        // Elect a leader first so proposals are not dropped.
-        for _ in 0..30 {
-            cluster.tick_all().await;
-        }
-
         // Gate 0 (Sector 0 -> Sector 1) sits near Sector 0's +X edge.
         let gate = dawn_sector::galaxy::Galaxy::demo()
             .gates
@@ -424,7 +431,13 @@ mod tests {
 
         let ship_id = cluster.nodes[0]
             .spawn_ship(gate.position, Velocity::new(0.0, 0.0, 0.0))
-            .await;
+            .await
+            .expect("fixture must be inserted before leader-election ticks");
+
+        // Elect a leader after all fixture mutation is complete.
+        for _ in 0..30 {
+            cluster.tick_all().await;
+        }
 
         let accepted = cluster.nodes[0].jump(ship_id, gate.id).await;
         assert!(accepted, "jump command must pass up-front validation");
@@ -453,13 +466,13 @@ mod tests {
         use dawn_core::{JumpGateId, Position, Velocity};
 
         let cluster = MultiNodeCluster::new(NODES);
+        let ship_id = cluster.nodes[0]
+            .spawn_ship(Position::ORIGIN, Velocity::new(0.0, 0.0, 0.0))
+            .await
+            .expect("fixture must be inserted before leader-election ticks");
         for _ in 0..30 {
             cluster.tick_all().await;
         }
-
-        let ship_id = cluster.nodes[0]
-            .spawn_ship(Position::ORIGIN, Velocity::new(0.0, 0.0, 0.0))
-            .await;
 
         let accepted = cluster.nodes[0].jump(ship_id, JumpGateId(0)).await;
         assert!(
@@ -563,6 +576,14 @@ mod tests {
         use dawn_core::{Position, Velocity};
 
         let cluster = MultiNodeCluster::new(NODES);
+        let mut fixture_ships = Vec::with_capacity(NODES);
+        for node in cluster.nodes() {
+            fixture_ships.push(
+                node.spawn_ship(Position::ORIGIN, Velocity::new(1.0, 0.0, 0.0))
+                    .await
+                    .expect("fixtures must be inserted before leader-election ticks"),
+            );
+        }
 
         // Elect the first Leader.
         for _ in 0..30 {
@@ -598,9 +619,7 @@ mod tests {
             .find(|&i| i != old_leader_idx && i != owner_idx)
             .expect("a third sector must exist for the destination");
 
-        let ship_id = cluster.nodes[owner_idx]
-            .spawn_ship(Position::ORIGIN, Velocity::new(1.0, 0.0, 0.0))
-            .await;
+        let ship_id = fixture_ships[owner_idx];
         let accepted = cluster.nodes[owner_idx]
             .transit(ship_id, SectorId(dest_idx as u8))
             .await;
@@ -616,12 +635,12 @@ mod tests {
             "origin sector must no longer own the ship"
         );
         assert_eq!(
-            stats[dest_idx].ship_count, 1,
-            "destination sector must own the ship"
+            stats[dest_idx].ship_count, 2,
+            "destination sector must own its fixture and the transferred ship"
         );
         assert_eq!(
-            stats[old_leader_idx].ship_count, 0,
-            "the partitioned sector must be unaffected"
+            stats[old_leader_idx].ship_count, 1,
+            "the partitioned sector fixture must be unaffected"
         );
 
         cluster.shutdown().await;
@@ -630,7 +649,10 @@ mod tests {
     #[tokio::test]
     async fn replicated_event_count_grows_monotonically_across_ticks() {
         let cluster = MultiNodeCluster::new(NODES);
-        cluster.spawn_ships_on_all(5, &config()).await;
+        cluster
+            .spawn_ships_on_all(5, &config())
+            .await
+            .expect("fixtures must be inserted before ticking");
 
         let mut prev = cluster.total_replicated_events().await;
         for _ in 0..TICKS {

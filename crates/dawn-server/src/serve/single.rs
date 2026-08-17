@@ -5,7 +5,7 @@ use super::{
     build_serve_node, client_request_rejection, load_serve_dependencies, market::MarketRuntime,
     AoiDelivery, DuelMetrics, AOI_CELL_SIZE, P4_TICK_MS, TIDI_BUDGET,
 };
-use crate::runtime_frame::{RuntimeFrameHost, RuntimeFramePolicy};
+use crate::runtime_frame::{RuntimeClientAdmissionError, RuntimeFrameHost, RuntimeFramePolicy};
 use crate::ws_server;
 use dawn_core::{DomainEvent, NodeId, Position, SectorBounds, SectorId, ShipId};
 use dawn_protocol::ServerMessage;
@@ -66,7 +66,8 @@ pub(crate) async fn run_phase4_server(
     let mut market = MarketRuntime::open("data/market.sqlite")
         .expect("failed to open Market database at data/market.sqlite");
 
-    host.spawn_npc_frigates(ship_count);
+    host.spawn_npc_frigates(ship_count)
+        .expect("NPC fixture population must be created before the first frame");
     // Duel-mode player spawn: close enough to the Bot to be within weapon
     // range (Small Railgun: 3000 range + 2000 falloff = 5000) from the
     // moment the human connects, instead of the universe-wide
@@ -82,7 +83,9 @@ pub(crate) async fn run_phase4_server(
         // (e.g. to practice locking/engaging more than one target at once).
         for i in 0..enemy_count.max(1) {
             let bot_pos = Position::new(1200.0, i as f64 * 800.0, 0.0);
-            let (_, bot_ship_id) = host.spawn_bot_ship(bot_pos);
+            let (_, bot_ship_id) = host
+                .spawn_bot_ship(bot_pos)
+                .expect("Bot fixture population must be created before the first frame");
             println!(
                 "  [Server] Duel mode: Bot ship #{} ready at {:?}",
                 bot_ship_id.raw(),
@@ -169,8 +172,15 @@ pub(crate) async fn run_phase4_server(
 
             let mut attempt = match host.begin_client_admission(intent, AOI_CELL_SIZE) {
                 Ok(attempt) => attempt,
-                Err(refusal) => {
+                Err(RuntimeClientAdmissionError::Refused(refusal)) => {
                     log_single_refusal(request.peer_addr, refusal);
+                    continue;
+                }
+                Err(RuntimeClientAdmissionError::Host(error)) => {
+                    eprintln!(
+                        "[Server] connection from {} refused: {error}",
+                        request.peer_addr
+                    );
                     continue;
                 }
             };
@@ -199,7 +209,9 @@ pub(crate) async fn run_phase4_server(
         // intentionally ignored by this single-sector adapter). Start this
         // transition with an empty output buffer rather than deriving output
         // from the legacy event-log cursor.
-        let _ = host.drain_pending_events();
+        let _ = host
+            .drain_pending_events()
+            .expect("in-memory single-sector runtime must remain writable");
         let mut all_new_events = Vec::new();
 
         let mut lock_commands: Vec<dawn_core::LockOnCommand> = Vec::new();
@@ -209,12 +221,15 @@ pub(crate) async fn run_phase4_server(
                 sess.send_message(&ServerMessage::MarketSnapshot(snapshot));
             }
         }
-        for dispatch in host.collect_runtime_commands(
-            &mut sessions,
-            &mut lock_commands,
-            |session| session.player_id,
-            ws_server::PlayerSession::try_recv_request,
-        ) {
+        for dispatch in host
+            .collect_runtime_commands(
+                &mut sessions,
+                &mut lock_commands,
+                |session| session.player_id,
+                ws_server::PlayerSession::try_recv_request,
+            )
+            .expect("in-memory single-sector runtime must remain writable")
+        {
             match dispatch {
                 RuntimeCommandDispatch::Jump {
                     ship_id, command, ..
@@ -390,6 +405,7 @@ impl RuntimeFrameHost<InMemoryJournal, LocalRuntimeConsensus> {
         completion_rx: &mut mpsc::UnboundedReceiver<HandshakeCompletion>,
     ) -> Vec<(ws_server::PlayerSession, CommittedClientAdmission)> {
         self.with_node_mut(|node| drain_single_admission_completions(node, completion_rx))
+            .expect("in-memory single-sector runtime must remain writable")
     }
 }
 

@@ -6,7 +6,7 @@
 //! Redirect handling, and AoI delivery.
 
 use super::client_admission::ClientAdmission;
-use crate::runtime_frame::{OwnedRaftRuntimeConsensus, RuntimeFrameHost};
+use crate::runtime_frame::{OwnedRaftRuntimeConsensus, RuntimeFrameHost, RuntimeFrameHostError};
 use dawn_actor::ws_server;
 use dawn_core::{DomainEvent, SectorId, ShipId};
 use dawn_distributed::{OutboundLogPublisher, PeerReplicationTransport};
@@ -20,6 +20,9 @@ use dawn_storage::{EventStore, FileJournal};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 
+type PendingPlayerJump = (usize, ShipId, dawn_core::JumpCommand);
+type CollectedPlayerCommands = (Vec<dawn_core::LockOnCommand>, Vec<PendingPlayerJump>);
+
 impl RuntimeFrameHost<FileJournal, OwnedRaftRuntimeConsensus> {
     /// Advance production client-handshake admission against the owned node.
     fn advance_handshakes(
@@ -27,8 +30,8 @@ impl RuntimeFrameHost<FileJournal, OwnedRaftRuntimeConsensus> {
         admission: &mut ClientAdmission,
         sector_id: SectorId,
         aoi_cell_size: f64,
-    ) {
-        self.with_node_mut(|node| admission.advance_handshakes(node, sector_id, aoi_cell_size));
+    ) -> Result<(), RuntimeFrameHostError> {
+        self.with_node_mut(|node| admission.advance_handshakes(node, sector_id, aoi_cell_size))
     }
 }
 
@@ -85,15 +88,15 @@ impl SectorNodeRuntime {
         admission: &mut ClientAdmission,
         sector_id: SectorId,
         aoi_cell_size: f64,
-    ) {
+    ) -> Result<(), RuntimeFrameHostError> {
         self.host
-            .advance_handshakes(admission, sector_id, aoi_cell_size);
+            .advance_handshakes(admission, sector_id, aoi_cell_size)
     }
 
     pub(crate) fn with_state_mut<R>(
         &mut self,
         operation: impl FnOnce(&mut SimulationNode, &mut FileJournal) -> R,
-    ) -> R {
+    ) -> Result<R, RuntimeFrameHostError> {
         self.host.with_state_mut(operation)
     }
 
@@ -119,8 +122,8 @@ impl SectorNodeRuntime {
     }
 
     pub(crate) fn run_frame(&mut self, event_store: &mut impl EventStore) -> anyhow::Result<()> {
-        let (lock_commands, pending_jumps) = self.collect_player_commands();
-        self.propose_player_jumps(pending_jumps);
+        let (lock_commands, pending_jumps) = self.collect_player_commands()?;
+        self.propose_player_jumps(pending_jumps)?;
 
         let outbound_replication = &mut self.outbound_replication;
         let output = self
@@ -142,10 +145,7 @@ impl SectorNodeRuntime {
 
     fn collect_player_commands(
         &mut self,
-    ) -> (
-        Vec<dawn_core::LockOnCommand>,
-        Vec<(usize, ShipId, dawn_core::JumpCommand)>,
-    ) {
+    ) -> Result<CollectedPlayerCommands, RuntimeFrameHostError> {
         let mut lock_commands = Vec::new();
         let mut pending_jumps = Vec::new();
 
@@ -154,7 +154,7 @@ impl SectorNodeRuntime {
             &mut lock_commands,
             |session| session.player_id,
             ws_server::PlayerSession::try_recv_request,
-        ) {
+        )? {
             match dispatch {
                 RuntimeCommandDispatch::Jump {
                     session_index,
@@ -188,13 +188,13 @@ impl SectorNodeRuntime {
             }
         }
 
-        (lock_commands, pending_jumps)
+        Ok((lock_commands, pending_jumps))
     }
 
     fn propose_player_jumps(
         &mut self,
         pending_jumps: Vec<(usize, ShipId, dawn_core::JumpCommand)>,
-    ) {
+    ) -> Result<(), RuntimeFrameHostError> {
         for (idx, ship_id, j) in pending_jumps {
             let Some(sess) = self.sessions.get(idx) else {
                 continue;
@@ -202,7 +202,7 @@ impl SectorNodeRuntime {
             if ship_id != sess.ship_id {
                 continue;
             }
-            let outcome = self.host.propose_jump(ship_id, j.gate_id);
+            let outcome = self.host.propose_jump(ship_id, j.gate_id)?;
             match outcome {
                 JumpOutcome::NeedsTransitProposal { to } => {
                     println!(
@@ -229,6 +229,7 @@ impl SectorNodeRuntime {
                 JumpOutcome::Rejected => {}
             }
         }
+        Ok(())
     }
 
     fn log_auto_jumps(&self, auto_jumps: &[(ShipId, dawn_core::JumpGateId)]) {

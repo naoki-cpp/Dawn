@@ -593,8 +593,11 @@ mod tests {
                 quantity: 5,
                 settlement_id: SEED_SETTLEMENT_ID,
             })
-        });
-        let _ = host.drain_pending_events();
+        })
+        .expect("in-memory market test host must remain writable");
+        let _ = host
+            .drain_pending_events()
+            .expect("in-memory market test host must remain writable");
 
         MarketSettlement::place(&mut db, seller, order(seller_ship, OrderSide::Ask, 5));
         let queued = MarketSettlement::drain_pending_inputs(&mut db, host.node());
@@ -662,8 +665,11 @@ mod tests {
                 quantity: 2,
                 settlement_id: SEED_SETTLEMENT_ID,
             })
-        });
-        let _ = host.drain_pending_events();
+        })
+        .expect("in-memory market test host must remain writable");
+        let _ = host
+            .drain_pending_events()
+            .expect("in-memory market test host must remain writable");
 
         // The seller's Ask reserves cargo through the real drain/apply/ack
         // cycle, one tick's worth at a time.

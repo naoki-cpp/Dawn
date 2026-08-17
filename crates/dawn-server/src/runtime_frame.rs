@@ -114,6 +114,7 @@ pub(crate) enum RuntimeFramePhase {
 #[derive(Debug)]
 pub(crate) enum RuntimeFrameHostError {
     BootstrapClosed,
+    Fenced,
     Tick(dawn_sector::transit::TickTransitionError),
 }
 
@@ -126,6 +127,10 @@ impl fmt::Display for RuntimeFrameHostError {
                     "bootstrap mutation is only available before the first runtime frame"
                 )
             }
+            Self::Fenced => write!(
+                formatter,
+                "runtime host is fenced and requires recovery before further mutation"
+            ),
             Self::Tick(error) => write!(formatter, "runtime frame failed: {error}"),
         }
     }
@@ -134,8 +139,33 @@ impl fmt::Display for RuntimeFrameHostError {
 impl std::error::Error for RuntimeFrameHostError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::BootstrapClosed => None,
+            Self::BootstrapClosed | Self::Fenced => None,
             Self::Tick(error) => Some(error),
+        }
+    }
+}
+
+/// Failure to begin admission through a runtime-owned Sector.
+#[derive(Debug)]
+pub(crate) enum RuntimeClientAdmissionError {
+    Host(RuntimeFrameHostError),
+    Refused(ClientAdmissionRefusal),
+}
+
+impl fmt::Display for RuntimeClientAdmissionError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Host(error) => write!(formatter, "client admission unavailable: {error}"),
+            Self::Refused(refusal) => write!(formatter, "client admission refused: {refusal}"),
+        }
+    }
+}
+
+impl std::error::Error for RuntimeClientAdmissionError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Host(error) => Some(error),
+            Self::Refused(refusal) => Some(refusal),
         }
     }
 }
@@ -166,12 +196,18 @@ pub(crate) trait RuntimeNodeView {
 }
 
 pub(crate) trait RuntimeNodeMutation: RuntimeNodeView {
-    fn with_runtime_node_mut<R>(&mut self, operation: impl FnOnce(&mut SimulationNode) -> R) -> R;
+    fn with_runtime_node_mut<R>(
+        &mut self,
+        operation: impl FnOnce(&mut SimulationNode) -> R,
+    ) -> Result<R, RuntimeFrameHostError>;
 }
 
 impl RuntimeNodeMutation for SimulationNode {
-    fn with_runtime_node_mut<R>(&mut self, operation: impl FnOnce(&mut SimulationNode) -> R) -> R {
-        operation(self)
+    fn with_runtime_node_mut<R>(
+        &mut self,
+        operation: impl FnOnce(&mut SimulationNode) -> R,
+    ) -> Result<R, RuntimeFrameHostError> {
+        Ok(operation(self))
     }
 }
 
@@ -198,7 +234,10 @@ where
     C: RuntimeConsensus,
     P: RuntimeDurabilityPolicy,
 {
-    fn with_runtime_node_mut<R>(&mut self, operation: impl FnOnce(&mut SimulationNode) -> R) -> R {
+    fn with_runtime_node_mut<R>(
+        &mut self,
+        operation: impl FnOnce(&mut SimulationNode) -> R,
+    ) -> Result<R, RuntimeFrameHostError> {
         self.with_node_mut(operation)
     }
 }
@@ -239,15 +278,17 @@ where
     pub(crate) fn with_node_mut<R>(
         &mut self,
         operation: impl FnOnce(&mut SimulationNode) -> R,
-    ) -> R {
-        operation(&mut self.node)
+    ) -> Result<R, RuntimeFrameHostError> {
+        self.ensure_mutation_available()?;
+        Ok(operation(&mut self.node))
     }
 
     pub(crate) fn with_state_mut<R>(
         &mut self,
         operation: impl FnOnce(&mut SimulationNode, &mut J) -> R,
-    ) -> R {
-        operation(&mut self.node, &mut self.journal)
+    ) -> Result<R, RuntimeFrameHostError> {
+        self.ensure_mutation_available()?;
+        Ok(operation(&mut self.node, &mut self.journal))
     }
 
     pub(crate) fn phase(&self) -> RuntimeFramePhase {
@@ -263,6 +304,23 @@ where
         self.phase = RuntimeFramePhase::Running;
     }
 
+    fn ensure_mutation_available(&self) -> Result<(), RuntimeFrameHostError> {
+        if self.phase == RuntimeFramePhase::Fenced {
+            Err(RuntimeFrameHostError::Fenced)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn ensure_bootstrapping(&self) -> Result<(), RuntimeFrameHostError> {
+        self.ensure_mutation_available()?;
+        if self.phase == RuntimeFramePhase::Bootstrapping {
+            Ok(())
+        } else {
+            Err(RuntimeFrameHostError::BootstrapClosed)
+        }
+    }
+
     /// Create initial world state before this host starts processing frames.
     pub(crate) fn bootstrap_ship(
         &mut self,
@@ -270,27 +328,33 @@ where
         position: Position,
         velocity: Velocity,
     ) -> Result<ShipId, RuntimeFrameHostError> {
-        if self.phase != RuntimeFramePhase::Bootstrapping {
-            return Err(RuntimeFrameHostError::BootstrapClosed);
-        }
+        self.ensure_bootstrapping()?;
         Ok(self.node.spawn_ship(ship_type_id, position, velocity))
     }
 
-    pub(crate) fn drain_pending_events(&mut self) -> Vec<DomainEvent> {
-        self.node.drain_pending_events()
+    pub(crate) fn drain_pending_events(
+        &mut self,
+    ) -> Result<Vec<DomainEvent>, RuntimeFrameHostError> {
+        self.with_node_mut(SimulationNode::drain_pending_events)
     }
 
     /// Seed initial NPC frigates into the Sector.
     ///
     /// Fixture/composition-root use only (initial server population), not a
     /// per-tick operation.
-    pub(crate) fn spawn_npc_frigates(&mut self, count: usize) {
-        self.with_node_mut(|node| node.spawn_npc_frigates(count));
+    pub(crate) fn spawn_npc_frigates(&mut self, count: usize) -> Result<(), RuntimeFrameHostError> {
+        self.ensure_bootstrapping()?;
+        self.node.spawn_npc_frigates(count);
+        Ok(())
     }
 
     /// Spawn a duel-mode Bot ship and its owning player identity.
-    pub(crate) fn spawn_bot_ship(&mut self, position: Position) -> (PlayerId, ShipId) {
-        self.with_node_mut(|node| node.spawn_bot_ship(position))
+    pub(crate) fn spawn_bot_ship(
+        &mut self,
+        position: Position,
+    ) -> Result<(PlayerId, ShipId), RuntimeFrameHostError> {
+        self.ensure_bootstrapping()?;
+        Ok(self.node.spawn_bot_ship(position))
     }
 
     /// The Sector's topology-derived default spawn point for a fresh player.
@@ -309,14 +373,22 @@ where
         &mut self,
         intent: ClientAdmissionIntent,
         aoi_cell_size: f64,
-    ) -> Result<ClientAdmissionAttempt, ClientAdmissionRefusal> {
-        self.with_node_mut(|node| node.begin_client_admission(intent, aoi_cell_size))
+    ) -> Result<ClientAdmissionAttempt, RuntimeClientAdmissionError> {
+        self.ensure_mutation_available()
+            .map_err(RuntimeClientAdmissionError::Host)?;
+        self.node
+            .begin_client_admission(intent, aoi_cell_size)
+            .map_err(RuntimeClientAdmissionError::Refused)
     }
 
     /// Adopt a ship that just jumped into this Sector under `player_id`'s
     /// ownership. Returns `false` if the ship is not (yet) present in this
     /// Sector's ECS.
-    pub(crate) fn adopt_player_ship(&mut self, ship_id: ShipId, player_id: PlayerId) -> bool {
+    pub(crate) fn adopt_player_ship(
+        &mut self,
+        ship_id: ShipId,
+        player_id: PlayerId,
+    ) -> Result<bool, RuntimeFrameHostError> {
         self.with_node_mut(|node| node.adopt_player_ship(ship_id, player_id))
     }
 
@@ -329,8 +401,9 @@ where
         ship_type_id: ShipTypeId,
         position: Position,
         velocity: Velocity,
-    ) -> ShipId {
-        self.with_node_mut(|node| node.spawn_ship(ship_type_id, position, velocity))
+    ) -> Result<ShipId, RuntimeFrameHostError> {
+        self.ensure_bootstrapping()?;
+        Ok(self.node.spawn_ship(ship_type_id, position, velocity))
     }
 
     /// Admit requests through the Sector's single typed request seam.
@@ -340,18 +413,20 @@ where
         lock_commands: &mut Vec<LockOnCommand>,
         player: Player,
         request: Request,
-    ) -> Vec<RuntimeCommandDispatch>
+    ) -> Result<Vec<RuntimeCommandDispatch>, RuntimeFrameHostError>
     where
         Player: Fn(&S) -> dawn_core::PlayerId,
         Request: FnMut(&mut S) -> Option<dawn_core::ClientRequest>,
     {
-        dawn_sector::node::collect_runtime_commands(
-            &mut self.node,
-            sessions,
-            lock_commands,
-            player,
-            request,
-        )
+        self.with_node_mut(|node| {
+            dawn_sector::node::collect_runtime_commands(
+                node,
+                sessions,
+                lock_commands,
+                player,
+                request,
+            )
+        })
     }
 
     /// Propose a validated cross-Sector request through the owned consensus
@@ -361,23 +436,30 @@ where
         ship_id: ShipId,
         to: SectorId,
         gate_id: Option<JumpGateId>,
-    ) {
+    ) -> Result<(), RuntimeFrameHostError> {
+        self.ensure_mutation_available()?;
         self.consensus.propose(TransitOp::Request {
             ship_id,
             to,
             gate_id,
         });
+        Ok(())
     }
 
     /// Apply jump fallback rules and submit any resulting transit proposal
     /// through the owned consensus adapter.
-    pub(crate) fn propose_jump(&mut self, ship_id: ShipId, gate_id: JumpGateId) -> JumpOutcome {
-        dawn_sector::transit::propose_jump_with_consensus(
+    pub(crate) fn propose_jump(
+        &mut self,
+        ship_id: ShipId,
+        gate_id: JumpGateId,
+    ) -> Result<JumpOutcome, RuntimeFrameHostError> {
+        self.ensure_mutation_available()?;
+        Ok(dawn_sector::transit::propose_jump_with_consensus(
             &mut self.node,
             &mut self.consensus,
             ship_id,
             gate_id,
-        )
+        ))
     }
 
     /// Run exactly one authoritative frame for this Sector.
@@ -540,6 +622,65 @@ mod tests {
     }
 
     #[test]
+    fn fixture_spawns_are_closed_after_the_first_frame() {
+        let mut host = host();
+        host.spawn_fixture_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO)
+            .expect("fixture spawn should be available during bootstrap");
+
+        host.run_frame(dawn_sector::transition::FrameInput::lock_only(&[]))
+            .expect("local frame should commit");
+        let ship_count = host.node().ship_count();
+
+        assert!(matches!(
+            host.spawn_fixture_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO),
+            Err(RuntimeFrameHostError::BootstrapClosed)
+        ));
+        assert!(matches!(
+            host.spawn_npc_frigates(1),
+            Err(RuntimeFrameHostError::BootstrapClosed)
+        ));
+        assert!(matches!(
+            host.spawn_bot_ship(Position::ORIGIN),
+            Err(RuntimeFrameHostError::BootstrapClosed)
+        ));
+        assert_eq!(host.node().ship_count(), ship_count);
+    }
+
+    #[test]
+    fn client_admission_remains_available_while_running() {
+        let mut host = host();
+        host.run_frame(dawn_sector::transition::FrameInput::lock_only(&[]))
+            .expect("local frame should commit");
+
+        let attempt = host
+            .begin_client_admission(
+                ClientAdmissionIntent::Fresh {
+                    spawn_position: Position::ORIGIN,
+                },
+                1_000.0,
+            )
+            .expect("healthy running hosts should accept admission attempts");
+        assert_eq!(host.node().ship_count(), 0);
+
+        let resolution = host
+            .with_node_mut(|node| {
+                dawn_sector::client_admission_resolution::resolve_client_admission(
+                    node,
+                    attempt,
+                    Ok::<(), ()>(()),
+                )
+            })
+            .expect("healthy running hosts should resolve admission attempts");
+
+        assert_eq!(host.phase(), RuntimeFramePhase::Running);
+        assert_eq!(host.node().ship_count(), 1);
+        assert!(matches!(
+            resolution,
+            dawn_sector::client_admission_resolution::ClientAdmissionResolution::Committed { .. }
+        ));
+    }
+
+    #[test]
     fn host_returns_the_committed_tick_output() {
         let mut host = host();
         let output = host
@@ -660,8 +801,10 @@ mod tests {
     #[test]
     fn append_failure_fences_the_host_and_preserves_pending_output() {
         let mut host = host_with_journal(FailingJournal, RuntimeFramePolicy::local_durable(0));
-        host.bootstrap_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO)
+        let ship_id = host
+            .bootstrap_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO)
             .expect("bootstrap should be available");
+        let diagnostic_spawn_position = host.default_player_spawn_position();
         let expected_events = host.node().pending_events().to_vec();
 
         let result = host.run_frame(dawn_sector::transition::FrameInput::lock_only(&[]));
@@ -676,6 +819,83 @@ mod tests {
         assert_eq!(host.node().pending_events(), expected_events.as_slice());
         assert_eq!(host.phase(), RuntimeFramePhase::Fenced);
         assert!(host.health().is_fenced());
+
+        let mut mutation_called = false;
+        assert!(matches!(
+            host.with_node_mut(|_| mutation_called = true),
+            Err(RuntimeFrameHostError::Fenced)
+        ));
+        assert!(!mutation_called);
+
+        let mut state_mutation_called = false;
+        assert!(matches!(
+            host.with_state_mut(|_, _| state_mutation_called = true),
+            Err(RuntimeFrameHostError::Fenced)
+        ));
+        assert!(!state_mutation_called);
+
+        assert!(matches!(
+            host.begin_client_admission(
+                ClientAdmissionIntent::Fresh {
+                    spawn_position: Position::ORIGIN,
+                },
+                1_000.0,
+            ),
+            Err(RuntimeClientAdmissionError::Host(
+                RuntimeFrameHostError::Fenced
+            ))
+        ));
+        assert!(matches!(
+            host.adopt_player_ship(ship_id, PlayerId(9)),
+            Err(RuntimeFrameHostError::Fenced)
+        ));
+        assert!(matches!(
+            host.bootstrap_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO),
+            Err(RuntimeFrameHostError::Fenced)
+        ));
+        assert!(matches!(
+            host.spawn_npc_frigates(1),
+            Err(RuntimeFrameHostError::Fenced)
+        ));
+        assert!(matches!(
+            host.spawn_bot_ship(Position::ORIGIN),
+            Err(RuntimeFrameHostError::Fenced)
+        ));
+        assert!(matches!(
+            host.spawn_fixture_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO),
+            Err(RuntimeFrameHostError::Fenced)
+        ));
+        assert!(matches!(
+            host.drain_pending_events(),
+            Err(RuntimeFrameHostError::Fenced)
+        ));
+
+        let mut sessions: [(); 0] = [];
+        let mut lock_commands = Vec::new();
+        assert!(matches!(
+            host.collect_runtime_commands(
+                &mut sessions,
+                &mut lock_commands,
+                |_| PlayerId(0),
+                |_| None,
+            ),
+            Err(RuntimeFrameHostError::Fenced)
+        ));
+        assert!(matches!(
+            host.propose_transit_request(ship_id, SectorId(1), None),
+            Err(RuntimeFrameHostError::Fenced)
+        ));
+        assert!(matches!(
+            host.propose_jump(ship_id, JumpGateId(0)),
+            Err(RuntimeFrameHostError::Fenced)
+        ));
+
+        assert_eq!(host.node().pending_events(), expected_events.as_slice());
+        assert_eq!(host.node().ship_count(), 1);
+        assert_eq!(
+            host.default_player_spawn_position(),
+            diagnostic_spawn_position
+        );
     }
 
     struct RecordingJournal {

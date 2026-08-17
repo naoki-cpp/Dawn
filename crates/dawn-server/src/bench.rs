@@ -78,6 +78,22 @@ pub(crate) async fn run_raft_demo() {
 
     let cluster = MultiNodeCluster::new(NODES);
 
+    // Actor fixture insertion is a bootstrap-only capability. Provision the
+    // demo ships before the first Tick, then select the failover fixture once
+    // the replacement leader is known.
+    let ship = cluster.nodes()[0]
+        .spawn_ship(Position::ORIGIN, Velocity::new(1.0, 0.0, 0.0))
+        .await
+        .expect("Raft demo fixtures must be inserted before the first Tick");
+    let mut failover_ships = Vec::with_capacity(NODES);
+    for node in cluster.nodes() {
+        failover_ships.push(
+            node.spawn_ship(Position::ORIGIN, Velocity::new(1.0, 0.0, 0.0))
+                .await
+                .expect("Raft demo fixtures must be inserted before the first Tick"),
+        );
+    }
+
     // Act 1: leader election.
     println!("\n── Act 1: leader election ──");
     tick_n(&cluster, 30).await;
@@ -90,10 +106,7 @@ pub(crate) async fn run_raft_demo() {
 
     // Act 2: a Transit through the Raft Log.
     println!("\n── Act 2: Sector Transit through the Raft Log ──");
-    let ship = cluster.nodes()[0]
-        .spawn_ship(Position::ORIGIN, Velocity::new(1.0, 0.0, 0.0))
-        .await;
-    println!("  spawned {ship:?} in Sector 0");
+    println!("  using bootstrap fixture {ship:?} in Sector 0");
     print_stats(&cluster).await;
     let accepted = cluster.nodes()[0].transit(ship, SectorId(1)).await;
     println!("  TransitCommand(S0 → S1) accepted: {accepted}");
@@ -117,10 +130,8 @@ pub(crate) async fn run_raft_demo() {
     println!("\n── Act 4: Transit during node failure ──");
     let owner = new_leader;
     let dest = (0..NODES).find(|&i| i != leader && i != owner).unwrap();
-    let ship2 = cluster.nodes()[owner]
-        .spawn_ship(Position::ORIGIN, Velocity::new(1.0, 0.0, 0.0))
-        .await;
-    println!("  spawned {ship2:?} in Sector {owner}");
+    let ship2 = failover_ships[owner];
+    println!("  using bootstrap fixture {ship2:?} in Sector {owner}");
     let accepted = cluster.nodes()[owner]
         .transit(ship2, SectorId(dest as u8))
         .await;
@@ -229,7 +240,10 @@ pub(crate) async fn run_phase2_demo() {
 
     // Spawn ships on all nodes.
     let t0 = Instant::now();
-    cluster.spawn_ships_on_all(P2_SHIPS, &config).await;
+    cluster
+        .spawn_ships_on_all(P2_SHIPS, &config)
+        .await
+        .expect("benchmark fixtures must be inserted before ticking");
     println!(
         "  spawn  : {} ships total in {:.2}ms",
         P2_NODES * P2_SHIPS,

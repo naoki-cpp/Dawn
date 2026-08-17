@@ -140,7 +140,9 @@ fn apply_jump_handoffs(
                 DomainEvent::JumpGateUsed(e) => {
                     if let Some(&player_id) = ship_player.get(&e.ship_id) {
                         let dest = e.to_sector.0 as usize;
-                        nodes[dest].adopt_player_ship(e.ship_id, player_id);
+                        nodes[dest]
+                            .adopt_player_ship(e.ship_id, player_id)
+                            .expect("live cluster nodes must accept committed transit ownership");
                         player_sector.insert(player_id, dest);
                         jumped_players.push((player_id, dest));
                         own_events.entry(player_id).or_default().push(event.clone());
