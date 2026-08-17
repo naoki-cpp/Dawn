@@ -79,19 +79,19 @@ only as an async in-memory adapter; it is not a second Tick implementation.
 | `crates/dawn-distributed/src/peer_transport.rs` | 963 | 🟡 shared peer framing/lifecycle・control/bulk isolation・tests。adapter surfaceが増えたらprotocol/framing分割 |
 | `crates/dawn-sector/src/transit/handoff.rs` | 963 | 🟢 Transit Saga request/commit/ack policy・retry/idempotency/recovery |
 | `crates/dawn-sector/src/node/snapshot_io.rs` | 961 | 🟢 snapshot/checkpoint/restore seam・tests |
-| `crates/dawn-sector/src/node/inventory.rs` | 940 | 🟢 fitting mutation boundary・tests。cargo操作は`ship_cargo.rs`へ分離済み |
+| `crates/dawn-sector/src/node/inventory.rs` | 908 | 🟢 fitting mutation boundary・tests。cargo操作は`ship_cargo.rs`へ分離済み |
 | `crates/dawn-sector/src/client_admission.rs` | 906 | 🟢 admission protocol state machine・tests |
 | `crates/dawn-protocol/src/server_fact.rs` | 806 | 🟢 server fact projection/schema・tests |
 | `crates/dawn-core/src/commands.rs` | 794 | 🟢 domain command types/validation data・tests |
 | `crates/dawn-sector/src/aoi.rs` | 781 | 🟢 AoI index/delta delivery contract・tests |
-| `crates/dawn-core/src/events.rs` | 776 | 🟢 domain event catalog/type definitions・tests |
+| `crates/dawn-core/src/events.rs` | 777 | 🟢 domain event catalog/type definitions・tests |
 | `crates/dawn-sector/src/node/spawner_logic.rs` | 732 | 🟢 spawn policy・tests |
 | `crates/dawn-sector/src/transit/tests.rs` | 676 | 🟢 transit integration tests |
 | `crates/dawn-sector/src/node/station_materialization.rs` | 650 | 🟢 station assemble/disassemble materialization・tests |
 | `crates/dawn-server/src/cluster.rs` | 648 | 🟢 in-process cluster wiring・fault tests |
 | `crates/dawn-server/src/serve/cluster.rs` | 646 | 🟢 clustered serve composition・admission/jump tests |
 | `crates/dawn-sector/src/node/approach.rs` | 631 | 🟢 approach steering state machine・tests |
-| `crates/dawn-sector/src/node/ship_cargo.rs` | 631 | 🟢 ship cargo ownership/bridge boundary・tests |
+| `crates/dawn-sector/src/node/ship_cargo.rs` | 681 | 🟢 ship cargo ownership/bridge boundary・tests |
 | `crates/dawn-market/src/repository.rs` | 623 | 🟡 SQLite order/Currency/outbox persistence。bounded-memory streamingはfollow-up |
 | `crates/dawn-distributed/src/state.rs` | 593 | 🟢 Raft state transition/persistence boundary・tests |
 | `crates/dawn-ecs/src/systems/combat.rs` | 584 | 🟢 combat system・tests |

@@ -50,13 +50,13 @@ Fit/Unfit は人間プレイヤーのみが行う操作のため）。
 ```rust
 // dawn-ecs/src/components/inventory.rs
 pub struct InventoryComp {
-    pub items: Vec<ModuleId>,   // 複数所持は同じ ModuleId を複数 push
+    pub items: BTreeMap<ItemId, u64>, // ItemIdごとのスタック個数
 }
 ```
 
-`Vec<ModuleId>` で十分（個体差のあるアイテムではなく、同一 `ModuleDefinition`
-の写しが複数あるだけ）。`FittingComp` の各スロットへ移動する際に1個消費し、
-Unfit で1個返す。
+`ItemId` は個体差のないアイテムの正規識別子であり、個数はスタック値として
+保持する（ItemIdの一般化とスタック化は ADR-0034 で確定）。`FittingComp` の
+各スロットへ移動する際に1個消費し、Unfitで1個返す。
 
 ### 4. コマンド
 
@@ -84,7 +84,7 @@ Unfit で1個返す。
 ### 5. イベント: `ShipFitted` にインベントリ・スナップショットを追加
 
 新規イベント型は導入しない。既存の `ShipFitted { ship_id, fitting, tick }` に
-`inventory: Vec<ModuleId>` を追加し、装備変更と対になるインベントリ変化を
+`inventory: BTreeMap<ItemId, u64>` を追加し、装備変更と対になるインベントリ変化を
 同じイベントで運ぶ（Fit/Unfit は常に両方を同時に変えるため、1イベントで
 両方の結果状態を記録するのが最小の追加で済む——新規イベント型 + 新規 replay
 分岐 + 新規 catalog エントリを避けられる）。
@@ -98,7 +98,7 @@ spawn 時に直接構築する（`apply_event` の `ShipSpawned` 分岐でも同
 ### 6. 永続化（スナップショット）
 
 `ShipSnapshot`（`dawn-sector::persistence::snapshot`）に
-`#[serde(default)] pub inventory: Vec<ModuleId>` を追加する。
+`#[serde(default)] pub inventory: BTreeMap<ItemId, u64>` を追加する。
 `#[serde(default)]` は既存スナップショットとの後方互換のため
 （`tackled_by` で確立済みの規約と同じ）。
 
@@ -115,12 +115,12 @@ spawn 時に直接構築する（`apply_event` の `ShipSpawned` 分岐でも同
   対になって発行されるため、2イベント化するメリットがない。既存イベントへの
   フィールド追加で足りる。
 - **アイテムをスタック数ではなく個体（ユニークID）で持つ**: 現状のモジュールに
-  個体差（劣化・改造）が無いため、`Vec<ModuleId>` の重複で表現できる。個体差が
-  要る機能（ダメージ付きモジュール等）が出たら、その時に型を作る。
+  個体差（劣化・改造）が無いため、`BTreeMap<ItemId, u64>` のスタックで十分。
+  個体差が要る機能（ダメージ付きモジュール等）が出たら、その時に型を作る。
 
 ## 実装チェックリスト
 
-- [x] dawn-core: `UnfitModuleCommand` 追加・`ShipFitted.inventory` 追加
+- [x] dawn-core: `UnfitModuleCommand` 追加・スタック型の `ShipFitted.inventory` 追加
 - [x] dawn-core: `SlotLayout::capacity_for(SlotKind) -> u8`
 - [x] dawn-ecs: `InventoryComp` 追加（`take`/`add`）
 - [x] dawn-ecs: `FittingComp::slot(&self, SlotKind) -> &[FittedSlot]`（読み取り専用）

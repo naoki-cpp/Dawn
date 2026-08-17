@@ -6,10 +6,15 @@ related  : .agents/skills/security-check/SKILL.md,
            .agents/skills/security-check/references/owasp-map.md,
            .agents/skills/security-check/references/baseline.md（初回レビューの凍結記録）,
            docs/architecture/security-review-completed.md（解消済みfindingの作業ログ）
-date     : 2026-08-10
+date     : 2026-08-17
 ---
 
 # Security Review — Dawn Server（OWASP観点）
+
+2026-08-17 update: Issue #317 replaced cargo/admission event snapshots with
+`BTreeMap<ItemId, u64>` stack rows, removing per-unit expansion. Market wire
+orders now reject values above SQLite's signed 64-bit range at admission; no
+new security finding was introduced.
 
 2026-08-10 update: Issue #279 added the SQLite-backed Market repository and
 the settlement adapter. SQL remains parameterized, Market order destinations
@@ -86,7 +91,7 @@ single/clusterともCreditの宛先は、所有かつドック済みの船を持
 
 ### A04 コマンド層のアロケーション
 
-`ClientRequest`はtyped IDs/enumsと固定形payloadのみ。クライアント供給カウントが駆動する無制限ループ/アロケーションはなく、非有限座標・半径はqueue投入前に構造化拒否される。
+`ClientRequest`はtyped IDs/enumsと固定形payloadのみ。クライアント供給カウントが駆動する無制限ループ/アロケーションはなく、非有限座標・半径はqueue投入前に構造化拒否される。Market wireのprice/quantityはSQLiteのsigned 64-bit範囲を超える値もqueue投入前に拒否される。
 
 `MarketCommandWire`もscalar-onlyで、per-sessionのMarket queueは既存command queueと同じ
 256件のbounded channel。`MarketSnapshot`は最大200注文で、DBの`open_orders_for`にも同じ
