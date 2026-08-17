@@ -374,18 +374,14 @@ mod tests {
     /// `ShipFitted` snapshot event that every cargo mutation emits (the one
     /// externally-visible source of truth for cargo contents outside the
     /// `dawn-sector` crate).
-    fn cargo_count_from_events(events: &[DomainEvent], ship_id: ShipId, item_id: ItemId) -> usize {
+    fn cargo_count_from_events(events: &[DomainEvent], ship_id: ShipId, item_id: ItemId) -> u64 {
         events
             .iter()
             .rev()
             .find_map(|event| match event {
-                DomainEvent::ShipFitted(fitted) if fitted.ship_id == ship_id => Some(
-                    fitted
-                        .inventory
-                        .iter()
-                        .filter(|item| **item == item_id)
-                        .count(),
-                ),
+                DomainEvent::ShipFitted(fitted) if fitted.ship_id == ship_id => {
+                    Some(fitted.inventory.get(&item_id).copied().unwrap_or(0))
+                }
                 _ => None,
             })
             .unwrap_or(0)

@@ -674,12 +674,6 @@ impl SimulationNode {
             .world
             .get::<dawn_ecs::components::InventoryComp>(entity)
             .map(|inv| inv.items.clone())
-            .map(|items| {
-                items
-                    .into_iter()
-                    .flat_map(|(item_id, count)| std::iter::repeat_n(item_id, count as usize))
-                    .collect()
-            })
             .unwrap_or_default();
         self.emit_event(DomainEvent::ShipFitted(dawn_core::events::ShipFitted {
             ship_id,

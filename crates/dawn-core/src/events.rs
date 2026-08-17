@@ -21,6 +21,7 @@ use crate::navigation::{AnchorId, JumpGateId, StarSystemId, StationId};
 use crate::ship_type::ShipTypeId;
 use crate::{AbsolutePosition, PlayerId, Position, SectorId, ShipId, Tick, Velocity};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// Every domain event that can be appended to the Event Log.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -230,7 +231,7 @@ pub struct ClientAdmissionCommitted {
     pub initial_position: AbsolutePosition,
     pub ship_type_id: ShipTypeId,
     pub fitting: FittingSnapshot,
-    pub inventory: Vec<ItemId>,
+    pub inventory: BTreeMap<ItemId, u64>,
     pub starter_station_id: StationId,
     pub starter_item_id: ItemId,
     pub starter_item_count: u64,
@@ -396,7 +397,7 @@ pub struct ShipFitted {
     /// 既存の ShipFitted に同梱する。Market の片側 Item bridge command も
     /// 装備を変えずにこのスナップショットを更新するため、同じイベントを再利用する。
     #[serde(default)]
-    pub inventory: Vec<ItemId>,
+    pub inventory: BTreeMap<ItemId, u64>,
     pub tick: Tick,
     /// Market settlement delivery that caused this cargo snapshot, if any.
     /// This lets event replay restore Sector-side duplicate-delivery protection.

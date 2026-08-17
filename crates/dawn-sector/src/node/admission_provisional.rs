@@ -250,12 +250,6 @@ impl SimulationNode {
             .world
             .get::<InventoryComp>(entity)
             .map(|inventory| inventory.items.clone())
-            .map(|items| {
-                items
-                    .into_iter()
-                    .flat_map(|(item_id, count)| std::iter::repeat_n(item_id, count as usize))
-                    .collect()
-            })
             .unwrap_or_default();
         let event = ClientAdmissionCommitted {
             player_id,

@@ -717,7 +717,7 @@ mod tests {
             DomainEvent::ShipFitted(dawn_core::events::ShipFitted {
                 ship_id: ship_id(1),
                 fitting: dawn_core::fitting::FittingSnapshot::empty(),
-                inventory: vec![],
+                inventory: Default::default(),
                 market_settlement_id: None,
                 tick,
             }),

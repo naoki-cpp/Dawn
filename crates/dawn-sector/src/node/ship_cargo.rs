@@ -383,15 +383,33 @@ mod tests {
         let dawn_core::DomainEvent::ShipFitted(event) = event else {
             panic!("cargo mutation must emit a ShipFitted snapshot");
         };
-        assert_eq!(
-            event
-                .inventory
-                .iter()
-                .filter(|item| **item == ItemId::ScrapMetal)
-                .count(),
-            1
-        );
+        assert_eq!(event.inventory.get(&ItemId::ScrapMetal), Some(&1));
         assert_eq!(event.market_settlement_id, Some(1));
+    }
+
+    #[test]
+    fn ship_fitted_snapshot_keeps_max_stack_as_one_entry() {
+        let mut node = node_with_modules();
+        let (_player, ship_id) = spawn_owned_player(&mut node);
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
+        {
+            let mut inventory = node
+                .simulation
+                .world
+                .get_mut::<InventoryComp>(entity)
+                .unwrap();
+            inventory.items.clear();
+            inventory.items.insert(ItemId::ScrapMetal, u64::MAX);
+        }
+
+        node.emit_ship_fitted(ship_id, entity);
+
+        let event = node.pending_events().last().unwrap();
+        let dawn_core::DomainEvent::ShipFitted(event) = event else {
+            panic!("cargo snapshot must emit a ShipFitted event");
+        };
+        assert_eq!(event.inventory.get(&ItemId::ScrapMetal), Some(&u64::MAX));
+        assert_eq!(event.inventory.len(), 1);
     }
 
     #[test]

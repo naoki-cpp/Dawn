@@ -21,6 +21,9 @@ use crate::runtime_frame::RuntimeNodeView;
 use dawn_sector::transition::MarketSettlementOutcome;
 
 const MAX_MARKET_ORDERS: usize = 200;
+/// SQLite persists Market numeric fields as signed 64-bit INTEGER values.
+/// Reject larger wire values before they enter the Market transition.
+const MAX_MARKET_ORDER_VALUE: u64 = i64::MAX as u64;
 const MARKET_DOCK_REQUIRED_NOTICE: &str = "Dock at a station to use the Market";
 
 /// Owns the persistent Market database for one serve process.
@@ -239,7 +242,12 @@ fn parse_order(
     price: u64,
     quantity: u64,
 ) -> Option<ParsedOrder> {
-    if price == 0 || quantity == 0 || price.checked_mul(quantity).is_none() {
+    if price == 0
+        || quantity == 0
+        || price > MAX_MARKET_ORDER_VALUE
+        || quantity > MAX_MARKET_ORDER_VALUE
+        || price.checked_mul(quantity).is_none()
+    {
         return None;
     }
     let item_id = ItemId::try_from(item_id).ok()?;
@@ -292,6 +300,30 @@ mod tests {
         assert!(parse_order(1, ItemWire::ScrapMetal, MarketOrderSide::Ask, 0, 1).is_none());
         assert!(parse_order(1, ItemWire::ScrapMetal, MarketOrderSide::Ask, 1, 0).is_none());
         assert!(parse_order(1, ItemWire::ScrapMetal, MarketOrderSide::Ask, u64::MAX, 2).is_none());
+        assert!(parse_order(
+            1,
+            ItemWire::ScrapMetal,
+            MarketOrderSide::Ask,
+            1,
+            MAX_MARKET_ORDER_VALUE + 1
+        )
+        .is_none());
+        assert!(parse_order(
+            1,
+            ItemWire::ScrapMetal,
+            MarketOrderSide::Ask,
+            MAX_MARKET_ORDER_VALUE + 1,
+            1
+        )
+        .is_none());
+        assert!(parse_order(
+            1,
+            ItemWire::ScrapMetal,
+            MarketOrderSide::Ask,
+            MAX_MARKET_ORDER_VALUE,
+            1
+        )
+        .is_some());
         assert!(parse_order(
             1,
             ItemWire::Module { module_id: 0 },
