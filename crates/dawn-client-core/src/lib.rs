@@ -32,6 +32,7 @@
 //! assert_eq!(loadout.active_ship_id, Some(7));
 //! ```
 
+mod client_action;
 mod client_rules;
 mod client_state;
 mod item_row;
@@ -42,6 +43,9 @@ mod ship_motion;
 mod world_session;
 mod world_space;
 
+pub use client_action::{
+    ClientAction, ClientActionContext, ClientInteraction, ClientKey, ClientLocalAction, Selection,
+};
 pub use client_rules::ClientRules;
 pub use client_state::{ClientFact, ClientState, ClientStateError, ShipLeaveReason};
 pub use dawn_core::StatDelta;

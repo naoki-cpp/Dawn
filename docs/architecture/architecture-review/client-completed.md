@@ -31,6 +31,20 @@ date     : 2026-08-10
 | C-12 | `WorldInteraction` selection read API二重化（#202） | `selection_state() -> Dictionary` を削除し、`main.gd` とテストを `selected_target_id()` / `selected_gate_id()` / `selected_body_id()` のscalar accessorへ統一。選択の相互排他性を維持したままstring-keyed境界を除去。 |
 | C-13 | server outcomeのtyped stateをDictionary経由でRustへ戻す二重変換（#238） | `ServerMessageOutcome::dispatch` がdecoded wire valueを`ClientFact`へ変換し、`ClientState`を通じて`WorldSessionState`へ適用してからtyped presentation recordをGDScriptへ通知する単一経路へ移行。navigation/ship lifecycle/AoI/health/lock/motion/dock/system/loadout/marketのDictionary再入力を削除し、pure Rust testとtyped fixture GdUnitを追加。 |
 | C-15 | Dictionary/string-tag intentとMarket JSON builder（#281） | `ClientIntent`/`ClientSelection` GDExtension型を追加し、`InputDecoder`/`WorldInteraction`/`main.gd`をsemantic predicateとtyped accessorへ移行。Marketの専用builder化、`MarketOrderSide` enum化、`ClientCommandResult`による明示的エラー、fallible `ClientMessage::encode`を導入し、JSON往復と空byte sentinelを削除。 |
+| C-17 | Client Action ladder | `ClientIntent`/`ClientSelection`/`InputDecoder`を削除。selection・double-click・入力ポリシーを`dawn-client-core::ClientInteraction`へ移し、`ClientAction`の`Request`/`Local`へ一度だけ分類。GDScriptはkey/hit-test正規化、scene effect、typed requestの`connection.gd::send_action` transportを担当し、camera-dependentなdouble-click移動だけは`send_move_command()`を使う。 |
+
+### 2026-08-17 — Client Action ladderの削除
+
+`dawn-client-core::ClientInteraction`が、相互排他的なselection、double-click timing、
+keyboard policy、typed `dawn_core::ClientRequest` constructionを所有するようにした。
+`ClientAction`はserver requestとGodot-only local effectを単一の型で表し、
+`main.gd`の25分岐と入力経路のsend wrapper列を、1つのexecutorと`send_action()`へ集約した。
+ただしカメラのscreen ray投影が必要なdouble-click移動だけは、local actionを受けた後に
+`send_move_command()`を呼ぶ。Godot側にはengine-specificなkey/hit-test normalizationと
+scene/presentation side effectだけを残した。
+
+Rust unit testでinteraction policyを検証し、GdUnit4はGDExtension境界を検証する。
+旧`input_decoder_test.gd`は削除し、`world_interaction_test.gd`は10件の薄い境界テストへ整理した。
 
 ### 2026-07-24: client WorldSpace の座標計算をRustへ移管
 
@@ -61,7 +75,6 @@ C-1 の抽出先（`ShipPicking` / `NavigationMarkerRenderer` / `InputDecoder` /
 | `main_test.gd` | main.gd 残存純粋関数 + モジュールdeactivate判定の回帰テスト | 38 |
 | `ship_picking_test.gd` | `ShipPicking`（画面空間ピッキング含む） | 12 |
 | `navigation_marker_renderer_test.gd` | `NavigationMarkerRenderer`（選択リング含む） | 12 |
-| `input_decoder_test.gd` | `InputDecoder` の型付き `ClientIntent` 生成とキー判定 | 9 |
 | `hud_manager_test.gd` | `HudManager`（2026-07-10、C-9解消でヒットテスト系4ケースを `hud_hit_test_test.gd` へ移動） | 26 |
 | `hud_hit_test_test.gd` | `HudHitTest`（2026-07-10新設、C-9解消。`module_slot_at`/`column_at` のヒットテストケース） | 7 |
 | `hud_surface_test.gd` | `HudSurface`（HUD render frame / fitting更新 / inventory hit-test 委譲 / パネル dirty-tracking 判定。C-4 で `ModuleRow` の `clone()`/`equals()` ベース差分判定のケースを追加）。2026-07-08、station roster / `source` タグ付けのケースを追加（+2） | 17 |
@@ -75,7 +88,7 @@ C-1 の抽出先（`ShipPicking` / `NavigationMarkerRenderer` / `InputDecoder` /
 | `player_loadout_test.gd` | `PlayerLoadout` typed GDExtension boundary | 3 |
 | `ship_controller_test.gd` | `ShipController` | 4 |
 | `world_session_test.gd` | `WorldSession`（InitialState / ship registry / HP / lock / tick-cap / destroy / dock state） | 13 |
-| `world_interaction_test.gd` | `WorldInteraction`（typed selection / double-click / lock intent / key intent 解釈） | 9 |
+| `world_interaction_test.gd` | `WorldInteraction`/`ClientInteraction`境界（selection / double-click / lock action / key action） | 10 |
 | `client_command_gd_test.gd` | `ClientCommandResult`、型付き Sector/Market builder、明示的な入力エラー | 5 |
 | `world_presentation_test.gd` | `WorldPresentation`（marker clamp / warp tunnel easing / sun state） | 9 |
 | **合計** | | **196**（`func test_` 実測、2026-08-10） |

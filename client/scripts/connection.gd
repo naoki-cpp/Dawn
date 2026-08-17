@@ -122,6 +122,13 @@ func _process(delta: float) -> void:
 func send_move_command(target: Vector3) -> void:
 	_send_request(_cmd.move_command(target.x, target.y, target.z))
 
+## Typed network actions arrive already classified by dawn-client-core. This is
+## the transport entry point for requests that do not need Godot-only data.
+## Camera-dependent double-click movement still uses send_move_command() after
+## the local action asks main.gd to project the screen ray.
+func send_action(action: ClientAction) -> void:
+	_send_request(action.request_result())
+
 func send_lock_on_command(target_id: int) -> void:
 	_send_request(_cmd.lock_on_command(target_id))
 

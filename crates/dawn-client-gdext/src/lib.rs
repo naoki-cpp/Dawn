@@ -5,8 +5,8 @@
 
 use godot::prelude::*;
 
+mod client_action_gd;
 mod client_command_gd;
-mod client_intent_gd;
 mod client_rules_gd;
 mod item_identity_gd;
 mod item_row_gd;
@@ -27,8 +27,8 @@ mod client_outcome {
     pub(crate) use crate::server_message_validation::validate_player_loadout_godot_ranges;
 }
 
+pub use client_action_gd::{ClientAction, ClientInteraction};
 pub use client_command_gd::{ClientCommand, ClientCommandResult};
-pub use client_intent_gd::{ClientIntent, ClientSelection};
 pub use client_rules_gd::ClientRules;
 pub use item_identity_gd::ItemIdentity;
 pub use item_row_gd::ItemRow;
