@@ -2,9 +2,9 @@
 //!
 //! [`WorldSessionState`] owns the state derived from InitialState and domain
 //! events. It deliberately has no scene-tree or transport dependency; the
-//! GDExtension layer converts wire values into [`WorldSessionUpdate`] and
-//! exposes typed presentation records while `main.gd` keeps the Node3D
-//! registry and visual side effects.
+//! GDExtension layer converts wire values into [`ClientFact`] and exposes
+//! typed presentation records while `main.gd` keeps the Node3D registry and
+//! visual side effects.
 
 use std::collections::BTreeMap;
 
@@ -195,73 +195,6 @@ pub struct DestructionOutcome {
     pub destroyed_opponent: bool,
 }
 
-/// One typed state transition accepted by [`WorldSessionState`].
-///
-/// The wire/Godot adapter converts external schemas into these plain values;
-/// the state module remains independent from `dawn-protocol` and Godot.
-#[derive(Debug, Clone, PartialEq)]
-pub enum WorldSessionUpdate {
-    InitialState {
-        navigation: NavigationInput,
-        ships: Vec<ShipRegistration>,
-        connection_ship_id: i64,
-    },
-    ShipEntered {
-        ship: ShipRegistration,
-        connection_ship_id: i64,
-    },
-    ShipSpawned {
-        ship_id: i64,
-        connection_ship_id: i64,
-    },
-    ShipLeft {
-        ship_id: i64,
-        clear_lock: bool,
-    },
-    ShipDestroyed {
-        ship_id: i64,
-    },
-    HealthChanged {
-        ship_id: i64,
-        shield: f64,
-        armor: f64,
-        hull: f64,
-    },
-    TargetLocked {
-        locker_id: i64,
-        target_id: i64,
-    },
-    LockLost {
-        locker_id: i64,
-        target_id: i64,
-    },
-    Docked {
-        ship_id: i64,
-        station_id: i64,
-        station_name: String,
-        tick: i64,
-    },
-    Undocked {
-        ship_id: i64,
-        tick: i64,
-    },
-    SystemChanged {
-        ship_id: i64,
-        to_system: i64,
-    },
-    Tick {
-        tick: i64,
-    },
-    PlayerLoadout {
-        active_ship_id: Option<i64>,
-        docked_station_id: Option<i64>,
-        docked_station_name: Option<String>,
-        tick: i64,
-    },
-    /// A typed event whose only client-state effect is event accounting.
-    ObservedEvent,
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShipRegistration {
     pub ship_id: i64,
@@ -360,143 +293,6 @@ impl Default for WorldSessionState {
 }
 
 impl WorldSessionState {
-    pub fn apply_update(
-        &mut self,
-        update: WorldSessionUpdate,
-        loadout: Option<&mut PlayerLoadoutMsg>,
-    ) -> WorldSessionEffect {
-        let counts_as_event = !matches!(
-            update,
-            WorldSessionUpdate::InitialState { .. } | WorldSessionUpdate::PlayerLoadout { .. }
-        );
-        if counts_as_event {
-            self.increment_event_count();
-        }
-
-        match update {
-            WorldSessionUpdate::InitialState {
-                navigation,
-                ships,
-                connection_ship_id,
-            } => {
-                self.reset();
-                self.ingest_navigation(navigation);
-                for registration in ships {
-                    self.register_ship(registration.ship_id, registration.ship, connection_ship_id);
-                }
-                WorldSessionEffect::InitialState {
-                    player_ship_id: self.player_ship_id,
-                }
-            }
-            WorldSessionUpdate::ShipEntered {
-                ship,
-                connection_ship_id,
-            } => {
-                let registered = !self.has_ship(ship.ship_id);
-                let became_player = self.register_ship(ship.ship_id, ship.ship, connection_ship_id);
-                WorldSessionEffect::ShipRegistered {
-                    registered,
-                    became_player,
-                }
-            }
-            WorldSessionUpdate::ShipSpawned {
-                ship_id,
-                connection_ship_id,
-            } => {
-                let registered = !self.has_ship(ship_id);
-                let became_player = self.register_ship(
-                    ship_id,
-                    ShipInput {
-                        max_shield: default_max_shield(),
-                        max_armor: default_max_armor(),
-                        max_hull: default_max_hull(),
-                        cap_max: default_cap_max(),
-                        cap_recharge_per_tick: default_cap_recharge(),
-                        ..ShipInput::default()
-                    },
-                    connection_ship_id,
-                );
-                WorldSessionEffect::ShipRegistered {
-                    registered,
-                    became_player,
-                }
-            }
-            WorldSessionUpdate::ShipLeft {
-                ship_id,
-                clear_lock,
-            } => WorldSessionEffect::ShipRemoved {
-                removed: self.remove_ship(ship_id, clear_lock),
-            },
-            WorldSessionUpdate::ShipDestroyed { ship_id } => {
-                WorldSessionEffect::ShipDestroyed(self.destroy_ship(ship_id))
-            }
-            WorldSessionUpdate::HealthChanged {
-                ship_id,
-                shield,
-                armor,
-                hull,
-            } => {
-                self.apply_hp_event(ship_id, shield, armor, hull);
-                WorldSessionEffect::None
-            }
-            WorldSessionUpdate::TargetLocked {
-                locker_id,
-                target_id,
-            } => WorldSessionEffect::LockChanged {
-                changed: self.apply_target_locked(locker_id, target_id),
-            },
-            WorldSessionUpdate::LockLost {
-                locker_id,
-                target_id,
-            } => WorldSessionEffect::LockChanged {
-                changed: self.apply_lock_lost(locker_id, target_id),
-            },
-            WorldSessionUpdate::Docked {
-                ship_id,
-                station_id,
-                station_name,
-                tick,
-            } => WorldSessionEffect::DockState {
-                accepted: self.apply_dock_event(ship_id, station_id, station_name, tick),
-            },
-            WorldSessionUpdate::Undocked { ship_id, tick } => WorldSessionEffect::DockState {
-                accepted: self.apply_undock_event(ship_id, tick),
-            },
-            WorldSessionUpdate::SystemChanged { ship_id, to_system } => {
-                WorldSessionEffect::SystemChanged {
-                    name: self.system_changed(ship_id, to_system),
-                }
-            }
-            WorldSessionUpdate::Tick { tick } => WorldSessionEffect::TickAdvanced {
-                ticks_elapsed: self.advance_tick_from_event(tick, loadout),
-            },
-            WorldSessionUpdate::PlayerLoadout {
-                active_ship_id,
-                docked_station_id,
-                docked_station_name,
-                tick,
-            } => {
-                let requested_ship_id = active_ship_id.unwrap_or(-1);
-                let active_changed = requested_ship_id != self.player_ship_id
-                    && (requested_ship_id < 0 || self.has_ship(requested_ship_id));
-                if active_changed {
-                    self.set_player_ship_id(requested_ship_id);
-                }
-                let station_id = docked_station_id.unwrap_or(-1);
-                let dock_changed = self.apply_dock_fitting(
-                    station_id,
-                    docked_station_name.unwrap_or_default(),
-                    tick,
-                );
-                WorldSessionEffect::PlayerLoadout {
-                    active_changed,
-                    dock_changed,
-                }
-            }
-            WorldSessionUpdate::ObservedEvent => WorldSessionEffect::None,
-        }
-    }
-
     pub fn reset(&mut self) {
         *self = Self::default();
     }
@@ -553,7 +349,7 @@ impl WorldSessionState {
         self.player_ship_id
     }
 
-    pub fn set_player_ship_id(&mut self, player_ship_id: i64) {
+    pub(crate) fn set_player_ship_id(&mut self, player_ship_id: i64) {
         self.player_ship_id = player_ship_id;
         remove_id(&mut self.opponent_ship_ids, player_ship_id);
         let Some(ship) = self.ships.get(&player_ship_id).cloned() else {
@@ -621,11 +417,11 @@ impl WorldSessionState {
         self.docked_station_id >= 0
     }
 
-    pub fn increment_event_count(&mut self) {
+    pub(crate) fn increment_event_count(&mut self) {
         self.event_count += 1;
     }
 
-    pub fn ingest_navigation(&mut self, input: NavigationInput) {
+    pub(crate) fn ingest_navigation(&mut self, input: NavigationInput) {
         self.current_system_name = input.system_name;
         self.system_names = input
             .systems
@@ -674,7 +470,7 @@ impl WorldSessionState {
             .collect();
     }
 
-    pub fn register_ship(
+    pub(crate) fn register_ship(
         &mut self,
         ship_id: i64,
         input: ShipInput,
@@ -709,7 +505,7 @@ impl WorldSessionState {
 
     /// Drops `ship_id` from the session. Returns whether it was there to drop
     /// -- the caller uses that to decide whether to free the scene node.
-    pub fn remove_ship(&mut self, ship_id: i64, clear_lock: bool) -> bool {
+    pub(crate) fn remove_ship(&mut self, ship_id: i64, clear_lock: bool) -> bool {
         if self.ships.remove(&ship_id).is_none() {
             return false;
         }
@@ -724,7 +520,7 @@ impl WorldSessionState {
         true
     }
 
-    pub fn destroy_ship(&mut self, ship_id: i64) -> DestructionOutcome {
+    pub(crate) fn destroy_ship(&mut self, ship_id: i64) -> DestructionOutcome {
         if self.ships.remove(&ship_id).is_none() {
             return DestructionOutcome::default();
         }
@@ -748,7 +544,7 @@ impl WorldSessionState {
         }
     }
 
-    pub fn system_changed(&mut self, ship_id: i64, to_system: i64) -> Option<String> {
+    pub(crate) fn system_changed(&mut self, ship_id: i64, to_system: i64) -> Option<String> {
         if ship_id != self.player_ship_id {
             return None;
         }
@@ -766,7 +562,7 @@ impl WorldSessionState {
     /// feedback, and neither of the other two values the old
     /// `HealthEventOutcome` reported (`changed_player`, `has_ship`) had a
     /// reader on either side of the Godot boundary.
-    pub fn apply_hp_event(&mut self, ship_id: i64, shield: f64, armor: f64, hull: f64) {
+    pub(crate) fn apply_hp_event(&mut self, ship_id: i64, shield: f64, armor: f64, hull: f64) {
         if !self.ships.contains_key(&ship_id) {
             return;
         }
@@ -781,7 +577,7 @@ impl WorldSessionState {
         }
     }
 
-    pub fn apply_target_locked(&mut self, locker_id: i64, target_id: i64) -> bool {
+    pub(crate) fn apply_target_locked(&mut self, locker_id: i64, target_id: i64) -> bool {
         if locker_id != self.player_ship_id {
             return false;
         }
@@ -789,7 +585,7 @@ impl WorldSessionState {
         true
     }
 
-    pub fn apply_lock_lost(&mut self, locker_id: i64, target_id: i64) -> bool {
+    pub(crate) fn apply_lock_lost(&mut self, locker_id: i64, target_id: i64) -> bool {
         if locker_id != self.player_ship_id {
             return false;
         }
@@ -799,7 +595,7 @@ impl WorldSessionState {
         true
     }
 
-    pub fn advance_tick_from_event(
+    pub(crate) fn advance_tick_from_event(
         &mut self,
         tick: i64,
         loadout: Option<&mut PlayerLoadoutMsg>,
@@ -821,7 +617,7 @@ impl WorldSessionState {
         self.simulate_cap(ticks, loadout);
     }
 
-    pub fn apply_dock_event(
+    pub(crate) fn apply_dock_event(
         &mut self,
         ship_id: i64,
         station_id: i64,
@@ -834,14 +630,19 @@ impl WorldSessionState {
         self.apply_dock_state(station_id, station_name, tick)
     }
 
-    pub fn apply_undock_event(&mut self, ship_id: i64, tick: i64) -> bool {
+    pub(crate) fn apply_undock_event(&mut self, ship_id: i64, tick: i64) -> bool {
         if ship_id != self.player_ship_id {
             return false;
         }
         self.apply_dock_state(-1, String::new(), tick)
     }
 
-    pub fn apply_dock_fitting(&mut self, station_id: i64, station_name: String, tick: i64) -> bool {
+    pub(crate) fn apply_dock_fitting(
+        &mut self,
+        station_id: i64,
+        station_name: String,
+        tick: i64,
+    ) -> bool {
         self.apply_dock_state(station_id, station_name, tick)
     }
 
@@ -1039,163 +840,63 @@ mod tests {
     }
 
     #[test]
-    fn typed_initial_state_is_the_authoritative_ingestion_path() {
+    fn initial_state_ingestion_registers_navigation_and_ships() {
         let mut state = WorldSessionState::default();
-        let effect = state.apply_update(
-            WorldSessionUpdate::InitialState {
-                navigation: NavigationInput {
-                    system_name: "Alpha".to_string(),
-                    systems: vec![SystemNameInput {
-                        id: 2,
-                        name: "Beta".to_string(),
-                    }],
-                    jump_gates: vec![GateInput {
-                        gate_id: 7,
-                        position: PositionInput {
-                            x: 149_597_870_710.0,
-                            y: 20.0,
-                            z: 30.0,
-                        },
-                        activation_radius: 1000.0,
-                        to_system_name: "Beta".to_string(),
-                    }],
-                    ..NavigationInput::default()
+        state.ingest_navigation(NavigationInput {
+            system_name: "Alpha".to_string(),
+            systems: vec![SystemNameInput {
+                id: 2,
+                name: "Beta".to_string(),
+            }],
+            jump_gates: vec![GateInput {
+                gate_id: 7,
+                position: PositionInput {
+                    x: 149_597_870_710.0,
+                    y: 20.0,
+                    z: 30.0,
                 },
-                ships: vec![ShipRegistration {
-                    ship_id: 11,
-                    ship: ship(true),
-                }],
-                connection_ship_id: 11,
-            },
-            None,
-        );
+                activation_radius: 1000.0,
+                to_system_name: "Beta".to_string(),
+            }],
+            ..NavigationInput::default()
+        });
+        state.register_ship(11, ship(true), 11);
 
-        assert_eq!(
-            effect,
-            WorldSessionEffect::InitialState { player_ship_id: 11 }
-        );
         assert_eq!(state.current_system_name(), "Alpha");
         assert_eq!(state.gates()[0].position[0], 149_597_870_710.0);
         assert_eq!(state.player_ship_id(), 11);
     }
 
     #[test]
-    fn typed_event_updates_cover_lifecycle_health_lock_and_docking() {
+    fn direct_state_operations_cover_lifecycle_health_lock_and_docking() {
         let mut state = WorldSessionState::default();
-        state.apply_update(
-            WorldSessionUpdate::ShipEntered {
-                ship: ShipRegistration {
-                    ship_id: 11,
-                    ship: ship(true),
-                },
-                connection_ship_id: 11,
-            },
-            None,
-        );
-        state.apply_update(
-            WorldSessionUpdate::HealthChanged {
-                ship_id: 11,
-                shield: 10.0,
-                armor: 20.0,
-                hull: 30.0,
-            },
-            None,
-        );
+        state.register_ship(11, ship(true), 11);
+        state.apply_hp_event(11, 10.0, 20.0, 30.0);
         assert_eq!(state.player_health().hull, 30.0);
-        assert!(matches!(
-            state.apply_update(
-                WorldSessionUpdate::TargetLocked {
-                    locker_id: 11,
-                    target_id: 42,
-                },
-                None,
-            ),
-            WorldSessionEffect::LockChanged { changed: true }
-        ));
+        assert!(state.apply_target_locked(11, 42));
         assert_eq!(state.player_lock_target(), 42);
-        assert!(matches!(
-            state.apply_update(
-                WorldSessionUpdate::Docked {
-                    ship_id: 11,
-                    station_id: 3,
-                    station_name: "Forge".to_string(),
-                    tick: 8,
-                },
-                None,
-            ),
-            WorldSessionEffect::DockState { accepted: true }
-        ));
+        assert!(state.apply_dock_event(11, 3, "Forge".to_string(), 8));
         assert!(state.is_docked());
-        assert!(matches!(
-            state.apply_update(
-                WorldSessionUpdate::ShipLeft {
-                    ship_id: 11,
-                    clear_lock: true,
-                },
-                None,
-            ),
-            WorldSessionEffect::ShipRemoved { removed: true }
-        ));
+        assert!(state.remove_ship(11, true));
         assert!(!state.has_ship(11));
-        assert_eq!(state.event_count(), 5);
     }
 
     #[test]
-    fn typed_player_loadout_rejects_unknown_active_ship_and_stale_dock_state() {
+    fn direct_loadout_reconciliation_rejects_stale_dock_state() {
         let mut state = WorldSessionState::default();
-        state.apply_update(
-            WorldSessionUpdate::ShipEntered {
-                ship: ShipRegistration {
-                    ship_id: 11,
-                    ship: ship(true),
-                },
-                connection_ship_id: 11,
-            },
-            None,
-        );
-        state.apply_update(
-            WorldSessionUpdate::Docked {
-                ship_id: 11,
-                station_id: 3,
-                station_name: "New".to_string(),
-                tick: 20,
-            },
-            None,
-        );
+        state.register_ship(11, ship(true), 11);
+        assert!(state.apply_dock_event(11, 3, "New".to_string(), 20));
 
-        let effect = state.apply_update(
-            WorldSessionUpdate::PlayerLoadout {
-                active_ship_id: Some(99),
-                docked_station_id: Some(2),
-                docked_station_name: Some("Stale".to_string()),
-                tick: 19,
-            },
-            None,
-        );
-        assert_eq!(
-            effect,
-            WorldSessionEffect::PlayerLoadout {
-                active_changed: false,
-                dock_changed: false,
-            }
-        );
+        assert!(!state.apply_dock_fitting(2, "Stale".to_string(), 19));
         assert_eq!(state.player_ship_id(), 11);
         assert_eq!(state.docked_station_id(), 3);
     }
 
     #[test]
-    fn typed_health_update_ignores_unknown_ship() {
+    fn direct_health_update_ignores_unknown_ship() {
         let mut state = WorldSessionState::default();
 
-        state.apply_update(
-            WorldSessionUpdate::HealthChanged {
-                ship_id: 99,
-                shield: 1.0,
-                armor: 2.0,
-                hull: 3.0,
-            },
-            None,
-        );
+        state.apply_hp_event(99, 1.0, 2.0, 3.0);
 
         assert!(!state.ship_hp().contains_key(&99));
     }

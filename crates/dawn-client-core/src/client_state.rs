@@ -4,7 +4,6 @@ use std::fmt;
 
 use crate::{
     NavigationInput, PlayerLoadoutMsg, ShipRegistration, WorldSessionEffect, WorldSessionState,
-    WorldSessionUpdate,
 };
 
 /// Why a ship disappeared from the visible world.
@@ -119,89 +118,122 @@ impl<'a> ClientState<'a> {
     }
 
     pub fn apply(&mut self, fact: ClientFact) -> Result<WorldSessionEffect, ClientStateError> {
-        let update = match fact {
+        if !matches!(
+            fact,
+            ClientFact::InitialState { .. }
+                | ClientFact::PlayerLoadout(_)
+                | ClientFact::ModuleActivation { .. }
+        ) {
+            self.session.increment_event_count();
+        }
+
+        match fact {
             ClientFact::InitialState {
                 navigation,
                 ships,
                 connection_ship_id,
-            } => WorldSessionUpdate::InitialState {
-                navigation,
-                ships,
-                connection_ship_id,
-            },
+            } => {
+                self.session.reset();
+                self.session.ingest_navigation(navigation);
+                for registration in ships {
+                    self.session.register_ship(
+                        registration.ship_id,
+                        registration.ship,
+                        connection_ship_id,
+                    );
+                }
+                Ok(WorldSessionEffect::InitialState {
+                    player_ship_id: self.session.player_ship_id(),
+                })
+            }
             ClientFact::ShipEntered {
                 ship,
                 connection_ship_id,
             } => {
                 let ship_id = ship.ship_id;
-                return Ok(self.apply_ship_registration(
-                    ship_id,
-                    WorldSessionUpdate::ShipEntered {
-                        ship,
-                        connection_ship_id,
-                    },
-                ));
+                let registered = !self.session.has_ship(ship_id);
+                let became_player =
+                    self.session
+                        .register_ship(ship_id, ship.ship, connection_ship_id);
+                Ok(self.reconcile_ship_registration(ship_id, registered, became_player))
             }
             ClientFact::ShipSpawned {
                 ship_id,
                 connection_ship_id,
             } => {
-                return Ok(self.apply_ship_registration(
+                let registered = !self.session.has_ship(ship_id);
+                let became_player = self.session.register_ship(
                     ship_id,
-                    WorldSessionUpdate::ShipSpawned {
-                        ship_id,
-                        connection_ship_id,
+                    crate::ShipInput {
+                        max_shield: crate::default_max_shield(),
+                        max_armor: crate::default_max_armor(),
+                        max_hull: crate::default_max_hull(),
+                        cap_max: crate::default_cap_max(),
+                        cap_recharge_per_tick: crate::default_cap_recharge(),
+                        ..crate::ShipInput::default()
                     },
-                ));
+                    connection_ship_id,
+                );
+                Ok(self.reconcile_ship_registration(ship_id, registered, became_player))
             }
-            ClientFact::ShipLeft { ship_id, reason } => WorldSessionUpdate::ShipLeft {
-                ship_id,
-                clear_lock: reason == ShipLeaveReason::Despawn,
-            },
-            ClientFact::ShipDestroyed { ship_id } => WorldSessionUpdate::ShipDestroyed { ship_id },
+            ClientFact::ShipLeft { ship_id, reason } => Ok(WorldSessionEffect::ShipRemoved {
+                removed: self
+                    .session
+                    .remove_ship(ship_id, reason == ShipLeaveReason::Despawn),
+            }),
+            ClientFact::ShipDestroyed { ship_id } => Ok(WorldSessionEffect::ShipDestroyed(
+                self.session.destroy_ship(ship_id),
+            )),
             ClientFact::HealthChanged {
                 ship_id,
                 shield,
                 armor,
                 hull,
-            } => WorldSessionUpdate::HealthChanged {
-                ship_id,
-                shield,
-                armor,
-                hull,
-            },
+            } => {
+                self.session.apply_hp_event(ship_id, shield, armor, hull);
+                Ok(WorldSessionEffect::None)
+            }
             ClientFact::TargetLocked {
                 locker_id,
                 target_id,
-            } => WorldSessionUpdate::TargetLocked {
-                locker_id,
-                target_id,
-            },
+            } => Ok(WorldSessionEffect::LockChanged {
+                changed: self.session.apply_target_locked(locker_id, target_id),
+            }),
             ClientFact::LockLost {
                 locker_id,
                 target_id,
-            } => WorldSessionUpdate::LockLost {
-                locker_id,
-                target_id,
-            },
+            } => Ok(WorldSessionEffect::LockChanged {
+                changed: self.session.apply_lock_lost(locker_id, target_id),
+            }),
             ClientFact::Docked {
                 ship_id,
                 station_id,
                 tick,
-            } => WorldSessionUpdate::Docked {
-                ship_id,
-                station_id,
-                station_name: self.session.station_name(station_id),
-                tick,
-            },
-            ClientFact::Undocked { ship_id, tick } => {
-                WorldSessionUpdate::Undocked { ship_id, tick }
+            } => {
+                let station_name = self.session.station_name(station_id);
+                Ok(WorldSessionEffect::DockState {
+                    accepted: self.session.apply_dock_event(
+                        ship_id,
+                        station_id,
+                        station_name,
+                        tick,
+                    ),
+                })
             }
+            ClientFact::Undocked { ship_id, tick } => Ok(WorldSessionEffect::DockState {
+                accepted: self.session.apply_undock_event(ship_id, tick),
+            }),
             ClientFact::SystemChanged { ship_id, to_system } => {
-                WorldSessionUpdate::SystemChanged { ship_id, to_system }
+                Ok(WorldSessionEffect::SystemChanged {
+                    name: self.session.system_changed(ship_id, to_system),
+                })
             }
-            ClientFact::Tick { tick } => WorldSessionUpdate::Tick { tick },
-            ClientFact::PlayerLoadout(loadout) => return self.replace_loadout(loadout),
+            ClientFact::Tick { tick } => Ok(WorldSessionEffect::TickAdvanced {
+                ticks_elapsed: self
+                    .session
+                    .advance_tick_from_event(tick, self.loadout.as_mut()),
+            }),
+            ClientFact::PlayerLoadout(loadout) => self.replace_loadout(loadout),
             ClientFact::ModuleActivation {
                 ship_id,
                 module_id,
@@ -214,36 +246,28 @@ impl<'a> ClientState<'a> {
                         loadout.apply_module_activation(module_id, active, forced_reason);
                     }
                 }
-                return Ok(WorldSessionEffect::None);
+                Ok(WorldSessionEffect::None)
             }
-            ClientFact::ObservedEvent => WorldSessionUpdate::ObservedEvent,
-        };
-        Ok(self.apply_world(update))
+            ClientFact::ObservedEvent => Ok(WorldSessionEffect::None),
+        }
     }
 
-    fn apply_ship_registration(
+    fn reconcile_ship_registration(
         &mut self,
         ship_id: i64,
-        update: WorldSessionUpdate,
+        registered: bool,
+        became_player: bool,
     ) -> WorldSessionEffect {
-        match self.apply_world(update) {
-            WorldSessionEffect::ShipRegistered {
+        if became_player || self.active_loadout_ship_id() != Some(ship_id) {
+            return WorldSessionEffect::ShipRegistered {
                 registered,
                 became_player,
-            } => {
-                if became_player || self.active_loadout_ship_id() != Some(ship_id) {
-                    return WorldSessionEffect::ShipRegistered {
-                        registered,
-                        became_player,
-                    };
-                }
-                self.session.set_player_ship_id(ship_id);
-                WorldSessionEffect::ShipRegistered {
-                    registered,
-                    became_player: true,
-                }
-            }
-            other => other,
+            };
+        }
+        self.session.set_player_ship_id(ship_id);
+        WorldSessionEffect::ShipRegistered {
+            registered,
+            became_player: true,
         }
     }
 
@@ -264,16 +288,22 @@ impl<'a> ClientState<'a> {
         let tick = client_i64(loadout.tick, "player_loadout.tick")?;
 
         *self.loadout = Some(loadout);
-        Ok(self.apply_world(WorldSessionUpdate::PlayerLoadout {
-            active_ship_id,
-            docked_station_id,
-            docked_station_name,
-            tick,
-        }))
-    }
 
-    fn apply_world(&mut self, update: WorldSessionUpdate) -> WorldSessionEffect {
-        self.session.apply_update(update, self.loadout.as_mut())
+        let requested_ship_id = active_ship_id.unwrap_or(-1);
+        let active_changed = requested_ship_id != self.session.player_ship_id()
+            && (requested_ship_id < 0 || self.session.has_ship(requested_ship_id));
+        if active_changed {
+            self.session.set_player_ship_id(requested_ship_id);
+        }
+        let dock_changed = self.session.apply_dock_fitting(
+            docked_station_id.unwrap_or(-1),
+            docked_station_name.unwrap_or_default(),
+            tick,
+        );
+        Ok(WorldSessionEffect::PlayerLoadout {
+            active_changed,
+            dock_changed,
+        })
     }
 }
 
@@ -747,6 +777,40 @@ mod tests {
         assert_eq!(session.player_lock_target(), -1);
         assert_eq!(session.event_count(), 0);
         assert_eq!(session.ship_count(), 1);
+    }
+
+    #[test]
+    fn client_fact_application_accounts_for_each_server_event_once() {
+        let (mut session, mut loadout) = setup();
+        assert_eq!(session.event_count(), 0);
+
+        ClientState::new(&mut session, &mut loadout)
+            .apply(ClientFact::ObservedEvent)
+            .unwrap();
+        assert_eq!(session.event_count(), 1);
+
+        ClientState::new(&mut session, &mut loadout)
+            .apply(ClientFact::ModuleActivation {
+                ship_id: 1,
+                module_id: 7,
+                active: true,
+                forced_reason: String::new(),
+            })
+            .unwrap();
+        assert_eq!(session.event_count(), 1);
+
+        ClientState::new(&mut session, &mut loadout)
+            .apply(ClientFact::PlayerLoadout(PlayerLoadoutMsg::default()))
+            .unwrap();
+        assert_eq!(session.event_count(), 1);
+
+        ClientState::new(&mut session, &mut loadout)
+            .apply(ClientFact::TargetLocked {
+                locker_id: 1,
+                target_id: 2,
+            })
+            .unwrap();
+        assert_eq!(session.event_count(), 2);
     }
 
     #[test]
