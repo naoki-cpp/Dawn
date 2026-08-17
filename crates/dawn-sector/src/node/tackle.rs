@@ -217,7 +217,7 @@ mod tests {
     #[test]
     fn tackle_releases_when_tackler_dies() {
         use crate::modules::MODULE_FOLD_DISRUPTOR;
-        use dawn_core::{ActivateModuleCommand, DomainEvent, LockOnCommand, SlotKind};
+        use dawn_core::{ActivateModuleCommand, LockOnCommand, SlotKind};
 
         let mut node = node_with_modules();
 
@@ -270,13 +270,7 @@ mod tests {
             "should be tackled first"
         );
 
-        node.apply_event_pub(DomainEvent::ShipDestroyed(
-            dawn_core::events::ShipDestroyed {
-                ship_id: ship_a,
-                killer_id: ship_b,
-                tick: node.current_tick(),
-            },
-        ));
+        node.remove_ship(ship_a);
         node.tick_with_lock_commands(&[]);
 
         assert!(
@@ -352,15 +346,10 @@ mod tests {
             "snapshot must record the tackler"
         );
 
-        let store2 = dawn_storage::InMemoryEventStore::new();
-        let modules: Vec<_> = crate::game_data::test_catalog().modules().to_vec();
-        let ship_types: Vec<_> = crate::game_data::test_catalog().ship_types().to_vec();
-        let node2 = SimulationNode::restore_from_test(
-            store2,
+        let node2 = SimulationNode::restore_from(
             &snapshot,
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-            &modules,
-            &ship_types,
+            crate::game_data::test_catalog_arc(),
         );
         assert!(
             !node2.can_propose_warp(ship_b, dawn_core::WarpTarget::Gate(gate_id)),

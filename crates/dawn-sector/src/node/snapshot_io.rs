@@ -207,7 +207,7 @@ impl SimulationNode {
     /// this struct owns directly — ships are materialised separately by
     /// `restore_ship_from_snapshot`. The external recovery journal is applied
     /// by the runtime after this checkpoint is loaded; this method does not
-    /// replay public events.
+    /// interpret public events as authoritative state.
     ///
     /// `StateSnapshot` is destructured exhaustively (no `..`) for the same
     /// reason `take_snapshot` destructures the node: adding a field there must
@@ -231,7 +231,7 @@ impl SimulationNode {
             pending_auto_jumps,
             applied_market_settlements,
             // `ships` needs the module and ship-type registries in place first.
-            // `covered_recovery_index` is external journal coverage, not a replay cursor for
+            // `covered_recovery_index` is external journal coverage, not an event cursor for
             // this storage-independent restore operation.
             ships: _,
             covered_recovery_index: _,
@@ -275,7 +275,6 @@ mod tests {
     use crate::node::station::StationOperationOutcome;
     use crate::persistence::{ShipSnapshot, StateSnapshot};
     use dawn_core::{NodeId, PlayerId, Position, SectorBounds, SectorId, ShipId, Tick, Velocity};
-    use dawn_storage::{store::EventStore, FileEventStore, InMemoryEventStore};
 
     fn mem_node() -> SimulationNode {
         SimulationNode::new_test(
@@ -305,26 +304,11 @@ mod tests {
     /// field.
     #[test]
     fn restoring_a_snapshot_and_recapturing_reproduces_it_exactly() {
-        // This fixture uses the test-only EventStore replay helper to preserve
-        // coverage for the legacy public-event reducer. Production restore is
-        // storage-independent and does not use this cursor as a replay range.
-        let mut store = InMemoryEventStore::new();
-        for i in 0..3 {
-            store.append(dawn_core::DomainEvent::ShipDespawned(
-                dawn_core::events::ShipDespawned {
-                    ship_id: ShipId::new(NodeId(0), 900 + i),
-                    tick: Tick(0),
-                },
-            ));
-        }
-
-        let original = snapshot_fixture(store.len() as u64);
-        let node = SimulationNode::restore_from_test(
-            store,
+        let original = snapshot_fixture(0);
+        let node = SimulationNode::restore_from(
             &original,
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-            crate::game_data::test_catalog().modules(),
-            crate::game_data::test_catalog().ship_types(),
+            crate::game_data::test_catalog_arc(),
         );
 
         assert_eq!(
@@ -347,12 +331,10 @@ mod tests {
         let second = node.next_player_id();
         let snapshot = node.take_snapshot();
 
-        let mut restored = SimulationNode::restore_from_test(
-            InMemoryEventStore::new(),
+        let mut restored = SimulationNode::restore_from(
             &snapshot,
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-            crate::game_data::test_catalog().modules(),
-            crate::game_data::test_catalog().ship_types(),
+            crate::game_data::test_catalog_arc(),
         );
 
         let after_restart = restored.next_player_id();
@@ -451,6 +433,7 @@ mod tests {
 
     #[test]
     fn snapshot_records_correct_ship_count_and_tick() {
+        const COVERED_RECOVERY_INDEX: u64 = 41;
         let mut node = mem_node();
         for i in 0..3 {
             node.spawn_ship(
@@ -463,10 +446,10 @@ mod tests {
             node.tick();
         }
 
-        let snap = node.take_snapshot_at(node.total_event_count() as u64);
+        let snap = node.take_snapshot_at(COVERED_RECOVERY_INDEX);
         assert_eq!(snap.ships.len(), 3);
         assert_eq!(snap.tick, Tick(5));
-        assert_eq!(snap.covered_recovery_index, node.total_event_count() as u64);
+        assert_eq!(snap.covered_recovery_index, COVERED_RECOVERY_INDEX);
     }
 
     #[test]
@@ -477,17 +460,16 @@ mod tests {
         let final_tick: Tick;
         let final_positions: Vec<Position>;
         {
-            let mut node = SimulationNode::with_test_store(
+            let mut node = SimulationNode::new_test(
                 NodeId(0),
                 SectorId(0),
                 SectorBounds::centered(SectorBounds::DEFAULT_HALF),
                 std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-                dawn_storage::InMemoryEventStore::new(),
             );
 
-            // Spawn owned player ships with a stable velocity. The legacy
-            // snapshot restores the instantaneous movement state; an active
-            // thrust command belongs to the RecoveryDelta write set instead.
+            // Spawn owned player ships with a stable velocity. The checkpoint
+            // restores instantaneous movement state; an active thrust command
+            // belongs to the RecoveryDelta write set instead.
             ship_ids = (0..5u64)
                 .map(|i| {
                     let id = node.spawn_player_ship_at_pub(
@@ -537,7 +519,7 @@ mod tests {
         assert_eq!(
             node2.current_tick(),
             final_tick,
-            "tick must match after restore + replay ticks"
+            "tick must match after restore + subsequent ticks"
         );
         assert_eq!(
             node2.ship_count(),
@@ -550,7 +532,7 @@ mod tests {
                 .expect("ship must exist after restore");
             assert_eq!(
                 restored_pos, *expected_pos,
-                "position of ship {} must match after restore + replay",
+                "position of ship {} must match after restore + subsequent ticks",
                 id
             );
         }
@@ -560,6 +542,7 @@ mod tests {
     /// restoring it and snapshotting again yields a byte-identical snapshot.
     #[test]
     fn snapshot_round_trips_through_restore_byte_for_byte() {
+        const COVERED_RECOVERY_INDEX: u64 = 73;
         let mut node = node_with_modules();
 
         for i in 0..4u64 {
@@ -575,20 +558,16 @@ mod tests {
             node.tick();
         }
 
-        let snap1 = node.take_snapshot_at(node.total_event_count() as u64);
+        let snap1 = node.take_snapshot_at(COVERED_RECOVERY_INDEX);
 
-        let mut store2 = InMemoryEventStore::new();
-        for event in node.pending_events() {
-            store2.append(event.clone());
-        }
-        let node2 = SimulationNode::restore_from_test(
-            store2,
+        let node2 = SimulationNode::restore_from(
             &snap1,
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-            crate::game_data::test_catalog().modules(),
-            crate::game_data::test_catalog().ship_types(),
+            crate::game_data::test_catalog_arc(),
         );
         let snap2 = node2.take_snapshot_at(snap1.covered_recovery_index);
+
+        assert_eq!(snap2.covered_recovery_index, COVERED_RECOVERY_INDEX);
 
         assert_eq!(
             postcard::to_stdvec(&snap1).unwrap(),
@@ -597,80 +576,19 @@ mod tests {
         );
     }
 
-    /// Legacy snapshot + public-event-tail regression for INV-002 / ADR-0017
-    /// (8A-1). It verifies the current implementation's ability to reproduce
-    /// capacitor state after snapshot restore and tail-tick re-execution.
-    /// ADR-0049 supersedes this path as operational recovery authority: the
-    /// future versioned RecoveryDelta/checkpoint must carry capacitor state.
-    ///
-    /// Ships coast at constant velocity with no move command so this regression
-    /// does not depend on flight-mode recovery. Both live and restored nodes
-    /// coast identically, isolating the snapshot round-trip property.
-    #[test]
-    fn snapshot_plus_tail_tick_reexecution_matches_live_including_capacitor() {
-        let mut live = node_with_modules();
-
-        for i in 0..3u64 {
-            live.spawn_ship(
-                dawn_core::ShipTypeId(1),
-                Position::new(i as f64 * 100.0, 0.0, 0.0),
-                Velocity::new(120.0, -40.0, 0.0),
-            );
-        }
-
-        for _ in 0..12 {
-            live.tick();
-        }
-        let snap = live.take_snapshot_at(live.total_event_count() as u64);
-        let events_up_to_snapshot: Vec<_> = live
-            .pending_events()
-            .iter()
-            .take(snap.covered_recovery_index as usize)
-            .cloned()
-            .collect();
-
-        for _ in 0..4 {
-            live.tick();
-        }
-        let live_final = live.take_snapshot();
-
-        let mut store2 = InMemoryEventStore::new();
-        for e in events_up_to_snapshot {
-            store2.append(e);
-        }
-        let mut restored = SimulationNode::restore_from_test(
-            store2,
-            &snap,
-            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-            crate::game_data::test_catalog().modules(),
-            crate::game_data::test_catalog().ship_types(),
-        );
-        for _ in 0..4 {
-            restored.tick();
-        }
-        let restored_final = restored.take_snapshot();
-
-        assert_eq!(
-            postcard::to_stdvec(&live_final).unwrap(),
-            postcard::to_stdvec(&restored_final).unwrap(),
-            "snapshot + tail tick re-execution must match live, including capacitor"
-        );
-    }
-
     /// INV-002 / ADR-0017 (8A-4) — operational recovery does NOT require genesis
-    /// replay. After compacting the hot log behind the snapshot, reopening and
-    /// restoring from the snapshot still reproduces the live state.
+    /// public-event history. Restoring from the checkpoint still reproduces
+    /// the live state before subsequent committed ticks are applied.
     #[test]
-    fn recovery_does_not_require_genesis_replay_after_compaction() {
+    fn recovery_does_not_require_genesis_public_event_history() {
         let snap;
         let live_final;
         {
-            let mut node = SimulationNode::with_test_store(
+            let mut node = SimulationNode::new_test(
                 NodeId(0),
                 SectorId(0),
                 SectorBounds::centered(SectorBounds::DEFAULT_HALF),
                 std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-                dawn_storage::InMemoryEventStore::new(),
             );
             for i in 0..3u64 {
                 node.spawn_ship(
@@ -706,31 +624,22 @@ mod tests {
         assert_eq!(
             postcard::to_stdvec(&live_final).unwrap(),
             postcard::to_stdvec(&restored_final).unwrap(),
-            "recovery from snapshot + bounded hot tail (no genesis) must match live"
+            "recovery from the checkpoint plus subsequent committed ticks must match live"
         );
     }
 
     #[test]
     fn hull_capacitor_and_fitting_state_are_restored_from_snapshot() {
         use crate::{modules, ship_types};
-        use dawn_core::events::{DamageTaken, ShipFitted};
         use dawn_core::fitting::{FittingSnapshot, SlotEntry};
-        use dawn_core::DomainEvent;
+        use dawn_ecs::components::{FittingComp, HullComp};
 
         let dir = tempfile::tempdir().unwrap();
-        let event_path = dir.path().join("events.log");
         let snapshot_path = dir.path().join("snapshot.bin");
 
         let ship_id: ShipId;
         {
-            let store = FileEventStore::open(&event_path).unwrap();
-            let mut node = SimulationNode::with_test_store(
-                NodeId(0),
-                SectorId(0),
-                SectorBounds::centered(SectorBounds::DEFAULT_HALF),
-                std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-                store,
-            );
+            let mut node = node_with_modules();
 
             ship_id = node.spawn_ship(
                 ship_types::SHIP_TYPE_MAGPIE,
@@ -738,18 +647,14 @@ mod tests {
                 Velocity::ZERO,
             );
 
-            node.apply_event_pub(DomainEvent::DamageTaken(DamageTaken {
-                ship_id,
-                damage: 50.0,
-                current_shield: 30.0,
-                current_armor: 90.0,
-                current_hull: 100.0,
-                tick: Tick(1),
-            }));
-
-            node.apply_event_pub(DomainEvent::ShipFitted(ShipFitted {
-                ship_id,
-                fitting: FittingSnapshot {
+            let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
+            node.simulation
+                .world
+                .get_mut::<HullComp>(entity)
+                .unwrap()
+                .set_hp(30.0, 90.0, 100.0);
+            let fitting = FittingComp::from_snapshot(
+                &FittingSnapshot {
                     high: vec![],
                     mid: vec![SlotEntry {
                         module_id: modules::MODULE_AFTERBURNER,
@@ -758,23 +663,20 @@ mod tests {
                     low: vec![],
                     rig: vec![],
                 },
-                inventory: vec![],
-                market_settlement_id: None,
-                tick: Tick(1),
-            }));
+                &node.game_data.module_registry,
+            );
+            node.simulation.world.insert_one(entity, fitting);
+            node.reapply_fitting(ship_id);
 
             let snap = node.take_snapshot();
             snap.save(&snapshot_path).unwrap();
         }
 
         let snap = StateSnapshot::load(&snapshot_path).unwrap();
-        let store2 = FileEventStore::open(&event_path).unwrap();
-        let node2 = SimulationNode::restore_from_test(
-            store2,
+        let node2 = SimulationNode::restore_from(
             &snap,
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-            crate::game_data::test_catalog().modules(),
-            crate::game_data::test_catalog().ship_types(),
+            crate::game_data::test_catalog_arc(),
         );
 
         let hp = node2.get_ship_hp(ship_id).unwrap();
@@ -814,10 +716,9 @@ mod tests {
     #[test]
     fn warp_lock_and_module_cycle_state_survive_snapshot_restore() {
         use crate::{modules, ship_types};
-        use dawn_core::events::ShipFitted;
         use dawn_core::fitting::{FittingSnapshot, SlotEntry};
         use dawn_core::navigation::WarpTarget;
-        use dawn_core::{AbsolutePosition, DomainEvent, JumpGateId};
+        use dawn_core::{AbsolutePosition, JumpGateId};
         use dawn_ecs::components::{
             FittingComp, LockComp, LockEntry, LockState, WarpComp, WarpPhase,
         };
@@ -863,9 +764,8 @@ mod tests {
         );
 
         // Fitted, active, partially-cycled module.
-        node.apply_event_pub(DomainEvent::ShipFitted(ShipFitted {
-            ship_id,
-            fitting: FittingSnapshot {
+        let fitting = FittingComp::from_snapshot(
+            &FittingSnapshot {
                 high: vec![SlotEntry {
                     module_id: modules::MODULE_AFTERBURNER,
                     is_active: true,
@@ -874,10 +774,10 @@ mod tests {
                 low: vec![],
                 rig: vec![],
             },
-            inventory: vec![],
-            market_settlement_id: None,
-            tick: Tick(1),
-        }));
+            &node.game_data.module_registry,
+        );
+        node.simulation.world.insert_one(entity, fitting);
+        node.reapply_fitting(ship_id);
         {
             let mut fitting = node
                 .simulation
@@ -966,18 +866,12 @@ mod tests {
         );
         let live_abs = node.ship_absolute(ship_id).expect("ship exists");
 
-        // Snapshot + restore from the event log (which includes AnchorRebased).
+        // Anchor and offset are checkpoint state, not a public-event replay.
         let snap = node.take_snapshot();
-        let mut store2 = InMemoryEventStore::new();
-        for event in node.pending_events() {
-            store2.append(event.clone());
-        }
-        let node2 = SimulationNode::restore_from_test(
-            store2,
+        let node2 = SimulationNode::restore_from(
             &snap,
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-            crate::game_data::test_catalog().modules(),
-            crate::game_data::test_catalog().ship_types(),
+            crate::game_data::test_catalog_arc(),
         );
 
         assert_eq!(
@@ -994,14 +888,12 @@ mod tests {
         );
     }
 
-    /// ADR-0038: Station inventory now survives a restart because it lives in
-    /// its own durable SQLite file, independent of the snapshot/event-log
-    /// lifecycle -- not because `take_snapshot()`/`restore_from()` carry it
-    /// (they don't, going forward). Simulates a real restart: `node` and
-    /// `node2` are otherwise-independent `SimulationNode`s (fresh in-memory
-    /// event store, like a real process restart would use a fresh
-    /// `FileEventStore` handle), but both point `open_repositories`
-    /// at the same on-disk file.
+    /// ADR-0038: Station inventory survives a restart because it lives in its
+    /// own durable SQLite file, independent of the checkpoint lifecycle -- not
+    /// because `take_snapshot()`/`restore_from()` carry it. Simulates a real
+    /// restart: `node` and `node2` are otherwise-independent
+    /// `SimulationNode`s, but both point `open_repositories` at the same
+    /// on-disk file.
     #[test]
     fn station_inventory_survives_snapshot_restore() {
         use dawn_core::{ItemId, PlayerId, StationId};
@@ -1020,16 +912,10 @@ mod tests {
         );
 
         let snap = node.take_snapshot();
-        let mut store2 = InMemoryEventStore::new();
-        for event in node.pending_events() {
-            store2.append(event.clone());
-        }
-        let mut node2 = SimulationNode::restore_from_test(
-            store2,
+        let mut node2 = SimulationNode::restore_from(
             &snap,
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-            crate::game_data::test_catalog().modules(),
-            crate::game_data::test_catalog().ship_types(),
+            crate::game_data::test_catalog_arc(),
         );
         node2.open_repositories(db_path).unwrap();
 
@@ -1075,75 +961,13 @@ mod tests {
         ));
 
         let snap = node.take_snapshot();
-        let mut store2 = InMemoryEventStore::new();
-        for event in node.pending_events() {
-            store2.append(event.clone());
-        }
-        let node2 = SimulationNode::restore_from_test(
-            store2,
+        let node2 = SimulationNode::restore_from(
             &snap,
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-            crate::game_data::test_catalog().modules(),
-            crate::game_data::test_catalog().ship_types(),
+            crate::game_data::test_catalog_arc(),
         );
 
         assert_eq!(node2.docked_station(ship_id), Some(StationId(0)));
         assert_eq!(node2.player_docked_station(player_id), Some(StationId(0)));
-    }
-
-    /// Legacy snapshot + public-event-tail regression: a ship spawned *after*
-    /// the last snapshot must come back identically (issue #197). Live
-    /// spawning and `ShipSpawned` replay both go through
-    /// `materialize_ship_stats` now, but before that they diverged silently --
-    /// replay skipped the `ships.type_ids` insertion and `CapacitorComp` init
-    /// the live path did. ADR-0049 supersedes this recovery path with the
-    /// versioned RecoveryDelta/checkpoint contract.
-    ///
-    /// Compares the *encoded* snapshot bytes rather than picking a few fields
-    /// to assert on, for the same reason `restoring_a_snapshot_and_recapturing_
-    /// reproduces_it_exactly` does above: a hand-picked field list is blind to
-    /// exactly the field this bug lived in.
-    #[test]
-    fn a_ship_spawned_after_the_snapshot_survives_snapshot_plus_tail_replay() {
-        let mut node = node_with_modules();
-        let snapshot_before = node.take_snapshot();
-
-        // Spawned after the snapshot: only reachable on restore via tail-log
-        // replay of its ShipSpawned event, not via restore_ship_from_snapshot.
-        // Velocity::ZERO: `ShipSpawned` carries no velocity field by design
-        // (legacy EventStore behavior: velocity is event-sourced only via
-        // `VelocityChanged`), so a nonzero spawn velocity here would never
-        // replay and would be a mismatch unrelated to the bug this test
-        // guards. ADR-0049 requires exact velocity recovery in the future
-        // RecoveryDelta/checkpoint path.
-        let ship_id = node.spawn_ship(
-            dawn_core::ShipTypeId(1),
-            Position::new(500.0, 0.0, 0.0),
-            Velocity::ZERO,
-        );
-        let live_snapshot = node.take_snapshot();
-
-        let mut store2 = InMemoryEventStore::new();
-        for event in node.pending_events() {
-            store2.append(event.clone());
-        }
-        let restored = SimulationNode::restore_from_test(
-            store2,
-            &snapshot_before,
-            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-            crate::game_data::test_catalog().modules(),
-            crate::game_data::test_catalog().ship_types(),
-        );
-
-        assert!(
-            restored.simulation.ships.index.contains_key(&ship_id),
-            "the post-snapshot ship must exist after restore"
-        );
-        assert_eq!(
-            postcard::to_stdvec(&restored.take_snapshot()).unwrap(),
-            postcard::to_stdvec(&live_snapshot).unwrap(),
-            "a ship spawned after the snapshot must restore with the same \
-             state (type_ids, capacitor, stats) the live node has"
-        );
     }
 }

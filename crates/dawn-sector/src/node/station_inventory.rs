@@ -37,20 +37,6 @@ impl SimulationNode {
             .unwrap_or(0)
     }
 
-    #[cfg(test)]
-    pub(crate) fn replace_station_inventory(
-        &mut self,
-        player_id: PlayerId,
-        station_id: StationId,
-        inventory: BTreeMap<ItemId, u64>,
-    ) {
-        for (item_id, count) in inventory {
-            self.persistence
-                .station_inventory()
-                .credit(player_id, station_id, item_id, count);
-        }
-    }
-
     pub(super) fn ensure_client_admission_grant(&mut self, event: &ClientAdmissionCommitted) {
         self.persistence
             .transaction()

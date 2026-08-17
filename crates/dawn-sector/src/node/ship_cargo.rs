@@ -17,8 +17,8 @@ use super::SimulationNode;
 impl SimulationNode {
     /// Seed `entity` with one of every registered module.
     ///
-    /// The live spawn path and `ShipSpawned` replay both call this deterministic
-    /// seed, so no separate event is needed for the fixed starter cargo.
+    /// The live player-spawn path calls this deterministic seed, so no separate
+    /// public fact is needed for the fixed starter cargo.
     pub(super) fn seed_player_inventory(&mut self, entity: Entity) {
         let mut inventory = InventoryComp::empty();
         for module_id in self.game_data.module_registry.keys().copied() {
@@ -217,8 +217,8 @@ impl SimulationNode {
             .insert(settlement_id);
 
         // ShipFitted is the existing full fitting/inventory snapshot event.
-        // Reuse it so Market settlement remains replayable without a second
-        // partial inventory source of truth.
+        // Reuse it so Market settlement remains a complete public projection
+        // fact without a second partial inventory source of truth.
         self.emit_ship_fitted_with_settlement(ship_id, entity, Some(settlement_id));
         true
     }
@@ -476,38 +476,6 @@ mod tests {
                 .unwrap()
                 .item_count(ItemId::ScrapMetal),
             u64::MAX
-        );
-    }
-
-    #[test]
-    fn market_item_snapshot_replay_restores_the_credited_cargo() {
-        let mut node = node_with_modules();
-        let (player, ship_id) = spawn_owned_player(&mut node);
-        assert!(node.credit_item_owned(CreditItemCommand {
-            player_id: player,
-            ship_id,
-            item_id: ItemId::ScrapMetal,
-            quantity: 4,
-            settlement_id: 6,
-        }));
-        let event = node.pending_events().last().unwrap().clone();
-
-        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
-        node.simulation
-            .world
-            .get_mut::<InventoryComp>(entity)
-            .unwrap()
-            .items
-            .clear();
-        node.apply_event_pub(event);
-
-        assert_eq!(
-            node.simulation
-                .world
-                .get::<InventoryComp>(entity)
-                .unwrap()
-                .item_count(ItemId::ScrapMetal),
-            4
         );
     }
 

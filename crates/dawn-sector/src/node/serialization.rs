@@ -331,7 +331,7 @@ mod tests {
         // visible even when anchored on different bodies. A star-anchored ship at
         // the origin and a Forge-anchored ship whose offset places it back at the
         // origin must land in the same AoI cell.
-        use dawn_core::{events::AnchorRebased, AnchorId, DomainEvent, Tick};
+        use dawn_core::AnchorId;
         let mut node = mem_node();
         // Forcing b's offset to exactly cancel Forge's own (true-AU-scale)
         // absolute position is itself an unrealistic, maximally-imprecise case
@@ -353,12 +353,13 @@ mod tests {
         // Rebase b onto Forge with an offset that returns it to absolute origin.
         let forge = node.anchor_table().abs(AnchorId(1)).unwrap();
         let off = Position::new(-forge[0], -forge[1], -forge[2]);
-        node.apply_event_pub(DomainEvent::AnchorRebased(AnchorRebased {
-            ship_id: b,
-            anchor: AnchorId(1),
-            offset: off,
-            tick: Tick(1),
-        }));
+        let entity = *node.simulation.ships.index.get(&b).unwrap();
+        node.simulation.world.set_ship_anchor(entity, AnchorId(1));
+        node.simulation
+            .world
+            .get_mut::<dawn_ecs::components::PositionComp>(entity)
+            .unwrap()
+            .0 = off;
         // Sanity: raw offsets differ wildly, but absolute positions coincide.
         assert_eq!(node.get_ship_anchor(b), Some(AnchorId(1)));
         let visible = node.ships_visible_to([0.0, 0.0, 0.0].into(), cell);

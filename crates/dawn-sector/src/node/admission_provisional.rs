@@ -211,7 +211,7 @@ impl SimulationNode {
     /// prepared Sector transition whose `RecoveryDelta` is durable before live
     /// apply, followed by idempotent Admission/Identity repository finalization.
     /// The public event may remain a business fact but is not the sole
-    /// replay-complete authority.
+    /// recovery authority.
     pub(crate) fn commit_reserved_fresh_admission(
         &mut self,
         player_id: PlayerId,
@@ -276,55 +276,6 @@ impl SimulationNode {
         self.players.pending_fresh_admissions.remove(&ship_id);
         self.ensure_client_admission_grant(&event);
         true
-    }
-
-    /// Replay one fresh-admission public event through the current migration
-    /// path. This method is idempotent for current ECS state and the SQLite
-    /// Station/identity ledger.
-    ///
-    /// ADR-0049 does not make this public-event replay the final exact recovery
-    /// reducer; future world recovery uses `RecoveryDelta`, with #277 repository
-    /// reconciliation for protocol authority.
-    #[cfg(test)]
-    pub(super) fn replay_client_admission_commit(&mut self, event: &ClientAdmissionCommitted) {
-        if !self.simulation.ships.index.contains_key(&event.ship_id) {
-            self.insert_to_world(event.ship_id, Position::ORIGIN, Velocity::ZERO);
-            self.set_spawn_anchor_abs(event.ship_id, event.initial_position);
-            self.materialize_ship_stats(
-                event.ship_id,
-                event.ship_type_id,
-                dawn_ecs::components::ShipStatsComp::PLAYER,
-            );
-            if let Some(&entity) = self.simulation.ships.index.get(&event.ship_id) {
-                let _ = self.simulation.world.remove_one::<IsNpcComp>(entity);
-                self.seed_player_inventory(entity);
-                let fitting =
-                    FittingComp::from_snapshot(&event.fitting, &self.game_data.module_registry);
-                let _ = self.simulation.world.insert_one(entity, fitting);
-                let items = event.inventory.iter().copied().fold(
-                    std::collections::BTreeMap::new(),
-                    |mut items, item_id| {
-                        *items.entry(item_id).or_default() += 1;
-                        items
-                    },
-                );
-                let _ = self
-                    .simulation
-                    .world
-                    .insert_one(entity, InventoryComp { items });
-                self.reapply_fitting(event.ship_id);
-            }
-        }
-        self.players
-            .active_ship
-            .insert(event.player_id, event.ship_id);
-        self.players.owners.insert(event.ship_id, event.player_id);
-        self.players.player_id_counter = self.players.player_id_counter.max(event.player_id.0 + 1);
-        self.simulation.id_counter = self
-            .simulation
-            .id_counter
-            .max(event.ship_id.0.counter() + 1);
-        self.ensure_client_admission_grant(event);
     }
 
     /// Release only the in-memory capacity/handshake claim.

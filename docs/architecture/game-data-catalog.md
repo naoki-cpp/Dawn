@@ -14,7 +14,7 @@ substitute a built-in or partial balance catalog.
 
 A production `SimulationNode` cannot be created or restored without an
 `Arc<GameDataCatalog>`. The catalog is therefore part of the Sector's required
-construction state, alongside topology and the event store. A node is never
+construction state alongside topology. A node is never
 observable with empty registries and cannot be repaired later through
 post-construction registration. Actor runtimes group topology and catalog in a
 single Sector-construction configuration instead of growing positional APIs.
@@ -27,11 +27,12 @@ code have no `register_module`, `register_ship_type`, or `register_into` path.
 Snapshot recovery receives the same catalog selected by the runtime:
 
 ```text
-SimulationNode::restore_from(store, snapshot, galaxy, catalog)
+SimulationNode::restore_from(snapshot, galaxy, catalog)
 ```
 
-This makes the definitions used for live execution and replay an explicit,
-single dependency. Recovery cannot silently select a different process-global
+This makes the definitions used for live execution and checkpoint/RecoveryDelta
+restore an explicit, single dependency. Recovery validates the checkpoint's
+catalog fingerprint and cannot silently select a different process-global
 catalog.
 
 ## Deterministic observation

@@ -48,7 +48,11 @@ The goal is to build a game that **surpasses EVE Online** (ADR-0016). The distri
 - Exact operational Sector recovery through ADR-0049 versioned checkpoints + authoritative state-delta tail
 - High throughput via separation of concerns between the Actor/runtime layer and ECS/domain engine
 
-"World reproducibility" must be qualified: public Event replay can rebuild supported audit/projection views, while exact acknowledged Sector state is recovered through the ADR-0049 recovery representation. Genesis public-event replay is not claimed as a universal exact-state contract.
+"World reproducibility" must be qualified: downstream audit/projection consumers
+may replay public events for their own views, while exact acknowledged Sector
+state is recovered through the ADR-0049 checkpoint and RecoveryDelta
+representation. `SimulationNode` has no public-event reverse reducer, and genesis
+public-event replay is not an operational recovery contract.
 
 ### Current scope (Phase 10 client integration / Phase 9 economy validation)
 

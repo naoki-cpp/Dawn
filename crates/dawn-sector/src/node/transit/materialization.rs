@@ -1,4 +1,4 @@
-//! Shared live/replay materialization kernel for Transit handoffs.
+//! Live materialization kernel for Transit handoffs.
 
 use dawn_core::{DomainEvent, Position, TransitHandoffState};
 use dawn_ecs::components::{

@@ -42,10 +42,9 @@ impl SimulationNode {
 
     /// Re-adopt a restored ship for a resumed player and reconcile Station access.
     ///
-    /// Ship ownership is restored from the snapshot or Transit handoff before
-    /// a resume begins. `docked_ships` is still authoritative after replay; use
-    /// it here to repair the player-facing Station context once identity is
-    /// re-established.
+    /// Ship ownership is restored from the checkpoint or Transit handoff before
+    /// a resume begins. `docked_ships` is authoritative; use it here to repair
+    /// the player-facing Station context once identity is re-established.
     pub(crate) fn resume_player_ship(&mut self, ship_id: ShipId, player_id: PlayerId) -> bool {
         if !self.adopt_player_ship(ship_id, player_id) {
             return false;
@@ -247,12 +246,8 @@ impl SimulationNode {
 
 #[cfg(test)]
 mod tests {
-    use dawn_core::{
-        events::{ShipDocked, ShipUndocked},
-        DockCommand, NodeId, SectorBounds, SectorId, StationId, Tick, WarpTarget,
-    };
+    use dawn_core::{DockCommand, NodeId, SectorBounds, SectorId, StationId, WarpTarget};
     use dawn_ecs::components::{ThrustComp, VelocityComp};
-    use dawn_storage::{store::EventStore, InMemoryEventStore};
 
     use super::*;
 
@@ -267,79 +262,6 @@ mod tests {
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
         )
-    }
-
-    fn copied_store(node: &SimulationNode) -> InMemoryEventStore {
-        let mut store = InMemoryEventStore::new();
-        for event in node.pending_events() {
-            store.append(event.clone());
-        }
-        store
-    }
-
-    #[test]
-    fn resume_reconciles_a_dock_event_replayed_without_ownership() {
-        let mut original = node();
-        let player_id = original.next_player_id();
-        let ship_id = original.spawn_player_ship(player_id);
-        let snapshot = original.take_snapshot();
-        let mut store = copied_store(&original);
-        store.append(DomainEvent::ShipDocked(ShipDocked {
-            ship_id,
-            station_id: StationId(0),
-            tick: Tick(1),
-        }));
-
-        let mut restored = SimulationNode::restore_from_test(
-            store,
-            &snapshot,
-            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-            crate::game_data::test_catalog().modules(),
-            crate::game_data::test_catalog().ship_types(),
-        );
-        assert_eq!(restored.docked_station(ship_id), Some(StationId(0)));
-        assert_eq!(
-            restored.player_docked_station(player_id),
-            Some(StationId(0))
-        );
-
-        assert!(restored.resume_player_ship(ship_id, player_id));
-        assert_eq!(
-            restored.player_docked_station(player_id),
-            Some(StationId(0))
-        );
-    }
-
-    #[test]
-    fn resume_clears_stale_player_context_after_undock_tail_replay() {
-        let mut original = node();
-        let player_id = original.next_player_id();
-        let ship_id = original.spawn_player_ship(player_id);
-        original.apply_event_pub(DomainEvent::ShipDocked(ShipDocked {
-            ship_id,
-            station_id: StationId(0),
-            tick: Tick(1),
-        }));
-        let snapshot = original.take_snapshot();
-        let mut store = copied_store(&original);
-        store.append(DomainEvent::ShipUndocked(ShipUndocked {
-            ship_id,
-            station_id: StationId(0),
-            tick: Tick(2),
-        }));
-
-        let mut restored = SimulationNode::restore_from_test(
-            store,
-            &snapshot,
-            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-            crate::game_data::test_catalog().modules(),
-            crate::game_data::test_catalog().ship_types(),
-        );
-        assert_eq!(restored.docked_station(ship_id), None);
-        assert_eq!(restored.player_docked_station(player_id), None);
-
-        assert!(restored.resume_player_ship(ship_id, player_id));
-        assert_eq!(restored.player_docked_station(player_id), None);
     }
 
     #[test]
