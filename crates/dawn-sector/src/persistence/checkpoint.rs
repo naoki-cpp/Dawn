@@ -202,10 +202,13 @@ mod tests {
             .unwrap()
             .expect("pending Transit must not block a checkpoint");
 
-        assert_eq!(snapshot.transit_saga.outgoing.len(), 1);
-        assert_eq!(snapshot.transit_saga.outgoing[0].ship_id, ship_id);
+        assert_eq!(snapshot.node_state.transit_saga.outgoing.len(), 1);
+        assert_eq!(
+            snapshot.node_state.transit_saga.outgoing[0].ship_id,
+            ship_id
+        );
         assert!(matches!(
-            snapshot.transit_saga.outgoing[0].state,
+            snapshot.node_state.transit_saga.outgoing[0].state,
             crate::persistence::TransitAttemptState::Prepared
         ));
     }

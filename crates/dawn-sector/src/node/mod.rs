@@ -395,7 +395,7 @@ impl SimulationNode {
                 .expect("checkpoint ship state must be internally consistent");
         }
 
-        node.restore_transit_saga(snapshot.transit_saga.clone())
+        node.restore_transit_saga(snapshot.node_state.transit_saga.clone())
             .expect("checkpoint Transit Saga must match the restored Sector");
 
         node

@@ -25,9 +25,10 @@ Work-package ownership is:
 - **#275:** in-memory state-owner decomposition. It consumes this table rather
   than redefining which fields are durable;
 - **#276:** durable Transit Saga/attempt repository and retry lifecycle. The
-  current implementation stores `TransitSagaSnapshot` in both `StateSnapshot`
-  and `TickRecoveryDelta`; it owns the concrete attempt/receipt representation
-  and must satisfy this recovery contract;
+  current implementation stores `TransitSagaSnapshot` inside the canonical
+  `NodeState` carried by both `StateSnapshot` and `TickRecoveryDelta`; it owns
+  the concrete attempt/receipt representation and must satisfy this recovery
+  contract;
 - **#277:** admission/identity/Station repository schema and transaction APIs.
   Admission/identity protocol state and pre-materialization identity consumption
   may be repository-owned authority as specified below; Station world-state
@@ -94,11 +95,15 @@ The production checkpoint and recovery path has one explicit storage boundary:
 - Durable snapshot files and replica snapshot bytes use the `DAWNCKP1` envelope
   with `CHECKPOINT_FORMAT_VERSION` and a payload checksum; unknown magic,
   versions, corrupt, or malformed payloads fail before state construction.
+- `StateSnapshot` and full `TickRecoveryDelta` each carry one canonical nested
+  `NodeState`. Checkpoint identity/context and ship images, and Tick transition
+  metadata, remain outside that node-level payload.
 - `FileJournal` is the authoritative runtime journal. Every production Tick is
   appended as one `JournalBatch` whose first record is a versioned
   `RecoveryDelta`, including eventless ticks. The full Tick image carries ship
-  ECS state, allocator/ownership/active-ship maps, docking context, and
-  cross-tick bot/auto-jump queues.
+  ECS state plus the canonical `NodeState` containing allocator,
+  ownership/active-ship maps, docking context, and cross-tick bot/auto-jump
+  queues.
 - Startup restores the checkpoint with its catalog fingerprint, then applies a
   contiguous journal tail. If no checkpoint exists, the configured genesis
   state is constructed once and the same RecoveryDelta reader replays from
@@ -204,7 +209,7 @@ before invoking the same per-session `AoiFrame` delivery operation.
 | Admission grant / resume-ticket current and staged binding | Yes, repository-owned identity state | admission commit/resume/rotation | #277 durable IdentityRepository transaction + explicit reconciliation with committed Sector transitions | Ticket rotation and ownership lookup must be crash-safe. Once a Ship is materialized, its world ownership/active routing are also RecoveryDelta authority. |
 | `pending_fresh_admissions` in-memory claim set | Derived concurrency guard | Current admission runtime | Rebuild/reacquire from #277 prepared reservation + live handshake ownership | It must not be the authority for whether an ID is consumed. Crash may release the lock, but not the durable reservation. |
 | `pending_resume_admissions` in-memory claim map | Runtime concurrency guard | Current resume handshake | None; reacquire from durable identity/world state on retry | A crash may release the in-flight lock. It cannot change durable ownership/ticket authority. |
-| Transit ownership/freeze state and current handoff lifecycle state | Yes | Raft-committed Transit apply | `TransitSagaSnapshot` in the checkpoint and `TickRecoveryDelta`, keyed by `TransitAttemptId` | `OutgoingTransitAttempt` owns the canonical handoff, retry deadline/count, and terminal state; `IncomingTransitReceipt` makes destination Commit idempotent. Public event scans replay/project facts only and never rebuild Saga state. |
+| Transit ownership/freeze state and current handoff lifecycle state | Yes | Raft-committed Transit apply | `NodeState.transit_saga` in the checkpoint and `TickRecoveryDelta`, keyed by `TransitAttemptId` | `OutgoingTransitAttempt` owns the canonical handoff, retry deadline/count, and terminal state; `IncomingTransitReceipt` makes destination Commit idempotent. Public event scans replay/project facts only and never rebuild Saga state. |
 | Bot persistent behavior state | Yes when it affects future decisions | Bot components/state | Component delta and checkpoint | Purely recomputable selection may be derived only when specified. |
 | Pending human command queue | No, until admitted into a transition | Runtime connection | Runtime input queue | Disconnect/crash may require client resubmission. The current generic `ClientRequest` protocol has no request ID, so resubmission is a new request unless an operation-specific idempotency identity exists. |
 | Generic client-command dedup state | Not provided today | `ClientRequest` envelope | None | Transparent exactly-once retry is not promised. A future generic retry feature must add a stable `RequestId`/equivalent at the #278/wire admission boundary and durable dedup state. |

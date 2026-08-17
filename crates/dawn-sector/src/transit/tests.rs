@@ -367,6 +367,7 @@ fn restored_requested_transit_reproposes_commit_with_the_durable_route() {
         .unwrap();
     let snapshot = source.take_snapshot();
     let attempt_id = snapshot
+        .node_state
         .transit_saga
         .outgoing
         .first()

@@ -42,7 +42,7 @@ Transitについては、Raftの回復判断を`transit::handoff`に残し、Shi
 - protocol、ClientCommand dispatch、AoI、data loader、NPC spawn loop
 - fitting再計算と`ShipFitted` emission tail
 - postcard encode/decode
-- snapshot constructor/read field list
+- canonical NodeState checkpoint/delta capture/restore
 
 Open:
 
