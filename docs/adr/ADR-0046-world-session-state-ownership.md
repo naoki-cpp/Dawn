@@ -90,7 +90,7 @@ tick/capacitor advancementといったwire非依存policyが残っていた。
 1. postcard frameをdecodeし、Godot整数範囲とcanonical item identityを検証する。
 2. wire値をwire非依存の`ClientFact`とpresentation値へ変換する。
 3. `ClientState::apply`でsession/loadout transactionを完了する。
-4. `WorldSessionEffect`をpresentationへ変換し、最終callbackを一度だけ呼ぶ。
+4. `WorldSessionEffect`から必要な値を取り出して最終callback引数へ変換し、最終callbackを一度だけ呼ぶ。
 
 `ClientState`は`WorldSessionState`と`Option<PlayerLoadoutMsg>`を同時にborrowするため、
 loadout replacement、dock reconciliation、tick simulation、module activationをadapterが

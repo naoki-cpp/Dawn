@@ -23,14 +23,15 @@ C-1〜C-8、C-11、C-13〜C-15は解消済み。実装詳細と完了条件は�
 
 ## C-16（Fix候補）: `server_message_gd.rs`のwire adapter責務混在
 
-`crates/dawn-client-gdext/src/server_message_gd.rs`は995行で、`ServerMessageDecoder`、
-wire→`ClientFact`変換、`ClientState`へのapply、`EventPresentation`からGodot targetへのcallback
-dispatchを一つのfileに保持している。各処理は同じGDExtension境界に属するが、wire schema、client
-state policy、Godot scene callbackという異なる変更理由で進化する。
+`crates/dawn-client-gdext/src/server_message_gd.rs`は、`ServerMessageDecoder`、wire→`ClientFact`
+変換、`ClientState`へのapply、Godot targetへのcallback dispatchを一つのfileに保持している。
+各処理は同じGDExtension境界に属するが、wire schema、client state policy、Godot scene callback
+という異なる変更理由で進化する。
 **根本原因:** typed state境界を導入した後も、adapterの入口・変換・副作用通知を一つのmoduleへ
-積み上げたため。**判断: Fix。** 同じcrate内でdecode、fact conversion、presentation dispatchを
-module分割し、Godot公開APIと`ServerMessageOutcome::dispatch`のcommit後順序は維持する。
-wire typeや`dawn-client-core`の責務を新crateへ移さない。
+積み上げたため。**判断: Fix（部分完了）。** 中間presentation mirrorと二段目のdispatch matchは
+削除し、canonical `ServerFact` matchからstate apply後に最終callbackへ直接渡す
+経路にした。残るmodule分割は別途行い、Godot公開APIと`ServerMessageOutcome::dispatch`の
+commit後順序は維持する。wire typeや`dawn-client-core`の責務を新crateへ移さない。
 
 ## R-2（保留）: `main.gd`追加分割
 

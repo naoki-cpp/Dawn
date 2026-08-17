@@ -311,11 +311,13 @@ impl ServerMessageOutcome {
                     ],
                 )
             }
-            ServerMessage::Fact(fact) => {
-                let presentation =
-                    apply_server_fact(&mut session, &mut loadout, fact, connection_ship_id);
-                dispatch_world_event(&presentation, &mut world_target)
-            }
+            ServerMessage::Fact(fact) => dispatch_server_fact(
+                &mut session,
+                &mut loadout,
+                fact,
+                connection_ship_id,
+                &mut world_target,
+            ),
             ServerMessage::PlayerLoadout(wire) => {
                 apply_fact(
                     &mut session,
@@ -346,13 +348,10 @@ impl ServerMessageOutcome {
                     },
                 );
                 let (registered, became_player) = registered_effect(effect);
-                dispatch_world_event(
-                    &EventPresentation::AoiEnter {
-                        ship: ShipPresentation::wrap(ship),
-                        registered,
-                        became_player,
-                    },
+                call_world(
                     &mut world_target,
+                    "_handle_aoi_enter",
+                    vslice![ShipPresentation::wrap(ship), registered, became_player],
                 )
             }
             ServerMessage::AoiLeave { ship_id } => {
@@ -364,22 +363,18 @@ impl ServerMessageOutcome {
                         reason: ShipLeaveReason::AreaOfInterest,
                     },
                 );
-                dispatch_world_event(
-                    &EventPresentation::AoiLeave {
-                        ship_id: godot_i64(*ship_id),
-                        removed: removed_effect(effect),
-                    },
+                call_world(
                     &mut world_target,
+                    "_handle_aoi_leave",
+                    vslice![godot_i64(*ship_id), removed_effect(effect)],
                 )
             }
             ServerMessage::PositionSnap { ship_id, position } => {
                 apply_fact(&mut session, &mut loadout, ClientFact::ObservedEvent);
-                dispatch_world_event(
-                    &EventPresentation::PositionSnap {
-                        ship_id: godot_i64(*ship_id),
-                        position: position_components(*position),
-                    },
+                call_world(
                     &mut world_target,
+                    "_handle_position_snap",
+                    vslice![godot_i64(*ship_id), position_components(*position)],
                 )
             }
             ServerMessage::MotionCorrection {
@@ -409,6 +404,14 @@ impl ServerMessageOutcome {
 }
 
 fn call_connection(target: &mut Gd<Object>, method: &str, arguments: &[Variant]) -> bool {
+    call_handler(target, method, arguments)
+}
+
+fn call_world(target: &mut Gd<Object>, method: &str, arguments: &[Variant]) -> bool {
+    call_handler(target, method, arguments)
+}
+
+fn call_handler(target: &mut Gd<Object>, method: &str, arguments: &[Variant]) -> bool {
     if !ensure_handler(target, method) {
         return false;
     }
@@ -416,187 +419,13 @@ fn call_connection(target: &mut Gd<Object>, method: &str, arguments: &[Variant])
     true
 }
 
-enum EventPresentation {
-    ShipSpawned {
-        ship_id: i64,
-        position: PackedFloat64Array,
-        registered: bool,
-        became_player: bool,
-    },
-    VelocityChanged {
-        ship_id: i64,
-        velocity: PackedFloat64Array,
-        tick: i64,
-    },
-    ShipDespawned {
-        ship_id: i64,
-        removed: bool,
-    },
-    ShipDocked {
-        ship_id: i64,
-        station_id: i64,
-        tick: i64,
-        accepted: bool,
-    },
-    ShipUndocked {
-        ship_id: i64,
-        station_id: i64,
-        tick: i64,
-        accepted: bool,
-    },
-    ShipAssembled,
-    DamageTaken {
-        ship_id: i64,
-    },
-    RepairApplied {
-        ship_id: i64,
-    },
-    ShipDestroyed {
-        ship_id: i64,
-        outcome: Gd<DestructionOutcome>,
-    },
-    TargetLocked {
-        locker_id: i64,
-        target_id: i64,
-        changed: bool,
-    },
-    LockLost {
-        locker_id: i64,
-        target_id: i64,
-        changed: bool,
-    },
-    JumpGateUsed {
-        ship_id: i64,
-        gate_id: i64,
-        entry_pos: PackedFloat64Array,
-        tick: i64,
-    },
-    StarSystemChanged {
-        ship_id: i64,
-        to_system: i64,
-        name: Option<String>,
-    },
-    AoiEnter {
-        ship: Gd<ShipPresentation>,
-        registered: bool,
-        became_player: bool,
-    },
-    AoiLeave {
-        ship_id: i64,
-        removed: bool,
-    },
-    PositionSnap {
-        ship_id: i64,
-        position: PackedFloat64Array,
-    },
-}
-
-fn dispatch_world_event(event: &EventPresentation, target: &mut Gd<Object>) -> bool {
-    let Some(method) = event_handler(event) else {
-        return true;
-    };
-    if !ensure_handler(target, method) {
-        return false;
-    }
-    match event {
-        EventPresentation::ShipSpawned {
-            ship_id,
-            position,
-            registered,
-            became_player,
-        } => {
-            target.call(
-                method,
-                vslice![*ship_id, position.clone(), *registered, *became_player],
-            );
-        }
-        EventPresentation::VelocityChanged {
-            ship_id,
-            velocity,
-            tick,
-        } => {
-            target.call(method, vslice![*ship_id, velocity.clone(), *tick]);
-        }
-        EventPresentation::ShipDespawned { ship_id, removed }
-        | EventPresentation::AoiLeave { ship_id, removed } => {
-            target.call(method, vslice![*ship_id, *removed]);
-        }
-        EventPresentation::ShipDocked {
-            ship_id,
-            station_id,
-            tick,
-            accepted,
-        }
-        | EventPresentation::ShipUndocked {
-            ship_id,
-            station_id,
-            tick,
-            accepted,
-        } => {
-            target.call(method, vslice![*ship_id, *station_id, *tick, *accepted]);
-        }
-        EventPresentation::ShipAssembled => {}
-        EventPresentation::DamageTaken { ship_id }
-        | EventPresentation::RepairApplied { ship_id } => {
-            target.call(method, vslice![*ship_id]);
-        }
-        EventPresentation::ShipDestroyed { ship_id, outcome } => {
-            target.call(method, vslice![*ship_id, outcome.clone()]);
-        }
-        EventPresentation::TargetLocked {
-            locker_id,
-            target_id,
-            changed,
-        }
-        | EventPresentation::LockLost {
-            locker_id,
-            target_id,
-            changed,
-        } => {
-            target.call(method, vslice![*locker_id, *target_id, *changed]);
-        }
-        EventPresentation::JumpGateUsed {
-            ship_id,
-            gate_id,
-            entry_pos,
-            tick,
-        } => {
-            target.call(
-                method,
-                vslice![*ship_id, *gate_id, entry_pos.clone(), *tick],
-            );
-        }
-        EventPresentation::StarSystemChanged {
-            ship_id,
-            to_system,
-            name,
-        } => {
-            let name = name
-                .as_ref()
-                .map(|name| GString::from(name).to_variant())
-                .unwrap_or_else(Variant::nil);
-            target.call(method, vslice![*ship_id, *to_system, name]);
-        }
-        EventPresentation::AoiEnter {
-            ship,
-            registered,
-            became_player,
-        } => {
-            target.call(method, vslice![ship.clone(), *registered, *became_player]);
-        }
-        EventPresentation::PositionSnap { ship_id, position } => {
-            target.call(method, vslice![*ship_id, position.clone()]);
-        }
-    }
-    true
-}
-
-fn apply_server_fact(
+fn dispatch_server_fact(
     session: &mut Gd<WorldSession>,
     loadout: &mut Gd<PlayerLoadout>,
     fact: &ServerFact,
     connection_ship_id: i64,
-) -> EventPresentation {
+    target: &mut Gd<Object>,
+) -> bool {
     match fact {
         ServerFact::ShipSpawned {
             ship_id, position, ..
@@ -610,12 +439,16 @@ fn apply_server_fact(
                 },
             );
             let (registered, became_player) = registered_effect(effect);
-            EventPresentation::ShipSpawned {
-                ship_id: godot_i64(*ship_id),
-                position: position_components(*position),
-                registered,
-                became_player,
-            }
+            call_world(
+                target,
+                "_handle_ship_spawned",
+                vslice![
+                    godot_i64(*ship_id),
+                    position_components(*position),
+                    registered,
+                    became_player
+                ],
+            )
         }
         ServerFact::VelocityChanged {
             ship_id,
@@ -629,11 +462,15 @@ fn apply_server_fact(
                     tick: godot_i64(*tick),
                 },
             );
-            EventPresentation::VelocityChanged {
-                ship_id: godot_i64(*ship_id),
-                velocity: velocity_components(*velocity),
-                tick: godot_i64(*tick),
-            }
+            call_world(
+                target,
+                "_handle_velocity_changed",
+                vslice![
+                    godot_i64(*ship_id),
+                    velocity_components(*velocity),
+                    godot_i64(*tick)
+                ],
+            )
         }
         ServerFact::ShipDespawned { ship_id, .. } => {
             let effect = apply_fact(
@@ -644,10 +481,11 @@ fn apply_server_fact(
                     reason: ShipLeaveReason::Despawn,
                 },
             );
-            EventPresentation::ShipDespawned {
-                ship_id: godot_i64(*ship_id),
-                removed: removed_effect(effect),
-            }
+            call_world(
+                target,
+                "_handle_ship_despawned",
+                vslice![godot_i64(*ship_id), removed_effect(effect)],
+            )
         }
         ServerFact::ShipDocked {
             ship_id,
@@ -663,12 +501,16 @@ fn apply_server_fact(
                     tick: godot_i64(*tick),
                 },
             );
-            EventPresentation::ShipDocked {
-                ship_id: godot_i64(*ship_id),
-                station_id: i64::from(*station_id),
-                tick: godot_i64(*tick),
-                accepted: dock_effect(effect),
-            }
+            call_world(
+                target,
+                "_handle_ship_docked",
+                vslice![
+                    godot_i64(*ship_id),
+                    i64::from(*station_id),
+                    godot_i64(*tick),
+                    dock_effect(effect)
+                ],
+            )
         }
         ServerFact::ShipUndocked {
             ship_id,
@@ -683,16 +525,20 @@ fn apply_server_fact(
                     tick: godot_i64(*tick),
                 },
             );
-            EventPresentation::ShipUndocked {
-                ship_id: godot_i64(*ship_id),
-                station_id: i64::from(*station_id),
-                tick: godot_i64(*tick),
-                accepted: dock_effect(effect),
-            }
+            call_world(
+                target,
+                "_handle_ship_undocked",
+                vslice![
+                    godot_i64(*ship_id),
+                    i64::from(*station_id),
+                    godot_i64(*tick),
+                    dock_effect(effect)
+                ],
+            )
         }
         ServerFact::ShipAssembled { .. } => {
             apply_fact(session, loadout, ClientFact::ObservedEvent);
-            EventPresentation::ShipAssembled
+            true
         }
         ServerFact::DamageTaken {
             ship_id,
@@ -711,9 +557,7 @@ fn apply_server_fact(
                     hull: f64::from(*current_hull),
                 },
             );
-            EventPresentation::DamageTaken {
-                ship_id: godot_i64(*ship_id),
-            }
+            call_world(target, "_handle_damage_taken", vslice![godot_i64(*ship_id)])
         }
         ServerFact::RepairApplied {
             ship_id,
@@ -732,9 +576,11 @@ fn apply_server_fact(
                     hull: f64::from(*current_hull),
                 },
             );
-            EventPresentation::RepairApplied {
-                ship_id: godot_i64(*ship_id),
-            }
+            call_world(
+                target,
+                "_handle_repair_applied",
+                vslice![godot_i64(*ship_id)],
+            )
         }
         ServerFact::ShipDestroyed { ship_id, .. } => {
             let effect = apply_fact(
@@ -747,10 +593,11 @@ fn apply_server_fact(
             let WorldSessionEffect::ShipDestroyed(outcome) = effect else {
                 unreachable!("ShipDestroyed fact must return destruction state")
             };
-            EventPresentation::ShipDestroyed {
-                ship_id: godot_i64(*ship_id),
-                outcome: DestructionOutcome::wrap(outcome),
-            }
+            call_world(
+                target,
+                "_handle_ship_destroyed",
+                vslice![godot_i64(*ship_id), DestructionOutcome::wrap(outcome)],
+            )
         }
         ServerFact::TargetLocked {
             locker_id,
@@ -765,11 +612,15 @@ fn apply_server_fact(
                     target_id: godot_i64(*target_id),
                 },
             );
-            EventPresentation::TargetLocked {
-                locker_id: godot_i64(*locker_id),
-                target_id: godot_i64(*target_id),
-                changed: lock_effect(effect),
-            }
+            call_world(
+                target,
+                "_handle_target_locked",
+                vslice![
+                    godot_i64(*locker_id),
+                    godot_i64(*target_id),
+                    lock_effect(effect)
+                ],
+            )
         }
         ServerFact::LockLost {
             locker_id,
@@ -784,11 +635,15 @@ fn apply_server_fact(
                     target_id: godot_i64(*target_id),
                 },
             );
-            EventPresentation::LockLost {
-                locker_id: godot_i64(*locker_id),
-                target_id: godot_i64(*target_id),
-                changed: lock_effect(effect),
-            }
+            call_world(
+                target,
+                "_handle_lock_lost",
+                vslice![
+                    godot_i64(*locker_id),
+                    godot_i64(*target_id),
+                    lock_effect(effect)
+                ],
+            )
         }
         ServerFact::ModuleActivated { .. } | ServerFact::ModuleDeactivated { .. } => {
             unreachable!("module events dispatch at the connection boundary")
@@ -801,12 +656,16 @@ fn apply_server_fact(
             ..
         } => {
             apply_fact(session, loadout, ClientFact::ObservedEvent);
-            EventPresentation::JumpGateUsed {
-                ship_id: godot_i64(*ship_id),
-                gate_id: i64::from(*gate_id),
-                entry_pos: position_components(*entry_pos),
-                tick: godot_i64(*tick),
-            }
+            call_world(
+                target,
+                "_handle_jump_gate_used",
+                vslice![
+                    godot_i64(*ship_id),
+                    i64::from(*gate_id),
+                    position_components(*entry_pos),
+                    godot_i64(*tick)
+                ],
+            )
         }
         ServerFact::StarSystemChanged {
             ship_id, to_system, ..
@@ -819,11 +678,14 @@ fn apply_server_fact(
                     to_system: i64::from(*to_system),
                 },
             );
-            EventPresentation::StarSystemChanged {
-                ship_id: godot_i64(*ship_id),
-                to_system: i64::from(*to_system),
-                name: system_effect(effect),
-            }
+            let name = system_effect(effect)
+                .map(|name| GString::from(name.as_str()).to_variant())
+                .unwrap_or_else(Variant::nil);
+            call_world(
+                target,
+                "_handle_star_system_changed",
+                vslice![godot_i64(*ship_id), i64::from(*to_system), name],
+            )
         }
     }
 }
@@ -960,27 +822,6 @@ fn system_effect(effect: WorldSessionEffect) -> Option<String> {
         WorldSessionEffect::SystemChanged { name } => name,
         _ => unreachable!("system fact returned an unexpected effect"),
     }
-}
-
-fn event_handler(event: &EventPresentation) -> Option<&'static str> {
-    Some(match event {
-        EventPresentation::ShipSpawned { .. } => "_handle_ship_spawned",
-        EventPresentation::VelocityChanged { .. } => "_handle_velocity_changed",
-        EventPresentation::ShipDespawned { .. } => "_handle_ship_despawned",
-        EventPresentation::ShipDocked { .. } => "_handle_ship_docked",
-        EventPresentation::ShipUndocked { .. } => "_handle_ship_undocked",
-        EventPresentation::ShipAssembled => return None,
-        EventPresentation::DamageTaken { .. } => "_handle_damage_taken",
-        EventPresentation::RepairApplied { .. } => "_handle_repair_applied",
-        EventPresentation::ShipDestroyed { .. } => "_handle_ship_destroyed",
-        EventPresentation::TargetLocked { .. } => "_handle_target_locked",
-        EventPresentation::LockLost { .. } => "_handle_lock_lost",
-        EventPresentation::JumpGateUsed { .. } => "_handle_jump_gate_used",
-        EventPresentation::StarSystemChanged { .. } => "_handle_star_system_changed",
-        EventPresentation::AoiEnter { .. } => "_handle_aoi_enter",
-        EventPresentation::AoiLeave { .. } => "_handle_aoi_leave",
-        EventPresentation::PositionSnap { .. } => "_handle_position_snap",
-    })
 }
 
 fn ensure_handler(target: &mut Gd<Object>, method: &str) -> bool {

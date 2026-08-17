@@ -132,6 +132,19 @@ func test_initial_state_updates_session_even_when_presentation_handler_is_missin
 	assert_int((state[0] as WorldSession).player_ship_id()).is_equal(11)
 
 
+func test_world_fact_updates_session_even_when_handler_is_missing() -> void:
+	var decoder := ServerMessageDecoder.new()
+	var outcome: ServerMessageOutcome = decoder.test_outcome("ShipDocked")
+	var target := RefCounted.new()
+	var state := _state()
+
+	var initial: ServerMessageOutcome = decoder.test_outcome("InitialState")
+	assert_bool(initial.dispatch(target, target, state[0], state[1], 11)).is_false()
+	assert_bool(outcome.dispatch(target, target, state[0], state[1], 11)).is_false()
+	assert_bool((state[0] as WorldSession).is_docked()).is_true()
+	assert_int((state[0] as WorldSession).docked_station_id()).is_equal(5)
+
+
 func test_real_initial_state_updates_session_before_typed_signal() -> void:
 	var decoder := ServerMessageDecoder.new()
 	var outcome: ServerMessageOutcome = decoder.test_outcome("InitialState")
