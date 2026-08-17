@@ -369,8 +369,6 @@ mod tests {
         // ADR-0036: Remote Repair follows the exact same target/Locked/Range
         // Gate machinery as Weapon/Tackle, just healing instead of damaging.
         use crate::modules::MODULE_SMALL_REMOTE_SHIELD_BOOSTER;
-        use dawn_core::events::DamageTaken;
-
         let mut node = node_with_modules();
         let repairer_id = node.next_player_id();
         let repairer = node.spawn_player_ship_at_pub(repairer_id, Position::ORIGIN);
@@ -386,14 +384,12 @@ mod tests {
 
         // Magpie max HP: shield=200, armor=120, hull=100 (matches ADR-0033 tests).
         let hp_before = node.get_ship_hp(ally).unwrap();
-        node.apply_event_pub(DomainEvent::DamageTaken(DamageTaken {
-            ship_id: ally,
-            damage: 220.0,
-            current_shield: 0.0,
-            current_armor: 100.0,
-            current_hull: 100.0,
-            tick: dawn_core::Tick(1),
-        }));
+        let ally_entity = *node.simulation.ships.index.get(&ally).unwrap();
+        node.simulation
+            .world
+            .get_mut::<dawn_ecs::components::HullComp>(ally_entity)
+            .unwrap()
+            .set_hp(0.0, 100.0, 100.0);
 
         assert!(
             node.activate_module_owned(

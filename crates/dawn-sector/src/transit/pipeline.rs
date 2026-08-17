@@ -6,8 +6,6 @@
 
 use super::handoff;
 use crate::node::SimulationNode;
-#[cfg(test)]
-use dawn_core::DomainEvent;
 use dawn_core::{
     AbsolutePosition, JumpGateId, SectorId, ShipId, Tick, TransitAttemptId, TransitHandoffState,
 };
@@ -56,14 +54,6 @@ impl From<handoff::AckEffect> for AckProposal {
             request_tick: effect.request_tick,
         }
     }
-}
-
-#[cfg(test)]
-pub(crate) use handoff::ReplayDirective;
-
-#[cfg(test)]
-pub(crate) fn replay_directive(event: &DomainEvent) -> Option<ReplayDirective<'_>> {
-    handoff::replay_directive(event)
 }
 
 fn journal(node: &SimulationNode) -> handoff::TransitJournal {

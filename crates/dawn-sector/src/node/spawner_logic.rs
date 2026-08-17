@@ -23,15 +23,9 @@ impl SimulationNode {
     /// already exist (via `insert_to_world`).
     ///
     /// This is the single core shared by every path that brings a ship into
-    /// existence -- `insert_ship_entity` (live spawn/assemble),
-    /// `spawn_player_ship_at`, and `ShipSpawned` replay (`apply_event.rs`).
-    /// Before this was pulled out, `ShipSpawned` replay hand-rolled its own
-    /// copy that omitted the `ships.type_ids` insertion and the
-    /// `CapacitorComp` initialization -- both present on the live path -- so
-    /// a ship spawned after the last legacy snapshot could come back from the
-    /// current snapshot + tail-log restore missing state the live node had
-    /// (issue #197). ADR-0049's future RecoveryDelta reducer must preserve the
-    /// same invariant. Position/anchor setup is deliberately NOT part of this
+    /// existence -- `insert_ship_entity` (spawn/assemble) and
+    /// `spawn_player_ship_at`. Exact committed ship state is restored from the
+    /// checkpoint/RecoveryDelta seam. Position/anchor setup is deliberately NOT part of this
     /// function: it differs legitimately per caller (a fresh `ShipSpawned`
     /// anchors at a real spawn position via `set_spawn_anchor`/
     /// `set_spawn_anchor_abs`; `ShipAssembled` starts at `Position::ORIGIN`
@@ -39,8 +33,8 @@ impl SimulationNode {
     /// keeps doing it their own way before calling this.
     ///
     /// `unregistered_fallback` is a defensive policy for an unknown dynamic
-    /// `ship_type_id` or legacy event. Required production IDs are validated
-    /// before construction, so normal player/NPC creation never takes it.
+    /// `ship_type_id`. Required production IDs are validated before
+    /// construction, so normal player/NPC creation never takes it.
     pub(super) fn materialize_ship_stats(
         &mut self,
         ship_id: ShipId,
@@ -72,12 +66,10 @@ impl SimulationNode {
     }
 
     /// Insert a ship entity into the ECS with stats derived from
-    /// `ship_type_id`, for a `ship_id` the caller has already allocated (or is
-    /// replaying from an event). Shared by `spawn_ship` (fresh ID, appends
-    /// `ShipSpawned`) and `assemble_ship_owned`/its replay arm (appends
-    /// `ShipAssembled` instead) -- each call site emits its own public event
-    /// afterward since which event fits depends on why the ship came into
-    /// being.
+    /// `ship_type_id`, for a `ship_id` the caller has already allocated.
+    /// Shared by `spawn_ship` and `assemble_ship_owned`; each call site emits
+    /// its own public event afterward since which event fits depends on why the
+    /// ship came into being.
     pub(super) fn insert_ship_entity(
         &mut self,
         ship_id: ShipId,
@@ -324,7 +316,8 @@ impl SimulationNode {
     // ── Private helpers ───────────────────────────────────────────────────────
 
     /// Add a Ship to the ECS World and record the entity in `ship_index`.
-    /// Does NOT append any event — used by `spawn_ship` and replay.
+    /// Does NOT append any event — used by live materialization before its
+    /// caller emits the corresponding public fact.
     pub(super) fn insert_to_world(
         &mut self,
         ship_id: ShipId,
@@ -360,9 +353,9 @@ impl SimulationNode {
     /// scale the star is the nearest body for all current spawns, so this is a
     /// no-op today; it becomes load-bearing once bodies sit at real AU.
     ///
-    /// Deterministic: `ShipSpawned` replay calls this with the same
-    /// `initial_position`, reproducing the same anchor (later `AnchorRebased`
-    /// events replay the warp rebases on top).
+    /// Deterministic: a live spawn with the same absolute position selects the
+    /// same anchor. Checkpoint/RecoveryDelta restore writes the persisted
+    /// anchor directly rather than deriving it from a public event.
     pub(super) fn set_spawn_anchor(&mut self, ship_id: ShipId, abs_pos: Position) {
         let Some(&entity) = self.simulation.ships.index.get(&ship_id) else {
             return;
@@ -542,7 +535,7 @@ impl SimulationNode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dawn_core::{DomainEvent, NodeId, Position, SectorBounds, SectorId, Tick};
+    use dawn_core::{NodeId, Position, SectorBounds, SectorId};
 
     fn node_with_catalog() -> SimulationNode {
         SimulationNode::new_test(
@@ -629,7 +622,7 @@ mod tests {
 
     #[test]
     fn anchor_rebased_preserves_absolute_position_and_updates_anchor() {
-        use dawn_core::{events::AnchorRebased, AnchorId};
+        use dawn_core::AnchorId;
         let mut node = node_with_catalog();
         let ship = node.spawn_ship(
             dawn_core::ShipTypeId(1),
@@ -640,12 +633,13 @@ mod tests {
         // absolute position composes anchor_abs(f64) + offset exactly (ADR-0029).
         let forge_abs = node.anchor_table().abs(AnchorId(1)).unwrap();
         let new_off = Position::new(2_000.0, 0.0, -1_500.0);
-        node.apply_event_pub(DomainEvent::AnchorRebased(AnchorRebased {
-            ship_id: ship,
-            anchor: AnchorId(1),
-            offset: new_off,
-            tick: Tick(1),
-        }));
+        let entity = *node.simulation.ships.index.get(&ship).unwrap();
+        node.simulation.world.set_ship_anchor(entity, AnchorId(1));
+        node.simulation
+            .world
+            .get_mut::<PositionComp>(entity)
+            .unwrap()
+            .0 = new_off;
         assert_eq!(node.get_ship_anchor(ship), Some(AnchorId(1)));
         let after = node.ship_absolute(ship).unwrap();
         assert!(
@@ -662,8 +656,7 @@ mod tests {
 
     #[test]
     fn snapshot_restore_preserves_a_rebased_ships_anchor_and_absolute_position() {
-        use dawn_core::{events::AnchorRebased, AnchorId};
-        use dawn_storage::InMemoryEventStore;
+        use dawn_core::AnchorId;
         let mut node = node_with_catalog();
         let ship = node.spawn_ship(
             dawn_core::ShipTypeId(1),
@@ -678,12 +671,13 @@ mod tests {
             world[1] - forge[1],
             world[2] - forge[2],
         );
-        node.apply_event_pub(DomainEvent::AnchorRebased(AnchorRebased {
-            ship_id: ship,
-            anchor: AnchorId(1),
-            offset: off,
-            tick: Tick(1),
-        }));
+        let entity = *node.simulation.ships.index.get(&ship).unwrap();
+        node.simulation.world.set_ship_anchor(entity, AnchorId(1));
+        node.simulation
+            .world
+            .get_mut::<PositionComp>(entity)
+            .unwrap()
+            .0 = off;
         let before = node.ship_absolute(ship).unwrap();
 
         let snap = node.take_snapshot();
@@ -698,12 +692,10 @@ mod tests {
             "snapshot must capture the rebased anchor"
         );
 
-        let node2 = SimulationNode::restore_from_test(
-            InMemoryEventStore::new(),
+        let node2 = SimulationNode::restore_from(
             &snap,
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-            crate::game_data::test_catalog().modules(),
-            crate::game_data::test_catalog().ship_types(),
+            crate::game_data::test_catalog_arc(),
         );
         assert_eq!(
             node2.get_ship_anchor(ship),
@@ -720,7 +712,7 @@ mod tests {
 
     #[test]
     fn ship_distance_is_correct_across_different_anchors() {
-        use dawn_core::{events::AnchorRebased, AnchorId};
+        use dawn_core::AnchorId;
         let mut node = node_with_catalog();
         // Ship a near the star (small offset under Helios), ship b near Forge
         // (small offset under its own anchor). Each is precise locally; the
@@ -736,12 +728,13 @@ mod tests {
             dawn_core::Velocity::ZERO,
         );
         let off_b = Position::new(500.0, 0.0, 0.0);
-        node.apply_event_pub(DomainEvent::AnchorRebased(AnchorRebased {
-            ship_id: b,
-            anchor: AnchorId(1),
-            offset: off_b,
-            tick: Tick(1),
-        }));
+        let entity = *node.simulation.ships.index.get(&b).unwrap();
+        node.simulation.world.set_ship_anchor(entity, AnchorId(1));
+        node.simulation
+            .world
+            .get_mut::<PositionComp>(entity)
+            .unwrap()
+            .0 = off_b;
         let forge_abs = node.anchor_table().abs(AnchorId(1)).unwrap();
         let a_abs = [1000.0_f64, 0.0, 0.0];
         let b_abs = [forge_abs[0] + 500.0, forge_abs[1], forge_abs[2]];

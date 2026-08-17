@@ -17,28 +17,12 @@
 //!
 //! Eventless Ticks, `active_ship`, capacitor/lock/module counters, queued future
 //! intent, and other authoritative values are covered by that recovery stream even
-//! when no public `DomainEvent` exists. Public Event replay remains useful for its
-//! supported projection/audit/legacy purposes, but is not the complete exact-state
-//! reducer.
+//! when no public `DomainEvent` exists. Public events remain independent
+//! projection/audit facts; this module does not replay them into a `SimulationNode`.
 //!
-//! # Legacy test-fixture restore procedure
-//!
-//! #272 has moved journal ownership out of the engine; the runtime supplies the
-//! covered recovery position when it captures a checkpoint. The test-only
-//! `FileEventStore` replay helper remains for public-event reducer coverage,
-//! not as the production recovery path.
-//!
-//! The compatibility fixture:
-//! 1. loads `StateSnapshot` from disk;
-//! 2. opens the `FileEventStore` for the same Sector;
-//! 3. calls the test-only `SimulationNode::restore_from_test` helper;
-//! 4. restores the snapshot state and replays the legacy public-event tail.
-//!
-//! Production restore uses `SimulationNode::restore_from` and receives the
-//! authoritative recovery tail from the runtime-owned journal boundary.
-//!
-//! Code that depends on this behavior must treat it as migration debt, not infer
-//! the future journal/checkpoint API from it.
+//! The runtime loads this checkpoint through `SimulationNode::restore_from` and
+//! applies the contiguous authoritative RecoveryDelta tail through the runtime-
+//! owned recovery boundary.
 //!
 //! # Publication guarantee retained by ADR-0049
 //!

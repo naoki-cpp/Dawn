@@ -298,7 +298,7 @@ impl SimulationNode {
         // Inventory is absent for NPCs and for ships fit_module touches before
         // seeding (ADR-0032) -- this privileged path doesn't consume from it,
         // so emit_ship_fitted just mirrors whatever is currently there for
-        // replay fidelity.
+        // projection fidelity.
         self.emit_ship_fitted(cmd.ship_id, entity);
 
         true

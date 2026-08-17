@@ -112,12 +112,11 @@ mod tests {
     use super::*;
     use dawn_core::{DockCommand, NodeId, Position, SectorBounds, SectorId, StationId};
     fn mem_node() -> SimulationNode {
-        SimulationNode::with_test_store(
+        SimulationNode::new_test(
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-            (),
         )
     }
 

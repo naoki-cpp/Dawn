@@ -309,9 +309,11 @@ impl SimulationNode {
     /// repeated low-precision interpolation did. Nothing reads a
     /// warping ship's exact position — Movement skips it, combat can't target
     /// it). Each tick sets `velocity = planned_point - current_pos` and emits
-    /// a `VelocityChanged`, so replay reconstructs the same path purely by
+    /// a `VelocityChanged` for public motion projections. Exact position and
+    /// velocity recovery comes from RecoveryDelta/checkpoint state, not from
+    /// integrating the public event stream.
     /// `position += velocity` (INV-MOVE) — no direct position writes leak past
-    /// the velocity record. The final tick settles and stops (velocity ZERO).
+    /// The final tick settles and stops (velocity ZERO).
     /// `auto_jump_gate`: if `Some(gate_id)`, queue an auto-jump on arrival.
     #[allow(clippy::too_many_arguments)]
     fn warp_step(

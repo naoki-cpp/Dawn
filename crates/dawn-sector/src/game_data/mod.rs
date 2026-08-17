@@ -195,33 +195,6 @@ pub(crate) fn test_catalog_arc() -> Arc<GameDataCatalog> {
 }
 
 #[cfg(test)]
-pub(crate) fn test_catalog_with_overrides(
-    module_overrides: &[ModuleDefinition],
-    ship_type_overrides: &[ShipTypeDefinition],
-) -> Arc<GameDataCatalog> {
-    let mut modules = test_catalog().modules().to_vec();
-    for definition in module_overrides {
-        match modules.iter_mut().find(|item| item.id == definition.id) {
-            Some(existing) => *existing = definition.clone(),
-            None => modules.push(definition.clone()),
-        }
-    }
-
-    let mut ship_types = test_catalog().ship_types().to_vec();
-    for definition in ship_type_overrides {
-        match ship_types.iter_mut().find(|item| item.id == definition.id) {
-            Some(existing) => *existing = definition.clone(),
-            None => ship_types.push(definition.clone()),
-        }
-    }
-
-    Arc::new(
-        GameDataCatalog::from_definitions(modules, ship_types)
-            .expect("test catalog overrides must remain complete and valid"),
-    )
-}
-
-#[cfg(test)]
 impl GameDataCatalog {
     pub(crate) fn load_test_runtime_directory(root: &Path) -> Result<Self, CatalogError> {
         Self::load_from_paths(

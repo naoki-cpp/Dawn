@@ -32,8 +32,8 @@ pub struct CheckpointScheduler {
 /// Runtime-owned journal operations required by checkpoint scheduling.
 ///
 /// The engine does not depend on this trait. It exists at the persistence
-/// adapter boundary so the legacy public-event log and the authoritative
-/// recovery journal can be migrated independently.
+/// adapter boundary so the public-event projection log and the authoritative
+/// recovery journal remain independently owned.
 pub trait CheckpointJournal {
     fn next_recovery_index(&self) -> io::Result<u64>;
     fn compact_checkpoint(&mut self, boundary: u64, cold_path: &Path) -> io::Result<()>;

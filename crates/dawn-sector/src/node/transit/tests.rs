@@ -1,13 +1,11 @@
 use crate::node::SimulationNode;
 use dawn_core::{
     commands::TransitCommand, DawnError, DomainEvent, Position, SectorId, ShipId, ShipTypeId,
-    TransitHandoffState,
 };
 use dawn_ecs::{components::VelocityComp, TransitState};
 
 use crate::persistence::StateSnapshot;
 use dawn_core::{NodeId, SectorBounds, Tick, Velocity};
-use dawn_storage::{EventStore, FileEventStore, InMemoryEventStore};
 
 fn mem_node() -> SimulationNode {
     SimulationNode::new_test(
@@ -612,15 +610,12 @@ fn transit_moves_ship_ownership_to_destination_sector_exactly_once() {
     assert_eq!(to_node.get_ship_position(ship_id), Some(entry_pos));
 }
 
-/// Legacy recovery regression: after a Sector Transit, the destination
-/// Sector's state can be reproduced by the current snapshot + Event Log
-/// replay path. ADR-0049 replaces this operational mechanism with a
-/// versioned checkpoint plus authoritative RecoveryDelta tail; the test
-/// remains while that migration is implemented.
+/// After a Sector Transit, the destination Sector's committed checkpoint can
+/// be restored without consulting the public-event stream. Exact operational
+/// recovery uses the ADR-0049 checkpoint plus authoritative RecoveryDelta tail.
 #[test]
-fn destination_sector_state_after_transit_is_fully_restored_from_snapshot_and_replay() {
+fn destination_sector_state_after_transit_is_fully_restored_from_checkpoint() {
     let dir = tempfile::tempdir().unwrap();
-    let event_path = dir.path().join("events.log");
     let snap_path = dir.path().join("snapshot.bin");
 
     let mut from_node = SimulationNode::new_test(
@@ -644,28 +639,23 @@ fn destination_sector_state_after_transit_is_fully_restored_from_snapshot_and_re
     let snapshot = from_node.export_transit(ship_id).unwrap();
 
     {
-        let store = FileEventStore::open(&event_path).unwrap();
-        let mut to_node = SimulationNode::with_test_store(
+        let mut to_node = SimulationNode::new_test(
             NodeId(1),
             SectorId(1),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-            store,
         );
         to_node.import_transit(&snapshot, SectorId(0), entry_pos.into(), Tick::ZERO);
 
         let snap = to_node.take_snapshot();
         snap.save(&snap_path).unwrap();
-    } // node drops; FileEventStore flushes via BufWriter
+    }
 
     let snap = StateSnapshot::load(&snap_path).unwrap();
-    let store2 = FileEventStore::open(&event_path).unwrap();
-    let restored = SimulationNode::restore_from_test(
-        store2,
+    let restored = SimulationNode::restore_from(
         &snap,
         std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-        &[],
-        &[],
+        crate::game_data::test_catalog_arc(),
     );
 
     assert_eq!(restored.ship_count(), 1);
@@ -723,229 +713,7 @@ fn transit_latency_benchmark() {
     println!("transit (propose+export+import) avg over {ITERATIONS} iterations: {avg:?}");
 }
 
-// ── Snapshot + tail replay recovery (issue #204) ────────────────────────
-
-#[test]
-fn replaying_requested_marks_the_ship_in_transit() {
-    let mut node = mem_node();
-    let ship_id = node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
-
-    node.apply_event_pub(DomainEvent::SectorTransitRequested(
-        dawn_core::events::SectorTransitRequested {
-            ship_id,
-            from: SectorId(0),
-            to: SectorId(1),
-            request_tick: Tick(1),
-            gate_id: None,
-            entry_pos: dawn_core::AbsolutePosition::ORIGIN,
-            tick: Tick(1),
-        },
-    ));
-
-    let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
-    assert_eq!(
-        node.simulation.world.transit_state(entity),
-        TransitState::InTransit { to: SectorId(1) }
-    );
-}
-
-#[test]
-fn replaying_an_incoming_request_marker_does_not_freeze_the_destination_ship() {
-    let mut node = SimulationNode::new_test(
-        NodeId(1),
-        SectorId(1),
-        SectorBounds::centered(SectorBounds::DEFAULT_HALF),
-        std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-    );
-    let ship_id = node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
-    node.apply_event_pub(DomainEvent::SectorTransitRequested(
-        dawn_core::events::SectorTransitRequested {
-            ship_id,
-            from: SectorId(0),
-            to: SectorId(1),
-            request_tick: Tick(7),
-            gate_id: None,
-            entry_pos: dawn_core::AbsolutePosition::ORIGIN,
-            tick: Tick(3),
-        },
-    ));
-
-    assert!(node.can_propose_transit(ship_id));
-}
-
-#[test]
-fn replaying_aborted_clears_the_in_transit_marker() {
-    let mut node = mem_node();
-    let ship_id = node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
-    node.apply_event_pub(DomainEvent::SectorTransitRequested(
-        dawn_core::events::SectorTransitRequested {
-            ship_id,
-            from: SectorId(0),
-            to: SectorId(1),
-            request_tick: Tick(1),
-            gate_id: None,
-            entry_pos: dawn_core::AbsolutePosition::ORIGIN,
-            tick: Tick(1),
-        },
-    ));
-
-    node.apply_event_pub(DomainEvent::SectorTransitAborted(
-        dawn_core::events::SectorTransitAborted {
-            ship_id,
-            from: SectorId(0),
-            to: SectorId(1),
-            tick: Tick(2),
-        },
-    ));
-
-    let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
-    assert_eq!(
-        node.simulation.world.transit_state(entity),
-        TransitState::None
-    );
-}
-
-#[test]
-fn replaying_stale_abort_for_an_old_route_keeps_the_current_marker() {
-    let mut node = mem_node();
-    let ship_id = node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
-    for event in [
-        DomainEvent::SectorTransitRequested(dawn_core::events::SectorTransitRequested {
-            ship_id,
-            from: SectorId(0),
-            to: SectorId(1),
-            request_tick: Tick(1),
-            gate_id: None,
-            entry_pos: dawn_core::AbsolutePosition::ORIGIN,
-            tick: Tick(1),
-        }),
-        DomainEvent::SectorTransitRequested(dawn_core::events::SectorTransitRequested {
-            ship_id,
-            from: SectorId(0),
-            to: SectorId(2),
-            request_tick: Tick(2),
-            gate_id: None,
-            entry_pos: dawn_core::AbsolutePosition::ORIGIN,
-            tick: Tick(2),
-        }),
-        DomainEvent::SectorTransitAborted(dawn_core::events::SectorTransitAborted {
-            ship_id,
-            from: SectorId(0),
-            to: SectorId(1),
-            tick: Tick(3),
-        }),
-    ] {
-        node.apply_event_pub(event);
-    }
-
-    let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
-    assert_eq!(
-        node.simulation.world.transit_state(entity),
-        TransitState::InTransit { to: SectorId(2) }
-    );
-}
-
-#[test]
-fn replaying_completed_on_the_source_sector_removes_the_ship() {
-    let mut node = mem_node();
-    let ship_id = node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
-
-    node.apply_event_pub(DomainEvent::SectorTransitCompleted(
-        dawn_core::events::SectorTransitCompleted {
-            handoff: sample_transit_handoff(ship_id, Velocity::ZERO),
-            from: SectorId(0), // matches node.sector_id() -- this is the source
-            to: SectorId(1),
-            request_tick: dawn_core::Tick::ZERO,
-            entry_pos: dawn_core::AbsolutePosition::ORIGIN,
-            tick: Tick(1),
-        },
-    ));
-
-    assert!(
-        !node.simulation.ships.index.contains_key(&ship_id),
-        "a Sector replaying its own SectorTransitCompleted as the source \
-         must not resurrect the ship it exported"
-    );
-}
-
-#[test]
-fn replaying_completed_on_the_destination_sector_materializes_the_ship() {
-    let mut node = SimulationNode::new_test(
-        NodeId(1),
-        SectorId(1), // matches `to` below -- this is the destination
-        SectorBounds::centered(SectorBounds::DEFAULT_HALF),
-        std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-    );
-    let ship_id = ShipId::new(NodeId(0), 7);
-
-    node.apply_event_pub(DomainEvent::SectorTransitCompleted(
-        dawn_core::events::SectorTransitCompleted {
-            handoff: sample_transit_handoff(ship_id, Velocity::new(1.0, 0.0, 0.0)),
-            from: SectorId(0),
-            to: SectorId(1),
-            request_tick: dawn_core::Tick::ZERO,
-            entry_pos: dawn_core::AbsolutePosition::new(500.0, 0.0, 0.0),
-            tick: Tick(1),
-        },
-    ));
-
-    assert!(
-        node.simulation.ships.index.contains_key(&ship_id),
-        "a Sector replaying SectorTransitCompleted as the destination \
-         must materialize the imported ship from the event alone"
-    );
-    let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
-    assert_eq!(
-        node.simulation.world.get::<VelocityComp>(entity).unwrap().0,
-        Velocity::new(1.0, 0.0, 0.0)
-    );
-}
-
-#[test]
-fn replaying_completed_on_the_destination_sector_is_idempotent() {
-    // Guards against a double-materialize if the event were ever
-    // replayed twice (e.g. a snapshot taken mid-tail-replay in a future
-    // refactor) -- mirrors the `!contains_key` guard every other
-    // ship-materializing replay arm already has (ShipSpawned, etc).
-    let mut node = SimulationNode::new_test(
-        NodeId(1),
-        SectorId(1),
-        SectorBounds::centered(SectorBounds::DEFAULT_HALF),
-        std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-    );
-    let ship_id = ShipId::new(NodeId(0), 7);
-    let event = DomainEvent::SectorTransitCompleted(dawn_core::events::SectorTransitCompleted {
-        handoff: sample_transit_handoff(ship_id, Velocity::ZERO),
-        from: SectorId(0),
-        to: SectorId(1),
-        request_tick: dawn_core::Tick::ZERO,
-        entry_pos: dawn_core::AbsolutePosition::new(500.0, 0.0, 0.0),
-        tick: Tick(1),
-    });
-
-    node.apply_event_pub(event.clone());
-    node.apply_event_pub(event);
-
-    assert_eq!(node.ship_count(), 1);
-}
-
-fn sample_transit_handoff(ship_id: ShipId, velocity: Velocity) -> TransitHandoffState {
-    TransitHandoffState {
-        ship_id,
-        owner_player_id: None,
-        resume_ticket: None,
-        pending_resume_ticket: None,
-        ship_type_id: ShipTypeId(1),
-        velocity,
-        current_shield: 80.0,
-        current_armor: 90.0,
-        current_hull: 100.0,
-        is_destroyed: false,
-        capacitor: Some(40.0),
-        fitting: dawn_core::fitting::FittingSnapshot::empty(),
-        inventory: std::collections::BTreeMap::new(),
-    }
-}
+// ── Transit checkpoint recovery ─────────────────────────────────────────
 
 /// The end-to-end acceptance test from issue #204: a completed
 /// cross-Sector Transit must survive a simulated restart of *both*
@@ -953,7 +721,7 @@ fn sample_transit_handoff(ship_id: ShipId, velocity: Velocity) -> TransitHandoff
 /// never both (a resurrected source ship) and never neither (a lost
 /// import).
 #[test]
-fn a_completed_transit_survives_snapshot_plus_tail_replay_on_both_sectors() {
+fn a_completed_transit_survives_checkpoint_restore_on_both_sectors() {
     let mut from_node = SimulationNode::new_test(
         NodeId(0),
         SectorId(0),
@@ -967,17 +735,12 @@ fn a_completed_transit_survives_snapshot_plus_tail_replay_on_both_sectors() {
         std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
     );
 
-    // Snapshot both Sectors *before* the transit -- the ship only exists
-    // in the post-snapshot tail, on both sides, the same shape as issue
-    // #197's regression.
+    // Complete the transit before taking each committed checkpoint.
     let ship_id = from_node.spawn_ship(
         ShipTypeId(1),
         Position::ORIGIN,
         Velocity::new(1.0, 0.0, 0.0),
     );
-    let from_snapshot_before = from_node.take_snapshot();
-    let to_snapshot_before = to_node.take_snapshot();
-
     from_node
         .propose_transit(TransitCommand {
             ship_id,
@@ -995,30 +758,16 @@ fn a_completed_transit_survives_snapshot_plus_tail_replay_on_both_sectors() {
     // branch, not the old immediate removal at export time.
     from_node.complete_outgoing_transit(exported.ship_id, SectorId(1), entry_pos, Tick::ZERO);
 
-    // Simulate a restart of both Sectors: snapshot + tail-log replay,
-    // exactly as `restore_from` is used in production recovery.
-    let mut from_store2 = InMemoryEventStore::new();
-    for event in from_node.pending_events() {
-        from_store2.append(event.clone());
-    }
-    let restored_from = SimulationNode::restore_from_test(
-        from_store2,
-        &from_snapshot_before,
+    // Simulate a restart of both Sectors from their committed checkpoints.
+    let restored_from = SimulationNode::restore_from(
+        &from_node.take_snapshot(),
         std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-        &[],
-        &[],
+        crate::game_data::test_catalog_arc(),
     );
-
-    let mut to_store2 = InMemoryEventStore::new();
-    for event in to_node.pending_events() {
-        to_store2.append(event.clone());
-    }
-    let restored_to = SimulationNode::restore_from_test(
-        to_store2,
-        &to_snapshot_before,
+    let restored_to = SimulationNode::restore_from(
+        &to_node.take_snapshot(),
         std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-        &[],
-        &[],
+        crate::game_data::test_catalog_arc(),
     );
 
     let owned_by_source = restored_from.simulation.ships.index.contains_key(&ship_id);
@@ -1029,8 +778,8 @@ fn a_completed_transit_survives_snapshot_plus_tail_replay_on_both_sectors() {
     );
     assert!(
         owned_by_destination,
-        "the destination Sector must reconstruct the imported ship from \
-         its own tail log alone"
+        "the destination Sector must restore the imported ship from its \
+         committed checkpoint"
     );
     assert_ne!(
         owned_by_source, owned_by_destination,
@@ -1055,16 +804,12 @@ fn a_completed_transit_survives_snapshot_plus_tail_replay_on_both_sectors() {
         "the imported ship must land at the transit entry position, \
          the same as the live import_transit path"
     );
-    // The load-bearing check: the destination replay must redo the
-    // anchor rebase itself (rebase_ship_anchor_state), not rely on the
-    // already-logged AnchorRebased entry -- that entry replays *before*
-    // the ship exists on this Sector (see that method's doc comment) and
-    // silently no-ops. Comparing against the live `to_node`'s anchor
-    // (produced by the same import through the normal, working path)
-    // catches a dropped rebase that a position-only check cannot: with no
-    // nearby body to rebase onto, this Sector's `AnchorTable` falls back
-    // to the same default anchor either way, so position alone reads
-    // identical whether or not the rebase ran. Anchor identity does not.
+    // The load-bearing check: checkpoint restore must preserve the anchor
+    // selected by live handoff materialization. Comparing against the live
+    // `to_node` anchor catches a dropped rebase that a position-only check
+    // cannot: with no nearby body to rebase onto, this Sector's `AnchorTable`
+    // falls back to the same default anchor either way, so position alone
+    // reads identical while anchor identity does not.
     assert_eq!(
         restored_to.get_ship_anchor(ship_id),
         to_node.get_ship_anchor(ship_id),
@@ -1100,14 +845,13 @@ fn a_ship_survives_a_restart_between_request_commit_and_transit_commit() {
         Position::ORIGIN,
         Velocity::new(1.0, 0.0, 0.0),
     );
-    let snapshot_before = from_node.take_snapshot();
-
     from_node
         .propose_transit(TransitCommand {
             ship_id,
             to: SectorId(1),
         })
         .unwrap();
+    let snapshot_after_request = from_node.take_snapshot();
     // Mirrors `prepare_transit_commit`'s snapshot step, run for a
     // `TransitOp::Commit` that -- in this test -- is never proposed,
     // never mind committed. Nothing past this point ever runs:
@@ -1115,16 +859,10 @@ fn a_ship_survives_a_restart_between_request_commit_and_transit_commit() {
     let _snapshot_for_commit_proposal = from_node.export_transit(ship_id).unwrap();
 
     // Simulate a whole-cluster restart at exactly this point.
-    let mut store2 = InMemoryEventStore::new();
-    for event in from_node.pending_events() {
-        store2.append(event.clone());
-    }
-    let restored = SimulationNode::restore_from_test(
-        store2,
-        &snapshot_before,
+    let restored = SimulationNode::restore_from(
+        &snapshot_after_request,
         std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-        &[],
-        &[],
+        crate::game_data::test_catalog_arc(),
     );
 
     assert!(

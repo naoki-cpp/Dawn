@@ -154,7 +154,7 @@ impl SimulationNode {
             return false;
         }
         // Stats are unaffected by pure reordering, but ShipFitted still
-        // needs to carry the new order for replay -- emit without the
+        // needs to carry the new order for projection -- emit without the
         // reapply_fitting half of apply_fitting_and_emit's usual tail.
         self.emit_ship_fitted(cmd.ship_id, entity);
         true
@@ -366,38 +366,6 @@ mod tests {
                 .unwrap()
                 .item_count(dawn_core::ItemId::ScrapMetal),
             u64::MAX
-        );
-    }
-
-    #[test]
-    fn market_item_snapshot_replay_restores_the_credited_cargo() {
-        let mut node = node_with_modules();
-        let (player, ship_id) = spawn_owned_player(&mut node);
-        assert!(node.credit_item_owned(CreditItemCommand {
-            player_id: player,
-            ship_id,
-            item_id: dawn_core::ItemId::ScrapMetal,
-            quantity: 4,
-            settlement_id: 6,
-        }));
-        let event = node.pending_events().last().unwrap().clone();
-
-        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
-        node.simulation
-            .world
-            .get_mut::<InventoryComp>(entity)
-            .unwrap()
-            .items
-            .clear();
-        node.apply_event_pub(event);
-
-        assert_eq!(
-            node.simulation
-                .world
-                .get::<InventoryComp>(entity)
-                .unwrap()
-                .item_count(dawn_core::ItemId::ScrapMetal),
-            4
         );
     }
 

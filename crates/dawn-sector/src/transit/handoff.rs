@@ -13,8 +13,6 @@ use crate::persistence::TransitSagaDiagnostics;
 use crate::persistence::{
     IncomingTransitReceipt, OutgoingTransitAttempt, TransitAttemptState, TransitSagaSnapshot,
 };
-#[cfg(test)]
-use dawn_core::DomainEvent;
 use dawn_core::{
     AbsolutePosition, JumpGateId, SectorId, ShipId, Tick, TransitAttemptId, TransitHandoffState,
 };
@@ -248,25 +246,6 @@ pub(super) struct AckEffect {
     pub from: SectorId,
     pub to: SectorId,
     pub request_tick: Tick,
-}
-
-/// Transit-specific action for the legacy public-event replay fixture.
-#[derive(Debug, Clone, Copy)]
-#[cfg(test)]
-pub(crate) enum ReplayDirective<'a> {
-    Requested(&'a dawn_core::events::SectorTransitRequested),
-    Completed(&'a dawn_core::events::SectorTransitCompleted),
-    Aborted(&'a dawn_core::events::SectorTransitAborted),
-}
-
-#[cfg(test)]
-pub(super) fn replay_directive(event: &DomainEvent) -> Option<ReplayDirective<'_>> {
-    match event {
-        DomainEvent::SectorTransitRequested(event) => Some(ReplayDirective::Requested(event)),
-        DomainEvent::SectorTransitCompleted(event) => Some(ReplayDirective::Completed(event)),
-        DomainEvent::SectorTransitAborted(event) => Some(ReplayDirective::Aborted(event)),
-        _ => None,
-    }
 }
 
 /// Apply a committed Request and return the exact Commit effect needed by the

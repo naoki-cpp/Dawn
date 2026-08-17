@@ -8,9 +8,9 @@
 //! The node is now storage-independent: it owns no journal and never appends
 //! its public output. The runtime prepares a transition, persists it through
 //! its journal boundary, and then applies the committed delta to this node.
-//! `restore_from()` restores only the state carried by the supplied snapshot;
-//! the test-only `restore_from_test()` helper retains the old public-event
-//! replay fixture for reducer coverage, not as a production recovery path.
+//! `restore_from()` restores the state carried by the supplied checkpoint;
+//! committed RecoveryDelta records are applied by the runtime-owned recovery
+//! boundary, never by replaying public events.
 //!
 //! The accepted target is a storage-independent engine (#272) whose committed
 //! Sector world state is recovered from a compatible versioned checkpoint plus
@@ -26,7 +26,6 @@
 //! recovery authority selected by ADR-0049.
 
 mod admission_provisional;
-mod apply_event;
 mod approach;
 mod bot_ai;
 mod command_module;
@@ -94,7 +93,7 @@ use dawn_ecs::{
 };
 
 #[cfg(test)]
-use dawn_core::{ship_type::ShipTypeDefinition, ModuleDefinition, ModuleId};
+use dawn_core::ModuleId;
 #[cfg(test)]
 use dawn_ecs::components::{CapacitorComp, FittingComp, HullComp};
 
@@ -273,41 +272,6 @@ impl SimulationNode {
             galaxy,
             crate::game_data::test_catalog_arc(),
         )
-    }
-
-    #[cfg(test)]
-    pub(crate) fn with_test_store<T>(
-        node_id: NodeId,
-        sector_id: SectorId,
-        bounds: SectorBounds,
-        galaxy: Arc<crate::galaxy::Galaxy>,
-        _store: T,
-    ) -> Self {
-        Self::new_test(node_id, sector_id, bounds, galaxy)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn restore_from_test<S: dawn_storage::EventStore>(
-        store: S,
-        snapshot: &StateSnapshot,
-        galaxy: Arc<crate::galaxy::Galaxy>,
-        modules: &[ModuleDefinition],
-        ship_types: &[ShipTypeDefinition],
-    ) -> Self {
-        let catalog = crate::game_data::test_catalog_with_overrides(modules, ship_types);
-        let mut node = Self::restore_from(snapshot, galaxy, catalog);
-        let events: Vec<_> = store
-            .iter_from(snapshot.covered_recovery_index)
-            .map(|record| record.event.clone())
-            .collect();
-        for event in &events {
-            node.apply_event(event);
-        }
-        node.frame_outputs.pending_events = store
-            .iter_from(0)
-            .map(|record| record.event.clone())
-            .collect();
-        node
     }
 }
 
@@ -645,8 +609,8 @@ impl SimulationNode {
 
     /// Removes a ship entirely: despawns its ECS entity, clears identity and
     /// PlayerState ownership maps, and drops its `base_stats` entry. The single
-    /// removal path is shared by combat death, `ShipDespawned` replay, and
-    /// Sector Transit departure.
+    /// removal path is shared by combat death, committed recovery/application,
+    /// and Sector Transit departure.
     pub(super) fn remove_ship(&mut self, ship_id: ShipId) {
         if self
             .simulation
@@ -912,12 +876,10 @@ mod tests {
             .is_none());
 
         let snapshot = node.take_snapshot();
-        let restored = SimulationNode::restore_from_test(
-            dawn_storage::InMemoryEventStore::new(),
+        let restored = SimulationNode::restore_from(
             &snapshot,
             Arc::clone(&galaxy),
-            &[],
-            &[],
+            crate::game_data::test_catalog_arc(),
         );
         assert!(Arc::ptr_eq(&restored.topology.sector_map.galaxy, &galaxy));
         assert_eq!(
@@ -1047,7 +1009,7 @@ mod tests {
     }
 
     #[test]
-    fn replaying_events_reproduces_correct_spawn_count() {
+    fn spawning_emits_the_expected_spawn_event_count() {
         let mut node = mem_node();
         for i in 0..5 {
             node.spawn_ship(
@@ -1108,12 +1070,7 @@ mod tests {
         let sid = node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
         assert!(node.at_population_cap());
         // Despawn drops the ship from the world, lowering the count.
-        node.apply_event_pub(DomainEvent::ShipDespawned(
-            dawn_core::events::ShipDespawned {
-                ship_id: sid,
-                tick: Tick::ZERO,
-            },
-        ));
+        node.remove_ship(sid);
         assert_eq!(node.ship_count(), 0);
         assert!(!node.at_population_cap());
     }

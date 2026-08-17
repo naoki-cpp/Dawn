@@ -245,7 +245,7 @@ impl SimulationNode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dawn_core::{DomainEvent, NodeId, SectorBounds, SectorId, Tick};
+    use dawn_core::{NodeId, SectorBounds, SectorId};
     use dawn_ecs::components::WarpPhase;
 
     fn node_with_modules() -> SimulationNode {
@@ -259,8 +259,6 @@ mod tests {
 
     #[test]
     fn bot_starts_aligning_when_hp_drops_below_50_percent() {
-        use dawn_core::events::DamageTaken;
-
         let mut node = node_with_modules();
 
         let bot_pos = Position::new(1200.0, 0.0, 0.0);
@@ -271,14 +269,12 @@ mod tests {
 
         // Magpie max HP: shield=200, armor=120, hull=100, total=420.
         // Deal 215 → shield=0, armor=105, hull=100 → 205/420 ≈ 48.8% < 50%.
-        node.apply_event_pub(DomainEvent::DamageTaken(DamageTaken {
-            ship_id: bot_ship_id,
-            damage: 215.0,
-            current_shield: 0.0,
-            current_armor: 105.0,
-            current_hull: 100.0,
-            tick: Tick(1),
-        }));
+        let entity = *node.simulation.ships.index.get(&bot_ship_id).unwrap();
+        node.simulation
+            .world
+            .get_mut::<HullComp>(entity)
+            .unwrap()
+            .set_hp(0.0, 105.0, 100.0);
 
         node.tick();
 
@@ -291,9 +287,7 @@ mod tests {
     #[test]
     fn tackled_bot_cannot_warp_but_keeps_fighting() {
         use crate::modules::MODULE_FOLD_DISRUPTOR;
-        use dawn_core::{
-            events::DamageTaken, ActivateModuleCommand, FitModuleCommand, LockOnCommand, SlotKind,
-        };
+        use dawn_core::{ActivateModuleCommand, FitModuleCommand, LockOnCommand, SlotKind};
 
         let mut node = node_with_modules();
 
@@ -345,14 +339,12 @@ mod tests {
             "bot should be tackled"
         );
 
-        node.apply_event_pub(DomainEvent::DamageTaken(DamageTaken {
-            ship_id: bot_ship_id,
-            damage: 215.0,
-            current_shield: 0.0,
-            current_armor: 105.0,
-            current_hull: 100.0,
-            tick: Tick(10),
-        }));
+        let entity = *node.simulation.ships.index.get(&bot_ship_id).unwrap();
+        node.simulation
+            .world
+            .get_mut::<HullComp>(entity)
+            .unwrap()
+            .set_hp(0.0, 105.0, 100.0);
 
         node.tick_with_lock_commands(std::slice::from_ref(&lock_cmd));
 

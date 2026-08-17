@@ -89,13 +89,16 @@ Situation: a ShipFitted event stores only a list of ModuleIds, reasoning that
 "the registry can resolve them later."
 
 Consequence of the violation:
-  If the registry changes later (e.g. a module's stats are updated), replaying
-  the old Event reproduces different stats than at the time it occurred.
-  -> Violates INV-002 (Event replay must fully reproduce the world).
+  If the registry changes later (e.g. a module's stats are updated), a
+  downstream consumer cannot reconstruct the fitting layout represented by
+  the old public fact from one undifferentiated ID list.
+  -> Makes the append-only audit/projection fact ambiguous.
 
 Correct implementation:
-  ShipFitted must include the full FittingSnapshot (complete module definitions).
-  Replay must be self-contained and never depend on the registry. See ADR-0006 §1.
+  ShipFitted carries the complete FittingSnapshot layout needed by public
+  consumers. Exact fitting, derived stats, cycle state, and catalog identity
+  are recovered from checkpoint + RecoveryDelta under ADR-0049, with the
+  checkpoint catalog fingerprint validated before restore.
 ```
 
 ## Pattern 8: Encoding state as a flag instead of as the event itself

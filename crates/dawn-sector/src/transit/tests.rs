@@ -2,7 +2,7 @@ use super::*;
 use crate::client_admission::{ClientAdmissionIntent, ClientAdmissionRefusal};
 use dawn_core::fitting::FittingSnapshot;
 use dawn_core::{NodeId, Position, SectorBounds, ShipTypeId, Velocity};
-use dawn_storage::{EventStore, InMemoryEventStore, InMemoryJournal};
+use dawn_storage::InMemoryJournal;
 
 fn node(node_id: u8, sector_id: u8) -> SimulationNode {
     SimulationNode::new_test(
@@ -240,16 +240,10 @@ fn transit_carries_owner_binding_to_destination_and_snapshot_restore() {
     reconnect.abort(&mut destination);
 
     let snapshot = destination.take_snapshot();
-    let mut store = InMemoryEventStore::new();
-    for event in destination.pending_events() {
-        store.append(event.clone());
-    }
-    let mut restored = SimulationNode::restore_from_test(
-        store,
+    let mut restored = SimulationNode::restore_from(
         &snapshot,
         std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-        &[],
-        &[],
+        crate::game_data::test_catalog_arc(),
     );
     assert!(matches!(
         restored.begin_client_admission(
@@ -381,13 +375,10 @@ fn restored_requested_transit_reproposes_commit_with_the_durable_route() {
 
     // Recovery must use the checkpointed Saga even when the public event log
     // has already been compacted away. The event store is deliberately empty.
-    let store = InMemoryEventStore::new();
-    let mut restored = SimulationNode::restore_from_test(
-        store,
+    let mut restored = SimulationNode::restore_from(
         &snapshot,
         std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-        &[],
-        &[],
+        crate::game_data::test_catalog_arc(),
     );
     let (raft, mut proposals) = raft_handle();
     let (_tx, mut committed_rx) = mpsc::unbounded_channel();
@@ -537,12 +528,10 @@ fn duplicate_commit_after_destination_checkpoint_does_not_append_a_pending_marke
     apply_committed_raft_entries(&mut destination, &raft, &mut rx);
 
     let checkpoint = destination.take_snapshot();
-    let mut restored = SimulationNode::restore_from_test(
-        InMemoryEventStore::new(),
+    let mut restored = SimulationNode::restore_from(
         &checkpoint,
         std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-        &[],
-        &[],
+        crate::game_data::test_catalog_arc(),
     );
     let (dup_tx, mut dup_rx) = mpsc::unbounded_channel();
     dup_tx.send(commit.encode()).unwrap();
@@ -591,12 +580,10 @@ fn duplicate_commit_after_checkpoint_does_not_resurrect_removed_ship() {
     checkpoint
         .ships
         .retain(|ship| ship.snapshot.ship_id != ship_id);
-    let mut restored = SimulationNode::restore_from_test(
-        InMemoryEventStore::new(),
+    let mut restored = SimulationNode::restore_from(
         &checkpoint,
         std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-        &[],
-        &[],
+        crate::game_data::test_catalog_arc(),
     );
     assert!(restored.get_ship_position(ship_id).is_none());
 

@@ -1,10 +1,8 @@
 //! Execution seam for accepted Station operations.
 //!
 //! The sibling Station modules validate commands and build a plan. This
-//! module owns the current implementation's ordered live side effects. The
-//! legacy path writes SQLite inventory first, applies shared runtime state next,
-//! and emits the corresponding `DomainEvent` last; replay skips the SQLite
-//! write to avoid applying it twice.
+//! module owns the ordered live side effects: durable Station inventory work,
+//! runtime state mutation, and the corresponding `DomainEvent` publication.
 //!
 //! ADR-0049 changes the target contract: the journal-owned Station aggregate is
 //! durable before live apply, then the required SQLite projection is applied
@@ -57,11 +55,11 @@ pub(super) enum StationOperationPlan {
     },
 }
 
-/// Runtime-only Station state transition shared by live execution and replay.
+/// Runtime-only Station state transition used by live execution.
 ///
 /// These directives deliberately contain no Station inventory mutation and no
-/// Public-event output. The live path performs durable SQLite work first and
-/// emits the event afterward; replay applies only this stage.
+/// public-event output. The caller performs durable inventory work first and
+/// emits the public event after applying this state change.
 #[derive(Debug, Clone, Copy)]
 pub(super) enum StationRuntimeState {
     Dock {
@@ -92,8 +90,8 @@ pub(super) enum StationOperationExecution {
 impl SimulationNode {
     /// Apply only the ECS/map/index portion of an accepted Station operation.
     ///
-    /// This is the single owner of the runtime mutation shared by the live and
-    /// replay paths. It must remain free of SQLite writes and event appends.
+    /// This is the single owner of the runtime mutation. It must remain free
+    /// of SQLite writes and event appends.
     pub(super) fn apply_station_runtime_state(&mut self, state: StationRuntimeState) {
         match state {
             StationRuntimeState::Dock {
@@ -306,36 +304,29 @@ mod tests {
 
     fn paired_player_nodes() -> (SimulationNode, SimulationNode, PlayerId, ShipId) {
         let mut live = node();
-        let mut replay = node();
+        let mut comparison = node();
         let player_id = live.next_player_id();
-        assert_eq!(replay.next_player_id(), player_id);
+        assert_eq!(comparison.next_player_id(), player_id);
         let ship_id = live.spawn_player_ship(player_id);
-        assert_eq!(replay.spawn_player_ship(player_id), ship_id);
-        (live, replay, player_id, ship_id)
+        assert_eq!(comparison.spawn_player_ship(player_id), ship_id);
+        (live, comparison, player_id, ship_id)
     }
 
-    fn last_event(node: &SimulationNode) -> DomainEvent {
-        node.pending_events()
-            .last()
-            .expect("live operation emits an event")
-            .clone()
-    }
-
-    fn assert_same_runtime_state(live: &SimulationNode, replay: &SimulationNode) {
+    fn assert_same_runtime_state(live: &SimulationNode, comparison: &SimulationNode) {
         let mut live_snapshot = live.take_snapshot();
-        let mut replay_snapshot = replay.take_snapshot();
+        let mut comparison_snapshot = comparison.take_snapshot();
         live_snapshot.covered_recovery_index = 0;
-        replay_snapshot.covered_recovery_index = 0;
+        comparison_snapshot.covered_recovery_index = 0;
         assert_eq!(
             postcard::to_stdvec(&live_snapshot).unwrap(),
-            postcard::to_stdvec(&replay_snapshot).unwrap()
+            postcard::to_stdvec(&comparison_snapshot).unwrap()
         );
         assert_eq!(
             live.simulation.ships.type_ids,
-            replay.simulation.ships.type_ids
+            comparison.simulation.ships.type_ids
         );
-        assert_eq!(live.players.owners, replay.players.owners);
-        assert_eq!(live.players.active_ship, replay.players.active_ship);
+        assert_eq!(live.players.owners, comparison.players.owners);
+        assert_eq!(live.players.active_ship, comparison.players.active_ship);
     }
 
     #[test]
@@ -402,8 +393,8 @@ mod tests {
     }
 
     #[test]
-    fn dock_live_and_replay_apply_identical_runtime_state() {
-        let (mut live, mut replay, player_id, ship_id) = paired_player_nodes();
+    fn dock_execution_is_deterministic_across_equivalent_nodes() {
+        let (mut live, mut comparison, player_id, ship_id) = paired_player_nodes();
         let station_id = StationId(0);
 
         live.execute_station_operation(StationOperationPlan::Dock {
@@ -412,16 +403,20 @@ mod tests {
             station_id,
         })
         .unwrap();
-        let event = last_event(&live);
-        replay.apply_event_pub(event.clone());
-        replay.apply_event_pub(event);
+        comparison
+            .execute_station_operation(StationOperationPlan::Dock {
+                player_id,
+                ship_id,
+                station_id,
+            })
+            .unwrap();
 
-        assert_same_runtime_state(&live, &replay);
+        assert_same_runtime_state(&live, &comparison);
     }
 
     #[test]
-    fn undock_live_and_replay_apply_identical_runtime_state() {
-        let (mut live, mut replay, player_id, ship_id) = paired_player_nodes();
+    fn undock_execution_is_deterministic_across_equivalent_nodes() {
+        let (mut live, mut comparison, player_id, ship_id) = paired_player_nodes();
         let station_id = StationId(0);
         live.execute_station_operation(StationOperationPlan::Dock {
             player_id,
@@ -429,7 +424,7 @@ mod tests {
             station_id,
         })
         .unwrap();
-        replay
+        comparison
             .execute_station_operation(StationOperationPlan::Dock {
                 player_id,
                 ship_id,
@@ -443,20 +438,22 @@ mod tests {
             station_id,
         })
         .unwrap();
-        let event = last_event(&live);
-        replay.apply_event_pub(event.clone());
-        replay.apply_event_pub(event);
+        comparison
+            .execute_station_operation(StationOperationPlan::Undock {
+                player_id,
+                ship_id,
+                station_id,
+            })
+            .unwrap();
 
-        assert_same_runtime_state(&live, &replay);
+        assert_same_runtime_state(&live, &comparison);
     }
 
     #[test]
-    fn disassemble_live_and_replay_apply_identical_runtime_state_without_sqlite_replay() {
-        let (mut live, mut replay, player_id, ship_id) = paired_player_nodes();
+    fn disassemble_live_execution_updates_runtime_state_and_projection() {
+        let (mut live, mut comparison, player_id, ship_id) = paired_player_nodes();
         let station_id = StationId(0);
         let ship_type_id = live.simulation.ships.type_ids[&ship_id];
-        let replay_packaged_before =
-            replay.station_item_count(player_id, station_id, ItemId::PackagedShip(ship_type_id));
 
         live.execute_station_operation(StationOperationPlan::DisassembleShip {
             player_id,
@@ -465,28 +462,27 @@ mod tests {
             ship_type_id,
         })
         .unwrap();
-        let event = last_event(&live);
-        replay.apply_event_pub(event.clone());
-        replay.apply_event_pub(event);
-
-        assert_eq!(
-            replay.station_item_count(player_id, station_id, ItemId::PackagedShip(ship_type_id)),
-            replay_packaged_before,
-            "replay must not repeat the live SQLite credit"
-        );
-        assert_same_runtime_state(&live, &replay);
+        comparison
+            .execute_station_operation(StationOperationPlan::DisassembleShip {
+                player_id,
+                ship_id,
+                station_id,
+                ship_type_id,
+            })
+            .unwrap();
+        assert_same_runtime_state(&live, &comparison);
     }
 
     #[test]
-    fn assemble_live_and_replay_apply_identical_runtime_state_after_live_only_debit() {
+    fn assemble_live_execution_updates_runtime_state_and_projection() {
         let mut live = node();
-        let mut replay = node();
+        let mut comparison = node();
         let player_id = PlayerId(1);
         let station_id = StationId(0);
         let ship_type_id = ShipTypeId(1);
         let packaged = ItemId::PackagedShip(ship_type_id);
         live.credit_station_item(player_id, station_id, packaged, 1);
-        replay.credit_station_item(player_id, station_id, packaged, 1);
+        comparison.credit_station_item(player_id, station_id, packaged, 1);
 
         let result = live
             .execute_station_operation(StationOperationPlan::AssembleShip {
@@ -495,21 +491,29 @@ mod tests {
                 ship_type_id,
             })
             .unwrap();
-        let StationOperationExecution::Assembled(ship_id) = result else {
+        let StationOperationExecution::Assembled(live_ship_id) = result else {
             panic!("expected an assembled ship result");
         };
-        replay
-            .try_debit_station_item(player_id, station_id, packaged, 1)
-            .expect("simulate the durable live-only debit before replay");
-        let event = last_event(&live);
-        replay.apply_event_pub(event.clone());
-        replay.apply_event_pub(event);
+        let comparison_result = comparison
+            .execute_station_operation(StationOperationPlan::AssembleShip {
+                player_id,
+                station_id,
+                ship_type_id,
+            })
+            .unwrap();
+        let StationOperationExecution::Assembled(comparison_ship_id) = comparison_result else {
+            panic!("expected an assembled ship result");
+        };
 
+        assert_eq!(live_ship_id, comparison_ship_id);
         assert_eq!(
-            replay.station_item_count(player_id, station_id, packaged),
+            comparison.station_item_count(player_id, station_id, packaged),
             0
         );
-        assert_eq!(replay.docked_station(ship_id), Some(station_id));
-        assert_same_runtime_state(&live, &replay);
+        assert_eq!(
+            comparison.docked_station(comparison_ship_id),
+            Some(station_id)
+        );
+        assert_same_runtime_state(&live, &comparison);
     }
 }
