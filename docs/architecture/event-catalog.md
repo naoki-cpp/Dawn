@@ -106,7 +106,7 @@ See [ADR-0017](../adr/ADR-0017-snapshot-compaction.md), [ADR-0049](../adr/ADR-00
 |---|---|---|---|
 | `ShipSpawned` | Ship appeared in the world | `SimulationNode::spawn_ship()` | ✅ implemented |
 | `ClientAdmissionIdentityReserved` | Fresh admission durably consumed a `PlayerId`/`ShipId` pair without materializing a Ship; this is an append-only audit fact, while exact allocation watermarks are checkpoint/RecoveryDelta authority | `SimulationNode::reserve_fresh_admission_identity()` | ✅ implemented |
-| `ClientAdmissionCommitted` | Atomic fresh-admission starter public fact: Ship, fitting/cargo snapshot, ownership identity, and idempotent Station grant description | `SimulationNode::commit_reserved_fresh_admission()` | ✅ implemented |
+| `ClientAdmissionCommitted` | Atomic fresh-admission starter public fact: Ship, fitting/stacked-cargo snapshot, ownership identity, and idempotent Station grant description | `SimulationNode::commit_reserved_fresh_admission()` | ✅ implemented |
 | `ShipDespawned` | Ship manually removed from the world | `SimulationNode` | type only (no emission site) |
 | `ShipDestroyed` | Ship destroyed in combat | `CombatSystem` | ✅ implemented |
 
@@ -326,7 +326,7 @@ Ship's fitting slots and/or cargo projection changed.
 |---|---|---|---|
 | `ship_id` | `ShipId` | ✓ | Ship whose fitting or cargo changed |
 | `fitting` | `FittingSnapshot` | ✓ | snapshot of all slots after the change (list of Module IDs) |
-| `inventory` | `Vec<ItemId>` | ✓ | snapshot of unfitted inventory after the change (ADR-0032, `#[serde(default)]`) |
+| `inventory` | `BTreeMap<ItemId, u64>` | ✓ | stack snapshot of unfitted inventory after the change (ADR-0032/0034, `#[serde(default)]`) |
 | `tick` | `Tick` | ✓ | Tick the fitting or cargo change was finalized |
 | `market_settlement_id` | `Option<u64>` | conditional | Settlement ID for downstream correlation and idempotent consumers; exact duplicate-delivery protection is checkpoint/RecoveryDelta authority |
 

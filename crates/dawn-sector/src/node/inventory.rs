@@ -275,12 +275,8 @@ mod tests {
         };
         assert_eq!(event.ship_id, ship_id);
         assert_eq!(
-            event
-                .inventory
-                .iter()
-                .filter(|item| **item == dawn_core::ItemId::ScrapMetal)
-                .count(),
-            3
+            event.inventory.get(&dawn_core::ItemId::ScrapMetal),
+            Some(&3)
         );
     }
 
