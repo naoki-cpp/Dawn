@@ -177,6 +177,17 @@ adapter has replayed/reconciled the committed transition and explicitly marks
 the runtime recovered. A successful frame return is the final acknowledgement
 point for the local profile.
 
+Fencing applies to the Host's entire live-mutation boundary, not only to its Tick
+entry point. While fenced, typed admission, ownership adoption, command
+collection, Transit/Jump proposal, pending-output drain, checkpoint access, and
+the generic mutable-node/state bridges all return `RuntimeFrameHostError::Fenced`
+without invoking their mutation closure. Read-only inspection remains available
+for diagnosis. Fixture population is separately limited to `Bootstrapping` and
+returns `BootstrapClosed` after the first frame. An adapter may return the Host
+to `Running` only through the explicit recovery operation after the committed
+transition and required repositories have been reconciled; ordinary mutators
+cannot serve as an implicit recovery path.
+
 The common presentation boundary is now `dawn-sector::aoi_frame::deliver_sector_sessions`.
 It owns the rebuild, committed-event/warp delivery, jump-session removal, and
 stale-player cleanup sequence for both the production node and single-sector

@@ -6,8 +6,8 @@ use super::{
     runtime, AoiDelivery, AOI_CELL_SIZE, P4_TICK_MS,
 };
 use crate::runtime_frame::{
-    OwnedRaftRuntimeConsensus, RuntimeFrameHost, RuntimeFramePolicy, RuntimeNodeMutation,
-    RuntimeNodeView,
+    OwnedRaftRuntimeConsensus, RuntimeClientAdmissionError, RuntimeFrameHost, RuntimeFramePolicy,
+    RuntimeNodeMutation, RuntimeNodeView,
 };
 use crate::{cluster, ws_server};
 use dawn_core::{DomainEvent, NodeId, PlayerId, SectorBounds, SectorId, ShipId};
@@ -82,7 +82,9 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
     let mut market = MarketRuntime::open("data/market.sqlite")
         .expect("failed to open Market database at data/market.sqlite");
 
-    hosts[0].spawn_npc_frigates(ship_count);
+    hosts[0]
+        .spawn_npc_frigates(ship_count)
+        .expect("NPC fixture population must be created before the first frame");
 
     // Warm up: tick until a Raft leader is elected (election timeout ≤ 20 ticks).
     for _ in 0..30 {
@@ -173,8 +175,15 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
             };
             let mut attempt = match hosts[sector].begin_client_admission(intent, AOI_CELL_SIZE) {
                 Ok(attempt) => attempt,
-                Err(refusal) => {
+                Err(RuntimeClientAdmissionError::Refused(refusal)) => {
                     log_cluster_refusal(request.peer_addr, refusal);
+                    continue;
+                }
+                Err(RuntimeClientAdmissionError::Host(error)) => {
+                    eprintln!(
+                        "[Server] connection from {} refused: {error}",
+                        request.peer_addr
+                    );
                     continue;
                 }
             };
@@ -208,12 +217,14 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                     market.handle_cluster(sess.player_id, market_command, sector, &hosts);
                 sess.send_message(&ServerMessage::MarketSnapshot(snapshot));
             }
-            let dispatches = hosts[sector].collect_runtime_commands(
-                std::slice::from_mut(sess),
-                &mut lock_commands[sector],
-                |session| session.player_id,
-                ws_server::PlayerSession::try_recv_request,
-            );
+            let dispatches = hosts[sector]
+                .collect_runtime_commands(
+                    std::slice::from_mut(sess),
+                    &mut lock_commands[sector],
+                    |session| session.player_id,
+                    ws_server::PlayerSession::try_recv_request,
+                )
+                .expect("in-memory clustered runtime must remain writable");
             for dispatch in dispatches {
                 match dispatch {
                     RuntimeCommandDispatch::Jump {
@@ -222,7 +233,10 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                         if ship_id != sess.ship_id {
                             continue;
                         }
-                        match hosts[sector].propose_jump(ship_id, command.gate_id) {
+                        match hosts[sector]
+                            .propose_jump(ship_id, command.gate_id)
+                            .expect("in-memory clustered runtime must remain writable")
+                        {
                             JumpOutcome::NeedsTransitProposal { to } => {
                                 println!(
                                     "  [Server] Jump proposed: ship #{} gate #{} (S{} → S{})",
@@ -361,10 +375,14 @@ fn drain_cluster_admission_completions<N: RuntimeNodeMutation>(
 ) -> Vec<(usize, ws_server::PlayerSession, CommittedClientAdmission)> {
     let mut ready = Vec::new();
     while let Ok((sector, attempt, result)) = completion_rx.try_recv() {
-        if let Some((session, committed)) = nodes[sector].with_runtime_node_mut(|node| {
+        match nodes[sector].with_runtime_node_mut(|node| {
             finish_cluster_admission(node, sector, player_sector, ship_player, attempt, result)
         }) {
-            ready.push((sector, session, committed));
+            Ok(Some((session, committed))) => ready.push((sector, session, committed)),
+            Ok(None) => {}
+            Err(error) => {
+                eprintln!("[Server] Sector {sector} discarded a completed handshake: {error}")
+            }
         }
     }
     ready

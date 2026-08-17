@@ -470,12 +470,22 @@ cluster serve consume the returned output for their local delivery paths. A
 cluster coordinator runs each Sector Host once, then performs handoff and routing
 using the collected outputs rather than introducing a second Tick ordering.
 
-Bootstrap mutations are allowed only before the first Host frame. Admission,
-Market settlement, and jump-fallback proposal paths currently use bounded Host
-bridges before the frame; the driver `spawn_ship` helper is retained only as
-deterministic fixture setup. These live mutations are being migrated to durable
-FrameInput commands in follow-up slices, so the bridges are explicit rather than
-being mistaken for a second production Tick path.
+The Host phase is also the capability boundary for every typed mutation entry:
+
+| Host phase | Allowed capabilities |
+|---|---|
+| `Bootstrapping` | Read-only inspection, normal pre-frame input bridges, and startup/demo/test fixture population. |
+| `Running` | Read-only inspection and bounded runtime bridges for admission, ownership adoption, command collection, Transit/Jump proposal, output drain, and checkpoint access. Fixture population is closed. |
+| `Fenced` | Read-only diagnosis and the explicit recovery transition only. Every live mutation bridge returns `RuntimeFrameHostError::Fenced` before touching node or journal state. |
+
+`SectorRuntimeHandle::spawn_ship` is therefore a deterministic fixture API, not
+a general actor mutation command: callers must provision those fixtures before
+the actor's first `Tick`, and a later request returns `FixtureSpawnError::BootstrapClosed`.
+Admission, Market settlement, and jump-fallback proposal paths currently use
+bounded Host bridges before the frame. These live mutations are being migrated
+to durable `FrameInput` commands in follow-up slices, so the bridges are explicit
+rather than being mistaken for a second production Tick path. A fenced Host must
+not use any of those bridges as an alternate write path.
 
 This is current implementation topology, not a permanent storage/API constraint:
 

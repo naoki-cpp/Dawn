@@ -167,7 +167,8 @@ async fn main() -> anyhow::Result<()> {
         RuntimeFramePolicy::local_durable(0),
     );
     if is_fresh {
-        host.spawn_npc_frigates(cfg.npc_ships);
+        host.spawn_npc_frigates(cfg.npc_ships)
+            .expect("fresh-sector fixtures must be inserted before the first frame");
     }
 
     // ── Shared peer transport: replication adapter ────────────────────────────
@@ -240,7 +241,9 @@ async fn main() -> anyhow::Result<()> {
         interval.tick().await;
         let tick_started = std::time::Instant::now();
 
-        runtime.advance_handshakes(&mut admission, sector_id, AOI_CELL_SIZE);
+        runtime
+            .advance_handshakes(&mut admission, sector_id, AOI_CELL_SIZE)
+            .map_err(|error| anyhow::anyhow!("client admission unavailable: {error}"))?;
 
         // Promote completed handshakes to active sessions.
         while let Some(sess) = admission.try_recv_ready_session() {
@@ -275,7 +278,7 @@ async fn main() -> anyhow::Result<()> {
         // normally on the next tick either way, and the next scheduled
         // checkpoint will retry.
         match runtime.with_state_mut(|node, journal| checkpoints.maybe_checkpoint(node, journal)) {
-            Ok(Some(snapshot)) => {
+            Ok(Ok(Some(snapshot))) => {
                 println!(
                     "[Node] checkpoint at tick {} (covered_recovery_index={})",
                     snapshot.tick.value(),
@@ -289,8 +292,13 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
             }
-            Ok(None) => {}
-            Err(e) => eprintln!("[Node] checkpoint failed, will retry next interval: {e}"),
+            Ok(Ok(None)) => {}
+            Ok(Err(error)) => {
+                eprintln!("[Node] checkpoint failed, will retry next interval: {error}")
+            }
+            Err(error) => {
+                return Err(anyhow::anyhow!("checkpoint mutation unavailable: {error}"));
+            }
         }
 
         // Field observability for 8D-5: a tick that overruns its own period

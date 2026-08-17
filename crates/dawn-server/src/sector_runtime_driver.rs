@@ -26,7 +26,9 @@ use dawn_sector::node::SimulationNode;
 use dawn_storage::InMemoryJournal;
 use tokio::sync::{mpsc, oneshot};
 
-use crate::runtime_frame::{OwnedRaftRuntimeConsensus, RuntimeFrameHost, RuntimeFramePolicy};
+use crate::runtime_frame::{
+    OwnedRaftRuntimeConsensus, RuntimeFrameHost, RuntimeFrameHostError, RuntimeFramePolicy,
+};
 
 // ── Public result/stats types ─────────────────────────────────────────────────
 
@@ -41,6 +43,35 @@ use crate::runtime_frame::{OwnedRaftRuntimeConsensus, RuntimeFrameHost, RuntimeF
 pub struct TickSummary {
     pub tick: Tick,
     pub events_emitted: usize,
+}
+
+/// A fixture ship can only be inserted before the actor's first runtime frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FixtureSpawnError {
+    /// At least one runtime frame has already started.
+    BootstrapClosed,
+    /// The runtime cannot accept any mutation until it is recovered.
+    RuntimeFenced,
+}
+
+impl std::fmt::Display for FixtureSpawnError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::BootstrapClosed => write!(formatter, "fixture spawning is closed"),
+            Self::RuntimeFenced => write!(formatter, "runtime is fenced"),
+        }
+    }
+}
+
+impl std::error::Error for FixtureSpawnError {}
+
+impl From<RuntimeFrameHostError> for FixtureSpawnError {
+    fn from(error: RuntimeFrameHostError) -> Self {
+        match error {
+            RuntimeFrameHostError::BootstrapClosed => Self::BootstrapClosed,
+            RuntimeFrameHostError::Fenced | RuntimeFrameHostError::Tick(_) => Self::RuntimeFenced,
+        }
+    }
 }
 
 /// Snapshot of a node's current state, returned by `GetStats`.
@@ -62,7 +93,7 @@ enum SectorRuntimeMessage {
     SpawnShip {
         position: Position,
         velocity: Velocity,
-        reply: oneshot::Sender<ShipId>,
+        reply: oneshot::Sender<Result<ShipId, FixtureSpawnError>>,
     },
     GetStats {
         reply: oneshot::Sender<NodeStats>,
@@ -129,7 +160,10 @@ impl SectorRuntimeDriver {
 
     /// Forward any un-replicated events from the node's local log.
     fn publish_new_events(&mut self) {
-        let events = self.host.drain_pending_events();
+        let events = self
+            .host
+            .drain_pending_events()
+            .expect("a successful fixture mutation must remain drainable");
         self.replication
             .publish_events(self.host.node().sector_id(), &events);
     }
@@ -164,12 +198,15 @@ impl SectorRuntimeDriver {
                     // This actor API is retained for deterministic fixture
                     // setup. Production runtime mutations must enter through
                     // RuntimeFrameHost::run_frame once a frame has started.
-                    let ship_id =
-                        self.host
-                            .spawn_fixture_ship(dawn_core::ShipTypeId(1), position, velocity);
+                    let ship_id = self
+                        .host
+                        .spawn_fixture_ship(dawn_core::ShipTypeId(1), position, velocity)
+                        .map_err(FixtureSpawnError::from);
 
-                    // Spawn appends to the internal log; publish those events.
-                    self.publish_new_events();
+                    if ship_id.is_ok() {
+                        // Spawn appends to the internal log; publish those events.
+                        self.publish_new_events();
+                    }
 
                     let _ = reply.send(ship_id);
                 }
@@ -195,7 +232,9 @@ impl SectorRuntimeDriver {
                     // commits and is applied at Step 7.5.
                     let accepted = self.host.node().can_propose_transit(ship_id);
                     if accepted {
-                        self.host.propose_transit_request(ship_id, to, None);
+                        self.host
+                            .propose_transit_request(ship_id, to, None)
+                            .expect("in-memory simulation runtime must remain writable");
                     }
                     let _ = reply.send(accepted);
                 }
@@ -218,7 +257,8 @@ impl SectorRuntimeDriver {
                             .expect("can_propose_jump confirmed gate exists")
                             .to_sector;
                         self.host
-                            .propose_transit_request(ship_id, to, Some(gate_id));
+                            .propose_transit_request(ship_id, to, Some(gate_id))
+                            .expect("in-memory simulation runtime must remain writable");
                     }
                     let _ = reply.send(accepted);
                 }
@@ -295,7 +335,12 @@ impl SectorRuntimeHandle {
         rx.await.expect("SectorRuntimeDriver dropped reply sender")
     }
 
-    pub async fn spawn_ship(&self, position: Position, velocity: Velocity) -> ShipId {
+    /// Insert deterministic fixture state before the actor's first Tick.
+    pub async fn spawn_ship(
+        &self,
+        position: Position,
+        velocity: Velocity,
+    ) -> Result<ShipId, FixtureSpawnError> {
         let (tx, rx) = oneshot::channel();
         self.tx
             .send(SectorRuntimeMessage::SpawnShip {
@@ -422,7 +467,8 @@ mod tests {
                 Position::new(100.0, 100.0, 100.0),
                 Velocity::new(1.0, 0.0, 0.0),
             )
-            .await;
+            .await
+            .expect("fixture spawn before first Tick");
         let stats = actor.get_stats().await;
         assert_eq!(stats.ship_count, 1);
         actor.shutdown().await;
@@ -437,7 +483,8 @@ mod tests {
                 Position::new(100.0, 100.0, 100.0),
                 Velocity::new(1.0, 0.0, 0.0),
             )
-            .await;
+            .await
+            .expect("fixture spawn before first Tick");
         let summary = actor.tick().await;
         assert_eq!(summary.tick, Tick(1));
         actor.shutdown().await;
@@ -450,7 +497,10 @@ mod tests {
         // We test that the bus correctly receives spawn events, and that
         // ticking a stationary NPC produces no extra events.
         let (actor, bus) = spawn_runtime();
-        actor.spawn_ship(Position::ORIGIN, Velocity::ZERO).await;
+        actor
+            .spawn_ship(Position::ORIGIN, Velocity::ZERO)
+            .await
+            .expect("fixture spawn before first Tick");
 
         // Spawn event is in bus. Tick a stationary NPC → no VelocityChanged.
         let summary = actor.tick().await;
@@ -470,13 +520,27 @@ mod tests {
         for i in 0..5 {
             actor
                 .spawn_ship(Position::new(i as f64 * 50.0, 0.0, 0.0), Velocity::ZERO)
-                .await;
+                .await
+                .expect("fixture spawn before first Tick");
         }
 
         // All spawn events must be in the bus because spawn_ship awaits the reply,
         // and the reply is sent AFTER publish_new_events().
         assert_eq!(bus.event_count().await, 5);
 
+        actor.shutdown().await;
+        bus.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn fixture_spawn_is_rejected_after_the_first_tick() {
+        let (actor, bus) = spawn_runtime();
+        actor.tick().await;
+
+        let result = actor.spawn_ship(Position::ORIGIN, Velocity::ZERO).await;
+
+        assert_eq!(result, Err(FixtureSpawnError::BootstrapClosed));
+        assert_eq!(actor.get_stats().await.ship_count, 0);
         actor.shutdown().await;
         bus.shutdown().await;
     }
