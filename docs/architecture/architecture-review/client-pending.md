@@ -9,7 +9,7 @@ date     : 2026-08-11
 
 # Architecture Review — Dawn Client（未完項目）
 
-C-1〜C-8、C-11、C-13〜C-15は解消済み。実装詳細と完了条件は各GitHub Issueに置き、ここでは判断だけを保持する。
+C-1〜C-8、C-11、C-13〜C-15、C-17は解消済み。実装詳細と完了条件は各GitHub Issueに置き、ここでは判断だけを保持する。
 
 ## C-9（保留）: `hud_manager.gd` watch帯
 
@@ -35,7 +35,7 @@ commit後順序は維持する。wire typeや`dawn-client-core`の責務を新cr
 
 ## R-2（保留）: `main.gd`追加分割
 
-`main.gd`は1148行だが、live state、interaction、presentationは既に分離済み。残るscene lifecycle /
+`main.gd`は1143行だが、live state、interaction、presentationは既に分離済み。残るscene lifecycle /
 node generation / network send / HUD assemblyはcomposition glueとして凝集している。
 **再評価:** scene-tree構成を自動検証できるようになるか、独立した変更理由が再び混在する場合。
 

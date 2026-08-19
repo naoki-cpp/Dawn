@@ -77,7 +77,8 @@ player stronger.
 
 - `dawn-core` defines pure domain types, commands, and events.
 - `dawn-client-core` defines the Godot-independent client-side domain model
-  (loadout, wire row types), depending only on `dawn-core` (ADR-0039).
+  (loadout, wire row types, WorldSession state, and ClientInteraction policy),
+  depending only on `dawn-core` (ADR-0039, ADR-0041).
 - `dawn-client-gdext` is the GDExtension binding exposing `dawn-client-core`
   to the Godot client (ADR-0040).
 - `dawn-ecs` defines components and systems without owning persistence.
@@ -108,6 +109,10 @@ Use these names consistently:
   by `dawn-protocol` rather than duplicated as a `*Wire` mirror. Functions that
   genuinely produce a JSON Schema document (`server_fact_json_schema()`,
   `client_request_json_schema()`) keep `json` in their names.
+- Use `ClientAction` for the typed result of client input interpretation. It
+  is either a server-bound `ClientRequest` or a Godot-owned local effect;
+  `ClientIntent`, string tags, and `Dictionary` payloads are not compatibility
+  layers for this path.
 
 ## Non-Goals
 

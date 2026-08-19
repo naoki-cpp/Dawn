@@ -1,69 +1,72 @@
 ##
-## Client-side world interaction policy for one play session. This module owns
-## typed selection state, double-click timing, and the mapping from normalized
-## input facts to ClientIntent objects. main.gd stays responsible for scene
-## wiring, network sends, and visual side effects.
+## Godot adapter for the engine-independent ClientInteraction policy.
+##
+## This file only normalizes Godot key constants and hit-test results. Selection
+## state, double-click timing, and action construction live in dawn-client-core.
 class_name WorldInteraction
 extends RefCounted
 
-const InputDecoder = preload("res://scripts/input_decoder.gd")
+const ACTION_NONE: int = 0
+const ACTION_REQUEST: int = 1
+const ACTION_LOCAL: int = 2
 
-const DOUBLE_CLICK_SEC: float = 0.4
-const DOUBLE_CLICK_PX: float = 10.0
+const LOCAL_NONE: int = 0
+const LOCAL_TOGGLE_MODULE: int = 1
+const LOCAL_ADJUST_KEEP_AT_RANGE: int = 2
+const LOCAL_TOGGLE_INVENTORY: int = 3
+const LOCAL_TOGGLE_MARKET: int = 4
+const LOCAL_TOGGLE_TACTICAL_OVERLAY: int = 5
+const LOCAL_DOUBLE_CLICK_MOVE: int = 6
+const LOCAL_SELECTION_CHANGED: int = 7
 
-var _selection: ClientSelection = ClientSelection.none()
-var _last_click_time: float = -1.0
-var _last_click_pos: Vector2 = Vector2.ZERO
+var _core: ClientInteraction = ClientInteraction.new()
 
 
-## Scalar accessors remain for presentation code that needs to compare a
-## selected ID. The source of truth is the mutually exclusive ClientSelection
-## object above, not three independently mutable integer fields.
 func selected_target_id() -> int:
-	return _selection.id() if _selection.is_ship() else -1
+	return _core.selected_target_id()
 
 
 func selected_gate_id() -> int:
-	return _selection.id() if _selection.is_gate() else -1
+	return _core.selected_gate_id()
 
 
 func selected_body_id() -> int:
-	return _selection.id() if _selection.is_body() else -1
+	return _core.selected_body_id()
 
 
 func selected_station_id() -> int:
-	return _selection.id() if _selection.is_station() else -1
+	return _core.selected_station_id()
 
 
 func clear_selection() -> void:
-	_selection = ClientSelection.none()
+	_core.clear_selection()
 
 
 func clear_navigation_selection() -> void:
-	if _selection.is_gate() or _selection.is_body() or _selection.is_station():
-		_selection = ClientSelection.none()
+	_core.clear_navigation_selection()
 
 
 func clear_target_if_matches(ship_id: int) -> void:
-	if _selection.is_ship() and ship_id == _selection.id():
-		_selection = ClientSelection.none()
+	_core.clear_target_if_matches(ship_id)
 
 
-func resolve_key_intent(
+func resolve_key_action(
 	keycode: Key,
 	player_ship_id: int,
 	nearby_gate_id: int,
 	nearby_station_id: int,
-	docked_station_id: int
-) -> ClientIntent:
-	return InputDecoder.decode_key(
-		keycode,
+	docked_station_id: int,
+	keep_at_range_m: float,
+	buildable_ship_type_id: int
+) -> ClientAction:
+	return _core.resolve_key_action(
+		_normalize_key(keycode),
 		player_ship_id,
-		_selection,
 		nearby_gate_id,
 		nearby_station_id,
-		docked_station_id
-	)
+		docked_station_id,
+		keep_at_range_m,
+		buildable_ship_type_id)
 
 
 func interpret_primary_click(
@@ -75,37 +78,48 @@ func interpret_primary_click(
 	hit_gate_id: int,
 	hit_body_id: int,
 	hit_station_id: int = -1
-) -> ClientIntent:
-	if player_ship_id < 0:
-		return ClientIntent.none()
-
-	var dt: float = now_sec - _last_click_time
-	var dp: float = screen_pos.distance_to(_last_click_pos)
-	if dt < DOUBLE_CLICK_SEC and dp < DOUBLE_CLICK_PX:
-		_last_click_time = -1.0
-		if camera_dragging:
-			return ClientIntent.none()
-		return ClientIntent.double_click_move()
-
-	_last_click_time = now_sec
-	_last_click_pos = screen_pos
-
-	if hit_ship_id >= 0:
-		_selection = ClientSelection.ship(hit_ship_id)
-		return ClientIntent.selection_changed()
-	if hit_gate_id >= 0:
-		_selection = ClientSelection.gate(hit_gate_id)
-		return ClientIntent.selection_changed()
-	if hit_station_id >= 0:
-		_selection = ClientSelection.station(hit_station_id)
-		return ClientIntent.selection_changed()
-	if hit_body_id >= 0:
-		_selection = ClientSelection.body(hit_body_id)
-		return ClientIntent.selection_changed()
-	return ClientIntent.none()
+) -> ClientAction:
+	return _core.primary_click(
+		screen_pos,
+		now_sec,
+		camera_dragging,
+		player_ship_id,
+		hit_ship_id,
+		hit_gate_id,
+		hit_body_id,
+		hit_station_id)
 
 
-func interpret_lock_click(player_ship_id: int, hit_ship_id: int) -> ClientIntent:
-	if player_ship_id < 0 or hit_ship_id < 0:
-		return ClientIntent.none()
-	return ClientIntent.lock_on(hit_ship_id)
+func interpret_lock_click(player_ship_id: int, hit_ship_id: int) -> ClientAction:
+	return _core.lock_click(player_ship_id, hit_ship_id)
+
+
+## Godot's Key enum is an engine concern. The resulting small integer is the
+## stable adapter protocol consumed by dawn-client-core::ClientKey.
+static func _normalize_key(keycode: Key) -> int:
+	match keycode:
+		KEY_F1: return 1
+		KEY_F2: return 2
+		KEY_F3: return 3
+		KEY_F4: return 4
+		KEY_F5: return 5
+		KEY_F6: return 6
+		KEY_F7: return 7
+		KEY_F8: return 8
+		KEY_S: return 9
+		KEY_J: return 10
+		KEY_A: return 11
+		KEY_W: return 12
+		KEY_O: return 13
+		KEY_K: return 14
+		KEY_BRACKETLEFT: return 15
+		KEY_BRACKETRIGHT: return 16
+		KEY_I: return 17
+		KEY_M: return 18
+		KEY_D: return 19
+		KEY_U: return 20
+		KEY_B: return 21
+		KEY_Y: return 22
+		KEY_X: return 23
+		KEY_TAB: return 24
+	return 0

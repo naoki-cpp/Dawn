@@ -48,7 +48,7 @@ impl ClientCommandResult {
         })
     }
 
-    fn failure(code: &str, message: impl Into<String>) -> Gd<Self> {
+    pub(crate) fn failure(code: &str, message: impl Into<String>) -> Gd<Self> {
         Gd::from_init_fn(|_base| Self {
             ok: false,
             bytes: PackedByteArray::new(),
@@ -84,6 +84,10 @@ fn request_result(request: Result<ClientRequest, RequestBuildError>) -> Gd<Clien
         Ok(bytes) => ClientCommandResult::success(bytes),
         Err(error) => ClientCommandResult::failure(error.code, error.message),
     }
+}
+
+pub(crate) fn request_result_from_request(request: ClientRequest) -> Gd<ClientCommandResult> {
+    request_result(Ok(request))
 }
 
 fn market_result(command: Result<MarketCommandWire, RequestBuildError>) -> Gd<ClientCommandResult> {

@@ -173,11 +173,48 @@ All Sector and Market builders return the typed GDExtension
 never uses an empty byte array as a failure sentinel. `ClientMessage::encode`
 is fallible and its postcard error is propagated into that result.
 
-Keyboard and world-click interpretation now returns the Rust-backed
+Keyboard and world-click interpretation then returned the Rust-backed
 `ClientIntent` object. The three mutually exclusive selection integers in
 `WorldInteraction` are replaced by one `ClientSelection` value. GDScript keeps
 scene ownership and side effects, while `main.gd` dispatches through typed
 predicates and accessors instead of string tags and magic dictionary keys.
 
+This input-specific part of the amendment was superseded by the 2026-08-17
+amendment below; the historical implementation is retained here to explain
+the migration sequence.
+
 GdUnit4 covers every intent family, typed selection transitions, dedicated
 Market builders, invalid Market sides/IDs, and invalid resume tickets.
+
+## 2026-08-17 amendment: collapse the Client Action ladder
+
+The former `ClientIntent` / `ClientSelection` GDExtension objects and the
+GDScript `InputDecoder` policy layer are removed. Input interpretation now
+has one engine-independent seam:
+
+```text
+Godot InputEvent / hit-test facts
+  -> WorldInteraction adapter (Godot key normalization only)
+  -> dawn-client-core::ClientInteraction
+  -> ClientAction { Request(ClientRequest) | Local(ClientLocalAction) }
+  -> main.gd one action executor
+```
+
+`dawn-client-core::ClientInteraction` owns mutually exclusive selection,
+double-click timing, keyboard policy, and the construction of typed
+`dawn_core::ClientRequest` values. `ClientLocalAction` contains only effects
+that require the Godot scene or presentation layer. The core crate remains
+Godot-independent and continues to depend only on `dawn-core`.
+
+The GDExtension `ClientAction` wrapper exposes the action kind and only the
+payload required by that kind. Network actions are validated and postcard
+encoded by the existing command encoder. `connection.gd` adds one
+`send_action()` transport entry point for typed requests in this path; the
+camera-dependent double-click move remains an explicit `send_move_command()`
+call after Godot projects the screen ray. The existing command wrappers also
+remain for inventory, fitting, and market surfaces until those UI paths are
+migrated independently. No wire schema or server contract changes.
+
+The old predicate/accessor ladder, string tags, and `Dictionary` round-trip
+are not retained as a compatibility layer. Core unit tests cover the policy;
+GdUnit4 keeps only the thin Godot-boundary contract tests.
