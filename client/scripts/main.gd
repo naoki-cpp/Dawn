@@ -45,6 +45,7 @@ var _cap_tick_accumulator : float = 0.0
 
 var _session := WorldSession.new()
 var _interaction := WorldInteractionScript.new()
+var _station_inventory := StationInventoryInteraction.new()
 var _hud_surface := HudSurfaceScript.new()
 var _market_surface := MarketSurfaceScript.new()
 var _presentation := WorldPresentationScript.new()
@@ -673,68 +674,29 @@ func _apply_player_module_activation(module_id: int, active: bool, forced_reason
 	_recalc_weapon_range()
 
 
-## A row click in the inventory panel: "fit" sends the module's own slot kind
-## (the module's `def.slot` decides where it goes -- the player makes no slot
-## choice), "unfit" removes that exact fitted instance (ADR-0032).
+## Inventory row behavior is resolved by the engine-independent station policy.
+## This method only supplies current context and applies the resulting request
+## or local Build picker effect.
 func _handle_inventory_row_click(row: InventoryRow) -> void:
-	match row.action:
-		InventoryRow.ACTION_FIT:
-			## Refitting requires being docked. The module ID is extracted
-			## from the canonical Item identity only at this command seam.
-			if row.item_id != null and row.item_id.is_module() \
-					and _player_ship_id >= 0 and _session.is_docked():
-				_connection.send_fit_module_command(
-					_player_ship_id, row.item_id.module_id() as int, row.slot)
-		InventoryRow.ACTION_UNFIT:
-			if _player_ship_id >= 0 and _session.is_docked():
-				_connection.send_unfit_module_command(_player_ship_id, row.module_id, row.slot)
-		InventoryRow.ACTION_UNFIT_ALL:
-			## No new wire command -- sends one UnfitModuleCommand per
-			## currently-fitted module (non-atomic: a mid-loop failure leaves
-			## a partially-unfitted ship, but each Unfit is independently safe
-			## and this is a convenience action, not a transactional one).
-			if _player_ship_id >= 0 and _session.is_docked():
-				for entry: Variant in _loadout.modules():
-					_connection.send_unfit_module_command(
-						_player_ship_id, entry.module_id as int, entry.slot as String)
-		InventoryRow.ACTION_ASSEMBLE:
-			## No active-ship requirement: this is exactly the recovery path
-			## for a shipless docked player (docs/architecture/ownership.md §8).
-			var docked_station_id: int = _session.docked_station_id()
-			if docked_station_id >= 0 and row.item_id != null \
-					and row.item_id.is_packaged_ship():
-				_connection.send_assemble_command(
-					docked_station_id, row.item_id.ship_type_id() as int)
-		InventoryRow.ACTION_SELECT_ACTIVE_SHIP:
-			## Also no active-ship requirement -- this is how a player re-boards
-			## after Disembark, or switches to a different owned ship.
-			_connection.send_select_active_ship_command(row.ship_id)
-		InventoryRow.ACTION_DISASSEMBLE:
-			## Dedicated button alongside the existing [Y] key (Phase 9B task
-			## 10) -- same command, server validates docked/undamaged/unfitted.
-			if _player_ship_id >= 0:
-				var docked_station_id: int = _session.docked_station_id()
-				if docked_station_id >= 0:
-					_connection.send_disassemble_ship_command(_player_ship_id, docked_station_id)
-		InventoryRow.ACTION_BUILD_TOGGLE:
-			## No command sent -- this only expands/collapses the ship-type
-			## picker rows below it, then forces an immediate panel redraw
-			## (there's no new PlayerLoadout snapshot to trigger one).
-			_hud_surface.toggle_build_picker(
-				_loadout.modules(),
-				_loadout.inventory(),
-				_loadout.station_inventory(),
-				_loadout.owned_ships(),
-				_buildable_ship_types)
-		InventoryRow.ACTION_BUILD_SHIP_TYPE:
-			## Dedicated button alongside the existing [B] key (Phase 9B task
-			## 10), but lets the player pick which buildable type instead of
-			## always sending the hard-coded BUILDABLE_SHIP_TYPE_ID.
-			if _player_ship_id >= 0:
-				var docked_station_id: int = _session.docked_station_id()
-				if docked_station_id >= 0:
-					_connection.send_build_packaged_ship_command(
-						_player_ship_id, docked_station_id, row.ship_type_id)
+	if row == null or row.action == null:
+		return
+	var action: StationInventoryAction = _station_inventory.click(
+		row.action, _player_ship_id, _session.docked_station_id(), _loadout.modules())
+	_execute_station_inventory_action(action)
+
+
+func _execute_station_inventory_action(action: StationInventoryAction) -> void:
+	if action == null:
+		return
+	if action.is_build_picker_toggle():
+		_hud_surface.toggle_build_picker(
+			_loadout.modules(),
+			_loadout.inventory(),
+			_loadout.station_inventory(),
+			_loadout.owned_ships(),
+			_buildable_ship_types)
+	elif action.request_count() > 0:
+		_connection.send_station_inventory_action(action)
 
 
 ## Right-click on a SHIP CARGO row moves the whole stack to the docked
@@ -742,16 +704,15 @@ func _handle_inventory_row_click(row: InventoryRow) -> void:
 ## ScrapMetal) per the user's explicit preference for a single straightforward
 ## right-click gesture rather than per-type UI carve-outs.
 func _handle_inventory_row_right_click(row: InventoryRow) -> void:
-	if row.source != InventoryRow.SOURCE_SHIP_CARGO:
+	if row == null or row.action == null:
 		return
-	if _player_ship_id < 0:
-		return
-	var docked_station_id: int = _session.docked_station_id()
-	if docked_station_id < 0:
-		return
-	if row.item_id != null:
-		_connection.send_transfer_to_station_command(
-			_player_ship_id, docked_station_id, row.item_id)
+	var action: StationInventoryAction = _station_inventory.resolve_drop(
+		row.action,
+		InventoryRow.SOURCE_STATION,
+		StationInventoryRow.none(),
+		_player_ship_id,
+		_session.docked_station_id())
+	_execute_station_inventory_action(action)
 
 
 ## Lazily creates the drag ghost once the cursor has moved past
@@ -788,7 +749,7 @@ func _end_inventory_drag(release_pos: Vector2) -> void:
 	if release_pos.distance_to(start) < DRAG_THRESHOLD_PX:
 		_handle_inventory_row_click(row)
 		return
-	var target_column: String = _hud_surface.inventory_panel_column_at(release_pos)
+	var target_column: int = _hud_surface.inventory_panel_column_at(release_pos)
 	_handle_inventory_row_drop(row, target_column, release_pos)
 
 
@@ -796,48 +757,21 @@ func _end_inventory_drag(release_pos: Vector2) -> void:
 ## transfer and plain-click fit/unfit/etc. are untouched by this -- drag is
 ## an additive path to the same commands, same "keep both interaction paths"
 ## precedent as the Build/Disassemble buttons-plus-keys work.
-func _handle_inventory_row_drop(row: InventoryRow, target_column: String, release_pos: Vector2) -> void:
-	if target_column == "":
+func _handle_inventory_row_drop(row: InventoryRow, target_column: int, release_pos: Vector2) -> void:
+	if row == null or row.action == null or target_column == InventoryRow.SOURCE_NONE:
 		return
-	if row.source == InventoryRow.SOURCE_FITTED and target_column == InventoryRow.SOURCE_FITTED:
-		## Reordering needs the specific row dropped on, not just the column
-		## -- mismatched slot kinds (e.g. dropping a High module onto a Mid
-		## row) are a no-op, since a module can't change slot kind by reorder.
+	var target_action := StationInventoryRow.none()
+	if target_column == InventoryRow.SOURCE_FITTED:
 		var target_row: InventoryRow = _hud_surface.inventory_panel_row_at(release_pos)
-		if target_row == null or target_row.source != InventoryRow.SOURCE_FITTED:
-			return
-		if target_row.slot != row.slot or target_row.module_id == row.module_id:
-			return
-		if _player_ship_id >= 0 and _session.is_docked():
-			_connection.send_reorder_fitted_module_command(
-				_player_ship_id, row.slot, row.slot_index, target_row.slot_index)
-		return
-	if target_column == row.source:
-		return
-	match row.source:
-		InventoryRow.SOURCE_SHIP_CARGO:
-			match target_column:
-				InventoryRow.SOURCE_FITTED:
-					if row.item_id != null and row.item_id.is_module() \
-							and _player_ship_id >= 0 and _session.is_docked():
-						_connection.send_fit_module_command(
-							_player_ship_id, row.item_id.module_id() as int, row.slot)
-				InventoryRow.SOURCE_STATION:
-					_handle_inventory_row_right_click(row)
-		InventoryRow.SOURCE_FITTED:
-			match target_column:
-				InventoryRow.SOURCE_SHIP_CARGO:
-					if _player_ship_id >= 0 and _session.is_docked():
-						_connection.send_unfit_module_command(_player_ship_id, row.module_id, row.slot)
-		InventoryRow.SOURCE_STATION:
-			match target_column:
-				InventoryRow.SOURCE_SHIP_CARGO:
-					if _player_ship_id >= 0 and row.item_id != null:
-						var docked_station_id: int = _session.docked_station_id()
-						if docked_station_id >= 0:
-							_connection.send_transfer_from_station_command(
-								_player_ship_id, docked_station_id, row.item_id)
-		## else: SHIPS column, or anything else -- not a meaningful drag target.
+		if target_row != null and target_row.action != null:
+			target_action = target_row.action
+	var action: StationInventoryAction = _station_inventory.resolve_drop(
+		row.action,
+		target_column,
+		target_action,
+		_player_ship_id,
+		_session.docked_station_id())
+	_execute_station_inventory_action(action)
 
 
 func _toggle_module_by_index(f_index: int) -> void:

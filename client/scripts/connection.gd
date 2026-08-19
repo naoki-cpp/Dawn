@@ -129,6 +129,13 @@ func send_move_command(target: Vector3) -> void:
 func send_action(action: ClientAction) -> void:
 	_send_request(action.request_result())
 
+## Station Inventory policy returns one request for ordinary rows or an
+## ordered list for Unfit All. Each request is sent independently to preserve
+## the existing non-atomic per-module semantics.
+func send_station_inventory_action(action: StationInventoryAction) -> void:
+	for index: int in action.request_count():
+		_send_request(action.request_result_at(index))
+
 func send_lock_on_command(target_id: int) -> void:
 	_send_request(_cmd.lock_on_command(target_id))
 
@@ -187,67 +194,15 @@ func send_keep_at_range_command(p_target_id: int, p_range_m: float = -1.0) -> vo
 func send_keep_at_range_gate_command(p_gate_id: int, p_range_m: float = -1.0) -> void:
 	_send_request(_cmd.keep_at_range_gate_command(p_gate_id, p_range_m))
 
-## [Inventory panel] Move a module from inventory into a fitting slot (ADR-0032).
-func send_fit_module_command(p_ship_id: int, p_module_id: int, p_slot: String) -> void:
-	_send_request(_cmd.fit_module_command(p_ship_id, p_module_id, p_slot))
-
-## [Inventory panel] Move a fitted module back into inventory (ADR-0032).
-func send_unfit_module_command(p_ship_id: int, p_module_id: int, p_slot: String) -> void:
-	_send_request(_cmd.unfit_module_command(p_ship_id, p_module_id, p_slot))
-
-## [Inventory panel] Reorder two fitted modules within the same slot kind
-## (drag-and-drop reorder in the FITTED column). Persisted server-side since
-## iteration order assigns weapon hotkey F-numbers -- see ADR-0032's
-## 2026-07-08 amendment.
-func send_reorder_fitted_module_command(
-	p_ship_id: int, p_slot: String, p_from_index: int, p_to_index: int
-) -> void:
-	_send_request(_cmd.reorder_fitted_module_command(
-		p_ship_id, p_slot, p_from_index, p_to_index))
-
 func send_dock_command(p_station_id: int) -> void:
 	_send_request(_cmd.dock_command(p_station_id))
 
 func send_undock_command() -> void:
 	_send_request(_cmd.undock_command())
 
-func send_build_packaged_ship_command(p_ship_id: int, p_station_id: int, p_ship_type_id: int) -> void:
-	_send_request(_cmd.build_packaged_ship_command(p_ship_id, p_station_id, p_ship_type_id))
-
-func send_disassemble_ship_command(p_ship_id: int, p_station_id: int) -> void:
-	_send_request(_cmd.disassemble_ship_command(p_ship_id, p_station_id))
-
-## Convert a station-inventory Packaged Ship item into a new live docked ship
-## (ADR-0034 9B, ADR-0037). No ship_id -- the ship doesn't exist yet.
-func send_assemble_command(p_station_id: int, p_ship_type_id: int) -> void:
-	_send_request(_cmd.assemble_command(p_station_id, p_ship_type_id))
-
 ## Leave the active ship while docked, without disassembling it (ADR-0037).
 func send_disembark_command() -> void:
 	_send_request(_cmd.disembark_command())
-
-## Make an owned, docked ship the caller's active ship (ADR-0037). This is
-## how a player re-boards after Disembark, or switches between owned ships.
-func send_select_active_ship_command(p_ship_id: int) -> void:
-	_send_request(_cmd.select_active_ship_command(p_ship_id))
-
-## Move the entire stack of one canonical Item identity out of a docked ship's
-## cargo into the caller's station inventory (ADR-0034 9B).
-func send_transfer_to_station_command(
-	p_ship_id: int,
-	p_station_id: int,
-	p_item_id: ItemIdentity
-) -> void:
-	_send_request(_cmd.transfer_to_station_command(p_ship_id, p_station_id, p_item_id))
-
-## The reverse of send_transfer_to_station_command: move the entire stack from
-## station inventory back into the docked ship's cargo.
-func send_transfer_from_station_command(
-	p_ship_id: int,
-	p_station_id: int,
-	p_item_id: ItemIdentity
-) -> void:
-	_send_request(_cmd.transfer_from_station_command(p_ship_id, p_station_id, p_item_id))
 
 ## Market requests use a separate wire envelope from Sector commands
 ## (ADR-0034). The server answers each request with MarketSnapshot.

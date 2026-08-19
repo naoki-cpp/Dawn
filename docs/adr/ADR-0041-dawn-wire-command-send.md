@@ -218,3 +218,31 @@ migrated independently. No wire schema or server contract changes.
 The old predicate/accessor ladder, string tags, and `Dictionary` round-trip
 are not retained as a compatibility layer. Core unit tests cover the policy;
 GdUnit4 keeps only the thin Godot-boundary contract tests.
+
+## 2026-08-19 amendment: extract Station Inventory interaction policy
+
+Station Inventory interaction now follows the same one-way typed boundary,
+without adding a new crate or changing the wire contract:
+
+```text
+HudManager row rendering / HudHitTest geometry
+  -> StationInventoryRow (typed GDExtension metadata)
+  -> dawn-client-core::StationInventoryInteraction
+  -> StationInventoryAction { Request(s) | Local | None }
+  -> connection.gd typed request transport / HudSurface local effect
+```
+
+`dawn-client-core` owns the engine-independent policy and constructs existing
+`ClientRequest` values. A docked station is required for station operations;
+`BuildPackagedShip` and `DisassembleShip` additionally require an active ship.
+Assemble of a packaged ship and `SelectActiveShip` remain valid for a shipless
+but docked player. Cargo transfer is restricted to `SHIP_CARGO -> STATION` or
+`STATION -> SHIP_CARGO` and carries the canonical `ItemId` identity. Same-column
+and invalid drops are no-ops.
+
+The build-picker toggle is a Godot-local action; choosing a ship type creates a
+typed build request. `Unfit All` returns an ordered list of independent
+`UnfitModule` requests, preserving the existing non-atomic per-module send
+semantics. Godot retains row rendering, hit testing, drag geometry, and scene
+effects. The old station-inventory string action tags and dedicated connection
+wrappers are removed only because this typed path replaces them completely.

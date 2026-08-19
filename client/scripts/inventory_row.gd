@@ -13,44 +13,21 @@
 ## flatten it back into `item_type` plus mutually exclusive numeric sentinels.
 extends RefCounted
 
-## action vocabulary -- named so a typo is an unknown-identifier error at
-## parse time instead of a silently-never-matching string literal.
-const ACTION_NONE := ""
-const ACTION_FIT := "fit"
-const ACTION_UNFIT := "unfit"
-## Unfits every currently-fitted module in one click (e.g. to clear the way
-## for Disassemble, which requires a fully unfitted ship).
-const ACTION_UNFIT_ALL := "unfit_all"
-const ACTION_ASSEMBLE := "assemble"
-const ACTION_SELECT_ACTIVE_SHIP := "select_active_ship"
-const ACTION_DISASSEMBLE := "disassemble"
-## Toggles the Build ship-type picker open/closed (Phase 9B task 10).
-const ACTION_BUILD_TOGGLE := "build_toggle"
-## One picker sub-row for a specific buildable ship type; `ship_type_id`
-## carries which one. Distinct from ACTION_BUILD_TOGGLE so main.gd can tell
-## "open the picker" apart from "build this type" with the same action prefix.
-const ACTION_BUILD_SHIP_TYPE := "build_ship_type"
-
-## `source` vocabulary -- tags which of the four inventory-panel columns a
-## row belongs to.
-const SOURCE_NONE := ""
-const SOURCE_SHIP_CARGO := "ship_cargo"
-const SOURCE_STATION := "station"
-const SOURCE_FITTED := "fitted"
-const SOURCE_SHIPS := "ships"
+## Column codes are used only by Godot hit-testing. Row meaning itself lives in
+## the typed `StationInventoryRow` GDExtension object.
+const SOURCE_NONE := -1
+const SOURCE_FITTED := 0
+const SOURCE_SHIP_CARGO := 1
+const SOURCE_STATION := 2
+const SOURCE_SHIPS := 3
 
 var panel: Control = null
-## Fitted-module and fit/unfit action payload. For an inventory Module row this
-## is derived from `item_id`; for a fitted row it comes from `ModuleRow`.
-var module_id: int = 0
-var slot: String = ""
-var action: String = ACTION_NONE
-## Build/assemble action payload. For a PackagedShip row this is derived from
-## `item_id`; build-picker rows carry a ship type without being inventory.
-var ship_type_id: int = 0
+## Typed station policy input. It is created by HudManager while rendering and
+## consumed by main.gd only through StationInventoryInteraction.
+var action: StationInventoryRow = null
 var item_id: ItemIdentity = null
 var count: int = 0
-var source: String = SOURCE_NONE
+var source: int = SOURCE_NONE
 var ship_id: int = 0
 ## Position within this module's own slot kind (ModuleRow.index / the
 ## server's per-slot-kind array position, not a global row index).
@@ -60,28 +37,24 @@ var slot_index: int = 0
 ## FITTED/SHIP CARGO/STATION rows. Non-inventory action rows pass `null` for
 ## `item_id`; actual cargo/station stacks pass the canonical typed identity.
 static func for_item(
-	panel: Control, module_id: int, slot: String, action: String, ship_type_id: int = 0,
-	item_id: ItemIdentity = null, count: int = 0, source: String = SOURCE_NONE,
-	slot_index: int = 0
+	p_panel: Control, p_action: StationInventoryRow, p_item_id: ItemIdentity = null,
+	p_count: int = 0, p_source: int = SOURCE_NONE, p_slot_index: int = 0
 ) -> Variant:
 	var row = new()
-	row.panel = panel
-	row.module_id = module_id
-	row.slot = slot
-	row.action = action
-	row.ship_type_id = ship_type_id
-	row.item_id = item_id
-	row.count = count
-	row.source = source
-	row.slot_index = slot_index
+	row.panel = p_panel
+	row.action = p_action
+	row.item_id = p_item_id
+	row.count = p_count
+	row.source = p_source
+	row.slot_index = p_slot_index
 	return row
 
 
 ## SHIPS roster row (ADR-0037). Only `ship_id`/`action` are meaningful.
-static func for_ship(panel: Control, ship_id: int, action: String) -> Variant:
+static func for_ship(p_panel: Control, p_ship_id: int, p_action: StationInventoryRow) -> Variant:
 	var row = new()
-	row.panel = panel
-	row.ship_id = ship_id
-	row.action = action
+	row.panel = p_panel
+	row.ship_id = p_ship_id
+	row.action = p_action
 	row.source = SOURCE_SHIPS
 	return row

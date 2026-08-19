@@ -204,7 +204,7 @@ func set_player_fitting(
 
 ## Toggles the Build ship-type picker (Phase 9B task 10) and forces the panel
 ## to redraw with the new expand/collapse state; called by main.gd on a
-## ACTION_BUILD_TOGGLE click, which doesn't itself carry a new PlayerLoadout
+## build-picker toggle click, which doesn't itself carry a new PlayerLoadout
 ## snapshot to trigger a rebuild.
 func toggle_build_picker(modules: Array, inventory: Array, station_inventory: Array,
 		owned_ships: Array, buildable_ship_types: Array) -> void:
@@ -236,7 +236,7 @@ func inventory_panel_row_at(pos: Vector2) -> InventoryRow:
 	return HudHitTest.inventory_panel_row_at(_inventory_panel_refs, pos)
 
 
-func inventory_panel_column_at(pos: Vector2) -> String:
+func inventory_panel_column_at(pos: Vector2) -> int:
 	return HudHitTest.column_at(_inventory_panel_refs, pos)
 
 

@@ -247,7 +247,7 @@ Market は固定価格やアルゴリズム式（AMM/Bonding curve）で価格�
 - [x] `dawn-market`: SQLite バックエンドの指値注文帳（bid/ask マッチング、2026-07-13。roadmap.md §12 9D-2）
 - [x] `dawn-market`: `PlayerId` 単位の Currency 台帳（Bid時エスクロー・約定時決済・Cancel時払い戻し、2026-07-13。roadmap.md §12 9D-3）
 - [x] `dawn-market`: `SettlementIntent` transactional outbox、stable `SettlementId`、SQLite atomic commit、Sector側重複配送防止（2026-08-10。#279）
-- [x] client: Dock/Undock + Station操作UI（入港状態の表示と `D` / `U` / `B` / `Y` 操作、Packaged Ship のインベントリ表示、Assemble/Disassemble/建造UI すべて実装済み。`main.gd` の `ACTION_ASSEMBLE`/`ACTION_DISASSEMBLE`、`connection.gd` の `send_assemble_command`/`send_disassemble_ship_command`/`send_build_packaged_ship_command`）
+- [x] client: Dock/Undock + Station操作UI（入港状態の表示と `D` / `U` / `B` / `Y` 操作、Packaged Ship のインベントリ表示、Assemble/Disassemble/建造UI すべて実装済み。Station Inventory のクリック/ドロップ方針と typed request 構築は `dawn-client-core::StationInventoryInteraction`、Godot側は行描画・ヒットテスト・drag geometry、GDExtensionは薄い型変換adapterを担当する）
 - [x] client: Market閲覧UI（指値注文の発注・Currency残高表示、2026-07-17。Market専用postcard envelope、single/cluster runtime bridge、Godot `market_surface.gd` の板・Bid/Ask・発注・Cancel・Currency表示を実装。snapshotは最大200件）
 
 #279後のSector側適用は`dawn-simulation::serve::market_settlement`に限定する。

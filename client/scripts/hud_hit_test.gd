@@ -30,9 +30,8 @@ static func module_slot_at(module_slots: Array[HudManager.ModuleSlotRefs], pos: 
 
 
 ## Returns the row under `pos` from either column, or `null` if none.
-## "fit" sends FitModuleCommand, "unfit" sends UnfitModuleCommand (see
-## InventoryRow's action constants) -- callers distinguish a miss from a hit
-## with a plain `null` check instead of a sentinel-key lookup.
+## Callers distinguish a miss from a hit with a plain `null` check instead of a
+## sentinel-key lookup.
 static func inventory_panel_row_at(refs: HudManager.InventoryPanelRefs, pos: Vector2) -> InventoryRow:
 	if not refs.panel.visible:
 		return null
@@ -52,14 +51,14 @@ static func inventory_panel_row_at(refs: HudManager.InventoryPanelRefs, pos: Vec
 
 
 ## Which of the four inventory-panel columns `pos` falls in (an
-## `InventoryRow.SOURCE_*` value), or `""` if outside all of them. Used by
+## `InventoryRow.SOURCE_*` value), or `SOURCE_NONE` if outside all of them. Used by
 ## the drag-and-drop drop-target resolution (main.gd) -- unlike
 ## inventory_panel_row_at(), this matches empty space within a column's list
 ## too (dropping below the last row must still count as a drop into that
 ## column, not a miss).
-static func column_at(refs: HudManager.InventoryPanelRefs, pos: Vector2) -> String:
+static func column_at(refs: HudManager.InventoryPanelRefs, pos: Vector2) -> int:
 	if not refs.panel.visible:
-		return ""
+		return InventoryRow.SOURCE_NONE
 	if refs.fitted_col.get_global_rect().has_point(pos):
 		return InventoryRow.SOURCE_FITTED
 	if refs.inv_col.get_global_rect().has_point(pos):
@@ -68,7 +67,7 @@ static func column_at(refs: HudManager.InventoryPanelRefs, pos: Vector2) -> Stri
 		return InventoryRow.SOURCE_STATION
 	if refs.ships_col.get_global_rect().has_point(pos):
 		return InventoryRow.SOURCE_SHIPS
-	return ""
+	return InventoryRow.SOURCE_NONE
 
 
 ## True when the inventory panel is open and `pos` falls anywhere inside it

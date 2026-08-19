@@ -43,12 +43,18 @@ review修正後のGDExtension境界、追加したClientState回帰test、明示
 | デッドコード | A | `ClientOutcome` mirrorと旧`ServerEventOutcome`互換classを削除 |
 | テスト可能性 | A | pure Rust `ClientState` transition test + typed outcome fixtureを使うGdUnit4。scene-tree/実WebSocket E2Eのみ手動領域 |
 
+2026-08-19: Station Inventoryのクリック/ドロップ方針と既存`ClientRequest`構築は
+`dawn-client-core::StationInventoryInteraction`へ移し、GDExtensionはtyped row/actionの
+薄いadapter、Godotは描画・hit-test・drag geometry・local picker effectだけを担当する。
+
 ## State ownership
 
 - `ClientState`: server factをsession/loadoutへ適用するwire非依存policy
 - `WorldSessionState`: live world stateと低レベルtyped transition
 - `WorldSession`: Godot adapter。公開write面はreset/client prediction tickに限定
 - `PlayerLoadout`: fitting/inventory/capacitor state。server replacement/module activationは`ClientState`経由
+- `StationInventoryInteraction`（core）: station inventoryの行クリック/ドロップ方針とtyped `ClientRequest`構築
+- `StationInventoryRow` / `StationInventoryAction`（GDExtension）: Godot境界のtyped metadata/result adapter
 - `ServerMessageOutcome::dispatch`: GDScriptが明示したconnection/world targetへ、state commit後に一度だけpresentationを渡す境界
 - `main.gd`: scene node registryと短命なoptimistic state
 - `ClientInteraction`（core）: selection、double-click、input facts → `ClientAction`
@@ -92,6 +98,7 @@ navigation map cacheはSector内でwrite-onceに近いpresentation cacheとし�
 | `crates/dawn-client-gdext/src/server_message_gd.rs` | 836 | 🟡 C-16部分完了。中間mirrorは削除済み、decode / wire→ClientFact / state apply / Godot dispatchのmodule分割は未完了 |
 | `crates/dawn-client-core/src/client_state.rs` | 842 | 🟢 ClientFactからWorldSessionEffectへの純粋なstate policy |
 | `crates/dawn-client-core/src/client_action.rs` | 584 | 🟢 engine-independent selection/input policy・typed ClientAction |
+| `crates/dawn-client-core/src/station_inventory.rs` | 729 | 🟢 engine-independent Station Inventory policy・typed request construction |
 | `crates/dawn-client-core/src/motion.rs` | 680 | 🟢 client motion/prediction kernel・tests |
 | `crates/dawn-client-gdext/src/client_command_gd.rs` | 564 | 🟢 typed request builder・入力検証・encode結果のGDExtension boundary |
 | `crates/dawn-client-gdext/src/client_action_gd.rs` | 280 | 🟢 ClientAction/ClientInteractionの薄いGodot adapter |
@@ -110,5 +117,6 @@ navigation map cacheはSector内でwrite-onceに近いpresentation cacheとし�
 | C-15 | #281 | Dictionary/string-tag intent、Market JSON builder、空byteエラーsentinel | 解消済み |
 | C-16 | — | `server_message_gd.rs`のdecode / fact apply / Godot dispatch混在。中間mirrorは削除済み、module分割は未完了 | 部分完了 |
 | C-17 | — | ClientIntentのpredicate/accessor ladder、GDScript input policy、network send分岐の重複 | 解消済み |
+| C-18 | — | Station Inventory interaction policy / string action tag ladder | 解消済み |
 
 `main.gd`の機械的な`.tscn`分割、raw `InputEvent`のdeep module流入、typed recordのDictionary回帰は行わない。

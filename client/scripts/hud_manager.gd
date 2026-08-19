@@ -697,17 +697,11 @@ static func build_inventory_panel(hud: CanvasLayer) -> InventoryPanelRefs:
 		fitted_col, inv_col, station_col, ships_col)
 
 
-## One inventory row (FITTED/SHIP CARGO/STATION). `action` is "fit"/"unfit"
-## for ship-inventory modules, "assemble" for a station-inventory PackagedShip
-## stack, and "" for passive item stacks (e.g. Scrap Metal) that are only
-## informational today. `source` tags which column the row belongs to
-## ("ship_cargo" or "station") so main.gd can tell a right-click-to-transfer
-## target (ship_cargo only) from a similarly-actionless station row without
-## relying on `action`, which collides ("" means different things in each
-## column).
+## One inventory row (FITTED/SHIP CARGO/STATION). The typed action object is
+## created here beside the rendered row and later handed to Rust policy.
 static func _make_inventory_row(
-	text: String, module_id: int, slot: String, action: String, ship_type_id: int = 0,
-	item_id: ItemIdentity = null, count: int = 0, source: String = InventoryRow.SOURCE_NONE,
+	text: String, action: StationInventoryRow, item_id: ItemIdentity = null,
+	count: int = 0, source: int = InventoryRow.SOURCE_NONE,
 	slot_index: int = 0
 ) -> InventoryRow:
 	var row := Panel.new()
@@ -726,14 +720,11 @@ static func _make_inventory_row(
 	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(lbl)
 
-	return InventoryRow.for_item(
-		row, module_id, slot, action, ship_type_id, item_id, count, source, slot_index)
+	return InventoryRow.for_item(row, action, item_id, count, source, slot_index)
 
 
-## One owned-ship row (ADR-0037 roster). `action` is "" for the already-active
-## ship (nothing to do -- clicking it would just re-select itself) and
-## "select_active_ship" for any other owned ship, docked at the same station
-## or not (the server validates that; a miss here just gets rejected).
+## One owned-ship row (ADR-0037 roster). The typed action records whether the
+## row is already active or can be selected.
 static func _make_ship_row(text: String, ship_id: int, is_active: bool) -> InventoryRow:
 	var row := Panel.new()
 	row.custom_minimum_size = Vector2(0.0, INVENTORY_ROW_HEIGHT)
@@ -751,7 +742,7 @@ static func _make_ship_row(text: String, ship_id: int, is_active: bool) -> Inven
 	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(lbl)
 
-	var action := InventoryRow.ACTION_NONE if is_active else InventoryRow.ACTION_SELECT_ACTIVE_SHIP
+	var action := StationInventoryRow.owned_ship(ship_id, is_active) as StationInventoryRow
 	return InventoryRow.for_ship(row, ship_id, action)
 
 
@@ -780,15 +771,14 @@ static func update_inventory_panel(
 		var m: ModuleRow = entry
 		var text := "%s: %s" % [m.slot, m.name]
 		var row := _make_inventory_row(
-			text, m.module_id, m.slot, InventoryRow.ACTION_UNFIT, 0, null, 0,
-			InventoryRow.SOURCE_FITTED, m.index)
+			text, StationInventoryRow.fitted_with_index(m.module_id, m.slot, m.index) as StationInventoryRow,
+			null, 0, InventoryRow.SOURCE_FITTED, m.index)
 		fitted_list.add_child(row.panel)
 		fitted_rows.append(row)
 
 	if not fitted_rows.is_empty():
 		var unfit_all_row := _make_inventory_row(
-			"Unfit all", 0, "", InventoryRow.ACTION_UNFIT_ALL, 0, null, 0,
-			InventoryRow.SOURCE_FITTED)
+			"Unfit all", StationInventoryRow.unfit_all(), null, 0, InventoryRow.SOURCE_FITTED)
 		fitted_list.add_child(unfit_all_row.panel)
 		fitted_rows.append(unfit_all_row)
 
@@ -798,15 +788,13 @@ static func update_inventory_panel(
 	for entry: Variant in inventory:
 		var item: ItemRow = entry
 		var text: String
-		var action := InventoryRow.ACTION_NONE
 		if item.item_id.is_module():
 			text = "%s: %s x%d" % [item.slot, item.name, item.count]
-			action = InventoryRow.ACTION_FIT
 		else:
 			text = "%s x%d" % [item.name, item.count]
 		var row := _make_inventory_row(
-			text, 0, item.slot, action, 0, item.item_id, item.count,
-			InventoryRow.SOURCE_SHIP_CARGO)
+			text, StationInventoryRow.cargo(item.item_id, item.slot) as StationInventoryRow,
+			item.item_id, item.count, InventoryRow.SOURCE_SHIP_CARGO)
 		inventory_list.add_child(row.panel)
 		inventory_rows.append(row)
 	refs.inventory_rows = inventory_rows
@@ -815,20 +803,18 @@ static func update_inventory_panel(
 	for entry: Variant in station_inventory:
 		var item: ItemRow = entry
 		var text: String
-		var action := InventoryRow.ACTION_NONE
 		if item.item_id.is_packaged_ship():
 			text = "%s x%d (click to assemble)" % [item.name, item.count]
-			action = InventoryRow.ACTION_ASSEMBLE
 		else:
 			text = "%s x%d" % [item.name, item.count]
 		var row := _make_inventory_row(
-			text, 0, "", action, 0, item.item_id, item.count,
+			text, StationInventoryRow.station(item.item_id), item.item_id, item.count,
 			InventoryRow.SOURCE_STATION)
 		station_list.add_child(row.panel)
 		station_rows.append(row)
 
 	var disassemble_row := _make_inventory_row(
-		"Disassemble active ship", 0, "", InventoryRow.ACTION_DISASSEMBLE, 0, null, 0,
+		"Disassemble active ship", StationInventoryRow.disassemble(), null, 0,
 		InventoryRow.SOURCE_STATION)
 	station_list.add_child(disassemble_row.panel)
 	station_rows.append(disassemble_row)
@@ -836,8 +822,7 @@ static func update_inventory_panel(
 	var picker_open: bool = refs.build_picker_open
 	var toggle_text := "Build Ship ▾" if picker_open else "Build Ship ▸"
 	var build_toggle_row := _make_inventory_row(
-		toggle_text, 0, "", InventoryRow.ACTION_BUILD_TOGGLE, 0, null, 0,
-		InventoryRow.SOURCE_STATION)
+		toggle_text, StationInventoryRow.build_toggle(), null, 0, InventoryRow.SOURCE_STATION)
 	station_list.add_child(build_toggle_row.panel)
 	station_rows.append(build_toggle_row)
 
@@ -847,7 +832,7 @@ static func update_inventory_panel(
 			var ship_type_id: int = t.ship_type_id
 			var name: String = t.name
 			var picker_row := _make_inventory_row(
-				"  %s" % name, 0, "", InventoryRow.ACTION_BUILD_SHIP_TYPE, ship_type_id,
+				"  %s" % name, StationInventoryRow.build_ship_type(ship_type_id) as StationInventoryRow,
 				null, 0, InventoryRow.SOURCE_STATION)
 			station_list.add_child(picker_row.panel)
 			station_rows.append(picker_row)

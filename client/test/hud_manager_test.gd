@@ -258,8 +258,12 @@ func test_station_column_always_shows_disassemble_and_build_toggle_rows() -> voi
 	var refs: HudManager.InventoryPanelRefs = HudManager.build_inventory_panel(hud)
 	HudManager.update_inventory_panel(refs, [], [], [], [], [])
 
-	var actions: Array = refs.station_rows.map(func(r: InventoryRow) -> String: return r.action)
-	assert_array(actions).contains([InventoryRow.ACTION_DISASSEMBLE, InventoryRow.ACTION_BUILD_TOGGLE])
+	assert_bool(
+		refs.station_rows.any(func(r: InventoryRow) -> bool: return r.action.is_disassemble())
+	).is_true()
+	assert_bool(
+		refs.station_rows.any(func(r: InventoryRow) -> bool: return r.action.is_build_toggle())
+	).is_true()
 
 
 func test_build_picker_is_collapsed_by_default_and_expands_when_toggled() -> void:
@@ -270,15 +274,15 @@ func test_build_picker_is_collapsed_by_default_and_expands_when_toggled() -> voi
 
 	HudManager.update_inventory_panel(refs, [], [], [], [], buildable)
 	assert_bool(
-		refs.station_rows.any(func(r: InventoryRow) -> bool: return r.action == InventoryRow.ACTION_BUILD_SHIP_TYPE)
+		refs.station_rows.any(func(r: InventoryRow) -> bool: return r.action.is_build_ship_type())
 	).is_false()
 
 	refs.build_picker_open = true
 	HudManager.update_inventory_panel(refs, [], [], [], [], buildable)
 	var picker_row: InventoryRow = refs.station_rows.filter(
-		func(r: InventoryRow) -> bool: return r.action == InventoryRow.ACTION_BUILD_SHIP_TYPE
+		func(r: InventoryRow) -> bool: return r.action.is_build_ship_type()
 	)[0]
-	assert_int(picker_row.ship_type_id).is_equal(7)
+	assert_bool(picker_row.action.is_build_ship_type()).is_true()
 
 
 func test_unfit_all_row_is_hidden_when_no_module_is_fitted() -> void:
@@ -288,7 +292,7 @@ func test_unfit_all_row_is_hidden_when_no_module_is_fitted() -> void:
 	HudManager.update_inventory_panel(refs, [], [], [], [], [])
 
 	assert_bool(
-		refs.fitted_rows.any(func(r: InventoryRow) -> bool: return r.action == InventoryRow.ACTION_UNFIT_ALL)
+		refs.fitted_rows.any(func(r: InventoryRow) -> bool: return r.action.is_unfit_all())
 	).is_false()
 
 
@@ -301,8 +305,8 @@ func test_unfit_all_row_appears_after_the_fitted_modules_when_any_are_fitted() -
 	HudManager.update_inventory_panel(refs, modules, [], [], [], [])
 
 	assert_int(refs.fitted_rows.size()).is_equal(2)
-	assert_str(refs.fitted_rows[0].action).is_equal(InventoryRow.ACTION_UNFIT)
-	assert_str(refs.fitted_rows[1].action).is_equal(InventoryRow.ACTION_UNFIT_ALL)
+	assert_bool(refs.fitted_rows[0].action.is_fitted()).is_true()
+	assert_bool(refs.fitted_rows[1].action.is_unfit_all()).is_true()
 
 
 ## Regression: the typed Rust adapter maps absent optional owned-ship values to
