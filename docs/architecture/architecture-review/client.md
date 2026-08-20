@@ -15,21 +15,27 @@ date     : 2026-08-20（HUD Read Model deepening後に再計測）
 
 ## 現状評価
 
-**総合: B+。** `main.gd`は984行、`hud_manager.gd`は859行まで増えているが、state、
+**総合: B+。** `main.gd`は967行、`hud_manager.gd`は859行まで増えているが、state、
 interaction、presentation、HUD、wire adapterの所有者は分離済みで、直ちにgod objectへ戻ったとは
-判断しない。一方、Rust/GDExtensionの`server_message_gd.rs`はdecode、ClientFact変換、state apply、
-Godot callback dispatchが一つのadapterに同居しているため、C-16を部分完了のFix候補として記録する。
+判断しない。C-16では、thin Godot decode/outcome seam、canonical inbound delivery、debug fixtureを
+`server_message_gd.rs`、`inbound_delivery.rs`、`server_message_fixture.rs`へ分離し、world messageは
+必要なstate commit後に`main.gd`の最終handlerへ一度だけ到達する構造へ整理した。
 
 issue #238で復号済みwire型をGodot `Dictionary`へ投影してRustへ戻す経路を削除し、
 #248で旧client adapterを削除した。#251ではtick、lock、dock、system、loadout、module、
 ship lifecycleのwire非依存policyを`dawn-client-core::ClientState`へ移した。
 GDExtensionはwire検証、wire→`ClientFact`変換、fact適用、presentation変換、
-typed client request/action boundaryだけを行う。入力の意味付けとselection/double-click
+typed client request/action boundaryだけを行う。`server_message_gd.rs`はdecodeとGodot公開outcome、
+`inbound_delivery.rs`はcanonical `ServerMessage` match、変換、commit、最終handler選択を所有する。
+入力の意味付けとselection/double-click
 policyは`dawn-client-core::ClientInteraction`が所有し、Godot側はkey/hit-testの正規化と
 scene effectだけを担当する。
-`ServerMessageOutcome::dispatch`が唯一のpresentation seamであり、state commit後に
-connection callbackまたは最終world handlerを一度だけ呼ぶ。world factは中間mirrorを作らず、
-canonical `ServerFact` matchから最終callbackへ直接変換する。#258で削除した
+Godot-facing `ServerMessageOutcome::dispatch`が唯一のpresentation seamであり、内部の
+`inbound_delivery::dispatch`へ一度だけ委譲する。そこでstate-bearing messageはcommit後に、
+presentation-only messageは直接、connection lifecycle callbackまたは最終world handlerを一度だけ呼ぶ。
+world factは中間mirrorを作らず、canonical `ServerFact`
+matchから最終callbackへ直接変換する。InitialState、PlayerLoadout、
+module activation、MarketSnapshot、MotionCorrectionも同じ直接経路を使う。#258で削除した
 Godot公開のserver-state mutation backdoorは、#251との統合後も復活させない。
 2026-08-20: HUDのframe projectionを`dawn-client-core::HudReadModel`へ移し、
 typed panel snapshot / display text / dirty decisionをRustで一元化した。`HudSurface`は
@@ -41,7 +47,7 @@ review修正後のGDExtension境界、追加したClientState回帰test、明示
 
 | 観点 | 評価 | 現在の判断 |
 |---|---|---|
-| ファイル分割 | B+ | 19スクリプトへの分割は維持。`main.gd` 1143行と`hud_manager.gd` 877行は監視帯、Rust message adapterはC-16で分割候補 |
+| ファイル分割 | B+ | 19スクリプトへの分割は維持。`main.gd` 967行と`hud_manager.gd` 859行は監視帯、Rust message adapterはC-16でthin seam / delivery / fixtureへ責務分離済み |
 | `main.gd`責務 | A− | scene lifecycle、node generation、event dispatch、network send、HUD assemblyに限定 |
 | 型境界 | A | wire decode → `ClientFact` → Rust state commit → typed presentationと、input fact → `ClientAction` → typed request/local effectの単一経路。Dictionary再入力なし |
 | 重複 | A− | shadow state、JSON往復、adapter内domain policy、二段event dispatchは解消。残るauthority重複は#200 |
@@ -60,7 +66,8 @@ review修正後のGDExtension境界、追加したClientState回帰test、明示
 - `PlayerLoadout`: fitting/inventory/capacitor state。server replacement/module activationは`ClientState`経由
 - `StationInventoryInteraction`（core）: station inventoryの行クリック/ドロップ方針とtyped `ClientRequest`構築
 - `StationInventoryRow` / `StationInventoryAction`（GDExtension）: Godot境界のtyped metadata/result adapter
-- `ServerMessageOutcome::dispatch`: GDScriptが明示したconnection/world targetへ、state commit後に一度だけpresentationを渡す境界
+- `ServerMessageOutcome::dispatch`: decoded messageをinternal deliveryへ委譲するthin Godot公開境界
+- `inbound_delivery::dispatch`: canonical message match、wire→`ClientFact`変換、state commit、connection lifecycleまたは最終world handlerへの一回のdelivery
 - `main.gd`: scene node registryと短命なoptimistic state
 - `ClientInteraction`（core）: selection、double-click、input facts → `ClientAction`
 - `WorldInteraction`（Godot）: Key/hit-test normalizationとcore adapter
@@ -70,16 +77,16 @@ review修正後のGDExtension境界、追加したClientState回帰test、明示
 
 navigation map cacheはSector内でwrite-onceに近いpresentation cacheとして許容し、毎frameのRust→Godot再構築は行わない。
 
-## ファイルサイズ（2026-08-17再計測）
+## ファイルサイズ（2026-08-20再計測）
 
 ### GDScript（`client/scripts/`）
 
 | ファイル | 行数 | 判定 |
 |---|---:|---|
-| `client/scripts/main.gd` | 984 | 🟡 R-2。scene lifecycle / node registry / event wiring / HUD scene-facts assemblyのorchestration。機械的分割はしない |
+| `client/scripts/main.gd` | 967 | 🟡 R-2。scene lifecycle / node registry / event wiring / HUD scene-facts assemblyのorchestration。機械的分割はしない |
 | `client/scripts/hud_manager.gd` | 859 | 🟡 C-9。typed refsとpanel build/updateが同一責務。独立変更理由が分かれるまで保留 |
 | `client/scripts/ship_controller.gd` | 448 | 🟢 motion adapterとvisual effectの一つのShip presentation boundary |
-| `client/scripts/connection.gd` | 403 | 🟢 WebSocket接続・reconnect・typed outcome受け渡し・ClientAction transport seam |
+| `client/scripts/connection.gd` | 313 | 🟢 WebSocket接続・reconnect・typed outcome受け渡し・ClientAction transport seam |
 | `client/scripts/world_presentation.gd` | 490 | 🟢 marker・floating-origin・celestial lighting presentation |
 | `client/scripts/market_surface.gd` | 270 | 🟢 Market panel surface |
 | `client/scripts/hud_surface.gd` | 163 | 🟢 typed snapshot paint・HUD reference ownership |
@@ -95,12 +102,14 @@ navigation map cacheはSector内でwrite-onceに近いpresentation cacheとし�
 | `client/scripts/billboard_bracket.gd` | 67 | 🟢 fixed-size navigation bracket visual |
 | `client/scripts/warp_tunnel_effect.gd` | 10 | 🟢 warp tunnel visual |
 
-### Rust/GDExtension boundary（client crates、500行以上）
+### Rust/GDExtension boundary（client crates、C-16関連と500行以上）
 
 | ファイル | 行数 | 判定 |
 |---|---:|---|
 | `crates/dawn-client-core/src/world_session.rs` | 903 | 🟢 typed world state machine・lifecycle/reconciliation。単一のsession authority |
-| `crates/dawn-client-gdext/src/server_message_gd.rs` | 836 | 🟡 C-16部分完了。中間mirrorは削除済み、decode / wire→ClientFact / state apply / Godot dispatchのmodule分割は未完了 |
+| `crates/dawn-client-gdext/src/inbound_delivery.rs` | 627 | 🟢 canonical message match、wire→`ClientFact`変換、state commit、effect抽出、final handler delivery |
+| `crates/dawn-client-gdext/src/server_message_gd.rs` | 65 | 🟢 thin Godot decoder / outcome seam。runtime deliveryは`inbound_delivery.rs`へ一度だけ委譲 |
+| `crates/dawn-client-gdext/src/server_message_fixture.rs` | 195 | 🟢 debug-only typed GdUnit fixture construction。production deliveryから分離 |
 | `crates/dawn-client-core/src/client_state.rs` | 842 | 🟢 ClientFactからWorldSessionEffectへの純粋なstate policy |
 | `crates/dawn-client-core/src/client_action.rs` | 584 | 🟢 engine-independent selection/input policy・typed ClientAction |
 | `crates/dawn-client-core/src/hud.rs` | 528 | 🟢 engine-independent HUD read model・formatting・change decisions |
@@ -121,7 +130,7 @@ navigation map cacheはSector内でwrite-onceに近いpresentation cacheとし�
 | C-13 | #238 | server outcomeのtyped stateをDictionary経由でRustへ戻す二重変換 | 解消済み |
 | C-14 | #251 | server-fact policyがGodot adapterに残る | 解消済み |
 | C-15 | #281 | Dictionary/string-tag intent、Market JSON builder、空byteエラーsentinel | 解消済み |
-| C-16 | — | `server_message_gd.rs`のdecode / fact apply / Godot dispatch混在。中間mirrorは削除済み、module分割は未完了 | 部分完了 |
+| C-16 | — | inbound relay ladderとdecode / delivery / debug fixtureの責務混在 | 解消済み（2026-08-20） |
 | C-17 | — | ClientIntentのpredicate/accessor ladder、GDScript input policy、network send分岐の重複 | 解消済み |
 | C-18 | — | Station Inventory interaction policy / string action tag ladder | 解消済み |
 | C-19 | — | HUD frame Dictionary / GDScript dirty tracking workaround | 解消済み（2026-08-20、`HudReadModel`） |

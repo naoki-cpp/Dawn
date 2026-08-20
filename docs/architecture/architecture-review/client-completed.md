@@ -89,7 +89,7 @@ C-1 の抽出先（`ShipPicking` / `NavigationMarkerRenderer` / `InputDecoder` /
 | `billboard_ring_test.gd` | `BillboardRing` | 3 |
 | `camera_controller_test.gd` | `CameraController`（orbit drag） | 3 |
 | `world_space_test.gd` | `WorldSpace`（ADR-0029 浮動原点リベース） | 6 |
-| `connection_test.gd` | `connection.gd`（URL正規化・module activated signal・typed PlayerLoadout message の回帰テスト） | 16 |
+| `connection_test.gd` | `connection.gd`（URL正規化・welcome lifecycle・direct final-handler inbound deliveryの回帰テスト） | 16 |
 | `market_surface_test.gd` | `MarketSurface` | 1 |
 | `planet_visibility_test.gd` | `PlanetVisibility` | 1 |
 | `player_loadout_test.gd` | `PlayerLoadout` typed GDExtension boundary | 3 |
@@ -137,3 +137,24 @@ tests. Absolute positions remain f64 components until rendering.
 paint forwardingだけを保持し、frame/panel Dictionary、`ModuleRow`/`ShipHealth`のHUD用clone/equality
 workaround、`unit_format.gd`を削除した。旧GdUnitの`unit_format_test.gd`はRustのHUD projection/formatting
 testsへ移行し、`hud_surface_test.gd`はpaint boundaryを検証する7ケースに更新した。
+
+### 2026-08-20 — C-16 inbound relay ladder collapse
+
+The Godot-facing `ServerMessageOutcome::dispatch` remains compatible and now
+delegates once to the internal `inbound_delivery::dispatch`. That module owns
+the exhaustive canonical `ServerMessage` match, wire-to-`ClientFact`
+conversion, state application, effect extraction, and handler selection. It
+sends InitialState, PlayerLoadout, ModuleActivated/Deactivated, MarketSnapshot,
+and MotionCorrection directly to the final `main.gd` handlers after any typed
+Rust state commit. `connection.gd` retains only connection lifecycle/transport
+callbacks: Welcome identity and resume-ticket handling, Redirect, and
+request-rejection logging. The no-op welcome relay and all selected
+world-message signals were removed.
+
+Debug-only typed fixture construction moved to
+`server_message_fixture.rs`; `ServerMessageDecoder.test_outcome()` remains the
+GdUnit binary inbound seam. `connection_test.gd` covers each moved family at the
+final handler, all typed Market `ItemIdentity` variants, state commit with a
+missing final handler, and ShipDocked's accepted effect and station name from
+inside the callback. Focused Rust/GDExtension and parse checks passed; full
+GdUnit execution remains for the parent verification pass.

@@ -130,14 +130,7 @@ func _assert_scene_tree_refs() -> void:
 func _ready() -> void:
 	_assert_scene_tree_refs()
 	_connection.bind_client_state(_session, _loadout, self)
-	_connection.motion_correction_received.connect(_handle_motion_correction)
 	_connection.connection_changed.connect(_on_connection_changed)
-	_connection.welcomed.connect(_on_welcomed)
-	_connection.initial_state_received.connect(_on_initial_state)
-	_connection.player_fitting_received.connect(_on_player_fitting)
-	_connection.module_activated.connect(_on_module_activated)
-	_connection.module_deactivated.connect(_on_module_deactivated)
-	_connection.market_snapshot_received.connect(_on_market_snapshot)
 	_presentation.build(self, _camera, _warp_tunnel, _gates_root, _bodies_root, _world, _directional_light)
 	_hud_surface.build(self, _hud, _stats_label)
 	_market_surface.build(
@@ -508,15 +501,6 @@ func _handle_star_system_changed(
 func _on_connection_changed(connected: bool) -> void:
 	if not connected:
 		_clear_all_ships()
-
-## Welcome received: just record player_id / ship_id.
-## Ship nodes are spawned by the subsequent InitialState.
-func _on_welcomed(_p_player_id: int, _p_ship_id: int) -> void:
-	## connection.gd ship_id / player_id properties are already populated.
-	## Market access is station-gated, so do not query it while the player is
-	## still in open space after connecting.
-	return
-
 
 func _on_market_refresh() -> void:
 	if not _session.is_docked():

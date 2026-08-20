@@ -9,6 +9,7 @@ mod client_action_gd;
 mod client_command_gd;
 mod client_rules_gd;
 mod hud_gd;
+mod inbound_delivery;
 mod item_identity_gd;
 mod item_row_gd;
 mod loadout_gd;
@@ -16,6 +17,8 @@ mod module_activation_intent_gd;
 mod module_row_gd;
 mod owned_ship_row_gd;
 mod presentation_gd;
+#[cfg(debug_assertions)]
+mod server_message_fixture;
 mod server_message_gd;
 mod server_message_validation;
 mod session_record_gd;
