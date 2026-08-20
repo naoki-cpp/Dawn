@@ -18,20 +18,6 @@ pub enum StationInventoryColumn {
     Ships,
 }
 
-impl StationInventoryColumn {
-    /// Convert the small numeric value used at the GDExtension boundary.
-    #[must_use]
-    pub const fn from_code(code: i64) -> Option<Self> {
-        match code {
-            0 => Some(Self::Fitted),
-            1 => Some(Self::ShipCargo),
-            2 => Some(Self::Station),
-            3 => Some(Self::Ships),
-            _ => None,
-        }
-    }
-}
-
 /// The typed identity of one fitted row, used by Unfit All and reorder.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FittedModuleRow {
@@ -227,7 +213,10 @@ impl StationInventoryInteraction {
             StationInventoryRow::OwnedShip {
                 ship,
                 active: false,
-            } => StationInventoryAction::Request(ClientRequest::SelectActiveShip { ship }),
+            } => context
+                .docked_station_id
+                .map(|_| StationInventoryAction::Request(ClientRequest::SelectActiveShip { ship }))
+                .unwrap_or(StationInventoryAction::None),
         }
     }
 
@@ -358,7 +347,7 @@ mod tests {
     }
 
     #[test]
-    fn shipless_player_can_select_an_owned_ship() {
+    fn shipless_docked_player_can_select_an_owned_ship() {
         let policy = StationInventoryInteraction;
         let action = policy.click(
             StationInventoryRow::OwnedShip {
@@ -374,26 +363,20 @@ mod tests {
     }
 
     #[test]
-    fn columns_and_row_metadata_have_stable_typed_boundaries() {
-        assert_eq!(
-            StationInventoryColumn::from_code(0),
-            Some(StationInventoryColumn::Fitted)
+    fn undocked_player_cannot_select_an_owned_ship() {
+        let action = StationInventoryInteraction.click(
+            StationInventoryRow::OwnedShip {
+                ship: ship(8),
+                active: false,
+            },
+            context(None, None),
         );
-        assert_eq!(
-            StationInventoryColumn::from_code(1),
-            Some(StationInventoryColumn::ShipCargo)
-        );
-        assert_eq!(
-            StationInventoryColumn::from_code(2),
-            Some(StationInventoryColumn::Station)
-        );
-        assert_eq!(
-            StationInventoryColumn::from_code(3),
-            Some(StationInventoryColumn::Ships)
-        );
-        assert_eq!(StationInventoryColumn::from_code(-1), None);
-        assert_eq!(StationInventoryColumn::from_code(4), None);
 
+        assert_eq!(action, StationInventoryAction::None);
+    }
+
+    #[test]
+    fn rows_report_semantic_columns() {
         assert_eq!(StationInventoryRow::None.column(), None);
         assert_eq!(
             fitted(1, SlotKind::High, 0).column(),

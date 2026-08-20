@@ -678,10 +678,10 @@ func _apply_player_module_activation(module_id: int, active: bool, forced_reason
 ## This method only supplies current context and applies the resulting request
 ## or local Build picker effect.
 func _handle_inventory_row_click(row: InventoryRow) -> void:
-	if row == null or row.action == null:
+	if row == null or row.policy_row == null:
 		return
 	var action: StationInventoryAction = _station_inventory.click(
-		row.action, _player_ship_id, _session.docked_station_id(), _loadout.modules())
+		row.policy_row, _player_ship_id, _session.docked_station_id(), _loadout.modules())
 	_execute_station_inventory_action(action)
 
 
@@ -704,11 +704,11 @@ func _execute_station_inventory_action(action: StationInventoryAction) -> void:
 ## ScrapMetal) per the user's explicit preference for a single straightforward
 ## right-click gesture rather than per-type UI carve-outs.
 func _handle_inventory_row_right_click(row: InventoryRow) -> void:
-	if row == null or row.action == null:
+	if row == null or row.policy_row == null:
 		return
 	var action: StationInventoryAction = _station_inventory.resolve_drop(
-		row.action,
-		InventoryRow.SOURCE_STATION,
+		row.policy_row,
+		StationInventoryInteraction.column_station(),
 		StationInventoryRow.none(),
 		_player_ship_id,
 		_session.docked_station_id())
@@ -758,17 +758,18 @@ func _end_inventory_drag(release_pos: Vector2) -> void:
 ## an additive path to the same commands, same "keep both interaction paths"
 ## precedent as the Build/Disassemble buttons-plus-keys work.
 func _handle_inventory_row_drop(row: InventoryRow, target_column: int, release_pos: Vector2) -> void:
-	if row == null or row.action == null or target_column == InventoryRow.SOURCE_NONE:
+	if row == null or row.policy_row == null \
+			or target_column == StationInventoryInteraction.column_none():
 		return
-	var target_action := StationInventoryRow.none()
-	if target_column == InventoryRow.SOURCE_FITTED:
+	var target_policy_row := StationInventoryRow.none()
+	if target_column == StationInventoryInteraction.column_fitted():
 		var target_row: InventoryRow = _hud_surface.inventory_panel_row_at(release_pos)
-		if target_row != null and target_row.action != null:
-			target_action = target_row.action
+		if target_row != null and target_row.policy_row != null:
+			target_policy_row = target_row.policy_row
 	var action: StationInventoryAction = _station_inventory.resolve_drop(
-		row.action,
+		row.policy_row,
 		target_column,
-		target_action,
+		target_policy_row,
 		_player_ship_id,
 		_session.docked_station_id())
 	_execute_station_inventory_action(action)

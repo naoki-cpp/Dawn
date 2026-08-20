@@ -52,7 +52,7 @@ Rust unit testでinteraction policyを検証し、GdUnit4はGDExtension境界を
 `main.gd`に残っていたStation Inventoryのstring action分岐と、
 `connection.gd`の個別送信wrapperを削除した。Rust coreが既存wire requestを
 構築し、Godot側には表示・hit-test・drag geometry・local build-picker effectだけを残した。
-coreの直接テスト96件と、Station Inventoryを含むGdUnit4 160件で検証した。
+coreの直接テスト97件と、Station Inventoryを含むGdUnit4 218件で検証した。
 
 ### 2026-07-24: client WorldSpace の座標計算をRustへ移管
 

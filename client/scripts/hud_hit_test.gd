@@ -50,24 +50,24 @@ static func inventory_panel_row_at(refs: HudManager.InventoryPanelRefs, pos: Vec
 	return null
 
 
-## Which of the four inventory-panel columns `pos` falls in (an
-## `InventoryRow.SOURCE_*` value), or `SOURCE_NONE` if outside all of them. Used by
+## Which of the four inventory-panel columns `pos` falls in (a code owned by
+## `StationInventoryInteraction`), or its no-column code if outside all of them. Used by
 ## the drag-and-drop drop-target resolution (main.gd) -- unlike
 ## inventory_panel_row_at(), this matches empty space within a column's list
 ## too (dropping below the last row must still count as a drop into that
 ## column, not a miss).
 static func column_at(refs: HudManager.InventoryPanelRefs, pos: Vector2) -> int:
 	if not refs.panel.visible:
-		return InventoryRow.SOURCE_NONE
+		return StationInventoryInteraction.column_none()
 	if refs.fitted_col.get_global_rect().has_point(pos):
-		return InventoryRow.SOURCE_FITTED
+		return StationInventoryInteraction.column_fitted()
 	if refs.inv_col.get_global_rect().has_point(pos):
-		return InventoryRow.SOURCE_SHIP_CARGO
+		return StationInventoryInteraction.column_ship_cargo()
 	if refs.station_col.get_global_rect().has_point(pos):
-		return InventoryRow.SOURCE_STATION
+		return StationInventoryInteraction.column_station()
 	if refs.ships_col.get_global_rect().has_point(pos):
-		return InventoryRow.SOURCE_SHIPS
-	return InventoryRow.SOURCE_NONE
+		return StationInventoryInteraction.column_ships()
+	return StationInventoryInteraction.column_none()
 
 
 ## True when the inventory panel is open and `pos` falls anywhere inside it

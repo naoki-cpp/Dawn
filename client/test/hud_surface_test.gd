@@ -90,7 +90,9 @@ func test_set_player_fitting_before_build_is_applied_after_build() -> void:
 
 	assert_int(unbuilt._module_slots.size()).is_equal(1)
 	assert_int(unbuilt._inventory_panel_refs.inventory_rows.size()).is_equal(1)
-	assert_bool(unbuilt._inventory_panel_refs.inventory_rows[0].item_id.is_scrap_metal()).is_true()
+	assert_bool(
+		unbuilt._inventory_panel_refs.inventory_rows[0].policy_row.is_cargo()
+	).is_true()
 
 
 func test_render_updates_all_hud_panels_from_one_frame() -> void:
@@ -147,10 +149,8 @@ func test_set_player_fitting_rebuilds_module_slots_and_inventory_rows() -> void:
 	assert_int(_surface._inventory_panel_refs.inventory_rows.size()).is_equal(2)
 	var rows: Array[InventoryRow] = _surface._inventory_panel_refs.inventory_rows
 	assert_str(((rows[1].panel as Panel).get_child(0) as Label).text).is_equal("Scrap Metal x4")
-	## Every ship-cargo row carries the ship-cargo column code. main.gd uses the
-	## typed StationInventoryRow policy, so this value is only for hit-testing.
-	assert_int(rows[0].source).is_equal(InventoryRow.SOURCE_SHIP_CARGO)
-	assert_bool(rows[1].item_id.is_scrap_metal()).is_true()
+	assert_bool(rows[0].policy_row.is_cargo()).is_true()
+	assert_bool(rows[1].policy_row.is_cargo()).is_true()
 
 
 func test_render_repaints_after_the_modules_array_is_mutated_in_place() -> void:
@@ -287,7 +287,7 @@ func test_inventory_panel_hit_helpers_delegate_to_built_panel() -> void:
 	var rows: Array[InventoryRow] = _surface._inventory_panel_refs.inventory_rows
 	var row_panel: Panel = rows[0].panel
 	var hit: InventoryRow = _surface.inventory_panel_row_at(row_panel.get_global_rect().get_center())
-	assert_bool(hit.action.is_cargo()).is_true()
+	assert_bool(hit.policy_row.is_cargo()).is_true()
 
 
 func test_station_inventory_packaged_ship_row_is_clickable_to_assemble() -> void:
@@ -300,8 +300,7 @@ func test_station_inventory_packaged_ship_row_is_clickable_to_assemble() -> void
 	var rows: Array[InventoryRow] = _surface._inventory_panel_refs.station_rows
 	var row_panel: Panel = rows[0].panel
 	var hit: InventoryRow = _surface.inventory_panel_row_at(row_panel.get_global_rect().get_center())
-	assert_bool(hit.action.is_station_item()).is_true()
-	assert_int(hit.item_id.ship_type_id() as int).is_equal(7)
+	assert_bool(hit.policy_row.is_station_item()).is_true()
 
 
 func test_owned_ships_roster_lists_active_and_inactive_ships() -> void:
@@ -316,17 +315,14 @@ func test_owned_ships_roster_lists_active_and_inactive_ships() -> void:
 	assert_int(ship_rows.size()).is_equal(2)
 
 	var active_row: InventoryRow = ship_rows[0]
-	assert_int(active_row.ship_id).is_equal(1)
-	assert_bool(active_row.action.is_owned_ship_active()).is_true()
+	assert_bool(active_row.policy_row.is_owned_ship_active()).is_true()
 
 	var inactive_row: InventoryRow = ship_rows[1]
-	assert_int(inactive_row.ship_id).is_equal(2)
-	assert_bool(inactive_row.action.is_owned_ship_selectable()).is_true()
+	assert_bool(inactive_row.policy_row.is_owned_ship_selectable()).is_true()
 
 	var hit: InventoryRow = _surface.inventory_panel_row_at(
 		(inactive_row.panel as Panel).get_global_rect().get_center())
-	assert_bool(hit.action.is_owned_ship_selectable()).is_true()
-	assert_int(hit.ship_id).is_equal(2)
+	assert_bool(hit.policy_row.is_owned_ship_selectable()).is_true()
 
 
 ## Typed fixture builder (session_record_gd.rs): `render()` forwards the same

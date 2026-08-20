@@ -98,7 +98,7 @@ navigation map cacheはSector内でwrite-onceに近いpresentation cacheとし�
 | `crates/dawn-client-gdext/src/server_message_gd.rs` | 836 | 🟡 C-16部分完了。中間mirrorは削除済み、decode / wire→ClientFact / state apply / Godot dispatchのmodule分割は未完了 |
 | `crates/dawn-client-core/src/client_state.rs` | 842 | 🟢 ClientFactからWorldSessionEffectへの純粋なstate policy |
 | `crates/dawn-client-core/src/client_action.rs` | 584 | 🟢 engine-independent selection/input policy・typed ClientAction |
-| `crates/dawn-client-core/src/station_inventory.rs` | 729 | 🟢 engine-independent Station Inventory policy・typed request construction |
+| `crates/dawn-client-core/src/station_inventory.rs` | 758 | 🟢 engine-independent Station Inventory policy・typed request construction |
 | `crates/dawn-client-core/src/motion.rs` | 680 | 🟢 client motion/prediction kernel・tests |
 | `crates/dawn-client-gdext/src/client_command_gd.rs` | 564 | 🟢 typed request builder・入力検証・encode結果のGDExtension boundary |
 | `crates/dawn-client-gdext/src/client_action_gd.rs` | 280 | 🟢 ClientAction/ClientInteractionの薄いGodot adapter |

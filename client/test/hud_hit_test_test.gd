@@ -39,7 +39,7 @@ func test_column_at_identifies_the_fitted_column() -> void:
 	await get_tree().process_frame
 
 	var result: int = HudHitTest.column_at(refs, refs.fitted_list.get_global_rect().position + Vector2(2, 2))
-	assert_int(result).is_equal(InventoryRow.SOURCE_FITTED)
+	assert_int(result).is_equal(StationInventoryInteraction.column_fitted())
 
 
 func test_column_at_identifies_the_ship_cargo_column() -> void:
@@ -50,7 +50,7 @@ func test_column_at_identifies_the_ship_cargo_column() -> void:
 	await get_tree().process_frame
 
 	var result: int = HudHitTest.column_at(refs, refs.inventory_list.get_global_rect().position + Vector2(2, 2))
-	assert_int(result).is_equal(InventoryRow.SOURCE_SHIP_CARGO)
+	assert_int(result).is_equal(StationInventoryInteraction.column_ship_cargo())
 
 
 func test_column_at_identifies_the_station_column() -> void:
@@ -61,7 +61,7 @@ func test_column_at_identifies_the_station_column() -> void:
 	await get_tree().process_frame
 
 	var result: int = HudHitTest.column_at(refs, refs.station_list.get_global_rect().position + Vector2(2, 2))
-	assert_int(result).is_equal(InventoryRow.SOURCE_STATION)
+	assert_int(result).is_equal(StationInventoryInteraction.column_station())
 
 
 func test_column_at_identifies_the_ships_column() -> void:
@@ -72,7 +72,7 @@ func test_column_at_identifies_the_ships_column() -> void:
 	await get_tree().process_frame
 
 	var result: int = HudHitTest.column_at(refs, refs.ships_list.get_global_rect().position + Vector2(2, 2))
-	assert_int(result).is_equal(InventoryRow.SOURCE_SHIPS)
+	assert_int(result).is_equal(StationInventoryInteraction.column_ships())
 
 
 func test_column_at_returns_empty_string_for_a_point_outside_every_column() -> void:
@@ -83,7 +83,7 @@ func test_column_at_returns_empty_string_for_a_point_outside_every_column() -> v
 	await get_tree().process_frame
 
 	var result: int = HudHitTest.column_at(refs, Vector2(-9999, -9999))
-	assert_int(result).is_equal(InventoryRow.SOURCE_NONE)
+	assert_int(result).is_equal(StationInventoryInteraction.column_none())
 
 
 func test_column_at_returns_empty_when_the_panel_is_hidden() -> void:
@@ -91,7 +91,9 @@ func test_column_at_returns_empty_when_the_panel_is_hidden() -> void:
 	add_child(hud)
 	var refs: HudManager.InventoryPanelRefs = HudManager.build_inventory_panel(hud)
 
-	assert_int(HudHitTest.column_at(refs, refs.fitted_list.get_global_rect().position)).is_equal(InventoryRow.SOURCE_NONE)
+	assert_int(HudHitTest.column_at(
+		refs, refs.fitted_list.get_global_rect().position
+	)).is_equal(StationInventoryInteraction.column_none())
 
 
 func _module(overrides: Dictionary) -> ModuleRow:

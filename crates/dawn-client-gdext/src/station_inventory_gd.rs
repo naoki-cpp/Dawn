@@ -3,19 +3,20 @@ use dawn_client_core::{
     StationInventoryContext, StationInventoryInteraction as CoreInteraction,
     StationInventoryLocalAction, StationInventoryRow as CoreRow,
 };
-use dawn_core::{ModuleId, ShipId, ShipTypeId, SlotKind, StationId};
+use dawn_core::{ModuleId, ShipId, ShipTypeId, StationId};
 use godot::prelude::*;
 
-use crate::client_command_gd::{request_result_from_request, ClientCommandResult};
+use crate::client_command_gd::{
+    request_result_from_request, slot_kind_from_str, ClientCommandResult,
+};
 use crate::item_identity_gd::ItemIdentity;
 use crate::module_row_gd::ModuleRow;
 
-const ACTION_NONE: i64 = 0;
-const ACTION_REQUEST: i64 = 1;
-const ACTION_REQUESTS: i64 = 2;
-const ACTION_LOCAL: i64 = 3;
-const LOCAL_NONE: i64 = 0;
-const LOCAL_TOGGLE_BUILD_PICKER: i64 = 1;
+const COLUMN_NONE: i64 = -1;
+const COLUMN_FITTED: i64 = 0;
+const COLUMN_SHIP_CARGO: i64 = 1;
+const COLUMN_STATION: i64 = 2;
+const COLUMN_SHIPS: i64 = 3;
 
 /// Typed policy metadata attached to one rendered station inventory row.
 #[derive(Debug, GodotClass)]
@@ -42,22 +43,6 @@ impl StationInventoryRow {
     }
 
     #[func]
-    fn fitted(module_id: i64, slot: GString) -> Variant {
-        let Some(module) = nonzero_module_id(module_id) else {
-            return Variant::nil();
-        };
-        let Some(slot) = parse_slot(&slot.to_string()) else {
-            return Variant::nil();
-        };
-        Self::wrap(CoreRow::Fitted(FittedModuleRow {
-            module,
-            slot,
-            index: 0,
-        }))
-        .to_variant()
-    }
-
-    #[func]
     fn fitted_with_index(module_id: i64, slot: GString, index: i64) -> Variant {
         let Some(module) = nonzero_module_id(module_id) else {
             return Variant::nil();
@@ -65,7 +50,7 @@ impl StationInventoryRow {
         let Ok(index) = u32::try_from(index) else {
             return Variant::nil();
         };
-        let Some(slot) = parse_slot(&slot.to_string()) else {
+        let Some(slot) = slot_kind_from_str(&slot.to_string()) else {
             return Variant::nil();
         };
         Self::wrap(CoreRow::Fitted(FittedModuleRow {
@@ -87,7 +72,7 @@ impl StationInventoryRow {
         let slot = if slot_text.is_empty() {
             Some(None)
         } else {
-            parse_slot(&slot_text).map(Some)
+            slot_kind_from_str(&slot_text).map(Some)
         };
         let Some(slot) = slot else {
             return Variant::nil();
@@ -192,26 +177,6 @@ impl StationInventoryAction {
 #[godot_api]
 impl StationInventoryAction {
     #[func]
-    fn kind(&self) -> i64 {
-        match self.action {
-            CoreAction::None => ACTION_NONE,
-            CoreAction::Request(_) => ACTION_REQUEST,
-            CoreAction::Requests(_) => ACTION_REQUESTS,
-            CoreAction::Local(_) => ACTION_LOCAL,
-        }
-    }
-
-    #[func]
-    fn local_kind(&self) -> i64 {
-        match self.action {
-            CoreAction::Local(StationInventoryLocalAction::ToggleBuildPicker) => {
-                LOCAL_TOGGLE_BUILD_PICKER
-            }
-            _ => LOCAL_NONE,
-        }
-    }
-
-    #[func]
     fn is_build_picker_toggle(&self) -> bool {
         matches!(
             self.action,
@@ -222,11 +187,6 @@ impl StationInventoryAction {
     #[func]
     fn request_count(&self) -> i64 {
         i64::try_from(self.action.request_count()).expect("station action request count fits i64")
-    }
-
-    #[func]
-    fn request_result(&self) -> Gd<ClientCommandResult> {
-        self.request_result_at(0)
     }
 
     #[func]
@@ -259,6 +219,31 @@ pub struct StationInventoryInteraction {
 #[godot_api]
 impl StationInventoryInteraction {
     #[func]
+    fn column_none() -> i64 {
+        COLUMN_NONE
+    }
+
+    #[func]
+    fn column_fitted() -> i64 {
+        COLUMN_FITTED
+    }
+
+    #[func]
+    fn column_ship_cargo() -> i64 {
+        COLUMN_SHIP_CARGO
+    }
+
+    #[func]
+    fn column_station() -> i64 {
+        COLUMN_STATION
+    }
+
+    #[func]
+    fn column_ships() -> i64 {
+        COLUMN_SHIPS
+    }
+
+    #[func]
     fn click(
         &self,
         row: Gd<StationInventoryRow>,
@@ -266,11 +251,19 @@ impl StationInventoryInteraction {
         docked_station_id: i64,
         fitted_modules: Array<Gd<ModuleRow>>,
     ) -> Gd<StationInventoryAction> {
-        let fitted = fitted_modules_from_godot(&fitted_modules);
-        StationInventoryAction::from_core(self.core.click(
-            row.bind().core_row(),
-            context(active_ship_id, docked_station_id, &fitted),
-        ))
+        let row = row.bind().core_row();
+        let fitted = if matches!(row, CoreRow::UnfitAll) {
+            let Some(fitted) = fitted_modules_from_godot(&fitted_modules) else {
+                return StationInventoryAction::from_core(CoreAction::None);
+            };
+            fitted
+        } else {
+            Vec::new()
+        };
+        StationInventoryAction::from_core(
+            self.core
+                .click(row, context(active_ship_id, docked_station_id, &fitted)),
+        )
     }
 
     #[func]
@@ -282,7 +275,7 @@ impl StationInventoryInteraction {
         active_ship_id: i64,
         docked_station_id: i64,
     ) -> Gd<StationInventoryAction> {
-        let Some(target_column) = StationInventoryColumn::from_code(target_column) else {
+        let Some(target_column) = column_from_code(target_column) else {
             return StationInventoryAction::from_core(CoreAction::None);
         };
         StationInventoryAction::from_core(self.core.drop(
@@ -306,12 +299,12 @@ fn context<'a>(
     )
 }
 
-fn fitted_modules_from_godot(rows: &Array<Gd<ModuleRow>>) -> Vec<FittedModuleRow> {
+fn fitted_modules_from_godot(rows: &Array<Gd<ModuleRow>>) -> Option<Vec<FittedModuleRow>> {
     rows.iter_shared()
-        .filter_map(|row| {
+        .map(|row| {
             let inner = row.bind().inner_clone();
             let module = nonzero_module_id(i64::from(inner.module_id))?;
-            let slot = parse_slot(&inner.slot)?;
+            let slot = slot_kind_from_str(&inner.slot)?;
             Some(FittedModuleRow {
                 module,
                 slot,
@@ -321,12 +314,12 @@ fn fitted_modules_from_godot(rows: &Array<Gd<ModuleRow>>) -> Vec<FittedModuleRow
         .collect()
 }
 
-fn parse_slot(value: &str) -> Option<SlotKind> {
-    match value {
-        "High" => Some(SlotKind::High),
-        "Mid" => Some(SlotKind::Mid),
-        "Low" => Some(SlotKind::Low),
-        "Rig" => Some(SlotKind::Rig),
+fn column_from_code(code: i64) -> Option<StationInventoryColumn> {
+    match code {
+        COLUMN_FITTED => Some(StationInventoryColumn::Fitted),
+        COLUMN_SHIP_CARGO => Some(StationInventoryColumn::ShipCargo),
+        COLUMN_STATION => Some(StationInventoryColumn::Station),
+        COLUMN_SHIPS => Some(StationInventoryColumn::Ships),
         _ => None,
     }
 }

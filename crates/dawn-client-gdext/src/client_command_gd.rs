@@ -133,17 +133,21 @@ fn nonzero_u32_id(value: i64, field: &str) -> Result<u32, RequestBuildError> {
     }
 }
 
-fn slot_kind(value: &GString) -> Result<SlotKind, RequestBuildError> {
-    match value.to_string().as_str() {
-        "High" => Ok(SlotKind::High),
-        "Mid" => Ok(SlotKind::Mid),
-        "Low" => Ok(SlotKind::Low),
-        "Rig" => Ok(SlotKind::Rig),
-        other => Err(RequestBuildError::new(
-            "invalid_slot_kind",
-            format!("unknown slot kind '{other}'"),
-        )),
+pub(crate) fn slot_kind_from_str(value: &str) -> Option<SlotKind> {
+    match value {
+        "High" => Some(SlotKind::High),
+        "Mid" => Some(SlotKind::Mid),
+        "Low" => Some(SlotKind::Low),
+        "Rig" => Some(SlotKind::Rig),
+        _ => None,
     }
+}
+
+fn slot_kind(value: &GString) -> Result<SlotKind, RequestBuildError> {
+    let value = value.to_string();
+    slot_kind_from_str(&value).ok_or_else(|| {
+        RequestBuildError::new("invalid_slot_kind", format!("unknown slot kind '{value}'"))
+    })
 }
 
 fn market_side(value: &GString) -> Result<MarketOrderSide, RequestBuildError> {

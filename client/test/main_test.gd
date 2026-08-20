@@ -743,8 +743,7 @@ func test_station_inventory_clicks_use_typed_actions() -> void:
 	_main._player_ship_id = 1
 	_setup_docked_session()
 
-	var row: InventoryRow = InventoryRow.for_item(
-		null, StationInventoryRow.disassemble(), null, 0, InventoryRow.SOURCE_STATION)
+	var row: InventoryRow = InventoryRow.create(null, StationInventoryRow.disassemble())
 	_main._handle_inventory_row_click(row)
 
 	assert_int(connection.station_inventory_actions.size()).is_equal(1)
@@ -757,8 +756,7 @@ func test_station_inventory_build_and_disassemble_require_active_docked_context(
 	_main._connection = connection
 	_main._player_ship_id = 1
 
-	var row: InventoryRow = InventoryRow.for_item(
-		null, StationInventoryRow.disassemble(), null, 0, InventoryRow.SOURCE_STATION)
+	var row: InventoryRow = InventoryRow.create(null, StationInventoryRow.disassemble())
 	_main._handle_inventory_row_click(row)
 
 	assert_int(connection.station_inventory_actions.size()).is_equal(0)
@@ -780,14 +778,14 @@ func test_shipless_docked_player_can_assemble_and_select_active_ship() -> void:
 	_setup_docked_session()
 
 	var packaged: ItemIdentity = ItemIdentity.packaged_ship(7) as ItemIdentity
-	var assemble_row: InventoryRow = InventoryRow.for_item(
-		null, StationInventoryRow.station(packaged), packaged, 1, InventoryRow.SOURCE_STATION)
+	var assemble_row: InventoryRow = InventoryRow.create(
+		null, StationInventoryRow.station(packaged))
 	_main._handle_inventory_row_click(assemble_row)
 	assert_int(connection.station_inventory_actions.size()).is_equal(1)
 	assert_int(connection.station_inventory_actions[0].request_count()).is_equal(1)
 
-	var select_row: InventoryRow = InventoryRow.for_ship(
-		null, 9, StationInventoryRow.owned_ship(9, false) as StationInventoryRow)
+	var select_row: InventoryRow = InventoryRow.create(
+		null, StationInventoryRow.owned_ship(9, false) as StationInventoryRow)
 	_main._handle_inventory_row_click(select_row)
 	assert_int(connection.station_inventory_actions.size()).is_equal(2)
 	assert_int(connection.station_inventory_actions[1].request_count()).is_equal(1)
@@ -803,14 +801,12 @@ func test_build_picker_is_local_and_ship_choice_is_typed() -> void:
 	add_child(hud)
 	_main._hud_surface.build(auto_free(Node.new()), hud, auto_free(Label.new()))
 
-	var toggle: InventoryRow = InventoryRow.for_item(
-		null, StationInventoryRow.build_toggle(), null, 0, InventoryRow.SOURCE_STATION)
+	var toggle: InventoryRow = InventoryRow.create(null, StationInventoryRow.build_toggle())
 	_main._handle_inventory_row_click(toggle)
 	assert_int(connection.station_inventory_actions.size()).is_equal(0)
 
-	var row: InventoryRow = InventoryRow.for_item(
-		null, StationInventoryRow.build_ship_type(42) as StationInventoryRow,
-		null, 0, InventoryRow.SOURCE_STATION)
+	var row: InventoryRow = InventoryRow.create(
+		null, StationInventoryRow.build_ship_type(42) as StationInventoryRow)
 	_main._handle_inventory_row_click(row)
 
 	assert_int(connection.station_inventory_actions.size()).is_equal(1)
@@ -828,8 +824,7 @@ func test_unfit_all_row_click_sends_one_unfit_command_per_fitted_module() -> voi
 		_module_fixture(2, "Low", false),
 	])
 
-	var row: InventoryRow = InventoryRow.for_item(
-		null, StationInventoryRow.unfit_all(), null, 0, InventoryRow.SOURCE_FITTED)
+	var row: InventoryRow = InventoryRow.create(null, StationInventoryRow.unfit_all())
 	_main._handle_inventory_row_click(row)
 
 	assert_int(connection.station_inventory_actions.size()).is_equal(1)
@@ -842,8 +837,7 @@ func test_unfit_all_row_click_is_a_no_op_when_no_module_is_fitted() -> void:
 	_main._connection = connection
 	_main._player_ship_id = 1
 
-	var row: InventoryRow = InventoryRow.for_item(
-		null, StationInventoryRow.unfit_all(), null, 0, InventoryRow.SOURCE_FITTED)
+	var row: InventoryRow = InventoryRow.create(null, StationInventoryRow.unfit_all())
 	_main._handle_inventory_row_click(row)
 
 	assert_int(connection.station_inventory_actions.size()).is_equal(0)
@@ -861,10 +855,12 @@ func test_drag_from_ship_cargo_to_fitted_sends_fit_command() -> void:
 	add_child(hud)
 	_main._hud_surface.build(auto_free(Node.new()), hud, auto_free(Label.new()))
 
-	var row: InventoryRow = InventoryRow.for_item(
-		null, StationInventoryRow.cargo(ItemIdentity.module(5) as ItemIdentity, "High") as StationInventoryRow,
-		ItemIdentity.module(5) as ItemIdentity, 1, InventoryRow.SOURCE_SHIP_CARGO)
-	_main._handle_inventory_row_drop(row, InventoryRow.SOURCE_FITTED, Vector2.ZERO)
+	var row: InventoryRow = InventoryRow.create(
+		null,
+		StationInventoryRow.cargo(
+			ItemIdentity.module(5) as ItemIdentity, "High") as StationInventoryRow)
+	_main._handle_inventory_row_drop(
+		row, StationInventoryInteraction.column_fitted(), Vector2.ZERO)
 
 	assert_int(connection.station_inventory_actions.size()).is_equal(1)
 	assert_int(connection.station_inventory_actions[0].request_count()).is_equal(1)
@@ -879,10 +875,12 @@ func test_drag_from_ship_cargo_to_fitted_is_a_no_op_when_undocked() -> void:
 	add_child(hud)
 	_main._hud_surface.build(auto_free(Node.new()), hud, auto_free(Label.new()))
 
-	var row: InventoryRow = InventoryRow.for_item(
-		null, StationInventoryRow.cargo(ItemIdentity.module(5) as ItemIdentity, "High") as StationInventoryRow,
-		ItemIdentity.module(5) as ItemIdentity, 1, InventoryRow.SOURCE_SHIP_CARGO)
-	_main._handle_inventory_row_drop(row, InventoryRow.SOURCE_FITTED, Vector2.ZERO)
+	var row: InventoryRow = InventoryRow.create(
+		null,
+		StationInventoryRow.cargo(
+			ItemIdentity.module(5) as ItemIdentity, "High") as StationInventoryRow)
+	_main._handle_inventory_row_drop(
+		row, StationInventoryInteraction.column_fitted(), Vector2.ZERO)
 
 	assert_int(connection.station_inventory_actions.size()).is_equal(0)
 	connection.free()
@@ -894,10 +892,11 @@ func test_drag_from_fitted_to_ship_cargo_sends_unfit_command() -> void:
 	_main._player_ship_id = 1
 	_setup_docked_session()
 
-	var row: InventoryRow = InventoryRow.for_item(
-		null, StationInventoryRow.fitted_with_index(5, "High", 0) as StationInventoryRow,
-		null, 0, InventoryRow.SOURCE_FITTED)
-	_main._handle_inventory_row_drop(row, InventoryRow.SOURCE_SHIP_CARGO, Vector2.ZERO)
+	var row: InventoryRow = InventoryRow.create(
+		null, StationInventoryRow.fitted_with_index(
+			5, "High", 0) as StationInventoryRow)
+	_main._handle_inventory_row_drop(
+		row, StationInventoryInteraction.column_ship_cargo(), Vector2.ZERO)
 
 	assert_int(connection.station_inventory_actions.size()).is_equal(1)
 	assert_int(connection.station_inventory_actions[0].request_count()).is_equal(1)
@@ -910,10 +909,11 @@ func test_drag_from_ship_cargo_to_station_sends_transfer_to_station_command() ->
 	_main._player_ship_id = 1
 	_setup_docked_session()
 
-	var row: InventoryRow = InventoryRow.for_item(
-		null, StationInventoryRow.cargo(ItemIdentity.scrap_metal(), "") as StationInventoryRow,
-		ItemIdentity.scrap_metal(), 4, InventoryRow.SOURCE_SHIP_CARGO)
-	_main._handle_inventory_row_drop(row, InventoryRow.SOURCE_STATION, Vector2.ZERO)
+	var row: InventoryRow = InventoryRow.create(
+		null, StationInventoryRow.cargo(
+			ItemIdentity.scrap_metal(), "") as StationInventoryRow)
+	_main._handle_inventory_row_drop(
+		row, StationInventoryInteraction.column_station(), Vector2.ZERO)
 
 	assert_int(connection.station_inventory_actions.size()).is_equal(1)
 	assert_int(connection.station_inventory_actions[0].request_count()).is_equal(1)
@@ -926,10 +926,10 @@ func test_drag_from_station_to_ship_cargo_sends_transfer_from_station_command() 
 	_main._player_ship_id = 1
 	_setup_docked_session()
 
-	var row: InventoryRow = InventoryRow.for_item(
-		null, StationInventoryRow.station(ItemIdentity.scrap_metal()),
-		ItemIdentity.scrap_metal(), 4, InventoryRow.SOURCE_STATION)
-	_main._handle_inventory_row_drop(row, InventoryRow.SOURCE_SHIP_CARGO, Vector2.ZERO)
+	var row: InventoryRow = InventoryRow.create(
+		null, StationInventoryRow.station(ItemIdentity.scrap_metal()))
+	_main._handle_inventory_row_drop(
+		row, StationInventoryInteraction.column_ship_cargo(), Vector2.ZERO)
 
 	assert_int(connection.station_inventory_actions.size()).is_equal(1)
 	assert_int(connection.station_inventory_actions[0].request_count()).is_equal(1)
@@ -942,10 +942,11 @@ func test_drag_dropped_back_onto_its_own_column_is_a_no_op() -> void:
 	_main._player_ship_id = 1
 	_setup_docked_session()
 
-	var row: InventoryRow = InventoryRow.for_item(
-		null, StationInventoryRow.cargo(ItemIdentity.scrap_metal(), "") as StationInventoryRow,
-		ItemIdentity.scrap_metal(), 4, InventoryRow.SOURCE_SHIP_CARGO)
-	_main._handle_inventory_row_drop(row, InventoryRow.SOURCE_SHIP_CARGO, Vector2.ZERO)
+	var row: InventoryRow = InventoryRow.create(
+		null, StationInventoryRow.cargo(
+			ItemIdentity.scrap_metal(), "") as StationInventoryRow)
+	_main._handle_inventory_row_drop(
+		row, StationInventoryInteraction.column_ship_cargo(), Vector2.ZERO)
 
 	assert_int(connection.station_inventory_actions.size()).is_equal(0)
 	connection.free()
@@ -976,7 +977,8 @@ func test_drag_within_fitted_reorders_two_modules_of_the_same_slot_kind() -> voi
 	var target_row: InventoryRow = fitted_rows[1]
 	var target_pos: Vector2 = (target_row.panel as Panel).get_global_rect().position + Vector2(2, 2)
 
-	_main._handle_inventory_row_drop(source_row, InventoryRow.SOURCE_FITTED, target_pos)
+	_main._handle_inventory_row_drop(
+		source_row, StationInventoryInteraction.column_fitted(), target_pos)
 
 	assert_int(connection.station_inventory_actions.size()).is_equal(1)
 	assert_int(connection.station_inventory_actions[0].request_count()).is_equal(1)
@@ -1005,7 +1007,8 @@ func test_drag_within_fitted_across_different_slot_kinds_is_a_no_op() -> void:
 	var target_row: InventoryRow = fitted_rows[1]
 	var target_pos: Vector2 = (target_row.panel as Panel).get_global_rect().position + Vector2(2, 2)
 
-	_main._handle_inventory_row_drop(source_row, InventoryRow.SOURCE_FITTED, target_pos)
+	_main._handle_inventory_row_drop(
+		source_row, StationInventoryInteraction.column_fitted(), target_pos)
 
 	assert_int(connection.station_inventory_actions.size()).is_equal(0)
 	connection.free()
@@ -1019,9 +1022,9 @@ func test_release_within_threshold_of_press_is_treated_as_a_plain_click() -> voi
 	_main._player_ship_id = 1
 	_setup_docked_session()
 
-	_main._drag_row = InventoryRow.for_item(
-		null, StationInventoryRow.fitted_with_index(5, "High", 0) as StationInventoryRow,
-		null, 0, InventoryRow.SOURCE_FITTED)
+	_main._drag_row = InventoryRow.create(
+		null, StationInventoryRow.fitted_with_index(
+			5, "High", 0) as StationInventoryRow)
 	_main._drag_start_pos = Vector2(100, 100)
 	_main._end_inventory_drag(Vector2(102, 101))  # well within DRAG_THRESHOLD_PX
 
@@ -1045,9 +1048,9 @@ func test_release_past_threshold_is_treated_as_a_drop_not_a_click() -> void:
 	var station_list: VBoxContainer = _main._hud_surface._inventory_panel_refs.station_list
 	var far_pos: Vector2 = station_list.get_global_rect().position + Vector2(2, 2)
 
-	_main._drag_row = InventoryRow.for_item(
-		null, StationInventoryRow.cargo(ItemIdentity.scrap_metal(), "") as StationInventoryRow,
-		ItemIdentity.scrap_metal(), 4, InventoryRow.SOURCE_SHIP_CARGO)
+	_main._drag_row = InventoryRow.create(
+		null, StationInventoryRow.cargo(
+			ItemIdentity.scrap_metal(), "") as StationInventoryRow)
 	_main._drag_start_pos = far_pos + Vector2(500, 500)  # far past DRAG_THRESHOLD_PX
 	_main._end_inventory_drag(far_pos)
 

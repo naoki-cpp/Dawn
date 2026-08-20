@@ -697,12 +697,10 @@ static func build_inventory_panel(hud: CanvasLayer) -> InventoryPanelRefs:
 		fitted_col, inv_col, station_col, ships_col)
 
 
-## One inventory row (FITTED/SHIP CARGO/STATION). The typed action object is
+## One inventory row (FITTED/SHIP CARGO/STATION). The typed policy row is
 ## created here beside the rendered row and later handed to Rust policy.
 static func _make_inventory_row(
-	text: String, action: StationInventoryRow, item_id: ItemIdentity = null,
-	count: int = 0, source: int = InventoryRow.SOURCE_NONE,
-	slot_index: int = 0
+	text: String, policy_row: StationInventoryRow
 ) -> InventoryRow:
 	var row := Panel.new()
 	row.custom_minimum_size = Vector2(0.0, INVENTORY_ROW_HEIGHT)
@@ -720,10 +718,10 @@ static func _make_inventory_row(
 	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(lbl)
 
-	return InventoryRow.for_item(row, action, item_id, count, source, slot_index)
+	return InventoryRow.create(row, policy_row)
 
 
-## One owned-ship row (ADR-0037 roster). The typed action records whether the
+## One owned-ship row (ADR-0037 roster). The typed policy row records whether the
 ## row is already active or can be selected.
 static func _make_ship_row(text: String, ship_id: int, is_active: bool) -> InventoryRow:
 	var row := Panel.new()
@@ -742,8 +740,8 @@ static func _make_ship_row(text: String, ship_id: int, is_active: bool) -> Inven
 	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(lbl)
 
-	var action := StationInventoryRow.owned_ship(ship_id, is_active) as StationInventoryRow
-	return InventoryRow.for_ship(row, ship_id, action)
+	var policy_row := StationInventoryRow.owned_ship(ship_id, is_active) as StationInventoryRow
+	return InventoryRow.create(row, policy_row)
 
 
 ## Rebuild all four columns from the latest PlayerLoadout snapshot. Item rows
@@ -771,14 +769,15 @@ static func update_inventory_panel(
 		var m: ModuleRow = entry
 		var text := "%s: %s" % [m.slot, m.name]
 		var row := _make_inventory_row(
-			text, StationInventoryRow.fitted_with_index(m.module_id, m.slot, m.index) as StationInventoryRow,
-			null, 0, InventoryRow.SOURCE_FITTED, m.index)
+			text,
+			StationInventoryRow.fitted_with_index(
+				m.module_id, m.slot, m.index) as StationInventoryRow)
 		fitted_list.add_child(row.panel)
 		fitted_rows.append(row)
 
 	if not fitted_rows.is_empty():
 		var unfit_all_row := _make_inventory_row(
-			"Unfit all", StationInventoryRow.unfit_all(), null, 0, InventoryRow.SOURCE_FITTED)
+			"Unfit all", StationInventoryRow.unfit_all())
 		fitted_list.add_child(unfit_all_row.panel)
 		fitted_rows.append(unfit_all_row)
 
@@ -793,8 +792,8 @@ static func update_inventory_panel(
 		else:
 			text = "%s x%d" % [item.name, item.count]
 		var row := _make_inventory_row(
-			text, StationInventoryRow.cargo(item.item_id, item.slot) as StationInventoryRow,
-			item.item_id, item.count, InventoryRow.SOURCE_SHIP_CARGO)
+			text, StationInventoryRow.cargo(
+				item.item_id, item.slot) as StationInventoryRow)
 		inventory_list.add_child(row.panel)
 		inventory_rows.append(row)
 	refs.inventory_rows = inventory_rows
@@ -808,21 +807,19 @@ static func update_inventory_panel(
 		else:
 			text = "%s x%d" % [item.name, item.count]
 		var row := _make_inventory_row(
-			text, StationInventoryRow.station(item.item_id), item.item_id, item.count,
-			InventoryRow.SOURCE_STATION)
+			text, StationInventoryRow.station(item.item_id))
 		station_list.add_child(row.panel)
 		station_rows.append(row)
 
 	var disassemble_row := _make_inventory_row(
-		"Disassemble active ship", StationInventoryRow.disassemble(), null, 0,
-		InventoryRow.SOURCE_STATION)
+		"Disassemble active ship", StationInventoryRow.disassemble())
 	station_list.add_child(disassemble_row.panel)
 	station_rows.append(disassemble_row)
 
 	var picker_open: bool = refs.build_picker_open
 	var toggle_text := "Build Ship ▾" if picker_open else "Build Ship ▸"
 	var build_toggle_row := _make_inventory_row(
-		toggle_text, StationInventoryRow.build_toggle(), null, 0, InventoryRow.SOURCE_STATION)
+		toggle_text, StationInventoryRow.build_toggle())
 	station_list.add_child(build_toggle_row.panel)
 	station_rows.append(build_toggle_row)
 
@@ -832,8 +829,8 @@ static func update_inventory_panel(
 			var ship_type_id: int = t.ship_type_id
 			var name: String = t.name
 			var picker_row := _make_inventory_row(
-				"  %s" % name, StationInventoryRow.build_ship_type(ship_type_id) as StationInventoryRow,
-				null, 0, InventoryRow.SOURCE_STATION)
+				"  %s" % name,
+				StationInventoryRow.build_ship_type(ship_type_id) as StationInventoryRow)
 			station_list.add_child(picker_row.panel)
 			station_rows.append(picker_row)
 
