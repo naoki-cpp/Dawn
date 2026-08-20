@@ -19,6 +19,10 @@ pub struct WorldSession {
 }
 
 impl WorldSession {
+    pub(crate) fn core_ref(&self) -> &WorldSessionState {
+        &self.state
+    }
+
     pub(crate) fn apply_fact(
         &mut self,
         fact: ClientFact,

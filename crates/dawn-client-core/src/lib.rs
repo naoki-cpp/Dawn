@@ -35,6 +35,7 @@
 mod client_action;
 mod client_rules;
 mod client_state;
+mod hud;
 mod item_row;
 mod loadout;
 mod module_row;
@@ -50,6 +51,10 @@ pub use client_action::{
 pub use client_rules::ClientRules;
 pub use client_state::{ClientFact, ClientState, ClientStateError, ShipLeaveReason};
 pub use dawn_core::StatDelta;
+pub use hud::{
+    HudChangeSet, HudFrame, HudReadModel, HudSceneFacts, HudShipStatusPanel, HudSnapshot,
+    HudStatsPanel, HudStatusPanel, HudTargetPanel,
+};
 pub use item_row::ItemRow;
 pub use loadout::{
     simulate_modules_capacitor_ticks, ActivationIntent, OwnedShipRow, PlayerLoadoutMsg,

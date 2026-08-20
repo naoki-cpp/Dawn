@@ -76,30 +76,31 @@ C-1 の抽出先（`ShipPicking` / `NavigationMarkerRenderer` / `InputDecoder` /
 
 ---
 
-## テストカバレッジ（C-1 完了時点 + 以降の回帰テスト追加、2026-08-02 実測で更新）
+## テストカバレッジ（C-1 完了時点 + 以降の回帰テスト追加、2026-08-20 実測で更新）
 
 | テストファイル | 対象 | ケース数 |
 |---|---|---|
-| `main_test.gd` | main.gd 残存純粋関数 + モジュールdeactivate判定の回帰テスト | 38 |
-| `ship_picking_test.gd` | `ShipPicking`（画面空間ピッキング含む） | 12 |
-| `navigation_marker_renderer_test.gd` | `NavigationMarkerRenderer`（選択リング含む） | 12 |
+| `main_test.gd` | main.gd 残存純粋関数 + モジュールdeactivate判定の回帰テスト | 41 |
+| `ship_picking_test.gd` | `ShipPicking`（画面空間ピッキング含む） | 16 |
+| `navigation_marker_renderer_test.gd` | `NavigationMarkerRenderer`（選択リング含む） | 16 |
 | `hud_manager_test.gd` | `HudManager`（2026-07-10、C-9解消でヒットテスト系4ケースを `hud_hit_test_test.gd` へ移動） | 26 |
 | `hud_hit_test_test.gd` | `HudHitTest`（2026-07-10新設、C-9解消。`module_slot_at`/`column_at` のヒットテストケース） | 7 |
-| `hud_surface_test.gd` | `HudSurface`（HUD render frame / fitting更新 / inventory hit-test 委譲 / パネル dirty-tracking 判定。C-4 で `ModuleRow` の `clone()`/`equals()` ベース差分判定のケースを追加）。2026-07-08、station roster / `source` タグ付けのケースを追加（+2） | 17 |
+| `hud_surface_test.gd` | `HudReadModel` typed snapshotのpaint、module structure変更、inventory hit-test委譲 | 7 |
 | `billboard_ring_test.gd` | `BillboardRing` | 3 |
 | `camera_controller_test.gd` | `CameraController`（orbit drag） | 3 |
-| `unit_format_test.gd` | `UnitFormat`（ADR-0029 速度/距離単位整形） | 8 |
 | `world_space_test.gd` | `WorldSpace`（ADR-0029 浮動原点リベース） | 6 |
-| `connection_test.gd` | `connection.gd`（URL正規化・module activated signal・typed PlayerLoadout message の回帰テスト） | 15 |
+| `connection_test.gd` | `connection.gd`（URL正規化・module activated signal・typed PlayerLoadout message の回帰テスト） | 16 |
 | `market_surface_test.gd` | `MarketSurface` | 1 |
 | `planet_visibility_test.gd` | `PlanetVisibility` | 1 |
 | `player_loadout_test.gd` | `PlayerLoadout` typed GDExtension boundary | 3 |
-| `ship_controller_test.gd` | `ShipController` | 4 |
-| `world_session_test.gd` | `WorldSession`（InitialState / ship registry / HP / lock / tick-cap / destroy / dock state） | 13 |
+| `ship_controller_test.gd` | `ShipController` | 5 |
+| `world_session_test.gd` | `WorldSession`（InitialState / ship registry / HP / lock / tick-cap / destroy / dock state） | 6 |
 | `world_interaction_test.gd` | `WorldInteraction`/`ClientInteraction`境界（selection / double-click / lock action / key action） | 10 |
-| `client_command_gd_test.gd` | `ClientCommandResult`、型付き Sector/Market builder、明示的な入力エラー | 5 |
-| `world_presentation_test.gd` | `WorldPresentation`（marker clamp / warp tunnel easing / sun state） | 9 |
-| **合計** | | **196**（`func test_` 実測、2026-08-10） |
+| `client_command_gd_test.gd` | `ClientCommandResult`、型付き Sector/Market builder、明示的な入力エラー | 6 |
+| `world_presentation_test.gd` | `WorldPresentation`（marker clamp / warp tunnel easing / sun state） | 20 |
+| `sky_catalog_test.gd` | bright-star catalogの不変条件 | 2 |
+| `station_inventory_test.gd` | typed Station Inventory policy adapter | 5 |
+| **合計** | | **200**（`func test_` 実測、2026-08-20） |
 
 テスト導入で見つかった不具合・定着した手順（詳細: `docs/process/godot-client-testing.md`）:
 - `Node3D` をシーンツリーに追加せず `global_position` を読むと `(0,0,0)` 固定になる
@@ -128,3 +129,11 @@ Removed `ClientMessageDecoder`, `json_variant.rs`, JSON row constructors,
 Dictionary/Vector3 coordinate helpers. GdUnit fixtures now use typed records or
 the real binary decoder; postcard command round trips live in `dawn-protocol`
 tests. Absolute positions remain f64 components until rendering.
+
+### 2026-08-20 — C-19 HUD Read Model deepening
+
+`dawn-client-core::HudReadModel`がHUD projection、表示整形、value-based change decisionを所有し、
+`dawn-client-gdext`はtyped snapshotのGodot adapterになった。`hud_surface.gd`はscene/control参照と
+paint forwardingだけを保持し、frame/panel Dictionary、`ModuleRow`/`ShipHealth`のHUD用clone/equality
+workaround、`unit_format.gd`を削除した。旧GdUnitの`unit_format_test.gd`はRustのHUD projection/formatting
+testsへ移行し、`hud_surface_test.gd`はpaint boundaryを検証する7ケースに更新した。

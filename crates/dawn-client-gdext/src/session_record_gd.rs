@@ -175,24 +175,7 @@ impl ShipHealth {
 }
 
 #[godot_api]
-impl ShipHealth {
-    /// Field-value equality, mirroring `ModuleRow::equals` and for the same
-    /// reason: `hud_surface.gd` diffs the target panel against last frame to
-    /// skip repaints, and `WorldSession::ship_health` mints a fresh object
-    /// every call, so Godot's default reference-identity `==` would report
-    /// "changed" on every single frame.
-    #[func]
-    fn equals(&self, other: Gd<ShipHealth>) -> bool {
-        let other = other.bind();
-        self.ship_id == other.ship_id
-            && self.shield == other.shield
-            && self.armor == other.armor
-            && self.hull == other.hull
-            && self.max_shield == other.max_shield
-            && self.max_armor == other.max_armor
-            && self.max_hull == other.max_hull
-    }
-}
+impl ShipHealth {}
 
 /// The player's capacitor pool (ADR-0011). Read as a unit by the HUD.
 #[derive(GodotClass)]

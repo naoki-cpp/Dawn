@@ -274,7 +274,7 @@ func test_warp_hud_guidance_uses_shared_minimum_distance_boundary() -> void:
 	_main.add_child(ship)
 	_main._ships = {1: ship}
 	_main._player_ship_id = 1
-	var min_warp_distance: float = _main._client_rules.min_warp_distance()
+	var min_warp_distance: float = ClientRules.new().min_warp_distance()
 	var gate: GateRecord = _gate(7, PackedFloat64Array([
 		min_warp_distance - 1.0, 0.0, 0.0]), 2000.0, "Beta")
 	_main._gates = [gate]
