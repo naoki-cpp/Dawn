@@ -14,7 +14,7 @@ class TypedOutcomeTarget:
 	var presentation: InitialStatePresentation
 	var dock_accepted: bool = false
 
-	func _accept_initial_state(state: InitialStatePresentation) -> void:
+	func _on_initial_state(state: InitialStatePresentation) -> void:
 		presentation = state
 
 	func _handle_ship_docked(

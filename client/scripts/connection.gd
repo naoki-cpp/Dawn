@@ -6,9 +6,8 @@
 ## 設計 (ADR-0005, ADR-0007):
 ##   接続フロー:
 ##     1. 接続確立 → Hello を送信
-##     2. Welcome を受信 → player_id / ship_id を保持、welcomed シグナル発行
-##     3. InitialState を受信 → initial_state シグナル発行
-##     4. 通常の DomainEvent ストリームを受信
+##     2. Welcome を受信 → player_id / ship_id と resume ticket を保持
+##     3. 通常の ServerMessageOutcome を world target へ渡す
 ##
 ## Phase 5: Hello/Welcome ハンドシェイク（ORIGIN シグナルを廃止）
 
@@ -16,21 +15,7 @@ extends Node
 
 # ── シグナル ──────────────────────────────────────────────────────────────────
 
-## Owner-only authoritative normal-flight state for client prediction (ADR-0043).
-signal motion_correction_received(correction: MotionCorrectionPresentation)
 signal connection_changed(connected: bool)
-## Welcome 受信時: player_id と ship_id を通知
-signal welcomed(player_id: int, ship_id: int)
-## On InitialState: notifies the full payload (ships + navigation map)
-signal initial_state_received(state: InitialStatePresentation)
-## On PlayerLoadout, after the typed Rust state has already been replaced.
-signal player_fitting_received()
-## ModuleActivated 受信時
-signal module_activated(ship_id: int, module_id: int, slot: String)
-## ModuleDeactivated 受信時。reason は "cap" | "range" | ""（""=プレイヤー起因、ADR-0035）。
-signal module_deactivated(ship_id: int, module_id: int, slot: String, reason: String)
-## Current Market balance and bounded open-order snapshot.
-signal market_snapshot_received(snapshot: MarketSnapshot)
 
 # ── 設定 ─────────────────────────────────────────────────────────────────────
 
@@ -54,8 +39,8 @@ var _server_url      : String        = SERVER_URL
 var _resume_ticket   : PackedByteArray = PackedByteArray()
 ## ClientCommand/ServerMessageDecoder are GDExtension classes (dawn-protocol/
 ## dawn-client-gdext, ADR-0041/ADR-0042) -- globally registered, no preload
-## needed. The decoder returns a typed ServerMessageOutcome that owns all
-## Rust-side variant projection.
+## needed. The decoder returns a typed ServerMessageOutcome that delegates to
+## the canonical Rust inbound delivery module.
 var _cmd             : ClientCommand         = ClientCommand.new()
 var _decoder         : ServerMessageDecoder  = ServerMessageDecoder.new()
 var _world_session   : WorldSession          = null
@@ -276,10 +261,10 @@ static func should_log_reconnect(attempt: int, elapsed: float, interval: float) 
 	return attempt <= 1 or elapsed >= interval
 
 ## One WebSocket frame always carries exactly one postcard `ServerMessage`
-## (ADR-0042). `ServerMessageDecoder` returns a typed Rust outcome; the
-## outcome itself owns variant projection and calls one fixed `_accept_*`
-## method below. No runtime path rebuilds the wire enum as a Dictionary or
-## dispatches by a string `"type"` field.
+## (ADR-0042). `ServerMessageDecoder` returns a typed Rust outcome. It delegates
+## once to Rust inbound delivery, which selects the connection lifecycle target
+## or final world presentation handler. No runtime path rebuilds the wire enum
+## as a Dictionary or dispatches by a string `"type"` field.
 func _receive_messages() -> void:
 	while _ws.get_available_packet_count() > 0:
 		var packet: PackedByteArray = _ws.get_packet()
@@ -306,17 +291,6 @@ func _accept_welcome(
 	_resume_ticket = p_resume_ticket
 	_welcomed = true
 	print("[Connection] Welcome: player_id=%d ship_id=%d" % [player_id, ship_id])
-	welcomed.emit(player_id, ship_id)
-
-
-func _accept_initial_state(state: InitialStatePresentation) -> void:
-	print("[Connection] InitialState: %d ships" % state.ships.size())
-	initial_state_received.emit(state)
-
-
-func _accept_player_loadout() -> void:
-	print("[Connection] PlayerLoadout received")
-	player_fitting_received.emit()
 
 
 func _accept_redirect(ws_addr: String, p_resume_ticket: PackedByteArray) -> void:
@@ -331,27 +305,6 @@ func _accept_redirect(ws_addr: String, p_resume_ticket: PackedByteArray) -> void
 	print("[Connection] Redirect: reconnecting to %s with resume ticket" % _server_url)
 	connection_changed.emit(false)
 	_ws.close()
-
-
-func _accept_module_activated(p_ship_id: int, p_module_id: int, slot: String) -> void:
-	module_activated.emit(p_ship_id, p_module_id, slot)
-
-
-func _accept_module_deactivated(
-	p_ship_id: int,
-	p_module_id: int,
-	slot: String,
-	reason: String
-) -> void:
-	module_deactivated.emit(p_ship_id, p_module_id, slot, reason)
-
-
-func _accept_market_snapshot(snapshot: MarketSnapshot) -> void:
-	market_snapshot_received.emit(snapshot)
-
-
-func _accept_motion_correction(correction: MotionCorrectionPresentation) -> void:
-	motion_correction_received.emit(correction)
 
 
 func _normalize_ws_url(addr: String) -> String:

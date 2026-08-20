@@ -9,7 +9,7 @@ class MarketOutcomeTarget:
 
 	var snapshot: MarketSnapshot
 
-	func _accept_market_snapshot(value: MarketSnapshot) -> void:
+	func _on_market_snapshot(value: MarketSnapshot) -> void:
 		snapshot = value
 
 

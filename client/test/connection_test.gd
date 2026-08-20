@@ -1,8 +1,7 @@
-## connection_test.gd
+## Inbound connection and presentation-seam contract tests.
 ##
-## Signal and redirect wiring tests for connection.gd. Wire decoding and
-## client-state policy are covered in Rust; these tests exercise the one typed
-## presentation seam with Rust-owned session/loadout state bound.
+## The Rust outcome commits typed client state and calls the final world target
+## once. connection.gd owns only connection lifecycle and transport callbacks.
 extends GdUnitTestSuite
 
 const Connection = preload("res://scripts/connection.gd")
@@ -37,66 +36,143 @@ func test_normalize_ws_url_keeps_existing_wss_scheme() -> void:
 	connection.free()
 
 
-func test_welcome_outcome_updates_identity_and_emits_signal() -> void:
+func test_welcome_outcome_updates_identity_resume_ticket_and_welcome_state() -> void:
+	var decoder := ServerMessageDecoder.new()
+	var outcome: ServerMessageOutcome = decoder.test_outcome("Welcome")
+	var state := _state()
 	var connection: Node = Connection.new()
-	var received: Array = []
-	connection.welcomed.connect(func(player_id: int, ship_id: int) -> void:
-		received.append({"player_id": player_id, "ship_id": ship_id})
-	)
-	connection._accept_welcome(
-		5,
-		11,
-		PackedByteArray([7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-			7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7])
-	)
+
+	assert_bool(outcome.dispatch(connection, connection, state[0], state[1], -1)).is_true()
 	assert_int(connection.player_id).is_equal(5)
 	assert_int(connection.ship_id).is_equal(11)
 	assert_int(connection._resume_ticket.size()).is_equal(32)
 	assert_bool(connection._welcomed).is_true()
-	assert_int(received.size()).is_equal(1)
 	connection.free()
 
 
-func test_module_activated_outcome_emits_module_signal() -> void:
-	var connection: Node = Connection.new()
-	var received: Array = []
-	connection.module_activated.connect(func(ship_id: int, module_id: int, slot: String) -> void:
-		received.append({"ship_id": ship_id, "module_id": module_id, "slot": slot})
-	)
-	connection._accept_module_activated(11, 7, "Mid")
-	assert_int(received.size()).is_equal(1)
-	assert_int((received[0] as Dictionary)["ship_id"]).is_equal(11)
-	assert_int((received[0] as Dictionary)["module_id"]).is_equal(7)
-	assert_str((received[0] as Dictionary)["slot"]).is_equal("Mid")
-	connection.free()
+class DirectPresentationTarget:
+	extends RefCounted
+	var session: WorldSession
+	var loadout: PlayerLoadout
+	var initial_state_seen: bool = false
+	var initial_system: String = ""
+	var initial_ship_count: int = 0
+	var fitting_tick: int = -1
+	var module_active: bool = false
+	var module_reason: String = ""
+	var market_snapshot: MarketSnapshot
+	var motion_correction: MotionCorrectionPresentation
+
+	func _on_initial_state(state: InitialStatePresentation) -> void:
+		initial_state_seen = true
+		initial_system = session.current_system_name()
+		initial_ship_count = state.ships.size()
+
+	func _on_player_fitting() -> void:
+		fitting_tick = loadout.tick()
+
+	func _on_module_activated(_ship_id: int, _module_id: int, _slot: String) -> void:
+		module_active = (loadout.modules()[0] as ModuleRow).is_active
+
+	func _on_module_deactivated(
+		_ship_id: int, _module_id: int, _slot: String, reason: String
+	) -> void:
+		module_active = (loadout.modules()[0] as ModuleRow).is_active
+		module_reason = reason
+
+	func _on_market_snapshot(snapshot: MarketSnapshot) -> void:
+		market_snapshot = snapshot
+
+	func _handle_motion_correction(correction: MotionCorrectionPresentation) -> void:
+		motion_correction = correction
 
 
-func test_player_loadout_outcome_emits_after_typed_state_replacement() -> void:
-	var connection: Node = Connection.new()
-	var received: Array = []
-	connection.player_fitting_received.connect(func() -> void:
-		received.append(true)
-	)
-	connection._accept_player_loadout()
-	assert_int(received.size()).is_equal(1)
-	connection.free()
+func _direct_target(state: Array) -> DirectPresentationTarget:
+	var target := DirectPresentationTarget.new()
+	target.session = state[0]
+	target.loadout = state[1]
+	return target
 
 
-func test_real_outcome_dispatches_welcome_and_detects_missing_handler() -> void:
-	var decoder := ServerMessageDecoder.new()
-	var outcome: ServerMessageOutcome = decoder.test_outcome("Welcome")
+func _dispatch(kind: String, target: DirectPresentationTarget, state: Array) -> bool:
+	var outcome: ServerMessageOutcome = ServerMessageDecoder.new().test_outcome(kind)
 	assert_object(outcome).is_not_null()
+	return outcome.dispatch(RefCounted.new(), target, state[0], state[1], 11)
+
+
+func test_initial_state_commits_before_calling_the_final_world_handler() -> void:
 	var state := _state()
+	var target := _direct_target(state)
 
-	var missing_target := Node.new()
-	assert_bool(outcome.dispatch(missing_target, missing_target, state[0], state[1], -1)).is_false()
-	missing_target.free()
+	assert_bool(_dispatch("InitialState", target, state)).is_true()
+	assert_bool(target.initial_state_seen).is_true()
+	assert_int(target.initial_ship_count).is_equal(2)
+	assert_str(target.initial_system).is_equal("Alpha")
+	assert_str((state[0] as WorldSession).current_system_name()).is_equal("Alpha")
+	assert_int((state[0] as WorldSession).player_ship_id()).is_equal(11)
 
-	var connection: Node = Connection.new()
-	assert_bool(outcome.dispatch(connection, connection, state[0], state[1], -1)).is_true()
-	assert_int(connection.player_id).is_equal(5)
-	assert_int(connection.ship_id).is_equal(11)
-	connection.free()
+
+func test_player_loadout_commits_before_calling_the_final_world_handler() -> void:
+	var state := _state()
+	var target := _direct_target(state)
+
+	assert_bool(_dispatch("PlayerLoadoutSwitch", target, state)).is_true()
+	assert_int(target.fitting_tick).is_equal(12)
+	assert_int((state[1] as PlayerLoadout).active_ship_id()).is_equal(22)
+
+
+func test_module_activation_commits_before_calling_the_final_world_handler() -> void:
+	var state := _state()
+	var module := ModuleRow.test_fixture("Mid", 0, 7, "", "", false, true, 0.0, 10)
+	assert_bool((state[1] as PlayerLoadout).test_fixture(
+		0, [module], -1, "", 11, []
+	)).is_true()
+	var target := _direct_target(state)
+
+	assert_bool(_dispatch("ModuleActivated", target, state)).is_true()
+	assert_bool(target.module_active).is_true()
+
+
+func test_module_deactivation_commits_before_calling_the_final_world_handler() -> void:
+	var state := _state()
+	var module := ModuleRow.test_fixture("Mid", 0, 7, "", "", true, true, 0.0, 10)
+	assert_bool((state[1] as PlayerLoadout).test_fixture(
+		0, [module], -1, "", 11, []
+	)).is_true()
+	var target := _direct_target(state)
+
+	assert_bool(_dispatch("ModuleDeactivated", target, state)).is_true()
+	assert_bool(target.module_active).is_false()
+	assert_str(target.module_reason).is_equal("cap")
+
+
+func test_market_snapshot_reaches_the_final_world_handler_without_a_connection_relay() -> void:
+	var state := _state()
+	var target := _direct_target(state)
+
+	assert_bool(_dispatch("MarketSnapshot", target, state)).is_true()
+	assert_object(target.market_snapshot).is_not_null()
+	assert_int(target.market_snapshot.balance).is_equal(250)
+	assert_str(target.market_snapshot.notice).is_equal("Ready")
+	assert_int(target.market_snapshot.orders.size()).is_equal(3)
+	var scrap: ItemIdentity = (target.market_snapshot.orders[0] as MarketOrder).item_id
+	var module: ItemIdentity = (target.market_snapshot.orders[1] as MarketOrder).item_id
+	var ship: ItemIdentity = (target.market_snapshot.orders[2] as MarketOrder).item_id
+	assert_bool(scrap.is_scrap_metal()).is_true()
+	assert_bool(module.is_module()).is_true()
+	assert_int(module.module_id() as int).is_equal(3)
+	assert_bool(ship.is_packaged_ship()).is_true()
+	assert_int(ship.ship_type_id() as int).is_equal(7)
+
+
+func test_motion_correction_reaches_the_final_world_handler_without_a_connection_relay() -> void:
+	var state := _state()
+	var target := _direct_target(state)
+
+	assert_bool(_dispatch("MotionCorrection", target, state)).is_true()
+	assert_object(target.motion_correction).is_not_null()
+	assert_int(target.motion_correction.ship_id).is_equal(11)
+	assert_int(target.motion_correction.tick).is_equal(42)
 
 
 class EventDispatchTarget:
@@ -109,103 +185,70 @@ class EventDispatchTarget:
 		removed = was_removed
 
 
-func test_real_world_event_dispatches_directly_to_final_handler() -> void:
+func test_existing_world_fact_still_dispatches_directly_to_its_final_handler() -> void:
 	var decoder := ServerMessageDecoder.new()
 	var outcome: ServerMessageOutcome = decoder.test_outcome("AoiLeave")
 	var state := _state()
-	var connection_target := RefCounted.new()
 	var target := EventDispatchTarget.new()
-	assert_bool(outcome.dispatch(
-		connection_target, target, state[0], state[1], -1
-	)).is_true()
+
+	assert_bool(outcome.dispatch(RefCounted.new(), target, state[0], state[1], -1)).is_true()
 	assert_int(target.left_ship_id).is_equal(19)
 	assert_bool(target.removed).is_false()
 
 
-func test_initial_state_updates_session_even_when_presentation_handler_is_missing() -> void:
+func test_state_commits_even_when_the_final_handler_is_missing() -> void:
 	var decoder := ServerMessageDecoder.new()
 	var outcome: ServerMessageOutcome = decoder.test_outcome("InitialState")
 	var target := RefCounted.new()
 	var state := _state()
+
 	assert_bool(outcome.dispatch(target, target, state[0], state[1], 11)).is_false()
 	assert_str((state[0] as WorldSession).current_system_name()).is_equal("Alpha")
 	assert_int((state[0] as WorldSession).player_ship_id()).is_equal(11)
 
 
-func test_world_fact_updates_session_even_when_handler_is_missing() -> void:
+func test_world_fact_commits_even_when_the_final_handler_is_missing() -> void:
 	var decoder := ServerMessageDecoder.new()
-	var outcome: ServerMessageOutcome = decoder.test_outcome("ShipDocked")
+	var initial: ServerMessageOutcome = decoder.test_outcome("InitialState")
+	var docked: ServerMessageOutcome = decoder.test_outcome("ShipDocked")
 	var target := RefCounted.new()
 	var state := _state()
 
-	var initial: ServerMessageOutcome = decoder.test_outcome("InitialState")
 	assert_bool(initial.dispatch(target, target, state[0], state[1], 11)).is_false()
-	assert_bool(outcome.dispatch(target, target, state[0], state[1], 11)).is_false()
+	assert_bool(docked.dispatch(target, target, state[0], state[1], 11)).is_false()
 	assert_bool((state[0] as WorldSession).is_docked()).is_true()
 	assert_int((state[0] as WorldSession).docked_station_id()).is_equal(5)
 
 
-func test_real_initial_state_updates_session_before_typed_signal() -> void:
+class DockEventTarget:
+	extends RefCounted
+	var session: WorldSession
+	var accepted: bool = false
+	var station_name_at_callback: String = ""
+
+	func _on_initial_state(_state: InitialStatePresentation) -> void:
+		pass
+
+	func _handle_ship_docked(
+		_ship_id: int, _station_id: int, _tick: int, session_accepted: bool
+	) -> void:
+		accepted = session_accepted
+		station_name_at_callback = session.docked_station_name()
+
+
+func test_ship_docked_commits_station_state_before_the_final_handler() -> void:
 	var decoder := ServerMessageDecoder.new()
-	var outcome: ServerMessageOutcome = decoder.test_outcome("InitialState")
-	var connection: Node = Connection.new()
+	var initial: ServerMessageOutcome = decoder.test_outcome("InitialState")
+	var docked: ServerMessageOutcome = decoder.test_outcome("ShipDocked")
 	var state := _state()
-	var states: Array = []
-	connection.initial_state_received.connect(func(initial: InitialStatePresentation) -> void:
-		states.append(initial)
-	)
-	assert_bool(outcome.dispatch(connection, connection, state[0], state[1], 11)).is_true()
-	assert_int(states.size()).is_equal(1)
-	assert_int((states[0] as InitialStatePresentation).ships.size()).is_equal(2)
-	assert_str((state[0] as WorldSession).current_system_name()).is_equal("Alpha")
-	assert_int((state[0] as WorldSession).player_ship_id()).is_equal(11)
-	connection.free()
+	var target := DockEventTarget.new()
+	target.session = state[0]
 
-
-func test_real_market_outcome_preserves_every_item_variant() -> void:
-	var decoder := ServerMessageDecoder.new()
-	var outcome: ServerMessageOutcome = decoder.test_outcome("MarketSnapshot")
-	var connection: Node = Connection.new()
-	var state := _state()
-	var snapshots: Array = []
-	connection.market_snapshot_received.connect(func(snapshot: MarketSnapshot) -> void:
-		snapshots.append(snapshot)
-	)
-	assert_bool(outcome.dispatch(connection, connection, state[0], state[1], -1)).is_true()
-	var snapshot := snapshots[0] as MarketSnapshot
-	assert_int(snapshot.balance).is_equal(250)
-	assert_str(snapshot.notice).is_equal("Ready")
-	assert_int(snapshot.orders.size()).is_equal(3)
-	var scrap: ItemIdentity = (snapshot.orders[0] as MarketOrder).item_id
-	var module: ItemIdentity = (snapshot.orders[1] as MarketOrder).item_id
-	var ship: ItemIdentity = (snapshot.orders[2] as MarketOrder).item_id
-	assert_bool(scrap.is_scrap_metal()).is_true()
-	assert_bool(module.is_module()).is_true()
-	assert_int(module.module_id() as int).is_equal(3)
-	assert_bool(ship.is_packaged_ship()).is_true()
-	assert_int(ship.ship_type_id() as int).is_equal(7)
-	connection.free()
-
-
-func test_real_motion_correction_emits_typed_presentation() -> void:
-	var decoder := ServerMessageDecoder.new()
-	var outcome: ServerMessageOutcome = decoder.test_outcome("MotionCorrection")
-	var connection: Node = Connection.new()
-	var state := _state()
-	var corrections: Array = []
-	connection.motion_correction_received.connect(
-		func(correction: MotionCorrectionPresentation) -> void:
-			corrections.append(correction)
-	)
-	assert_bool(outcome.dispatch(connection, connection, state[0], state[1], 11)).is_true()
-	assert_int(corrections.size()).is_equal(1)
-	var correction := corrections[0] as MotionCorrectionPresentation
-	assert_int(correction.ship_id).is_equal(11)
-	assert_int(correction.tick).is_equal(42)
-	assert_array(correction.position).contains_exactly([
-		5.0 * 1.495978707e11 + 10.0, 20.0, 30.0,
-	])
-	connection.free()
+	assert_bool(initial.dispatch(RefCounted.new(), target, state[0], state[1], 11)).is_true()
+	assert_bool(docked.dispatch(RefCounted.new(), target, state[0], state[1], 11)).is_true()
+	assert_bool(target.accepted).is_true()
+	assert_str(target.station_name_at_callback).is_equal("Forge Station")
+	assert_int((state[0] as WorldSession).docked_station_id()).is_equal(5)
 
 
 class MotionPathShip:
@@ -222,17 +265,16 @@ class MotionPathShip:
 		})
 
 
-func test_real_motion_correction_reaches_main_scene_handler() -> void:
+func test_motion_correction_calls_main_handler_directly() -> void:
 	var decoder := ServerMessageDecoder.new()
 	var outcome: ServerMessageOutcome = decoder.test_outcome("MotionCorrection")
-	var connection: Node = Connection.new()
 	var main: Node = Main.new()
 	var ship := MotionPathShip.new()
 	main._ships = {11: ship}
 	main._player_ship_id = 11
 	main.add_child(ship)
-	connection.motion_correction_received.connect(Callable(main, "_handle_motion_correction"))
-	assert_bool(outcome.dispatch(connection, main, main._session, main._loadout, 11)).is_true()
+
+	assert_bool(outcome.dispatch(RefCounted.new(), main, main._session, main._loadout, 11)).is_true()
 	assert_int(ship.reconcile_calls.size()).is_equal(1)
 	var call: Dictionary = ship.reconcile_calls[0]
 	assert_array(call["position"]).contains_exactly([
@@ -241,31 +283,3 @@ func test_real_motion_correction_reaches_main_scene_handler() -> void:
 	assert_vector(call["velocity"]).is_equal(Vector3(4.0, 5.0, -6.0))
 	assert_int(call["tick"]).is_equal(42)
 	main.free()
-	connection.free()
-
-
-class DockEventTarget:
-	extends RefCounted
-	var accepted: bool = false
-
-	func _accept_initial_state(_state: InitialStatePresentation) -> void:
-		pass
-
-	func _handle_ship_docked(
-		_ship_id: int, _station_id: int, _tick: int, session_accepted: bool
-	) -> void:
-		accepted = session_accepted
-
-
-func test_real_dock_event_updates_session_before_final_handler() -> void:
-	var decoder := ServerMessageDecoder.new()
-	var initial: ServerMessageOutcome = decoder.test_outcome("InitialState")
-	var docked: ServerMessageOutcome = decoder.test_outcome("ShipDocked")
-	var target := DockEventTarget.new()
-	var state := _state()
-	assert_bool(initial.dispatch(target, target, state[0], state[1], 11)).is_true()
-	assert_bool(docked.dispatch(target, target, state[0], state[1], 11)).is_true()
-	assert_bool((state[0] as WorldSession).is_docked()).is_true()
-	assert_int((state[0] as WorldSession).docked_station_id()).is_equal(5)
-	assert_str((state[0] as WorldSession).docked_station_name()).is_equal("Forge Station")
-	assert_bool(target.accepted).is_true()

@@ -22,10 +22,10 @@ var _main: Node
 class TypedOutcomeTarget:
 	extends RefCounted
 
-	func _accept_initial_state(_state: InitialStatePresentation) -> void:
+	func _on_initial_state(_state: InitialStatePresentation) -> void:
 		pass
 
-	func _accept_player_loadout() -> void:
+	func _on_player_fitting() -> void:
 		pass
 
 	func _handle_ship_docked(
