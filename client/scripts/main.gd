@@ -30,11 +30,6 @@ const MarketSurfaceScript = preload("res://scripts/market_surface.gd")
 const WorldPresentationScript = preload("res://scripts/world_presentation.gd")
 const WorldInteractionScript = preload("res://scripts/world_interaction.gd")
 const InventoryRow = preload("res://scripts/inventory_row.gd")
-## Unit-to-metre scale: real metres = (units/tick or units) * METERS_PER_UNIT,
-## fed into UnitFormat for display (m/s, km/s, AU/s, ... -- whichever reads
-## best at the given magnitude). Change this one constant to rescale all
-## displayed speeds and distances.
-const METERS_PER_UNIT : float = 1.0
 const CLIENT_TICKS_PER_SEC : float = 10.0
 
 const BUILDABLE_SHIP_TYPE_ID : int = 7
@@ -46,6 +41,7 @@ var _cap_tick_accumulator : float = 0.0
 var _session := WorldSession.new()
 var _interaction := WorldInteractionScript.new()
 var _station_inventory := StationInventoryInteraction.new()
+var _hud_read_model := HudReadModel.new()
 var _hud_surface := HudSurfaceScript.new()
 var _market_surface := MarketSurfaceScript.new()
 var _presentation := WorldPresentationScript.new()
@@ -167,12 +163,6 @@ func _process(delta: float) -> void:
 ## origin and is the only place server<->Godot conversions happen. WorldSpace
 ## is provided by dawn-client-gdext; its coordinate math stays in Rust.
 var _world := WorldSpace.new()
-var _client_rules := ClientRules.new()
-
-## Real-unit (m/s, km/s, AU/s, ...) display formatting (ADR-0029 §1.5: single
-## conversion module). Static methods only -- preloaded rather than referenced
-## by global class_name for the same headless-test-cache reason as WorldSpace.
-const UnitFormat = preload("res://scripts/unit_format.gd")
 
 
 ## Tracks whether the player ship is within activation range of a Jump Gate
@@ -211,16 +201,6 @@ func _update_station_proximity() -> void:
 	for entry: Dictionary in in_range:
 		_nearby_station_ids.append(entry.station_id as int)
 
-
-## Display name for a station_id, falling back to "Station #N" if unnamed
-## or not found in the galaxy map (e.g. between InitialState and StarMap sync).
-func _station_name(station_id: int) -> String:
-	for entry: Variant in _stations:
-		var station: StationRecord = entry as StationRecord
-		if station.station_id == station_id:
-			var name: String = station.name
-			return name if not name.is_empty() else "Station #%d" % station_id
-	return "Station #%d" % station_id
 
 func _input(event: InputEvent) -> void:
 	## Input meaning is decided by the engine-independent client policy. This
@@ -920,105 +900,29 @@ func _handle_lock_lost(_locker_id: int, target_id: int, changed: bool) -> void:
 	if changed and _ships.has(target_id):
 		(_ships[target_id] as Node3D).call("set_lock_state", "none")
 func _update_hud() -> void:
-	var speed_str: String = "-"
+	var facts := HudSceneFacts.new()
+	facts.connected = _connection.is_connected_to_server()
 	if _player_ship_id >= 0 and _ships.has(_player_ship_id):
-		var spd: float = (_ships[_player_ship_id] as Node3D).call("get_speed_server") as float
-		speed_str = UnitFormat.format_speed(spd * METERS_PER_UNIT)
-	var target_known: bool = _ships.has(_player_lock_target)
-	var dist_text: String = "—"
-	if target_known and _player_ship_id >= 0 and _ships.has(_player_ship_id):
-		var dist_m: float = (_ships[_player_ship_id] as Node3D).global_position.distance_to(
+		facts.has_player_speed = true
+		facts.player_speed_units = (_ships[_player_ship_id] as Node3D).call("get_speed_server") as float
+	facts.target_known = _ships.has(_player_lock_target)
+	if _ships.has(_player_lock_target) and _player_ship_id >= 0 and _ships.has(_player_ship_id):
+		facts.has_target_distance = true
+		facts.target_distance_units = (_ships[_player_ship_id] as Node3D).global_position.distance_to(
 			(_ships[_player_lock_target] as Node3D).global_position) / _world.render_scale()
-		dist_text = UnitFormat.format_distance(dist_m * METERS_PER_UNIT)
-	var target_hp: Variant = _session.ship_health(_player_lock_target)
-
-	var jump_line  : String = ""
-	if _nearby_gate_id >= 0:
-		jump_line = "\n[J] Jump Gate #%d" % _nearby_gate_id
-	if _jump_notice != "":
-		jump_line += "\n" + _jump_notice
-
-	var station_line: String = ""
-	if _session.is_docked():
-		var docked_station_id: int = _session.docked_station_id()
-		var docked_station_name: String = _session.docked_station_name()
-		var docked_name := docked_station_name if not docked_station_name.is_empty() else "Station #%d" % docked_station_id
-		if _player_ship_id >= 0:
-			station_line = (
-				"\nDocked: %s\n[U] Undock  [B] Build Magpie\n[Y] Disassemble ship  [X] Disembark"
-				% docked_name
-			)
-		else:
-			## Disembarked (ADR-0037): still docked, but no ship is active.
-			## No client UI yet to pick among owned ships (roadmap.md §12
-			## task 10), so this just confirms the state without an action hint.
-			station_line = "\nDisembarked at: %s\n(no active ship)" % docked_name
-	elif not _nearby_station_ids.is_empty():
-		var nearest_name: String = _station_name(_nearby_station_ids[0])
-		if _nearby_station_ids.size() == 1:
-			station_line = "\nNearby: %s\n[D] Dock at %s" % [nearest_name, nearest_name]
-		else:
-			var names: Array[String] = []
-			for sid: int in _nearby_station_ids:
-				names.append(_station_name(sid))
-			station_line = "\nNearby: %s\n[D] Dock at %s (nearest)" % [", ".join(names), nearest_name]
-
-	## Approach / warp target selection (ADR-0015 / ADR-0022 / ADR-0025).
-	var keep_at_range_hint: String = "\n[O] Orbit  [K] Keep at %.0f km  ([/]  adjust)" % _keep_at_range_km
-
-	var approach_line: String = ""
-	var selected_gate_id: int = _interaction.selected_gate_id()
-	var selected_body_id: int = _interaction.selected_body_id()
-	var selected_station_id: int = _interaction.selected_station_id()
-	var selected_target_id: int = _interaction.selected_target_id()
-	if selected_gate_id >= 0:
-		approach_line = "\n[A] Approach Gate #%d" % selected_gate_id + keep_at_range_hint
-		## Warp is only valid beyond the minimum warp distance (ADR-0022).
-		var gate_dist: float = _selected_gate_distance()
-		if gate_dist >= _client_rules.min_warp_distance():
-			approach_line += "\n[W] Warp  [J] Warp+Jump"
-		elif gate_dist >= 0.0:
-			approach_line += "\n[W] too close to warp"
-	elif selected_body_id >= 0:
-		## Look up body name for HUD.
-		var body_name: String = "Body #%d" % selected_body_id
-		for entry: Variant in _bodies:
-			var body: CelestialBodyRecord = entry as CelestialBodyRecord
-			if body.body_id == selected_body_id:
-				body_name = body.name
-				break
-		approach_line = "\n[W] Warp to %s" % body_name
-	elif selected_station_id >= 0:
-		approach_line = "\n[W] Warp to %s" % _station_name(selected_station_id)
-	elif selected_target_id >= 0:
-		approach_line = "\n[A] Approach #%d" % selected_target_id + keep_at_range_hint
-
-	var health: ShipHealth = _session.player_health()
-	var cap: CapacitorStatus = _session.capacitor_status()
-	_hud_surface.render({
-		"connected": _connection.is_connected_to_server(),
-		"ship_type_name": _session.player_ship_type_name(),
-		"system_name": _session.current_system_name(),
-		"speed": speed_str,
-		"player_ship_id": _player_ship_id,
-		"shield": health.shield,
-		"max_shield": health.max_shield,
-		"armor": health.armor,
-		"max_armor": health.max_armor,
-		"hull": health.hull,
-		"max_hull": health.max_hull,
-		"cap_current": cap.current,
-		"cap_max": cap.max,
-		"lock_target": _player_lock_target,
-		"target_known": target_known,
-		"target_distance": dist_text,
-		"target_hp": target_hp,
-		"modules": _loadout.modules(),
-		"stats_text": (
-			"Ships: %d\nTick: %d%s%s\n\n[Click] Select  [DoubleClick] Thrust\n[RightClick] Lock%s"
-			% [_ships.size(), _session.current_tick(), approach_line, station_line, jump_line]
-		),
-	})
+	facts.nearby_gate_id = _nearby_gate_id
+	facts.nearby_station_ids = _nearby_station_ids
+	facts.jump_notice = _jump_notice
+	facts.selected_gate_id = _interaction.selected_gate_id()
+	facts.selected_body_id = _interaction.selected_body_id()
+	facts.selected_station_id = _interaction.selected_station_id()
+	facts.selected_target_id = _interaction.selected_target_id()
+	var gate_distance := _selected_gate_distance()
+	if gate_distance >= 0.0:
+		facts.has_selected_gate_distance = true
+		facts.selected_gate_distance_units = gate_distance
+	facts.keep_at_range_km = _keep_at_range_km
+	_hud_surface.paint(_hud_read_model.project(_session, _loadout, facts))
 
 # -- Capacitor client-side simulation -----------------------------------------
 
@@ -1052,6 +956,7 @@ func _clear_ship_nodes() -> void:
 func _clear_all_ships() -> void:
 	_clear_ship_nodes()
 	_session.reset()
+	_hud_read_model.reset()
 	_sync_session_state()
 	## _session.reset() clears WorldSession's navigation map too -- clear the
 	## caches to match, so a disconnect doesn't leave stale gate/station/body

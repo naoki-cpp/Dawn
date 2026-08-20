@@ -273,6 +273,20 @@ ADR §1 決定 #5「実値表示（m/s・AU）の内部↔表示変換は単一�
 
 **検証**：GdUnit4 全75件 green。
 
+### HUD Read Modelへの統合（2026-08-20）
+
+速度・距離の表示変換とHUDのframe projectionは、GDScriptの
+`client/scripts/unit_format.gd` / `main.gd`から
+`dawn-client-core::HudReadModel`へ移した。`format_speed` /
+`format_distance`、表示テキスト、panel snapshot、value-based dirty decisionを
+Rustのengine-independent read modelが所有し、`dawn-client-gdext`はtyped
+GDScript-facing snapshotへ変換する。`HudSurface`はControlのpaint adapterとして
+残り、表示単位と既存の速度・距離しきい値は維持する。
+
+検証は`dawn-client-core`のHUD unit testsと、typed snapshotをpaintする
+`client/test/hud_surface_test.gd`で行う。旧`unit_format_test.gd`はRust側へ
+移動したため削除した。
+
 ### ゲートマーカーも遠距離クランプ対応（2026-06-23・ユーザー指摘）
 
 ゲートは元々マーカー（リング＋ラベル）を持っていたが、惑星マーカーのような「カメラ遠方クリップ面の手前へ

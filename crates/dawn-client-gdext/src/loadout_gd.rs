@@ -96,6 +96,10 @@ pub struct PlayerLoadout {
 
 #[godot_api]
 impl PlayerLoadout {
+    pub(crate) fn core_ref(&self) -> Option<&PlayerLoadoutMsg> {
+        self.loadout.as_ref()
+    }
+
     pub(crate) fn core_mut(&mut self) -> Option<&mut PlayerLoadoutMsg> {
         self.loadout.as_mut()
     }

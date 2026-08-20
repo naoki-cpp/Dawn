@@ -1,7 +1,9 @@
 ## hud_surface_test.gd
 ##
-## Tests for the HudSurface module that owns live HUD refs and delegates panel
-## construction/painting to HudManager.
+## HudSurface is tested at the typed read-model -> paint boundary. Rust owns
+## projection and dirty decisions; this suite checks that the existing Control
+## tree receives the right typed values and that hit-test/inventory ownership
+## remains intact.
 extends GdUnitTestSuite
 
 const HudSurfaceScript = preload("res://scripts/hud_surface.gd")
@@ -11,6 +13,9 @@ var _parent: Node
 var _hud: CanvasLayer
 var _stats_label: Label
 var _surface: RefCounted
+var _session: WorldSession
+var _loadout: PlayerLoadout
+var _read_model: HudReadModel
 
 
 func before_test() -> void:
@@ -22,11 +27,12 @@ func before_test() -> void:
 	_hud.add_child(_stats_label)
 	_surface = HudSurfaceScript.new()
 	_surface.build(_parent, _hud, _stats_label)
+	_session = WorldSession.new()
+	_loadout = PlayerLoadout.new()
+	_read_model = HudReadModel.new()
 
 
-## Minimal but schema-complete rows -- callers override only the keys the
-## test cares about, matching ModuleRow/ItemRow's required-key validation.
-func _module(overrides: Dictionary) -> ModuleRow:
+func _module(overrides: Dictionary = {}) -> ModuleRow:
 	var base: Dictionary = {
 		"slot": "High", "index": 0, "module_id": 1, "name": "Test Module", "kind": "Weapon",
 		"is_active": false, "is_active_module": true,
@@ -35,304 +41,111 @@ func _module(overrides: Dictionary) -> ModuleRow:
 	for key: String in overrides:
 		base[key] = overrides[key]
 	return ModuleRow.test_fixture(
-		base.slot as String,
-		base.index as int,
-		base.module_id as int,
-		base.name as String,
-		base.kind as String,
-		base.is_active as bool,
-		base.is_active_module as bool,
-		base.cap_cost_per_cycle as float,
-		base.cycle_time_ticks as int,
-	)
+		base.slot as String, base.index as int, base.module_id as int,
+		base.name as String, base.kind as String, base.is_active as bool,
+		base.is_active_module as bool, base.cap_cost_per_cycle as float,
+		base.cycle_time_ticks as int)
 
 
 func _item(item_id: ItemIdentity, overrides: Dictionary = {}) -> ItemRow:
 	return ItemRow.test_fixture(
-		item_id,
-		overrides.get("name", "Test Item") as String,
-		overrides.get("kind", "") as String,
-		overrides.get("slot", "") as String,
-		overrides.get("count", 1) as int,
-	) as ItemRow
+		item_id, overrides.get("name", "Test Item") as String,
+		overrides.get("kind", "") as String, overrides.get("slot", "") as String,
+		overrides.get("count", 1) as int) as ItemRow
 
 
-func _owned_ship(overrides: Dictionary) -> OwnedShipRow:
-	var base: Dictionary = {
-		"ship_id": 1,
-		"ship_type_id": 7,
-		"ship_type_name": "Magpie",
-		"docked_station_id": 0,
-		"is_active": true,
-	}
-	for key: String in overrides:
-		base[key] = overrides[key]
-	return OwnedShipRow.test_fixture(
-		base.ship_id as int,
-		base.ship_type_id as int,
-		base.ship_type_name as String,
-		base.docked_station_id as int,
-		base.is_active as bool,
-	)
+func _owned_ship(ship_id: int, active: bool) -> OwnedShipRow:
+	return OwnedShipRow.test_fixture(ship_id, 7, "Magpie", 0, active)
 
 
-func test_set_player_fitting_before_build_is_applied_after_build() -> void:
+func _snapshot(modules: Array[ModuleRow] = [], connected: bool = false, speed: float = 0.0) -> HudSnapshot:
+	_loadout.test_fixture(0, modules, -1, "", -1, [])
+	var facts := HudSceneFacts.new()
+	facts.connected = connected
+	facts.has_player_speed = connected
+	facts.player_speed_units = speed
+	facts.nearby_gate_id = -1
+	facts.selected_gate_id = -1
+	facts.selected_body_id = -1
+	facts.selected_station_id = -1
+	facts.selected_target_id = -1
+	facts.keep_at_range_km = 10.0
+	return _read_model.project(_session, _loadout, facts)
+
+
+func test_paint_updates_status_ship_module_and_stats_from_typed_snapshot() -> void:
+	var modules: Array[ModuleRow] = [_module({"name": "Afterburner", "is_active": true})]
+	_surface.paint(_snapshot(modules, true, 120.0))
+
+	assert_str(_surface._status_panel_refs.conn_label.text).is_equal("ONLINE")
+	assert_str(_surface._status_panel_refs.info_label.text).is_equal("System Unknown · 120 m/s")
+	assert_int(_surface._module_slots.size()).is_equal(1)
+	assert_str(_surface._module_slots[0].state.text).is_equal("ON")
+	assert_str(_stats_label.text).contains("Ships: 0")
+
+
+func test_paint_uses_core_dirty_decisions_for_equal_and_changed_snapshots() -> void:
+	_surface.paint(_snapshot([_module()], true, 120.0))
+	var equal := _snapshot([_module()], true, 120.0)
+	assert_bool(equal.changes.status_changed).is_false()
+	assert_bool(equal.changes.modules_changed).is_false()
+	_surface.paint(equal)
+
+	var changed := _snapshot([_module({"is_active": true})], true, 120.0)
+	assert_bool(changed.changes.modules_changed).is_true()
+	assert_bool(changed.changes.module_structure_changed).is_false()
+	_surface.paint(changed)
+	assert_str(_surface._module_slots[0].state.text).is_equal("ON")
+
+
+func test_module_structure_change_rebuilds_slots_at_paint_boundary() -> void:
+	_surface.paint(_snapshot([_module({"module_id": 1})]))
+	var slots_before: Array = _surface._module_slots
+	_surface.paint(_snapshot([
+		_module({"module_id": 1}), _module({"module_id": 2, "index": 1})
+	]))
+	assert_bool(_surface._module_slots == slots_before).is_false()
+	assert_int(_surface._module_slots.size()).is_equal(2)
+
+
+func test_fitting_before_build_is_applied_after_build_without_a_dictionary_frame() -> void:
 	var unbuilt: RefCounted = HudSurfaceScript.new()
-	var modules: Array[ModuleRow] = [
-		_module({"module_id": 7, "name": "Railgun", "is_active_module": true}),
-	]
-	var inventory: Array[ItemRow] = [
-		_item(ItemIdentity.scrap_metal(), {"name": "Scrap Metal", "count": 3}),
-	]
-
+	var modules: Array[ModuleRow] = [_module({"module_id": 7, "name": "Railgun"})]
+	var inventory: Array[ItemRow] = [_item(ItemIdentity.scrap_metal(), {"name": "Scrap Metal", "count": 3})]
 	unbuilt.set_player_fitting(modules, inventory)
 	unbuilt.build(_parent, _hud, _stats_label)
 
-	assert_int(unbuilt._module_slots.size()).is_equal(1)
 	assert_int(unbuilt._inventory_panel_refs.inventory_rows.size()).is_equal(1)
-	assert_bool(
-		unbuilt._inventory_panel_refs.inventory_rows[0].policy_row.is_cargo()
-	).is_true()
-
-
-func test_render_updates_all_hud_panels_from_one_frame() -> void:
-	var modules: Array[ModuleRow] = [
-		_module({"name": "Afterburner", "is_active_module": true, "is_active": true}),
-	]
-	_surface.set_player_fitting(modules, [])
-
-	_surface.render({
-		"connected": true,
-		"ship_type_name": "Magpie",
-		"system_name": "Alpha",
-		"speed": "120 m/s",
-		"player_ship_id": 1,
-		"shield": 250.0,
-		"max_shield": 500.0,
-		"armor": 300.0,
-		"max_armor": 300.0,
-		"hull": 200.0,
-		"max_hull": 200.0,
-		"cap_current": 75.0,
-		"cap_max": 100.0,
-		"lock_target": 7,
-		"target_known": true,
-		"target_distance": "3.2 km",
-		"target_hp": _health(50.0, 100.0, 100.0, 100.0, 100.0, 100.0),
-		"modules": modules,
-		"stats_text": "Ships: 2",
-	})
-
-	assert_str(_surface._status_panel_refs.conn_label.text).is_equal("ONLINE")
-	assert_float(_surface._ship_status_refs.bar_cap.bar.value).is_equal_approx(75.0, 0.0001)
-	assert_str(_surface._target_panel_refs.dist_label.text).is_equal("3.2 km")
-	assert_str(_surface._module_slots[0].state.text).is_equal("ON")
-	assert_str(_stats_label.text).is_equal("Ships: 2")
-
-
-func test_set_player_fitting_rebuilds_module_slots_and_inventory_rows() -> void:
-	var modules: Array[ModuleRow] = [
-		_module({"module_id": 1, "slot": "High", "name": "Gun", "is_active_module": true}),
-		_module({"module_id": 2, "slot": "Low", "name": "Plate", "is_active_module": false}),
-	]
-	var inventory: Array[ItemRow] = [
-		_item(ItemIdentity.module(3) as ItemIdentity, {"slot": "Mid", "name": "Afterburner", "count": 2}),
-		_item(ItemIdentity.scrap_metal(), {"name": "Scrap Metal", "count": 4}),
-	]
-
-	_surface.set_player_fitting(modules, inventory)
-
-	assert_int(_surface._module_slots.size()).is_equal(1)
-	## 2 module rows + 1 trailing "Unfit all" row (only appended when at
-	## least one module is fitted).
-	assert_int(_surface._inventory_panel_refs.fitted_rows.size()).is_equal(3)
-	assert_int(_surface._inventory_panel_refs.inventory_rows.size()).is_equal(2)
-	var rows: Array[InventoryRow] = _surface._inventory_panel_refs.inventory_rows
-	assert_str(((rows[1].panel as Panel).get_child(0) as Label).text).is_equal("Scrap Metal x4")
-	assert_bool(rows[0].policy_row.is_cargo()).is_true()
-	assert_bool(rows[1].policy_row.is_cargo()).is_true()
-
-
-func test_render_repaints_after_the_modules_array_is_mutated_in_place() -> void:
-	## Regression: main.gd passes the live PlayerLoadout modules into frame["modules"] by
-	## reference (not a copy), and _apply_player_module_activation (driven
-	## by ModuleActivated/Deactivated events, e.g. Range Gate forcing a
-	## weapon off out-of-range) mutates that same array's ModuleRow objects in
-	## place via PlayerLoadout.apply_module_activation. If render() stored
-	## _prev_modules as an alias of that live array instead of a snapshot,
-	## the in-place mutation would silently "update" _prev_modules too,
-	## permanently masking the change (the module bar staying ON forever
-	## even though the ship truly went inactive server-side).
-	var modules: Array[ModuleRow] = [
-		_module({"module_id": 1, "slot": "High", "name": "Gun", "is_active_module": true, "is_active": true}),
-	]
-	var frame: Dictionary = {"modules": modules}
-	_surface.set_player_fitting(modules, [])
-	_surface.render(frame)
-	assert_str(_surface._module_slots[0].state.text).is_equal("ON")
-
-	## Mutate the very same ModuleRow object in place, exactly as
-	## PlayerLoadout.apply_module_activation does -- no new object is created.
-	(modules[0] as ModuleRow).is_active = false
-
-	_surface.render(frame)
-	assert_str(_surface._module_slots[0].state.text).is_equal("OFF")
-
-
-func test_set_player_fitting_reuses_slots_when_active_module_set_is_unchanged() -> void:
-	var modules_off: Array[ModuleRow] = [
-		_module({"module_id": 1, "slot": "High", "name": "Gun", "is_active_module": true, "is_active": false}),
-	]
-	_surface.set_player_fitting(modules_off, [])
-	var slots_before: Array = _surface._module_slots
-
-	## Activate/Deactivate resyncs only flip is_active/forced_reason -- the
-	## module_id/slot identity list is unchanged, so this must reuse the
-	## existing slot Controls (no rebuild) rather than tearing them down.
-	var modules_on: Array[ModuleRow] = [
-		_module({"module_id": 1, "slot": "High", "name": "Gun", "is_active_module": true, "is_active": true}),
-	]
-	_surface.set_player_fitting(modules_on, [])
-
-	assert_bool(_surface._module_slots == slots_before).is_true()
-	assert_str(_surface._module_slots[0].state.text).is_equal("ON")
-
-
-func test_set_player_fitting_rebuilds_when_active_module_set_changes() -> void:
-	var modules_a: Array[ModuleRow] = [
-		_module({"module_id": 1, "slot": "High", "name": "Gun", "is_active_module": true, "is_active": false}),
-	]
-	_surface.set_player_fitting(modules_a, [])
-	var slots_before: Array = _surface._module_slots
-
-	## Fit/Unfit changes which modules are in the active set -- this must
-	## rebuild since slot indices/Controls no longer correspond 1:1.
-	var modules_b: Array[ModuleRow] = [
-		_module({"module_id": 1, "slot": "High", "name": "Gun", "is_active_module": true, "is_active": false}),
-		_module({"module_id": 5, "slot": "Mid", "name": "Tackle", "is_active_module": true, "is_active": false}),
-	]
-	_surface.set_player_fitting(modules_b, [])
-
-	assert_int(_surface._module_slots.size()).is_equal(2)
-	assert_bool(_surface._module_slots == slots_before).is_false()
-
-
-func test_panel_changed_is_false_for_equal_dictionaries() -> void:
-	var a: Dictionary = {"shield": 250.0, "armor": 300.0}
-	var b: Dictionary = {"shield": 250.0, "armor": 300.0}
-	assert_bool(_surface._panel_changed(a, b)).is_false()
-
-
-func test_panel_changed_is_true_when_a_value_differs() -> void:
-	var a: Dictionary = {"shield": 250.0, "armor": 300.0}
-	var b: Dictionary = {"shield": 200.0, "armor": 300.0}
-	assert_bool(_surface._panel_changed(a, b)).is_true()
-
-
-func test_panel_changed_is_true_for_nested_dictionary_difference() -> void:
-	var a: Dictionary = {"target_hp": {"shield": 50.0, "max_shield": 100.0}}
-	var b: Dictionary = {"target_hp": {"shield": 40.0, "max_shield": 100.0}}
-	assert_bool(_surface._panel_changed(a, b)).is_true()
-
-
-func test_panel_changed_is_true_for_array_difference() -> void:
-	var a: Array = [{"name": "Afterburner"}]
-	var b: Array = [{"name": "Plate"}]
-	assert_bool(_surface._panel_changed(a, b)).is_true()
-
-
-func test_modules_changed_is_false_for_equal_module_rows() -> void:
-	var a: Array[ModuleRow] = [_module({"module_id": 1})]
-	var b: Array[ModuleRow] = [_module({"module_id": 1})]
-	assert_bool(_surface._modules_changed(a, b)).is_false()
-
-
-func test_modules_changed_is_true_when_a_field_differs() -> void:
-	var a: Array[ModuleRow] = [_module({"module_id": 1, "is_active": false})]
-	var b: Array[ModuleRow] = [_module({"module_id": 1, "is_active": true})]
-	assert_bool(_surface._modules_changed(a, b)).is_true()
-
-
-func test_modules_changed_is_true_when_size_differs() -> void:
-	var a: Array[ModuleRow] = [_module({"module_id": 1})]
-	var b: Array[ModuleRow] = [_module({"module_id": 1}), _module({"module_id": 2})]
-	assert_bool(_surface._modules_changed(a, b)).is_true()
-
-
-func test_render_called_twice_with_same_frame_does_not_change_painted_values() -> void:
-	var frame: Dictionary = {
-		"connected": true,
-		"ship_type_name": "Magpie",
-		"system_name": "Alpha",
-		"speed": "120 m/s",
-		"shield": 250.0,
-		"cap_current": 75.0,
-		"cap_max": 100.0,
-	}
-	_surface.render(frame)
-	_surface.render(frame)
-
-	assert_str(_surface._status_panel_refs.conn_label.text).is_equal("ONLINE")
-	assert_float(_surface._ship_status_refs.bar_cap.bar.value).is_equal_approx(75.0, 0.0001)
+	assert_bool(unbuilt._inventory_panel_refs.inventory_rows[0].policy_row.is_cargo()).is_true()
 
 
 func test_inventory_panel_hit_helpers_delegate_to_built_panel() -> void:
-	_surface.set_player_fitting([], [_item(ItemIdentity.module(3) as ItemIdentity, {"slot": "Mid", "name": "Afterburner"})])
+	_surface.set_player_fitting([], [_item(ItemIdentity.module(3), {"slot": "Mid", "name": "Afterburner"})])
 	_surface.toggle_inventory_panel()
 	await get_tree().process_frame
-
 	var panel: Panel = _surface._inventory_panel_refs.panel
 	assert_bool(_surface.inventory_panel_consumes(panel.get_global_rect().get_center())).is_true()
-
-	var rows: Array[InventoryRow] = _surface._inventory_panel_refs.inventory_rows
-	var row_panel: Panel = rows[0].panel
-	var hit: InventoryRow = _surface.inventory_panel_row_at(row_panel.get_global_rect().get_center())
+	var row: InventoryRow = _surface._inventory_panel_refs.inventory_rows[0]
+	var hit: InventoryRow = _surface.inventory_panel_row_at((row.panel as Panel).get_global_rect().get_center())
 	assert_bool(hit.policy_row.is_cargo()).is_true()
 
 
 func test_station_inventory_packaged_ship_row_is_clickable_to_assemble() -> void:
 	_surface.set_player_fitting([], [], [
-		_item(ItemIdentity.packaged_ship(7) as ItemIdentity, {"name": "Magpie", "count": 1}),
+		_item(ItemIdentity.packaged_ship(7), {"name": "Magpie", "count": 1})
 	])
 	_surface.toggle_inventory_panel()
 	await get_tree().process_frame
-
-	var rows: Array[InventoryRow] = _surface._inventory_panel_refs.station_rows
-	var row_panel: Panel = rows[0].panel
-	var hit: InventoryRow = _surface.inventory_panel_row_at(row_panel.get_global_rect().get_center())
+	var row: InventoryRow = _surface._inventory_panel_refs.station_rows[0]
+	var hit: InventoryRow = _surface.inventory_panel_row_at((row.panel as Panel).get_global_rect().get_center())
 	assert_bool(hit.policy_row.is_station_item()).is_true()
 
 
-func test_owned_ships_roster_lists_active_and_inactive_ships() -> void:
-	_surface.set_player_fitting([], [], [], [
-		_owned_ship({}),
-		_owned_ship({"ship_id": 2, "is_active": false}),
-	])
+func test_owned_ships_roster_lists_active_and_selectable_ships() -> void:
+	_surface.set_player_fitting([], [], [], [_owned_ship(1, true), _owned_ship(2, false)])
 	_surface.toggle_inventory_panel()
 	await get_tree().process_frame
-
-	var ship_rows: Array[InventoryRow] = _surface._inventory_panel_refs.ship_rows
-	assert_int(ship_rows.size()).is_equal(2)
-
-	var active_row: InventoryRow = ship_rows[0]
-	assert_bool(active_row.policy_row.is_owned_ship_active()).is_true()
-
-	var inactive_row: InventoryRow = ship_rows[1]
-	assert_bool(inactive_row.policy_row.is_owned_ship_selectable()).is_true()
-
-	var hit: InventoryRow = _surface.inventory_panel_row_at(
-		(inactive_row.panel as Panel).get_global_rect().get_center())
-	assert_bool(hit.policy_row.is_owned_ship_selectable()).is_true()
-
-
-## Typed fixture builder (session_record_gd.rs): `render()` forwards the same
-## `ShipHealth` `WorldSession.ship_health()` returns.
-func _health(shield: float, max_shield: float, armor: float, max_armor: float, hull: float, max_hull: float) -> ShipHealth:
-	var h := ShipHealth.new()
-	h.shield = shield
-	h.max_shield = max_shield
-	h.armor = armor
-	h.max_armor = max_armor
-	h.hull = hull
-	h.max_hull = max_hull
-	return h
+	var rows: Array[InventoryRow] = _surface._inventory_panel_refs.ship_rows
+	assert_int(rows.size()).is_equal(2)
+	assert_bool(rows[0].policy_row.is_owned_ship_active()).is_true()
+	assert_bool(rows[1].policy_row.is_owned_ship_selectable()).is_true()

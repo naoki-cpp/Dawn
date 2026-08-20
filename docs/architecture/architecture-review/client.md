@@ -5,7 +5,7 @@ update   : クライアント側で大規模リファクタ実施後 / architect
 related  : docs/architecture/architecture-review/server.md（サーバー側）,
            docs/architecture/architecture-review/client-completed.md（完了済みログ）,
            docs/architecture/architecture-review/client-pending.md（未完項目）
-date     : 2026-08-17（Client Action ladder削除後に再計測）
+date     : 2026-08-20（HUD Read Model deepening後に再計測）
 ---
 
 # Architecture Review — Dawn Client（現行構造評価）
@@ -15,7 +15,7 @@ date     : 2026-08-17（Client Action ladder削除後に再計測）
 
 ## 現状評価
 
-**総合: B+。** `main.gd`は1143行、`hud_manager.gd`は877行まで増えているが、state、
+**総合: B+。** `main.gd`は984行、`hud_manager.gd`は859行まで増えているが、state、
 interaction、presentation、HUD、wire adapterの所有者は分離済みで、直ちにgod objectへ戻ったとは
 判断しない。一方、Rust/GDExtensionの`server_message_gd.rs`はdecode、ClientFact変換、state apply、
 Godot callback dispatchが一つのadapterに同居しているため、C-16を部分完了のFix候補として記録する。
@@ -31,6 +31,11 @@ scene effectだけを担当する。
 connection callbackまたは最終world handlerを一度だけ呼ぶ。world factは中間mirrorを作らず、
 canonical `ServerFact` matchから最終callbackへ直接変換する。#258で削除した
 Godot公開のserver-state mutation backdoorは、#251との統合後も復活させない。
+2026-08-20: HUDのframe projectionを`dawn-client-core::HudReadModel`へ移し、
+typed panel snapshot / display text / dirty decisionをRustで一元化した。`HudSurface`は
+Control参照、snapshotからのpaint、inventory hit-testの委譲だけを担当し、旧frame Dictionary、
+panel Dictionary、`ModuleRow`/`ShipHealth`のclone/equality workaround、GDScriptの
+unit formatterを削除した。
 review修正後のGDExtension境界、追加したClientState回帰test、明示targetを使うGdUnit fixtureは、
 固定Rust 1.97.1でformat、client-core/gdext test、clippyを検証した。
 
@@ -60,7 +65,8 @@ review修正後のGDExtension境界、追加したClientState回帰test、明示
 - `ClientInteraction`（core）: selection、double-click、input facts → `ClientAction`
 - `WorldInteraction`（Godot）: Key/hit-test normalizationとcore adapter
 - `WorldPresentation`: floating originとvisual effects
-- `HudSurface` / `HudManager`: Control参照とpanel構築・更新
+- `HudReadModel`（core）: HUD panel projection、display text、value-based dirty decision
+- `HudSurface` / `HudManager`: Control参照とtyped snapshotのpaint・panel構築
 
 navigation map cacheはSector内でwrite-onceに近いpresentation cacheとして許容し、毎frameのRust→Godot再構築は行わない。
 
@@ -70,24 +76,23 @@ navigation map cacheはSector内でwrite-onceに近いpresentation cacheとし�
 
 | ファイル | 行数 | 判定 |
 |---|---:|---|
-| `client/scripts/main.gd` | 1143 | 🟡 R-2。scene lifecycle / node registry / event wiring / HUD assemblyのorchestration。機械的分割はしない |
-| `client/scripts/hud_manager.gd` | 877 | 🟡 C-9。typed refsとpanel build/updateが同一責務。独立変更理由が分かれるまで保留 |
+| `client/scripts/main.gd` | 984 | 🟡 R-2。scene lifecycle / node registry / event wiring / HUD scene-facts assemblyのorchestration。機械的分割はしない |
+| `client/scripts/hud_manager.gd` | 859 | 🟡 C-9。typed refsとpanel build/updateが同一責務。独立変更理由が分かれるまで保留 |
 | `client/scripts/ship_controller.gd` | 448 | 🟢 motion adapterとvisual effectの一つのShip presentation boundary |
 | `client/scripts/connection.gd` | 403 | 🟢 WebSocket接続・reconnect・typed outcome受け渡し・ClientAction transport seam |
 | `client/scripts/world_presentation.gd` | 490 | 🟢 marker・floating-origin・celestial lighting presentation |
 | `client/scripts/market_surface.gd` | 270 | 🟢 Market panel surface |
-| `client/scripts/hud_surface.gd` | 266 | 🟢 HUD reference ownership・dirty tracking |
+| `client/scripts/hud_surface.gd` | 163 | 🟢 typed snapshot paint・HUD reference ownership |
 | `client/scripts/navigation_marker_renderer.gd` | 286 | 🟢 navigation marker・planet surface・EVE-style bracket rendering |
 | `client/scripts/sky_catalog.gd` | 57 | 🟢 fixed bright-star landmark data |
 | `client/scripts/camera_controller.gd` | 145 | 🟢 camera orbit input |
 | `client/scripts/ship_picking.gd` | 117 | 🟢 screen-space picking |
 | `client/scripts/world_interaction.gd` | 125 | 🟢 Godot key/hit-test normalizationとClientInteraction adapter |
 | `client/scripts/tactical_overlay.gd` | 93 | 🟢 tactical overlay |
-| `client/scripts/inventory_row.gd` | 87 | 🟢 typed inventory row presentation |
+| `client/scripts/inventory_row.gd` | 22 | 🟢 rendered Panelとtyped Station Inventory policy rowの対 |
 | `client/scripts/hud_hit_test.gd` | 80 | 🟢 HUD hit-test geometry |
 | `client/scripts/billboard_ring.gd` | 65 | 🟢 selection/lock ring visual |
 | `client/scripts/billboard_bracket.gd` | 67 | 🟢 fixed-size navigation bracket visual |
-| `client/scripts/unit_format.gd` | 38 | 🟢 unit formatting |
 | `client/scripts/warp_tunnel_effect.gd` | 10 | 🟢 warp tunnel visual |
 
 ### Rust/GDExtension boundary（client crates、500行以上）
@@ -98,6 +103,7 @@ navigation map cacheはSector内でwrite-onceに近いpresentation cacheとし�
 | `crates/dawn-client-gdext/src/server_message_gd.rs` | 836 | 🟡 C-16部分完了。中間mirrorは削除済み、decode / wire→ClientFact / state apply / Godot dispatchのmodule分割は未完了 |
 | `crates/dawn-client-core/src/client_state.rs` | 842 | 🟢 ClientFactからWorldSessionEffectへの純粋なstate policy |
 | `crates/dawn-client-core/src/client_action.rs` | 584 | 🟢 engine-independent selection/input policy・typed ClientAction |
+| `crates/dawn-client-core/src/hud.rs` | 528 | 🟢 engine-independent HUD read model・formatting・change decisions |
 | `crates/dawn-client-core/src/station_inventory.rs` | 758 | 🟢 engine-independent Station Inventory policy・typed request construction |
 | `crates/dawn-client-core/src/motion.rs` | 680 | 🟢 client motion/prediction kernel・tests |
 | `crates/dawn-client-gdext/src/client_command_gd.rs` | 564 | 🟢 typed request builder・入力検証・encode結果のGDExtension boundary |
@@ -118,5 +124,6 @@ navigation map cacheはSector内でwrite-onceに近いpresentation cacheとし�
 | C-16 | — | `server_message_gd.rs`のdecode / fact apply / Godot dispatch混在。中間mirrorは削除済み、module分割は未完了 | 部分完了 |
 | C-17 | — | ClientIntentのpredicate/accessor ladder、GDScript input policy、network send分岐の重複 | 解消済み |
 | C-18 | — | Station Inventory interaction policy / string action tag ladder | 解消済み |
+| C-19 | — | HUD frame Dictionary / GDScript dirty tracking workaround | 解消済み（2026-08-20、`HudReadModel`） |
 
 `main.gd`の機械的な`.tscn`分割、raw `InputEvent`のdeep module流入、typed recordのDictionary回帰は行わない。

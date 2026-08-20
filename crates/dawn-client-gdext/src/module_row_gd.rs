@@ -42,9 +42,9 @@ pub(crate) fn parse_kind(kind: &str) -> ModuleKind {
 
 /// GDScript-facing view of one fitted module slot (`dawn_client_core::ModuleRow`).
 /// Exported `#[var]` fields are a flattened, display-ready snapshot taken at
-/// construction time (`wrap`); `inner` (kept for `equals()`/`clone()`) is the
-/// source of truth. Field names and `equals()`/`clone()` mirror the old
-/// `module_row.gd` so `hud_surface.gd`'s module-bar diffing needs no changes.
+/// construction time (`wrap`); `inner` remains the source of truth for typed
+/// client policy and fixture mutation. HUD change decisions live in the core
+/// read model.
 #[derive(GodotClass)]
 #[class(no_init, base=RefCounted)]
 pub struct ModuleRow {
@@ -132,22 +132,6 @@ impl ModuleRow {
     fn set_forced_reason(&mut self, value: GString) {
         self.inner.forced_reason = value.to_string();
         self.forced_reason = value;
-    }
-
-    /// Field-value equality (mirrors the old `ModuleRow.equals()` --
-    /// `hud_surface.gd`'s module-bar diffing needs value comparison, not
-    /// Godot's default reference-identity `==`).
-    #[func]
-    fn equals(&self, other: Gd<ModuleRow>) -> bool {
-        self.inner == other.bind().inner
-    }
-
-    /// An independent copy -- `hud_surface.gd` snapshots the previous
-    /// frame's modules to diff against the next one, and a mutated live row
-    /// must not silently also change the stored snapshot.
-    #[func]
-    fn clone(&self) -> Gd<ModuleRow> {
-        Self::wrap(self.inner.clone())
     }
 
     /// Debug-only typed fixture for GdUnit. Production rows are created only
