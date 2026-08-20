@@ -12,6 +12,12 @@ related : ADR-0001（Event Sourcing）, ADR-0002（Actor）, ADR-0017（Snapshot
 
 # ADR-0027 — dawn-distributed クレートの新設
 
+> **Implementation correction (2026-08-20):** public-event log shipping now
+> uses the explicit `PublicEventIndex` type and
+> `from_public_event_index`/`public_event_next_index` names. Recovery snapshot
+> coverage uses the separate `RecoveryIndex`; eventless recovery Ticks must not
+> advance or seed the public-event cursor.
+
 ## 背景
 
 ADR-0021 は Sector-local 複製の戦略を「追記ログのゴシップ配布（log shipping）」に確定した
@@ -76,9 +82,9 @@ dawn-core
 
 /// A single gossip message: one or more events from a source node's log.
 pub struct LogBatch {
-    pub sector_id  : SectorId,
-    pub from_index : u64,
-    pub events     : Vec<DomainEvent>,
+    pub sector_id               : SectorId,
+    pub from_public_event_index : PublicEventIndex,
+    pub events                  : Vec<DomainEvent>,
 }
 
 /// Core trait — wire-format-agnostic replication transport.
@@ -96,7 +102,7 @@ impl ReplicationTransport for InMemoryReplicationBus { ... }
 /// Sender-side cursor and LogBatch construction for an owning Sector's append log.
 pub struct OutboundLogPublisher<T: ReplicationTransport> { ... }
 
-/// Anti-entropy: request missing events from a peer by log index range.
+/// Anti-entropy: request missing events from a peer by public-event index range.
 pub struct AntiEntropy { ... }
 
 /// Snapshot transfer: send/receive a StateSnapshot for far-behind replicas.

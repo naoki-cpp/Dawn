@@ -1,4 +1,5 @@
 use crate::persistence::StateSnapshot;
+use dawn_storage::{PublicEventIndex, RecoveryIndex};
 
 use super::{
     state::{GameData, SectorTopology, SimulationState},
@@ -7,8 +8,8 @@ use super::{
 
 impl SimulationNode {
     /// Capture the current ECS state as a `StateSnapshot` with no journal
-    /// coverage. Runtime code must use [`Self::take_snapshot_at`] with the
-    /// committed recovery-journal position it owns.
+    /// coverage. Runtime code must use [`Self::take_snapshot_with_cursors`]
+    /// with both committed stream positions it owns.
     ///
     /// The node is destructured exhaustively (no `..`) on purpose: adding a
     /// field to `SimulationNode` breaks this function until someone decides
@@ -19,9 +20,27 @@ impl SimulationNode {
         self.take_snapshot_at(0)
     }
 
-    /// Capture the current ECS state and explicitly record the external
-    /// recovery-journal position covered by the snapshot.
-    pub fn take_snapshot_at(&self, covered_recovery_index: u64) -> StateSnapshot {
+    /// Capture a recovery fixture with no covered public events.
+    ///
+    /// This helper exists for recovery tests and integration fixtures that do
+    /// not own a public event store. Production checkpointing must use
+    /// [`Self::take_snapshot_with_cursors`] so a valid public cursor cannot be
+    /// silently replaced by zero.
+    pub fn take_snapshot_at(
+        &self,
+        covered_recovery_index: impl Into<RecoveryIndex>,
+    ) -> StateSnapshot {
+        self.take_snapshot_with_cursors(covered_recovery_index.into(), PublicEventIndex::ZERO)
+    }
+
+    /// Capture the authoritative state with both independent durable stream
+    /// positions. Runtime checkpointing must provide the public-event cursor
+    /// from the public store instead of deriving it from recovery coverage.
+    pub fn take_snapshot_with_cursors(
+        &self,
+        covered_recovery_index: RecoveryIndex,
+        public_event_next_index: PublicEventIndex,
+    ) -> StateSnapshot {
         let Self {
             node_id,
             sector_id,
@@ -82,6 +101,7 @@ impl SimulationNode {
             sector_id: *sector_id,
             bounds: *bounds,
             covered_recovery_index,
+            public_event_next_index,
             tick: *current_tick,
             catalog_fingerprint: *catalog_fingerprint,
             ships,
@@ -192,6 +212,7 @@ impl SimulationNode {
             // this storage-independent restore operation.
             ships: _,
             covered_recovery_index: _,
+            public_event_next_index: _,
         } = snapshot;
 
         self.node_id = *node_id;
@@ -311,7 +332,8 @@ mod tests {
             node_id: NodeId(0),
             sector_id: SectorId(0),
             bounds: SectorBounds::centered(SectorBounds::DEFAULT_HALF),
-            covered_recovery_index,
+            covered_recovery_index: covered_recovery_index.into(),
+            public_event_next_index: 0.into(),
             tick: Tick(17),
             catalog_fingerprint: crate::game_data::test_catalog().fingerprint(),
             ships: vec![crate::transition::ShipState {
@@ -570,8 +592,8 @@ mod tests {
         }
         let mut restored_final = restored.take_snapshot_at(0);
         let mut live_final = live_final;
-        live_final.covered_recovery_index = 0;
-        restored_final.covered_recovery_index = 0;
+        live_final.covered_recovery_index = 0.into();
+        restored_final.covered_recovery_index = 0.into();
 
         assert_eq!(
             postcard::to_stdvec(&live_final).unwrap(),

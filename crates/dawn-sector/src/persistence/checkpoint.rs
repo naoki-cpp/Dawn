@@ -6,7 +6,7 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
-use dawn_storage::{DurableJournal, EventStore, FileEventStore, FileJournal, JournalIndex};
+use dawn_storage::{DurableJournal, FileJournal, JournalIndex, PublicEventIndex, RecoveryIndex};
 
 use super::snapshot::StateSnapshot;
 use crate::node::SimulationNode;
@@ -35,31 +35,21 @@ pub struct CheckpointScheduler {
 /// adapter boundary so the public-event projection log and the authoritative
 /// recovery journal remain independently owned.
 pub trait CheckpointJournal {
-    fn next_recovery_index(&self) -> io::Result<u64>;
-    fn compact_checkpoint(&mut self, boundary: u64, cold_path: &Path) -> io::Result<()>;
+    fn next_recovery_index(&self) -> io::Result<RecoveryIndex>;
+    fn compact_checkpoint(&mut self, boundary: RecoveryIndex, cold_path: &Path) -> io::Result<()>;
 }
 
 impl CheckpointJournal for FileJournal {
-    fn next_recovery_index(&self) -> io::Result<u64> {
+    fn next_recovery_index(&self) -> io::Result<RecoveryIndex> {
         self.next_index()
-            .map(|index| index.0)
+            .map(|index| RecoveryIndex(index.0))
             .map_err(|error| io::Error::other(error.to_string()))
     }
 
-    fn compact_checkpoint(&mut self, boundary: u64, cold_path: &Path) -> io::Result<()> {
-        self.compact(JournalIndex(boundary), cold_path)
+    fn compact_checkpoint(&mut self, boundary: RecoveryIndex, cold_path: &Path) -> io::Result<()> {
+        self.compact(JournalIndex(boundary.0), cold_path)
             .map(|_| ())
             .map_err(|error| io::Error::other(error.to_string()))
-    }
-}
-
-impl CheckpointJournal for FileEventStore {
-    fn next_recovery_index(&self) -> io::Result<u64> {
-        Ok(self.next_index())
-    }
-
-    fn compact_checkpoint(&mut self, boundary: u64, cold_path: &Path) -> io::Result<()> {
-        self.compact(boundary, cold_path)
     }
 }
 
@@ -71,12 +61,14 @@ impl CheckpointScheduler {
         }
     }
 
-    /// Snapshot the engine at the journal's next global position, then compact
-    /// that same journal only after the snapshot has been published.
+    /// Snapshot the engine at the recovery journal's next position and record
+    /// the independent public-event cursor, then compact the recovery journal
+    /// only after the snapshot has been published.
     pub fn maybe_checkpoint<J: CheckpointJournal>(
         &mut self,
         node: &mut SimulationNode,
         journal: &mut J,
+        public_event_next_index: PublicEventIndex,
     ) -> io::Result<Option<StateSnapshot>> {
         let tick = node.current_tick().value();
         if tick.saturating_sub(self.last_checkpoint_tick) < self.config.interval_ticks {
@@ -84,7 +76,8 @@ impl CheckpointScheduler {
         }
 
         let covered_recovery_index = journal.next_recovery_index()?;
-        let snapshot = node.take_snapshot_at(covered_recovery_index);
+        let snapshot =
+            node.take_snapshot_with_cursors(covered_recovery_index, public_event_next_index);
         snapshot.save(&self.config.snapshot_path)?;
         journal.compact_checkpoint(covered_recovery_index, &self.config.cold_path)?;
         self.last_checkpoint_tick = tick;
@@ -145,7 +138,7 @@ mod tests {
         for _ in 0..4 {
             node.tick();
             assert!(scheduler
-                .maybe_checkpoint(&mut node, &mut journal)
+                .maybe_checkpoint(&mut node, &mut journal, 0.into())
                 .unwrap()
                 .is_none());
         }
@@ -169,11 +162,12 @@ mod tests {
             node.tick();
         }
         let snapshot = scheduler
-            .maybe_checkpoint(&mut node, &mut journal)
+            .maybe_checkpoint(&mut node, &mut journal, 7.into())
             .unwrap()
             .expect("checkpoint at tick five");
 
         assert_eq!(snapshot.covered_recovery_index, 1);
+        assert_eq!(snapshot.public_event_next_index, 7);
         assert_eq!(journal.next_recovery_index().unwrap(), 1);
         assert!(dir.path().join("snapshot.bin").exists());
         assert!(dir.path().join("cold.log").exists());
@@ -198,7 +192,7 @@ mod tests {
             node.tick();
         }
         let snapshot = scheduler
-            .maybe_checkpoint(&mut node, &mut journal)
+            .maybe_checkpoint(&mut node, &mut journal, 0.into())
             .unwrap()
             .expect("pending Transit must not block a checkpoint");
 

@@ -29,6 +29,7 @@ pub mod state;
 pub mod transport;
 
 use dawn_core::{DomainEvent, SectorId};
+use dawn_storage::PublicEventIndex;
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 
@@ -58,21 +59,25 @@ pub use transport::{InProcessTransport, PartitionableTransport, RaftTransport};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LogBatch {
     pub sector_id: SectorId,
-    pub from_index: u64,
+    pub from_public_event_index: PublicEventIndex,
     pub events: Vec<DomainEvent>,
 }
 
 impl LogBatch {
-    pub fn new(sector_id: SectorId, from_index: u64, events: Vec<DomainEvent>) -> Self {
+    pub fn new(
+        sector_id: SectorId,
+        from_public_event_index: impl Into<PublicEventIndex>,
+        events: Vec<DomainEvent>,
+    ) -> Self {
         Self {
             sector_id,
-            from_index,
+            from_public_event_index: from_public_event_index.into(),
             events,
         }
     }
 
-    pub fn next_index(&self) -> u64 {
-        self.from_index + self.events.len() as u64
+    pub fn next_public_event_index(&self) -> PublicEventIndex {
+        PublicEventIndex(self.from_public_event_index.0 + self.events.len() as u64)
     }
 }
 

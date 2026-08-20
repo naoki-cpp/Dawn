@@ -6,21 +6,25 @@
 
 use crate::LogBatch;
 use dawn_core::SectorId;
-use dawn_storage::EventStore;
+use dawn_storage::{EventStore, PublicEventIndex};
 
 /// A request for the suffix of one Sector's append-only log.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MissingLogRequest {
     pub sector_id: SectorId,
-    pub from_index: u64,
+    pub from_public_event_index: PublicEventIndex,
     pub max_events: usize,
 }
 
 impl MissingLogRequest {
-    pub fn new(sector_id: SectorId, from_index: u64, max_events: usize) -> Self {
+    pub fn new(
+        sector_id: SectorId,
+        from_public_event_index: impl Into<PublicEventIndex>,
+        max_events: usize,
+    ) -> Self {
         Self {
             sector_id,
-            from_index,
+            from_public_event_index: from_public_event_index.into(),
             max_events,
         }
     }
@@ -66,13 +70,17 @@ impl AntiEntropy {
         request: MissingLogRequest,
     ) -> Option<LogBatch> {
         let records: Vec<_> = store
-            .iter_from(request.from_index)
+            .iter_from(request.from_public_event_index.0)
             .take(request.max_events)
             .collect();
 
         let first = records.first()?;
         let events = records.iter().map(|record| record.event.clone()).collect();
-        Some(LogBatch::new(request.sector_id, first.log_index, events))
+        Some(LogBatch::new(
+            request.sector_id,
+            PublicEventIndex(first.log_index),
+            events,
+        ))
     }
 
     /// Decide whether an incoming batch is duplicate, contiguous, overlapping,
@@ -83,11 +91,11 @@ impl AntiEntropy {
         batch: &LogBatch,
         max_events: usize,
     ) -> BatchApplyPlan {
-        if batch.next_index() <= expected_next_index {
+        if batch.next_public_event_index().0 <= expected_next_index {
             return BatchApplyPlan::Duplicate;
         }
 
-        if batch.from_index > expected_next_index {
+        if batch.from_public_event_index.0 > expected_next_index {
             return BatchApplyPlan::Gap(Self::request_missing(
                 sector_id,
                 expected_next_index,
@@ -96,8 +104,8 @@ impl AntiEntropy {
         }
 
         BatchApplyPlan::Apply {
-            first_event_offset: (expected_next_index - batch.from_index) as usize,
-            next_index: batch.next_index(),
+            first_event_offset: (expected_next_index - batch.from_public_event_index.0) as usize,
+            next_index: batch.next_public_event_index().0,
         }
     }
 }
@@ -138,9 +146,9 @@ mod tests {
         let batch = AntiEntropy::batch_from_store(&store, request).expect("suffix exists");
 
         assert_eq!(batch.sector_id, SectorId(1));
-        assert_eq!(batch.from_index, 2);
+        assert_eq!(batch.from_public_event_index, 2);
         assert_eq!(batch.events.len(), 3);
-        assert_eq!(batch.next_index(), 5);
+        assert_eq!(batch.next_public_event_index(), 5);
     }
 
     #[test]
@@ -150,9 +158,9 @@ mod tests {
 
         let batch = AntiEntropy::batch_from_store(&store, request).expect("suffix exists");
 
-        assert_eq!(batch.from_index, 3);
+        assert_eq!(batch.from_public_event_index, 3);
         assert_eq!(batch.events.len(), 4);
-        assert_eq!(batch.next_index(), 7);
+        assert_eq!(batch.next_public_event_index(), 7);
     }
 
     #[test]

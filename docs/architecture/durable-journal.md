@@ -31,6 +31,12 @@ ack gating. Those decisions belong to ADR-0049/#284 and #278. A remote
 runtime can reject stale epochs, wrong Sectors, ranges, transitions, or
 content.
 
+The recovery journal and the public-event store also have independent cursors.
+`RecoveryIndex` addresses authoritative checkpoint/RecoveryDelta coverage;
+`PublicEventIndex` addresses the next public fact to replicate. They may
+diverge on eventless Ticks. Checkpoint and catch-up code must pass both values
+explicitly rather than treating a recovery position as a public-event tail.
+
 ## File format and recovery
 
 `FileJournal` uses the versioned `DAWNJNL3` format. The file header contains the

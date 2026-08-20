@@ -5,7 +5,7 @@
 
 use crate::{LogBatch, ReplicationTransport};
 use dawn_core::SectorId;
-use dawn_storage::EventStore;
+use dawn_storage::{EventStore, PublicEventIndex};
 
 /// Publishes the newly appended suffix of one owner's event log.
 ///
@@ -15,33 +15,36 @@ use dawn_storage::EventStore;
 #[derive(Debug)]
 pub struct OutboundLogPublisher<T> {
     transport: T,
-    next_index: u64,
+    next_public_event_index: PublicEventIndex,
 }
 
 impl<T: ReplicationTransport> OutboundLogPublisher<T> {
     pub fn new(transport: T) -> Self {
         Self {
             transport,
-            next_index: 0,
+            next_public_event_index: PublicEventIndex(0),
         }
     }
 
     pub fn from_store_tail<S: EventStore>(transport: T, store: &S) -> Self {
         Self {
             transport,
-            next_index: store.next_index(),
+            next_public_event_index: PublicEventIndex(store.next_index()),
         }
     }
 
-    pub fn with_next_index(transport: T, next_index: u64) -> Self {
+    pub fn with_next_public_event_index(
+        transport: T,
+        next_public_event_index: impl Into<PublicEventIndex>,
+    ) -> Self {
         Self {
             transport,
-            next_index,
+            next_public_event_index: next_public_event_index.into(),
         }
     }
 
-    pub fn next_index(&self) -> u64 {
-        self.next_index
+    pub fn next_public_event_index(&self) -> u64 {
+        self.next_public_event_index.0
     }
 
     /// Publish all events appended since the previous call.
@@ -49,7 +52,7 @@ impl<T: ReplicationTransport> OutboundLogPublisher<T> {
     /// Returns the number of events handed to the transport.
     pub fn publish_new_events<S: EventStore>(&mut self, sector_id: SectorId, store: &S) -> usize {
         let events: Vec<_> = store
-            .iter_from(self.next_index)
+            .iter_from(self.next_public_event_index.0)
             .map(|record| record.event.clone())
             .collect();
 
@@ -71,8 +74,8 @@ impl<T: ReplicationTransport> OutboundLogPublisher<T> {
         }
 
         let published = events.len();
-        let batch = LogBatch::new(sector_id, self.next_index, events.to_vec());
-        self.next_index = batch.next_index();
+        let batch = LogBatch::new(sector_id, self.next_public_event_index, events.to_vec());
+        self.next_public_event_index = batch.next_public_event_index();
         self.transport.broadcast(batch);
         published
     }
@@ -107,11 +110,11 @@ mod tests {
         store.append(event(1));
 
         assert_eq!(publisher.publish_new_events(SectorId(7), &store), 2);
-        assert_eq!(publisher.next_index(), 2);
+        assert_eq!(publisher.next_public_event_index(), 2);
 
         let first = rx.recv().await.unwrap();
         assert_eq!(first.sector_id, SectorId(7));
-        assert_eq!(first.from_index, 0);
+        assert_eq!(first.from_public_event_index, 0);
         assert_eq!(first.events.len(), 2);
 
         assert_eq!(publisher.publish_new_events(SectorId(7), &store), 0);
@@ -120,7 +123,7 @@ mod tests {
         assert_eq!(publisher.publish_new_events(SectorId(7), &store), 1);
 
         let second = rx.recv().await.unwrap();
-        assert_eq!(second.from_index, 2);
+        assert_eq!(second.from_public_event_index, 2);
         assert_eq!(second.events.len(), 1);
 
         let bus = publisher.into_transport();
@@ -137,7 +140,7 @@ mod tests {
         store.append(event(1));
 
         let mut publisher = OutboundLogPublisher::from_store_tail(bus.clone(), &store);
-        assert_eq!(publisher.next_index(), 2);
+        assert_eq!(publisher.next_public_event_index(), 2);
         assert_eq!(publisher.publish_new_events(SectorId(7), &store), 0);
         assert!(rx.try_recv().is_err());
 
@@ -146,7 +149,7 @@ mod tests {
 
         let batch = rx.recv().await.unwrap();
         assert_eq!(batch.sector_id, SectorId(7));
-        assert_eq!(batch.from_index, 2);
+        assert_eq!(batch.from_public_event_index, 2);
         assert_eq!(batch.events.len(), 1);
 
         let bus = publisher.into_transport();

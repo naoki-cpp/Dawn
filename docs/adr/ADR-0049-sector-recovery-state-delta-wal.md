@@ -9,6 +9,12 @@ related : ADR-0001 (Event Sourcing), ADR-0014 (Raft / Transit), ADR-0017 (snapsh
 
 # ADR-0049 - Exact Sector recovery with a versioned state-delta journal
 
+> **Implementation correction (2026-08-20):** checkpoints now persist
+> independent authoritative-recovery and public-event cursors. Adding
+> `public_event_next_index` changes the postcard checkpoint payload, so
+> `CHECKPOINT_FORMAT_VERSION` was bumped to 4. This pre-release repository
+> does not retain an upcaster for the superseded layout.
+
 > **Implementation correction (2026-08-15, issue #312):** this ADR's
 > accepted decision already required flight-mode state, lock countdowns, and
 > module-cycle counters to be exact recovery authority (see the Context
@@ -515,6 +521,15 @@ that failover cannot skip a committed undelivered durable obligation. A disconne
 ephemeral client never holds public-event compaction open.
 
 ### 12. Replica catch-up and promotion
+
+The recovery position carried by a checkpoint is not a public-event
+replication position. Checkpoints record `covered_recovery_index` for the
+authoritative `RecoveryDelta` stream and `public_event_next_index` for the
+append-only public `DomainEvent` stream. Eventless Ticks may advance recovery
+without advancing public events. #280 snapshot/catch-up transport must carry
+both values and use only `public_event_next_index` when requesting or
+installing a public suffix; it must never derive the public cursor from
+recovery coverage.
 
 #280's physical catch-up path must transport enough data to obtain:
 

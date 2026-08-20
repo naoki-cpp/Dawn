@@ -49,7 +49,7 @@ use tokio::{
     time::sleep,
 };
 
-pub const PEER_PROTOCOL_VERSION: u16 = 1;
+pub const PEER_PROTOCOL_VERSION: u16 = 2;
 pub const MAX_CONTROL_FRAME_BYTES: usize = 1024 * 1024;
 pub const MAX_BULK_FRAME_BYTES: usize = 257 * 1024 * 1024;
 const MAX_HANDSHAKE_BYTES: usize = 4096;

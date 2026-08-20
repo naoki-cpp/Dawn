@@ -248,7 +248,7 @@ mod tests {
 
         let received = rx.recv().await.unwrap();
         assert_eq!(received, batch);
-        assert_eq!(received.next_index(), 44);
+        assert_eq!(received.next_public_event_index(), 44);
 
         bus.shutdown().await;
     }
@@ -263,7 +263,7 @@ mod tests {
             request_id: 1,
             requester_sector_id: SectorId(1),
             owner_sector_id: SectorId(0),
-            from_index: 0,
+            from_public_event_index: 0.into(),
             max_events: 10,
         }));
 

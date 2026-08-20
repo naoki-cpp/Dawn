@@ -7,7 +7,7 @@ use dawn_sector::node::SimulationNode;
 use dawn_sector::persistence::StateSnapshot;
 use dawn_sector::spawner::{generate_ships, SpawnConfig};
 use dawn_sector::{aoi, game_data::GameDataCatalog, persistence, ship_types};
-use dawn_storage::FileEventStore;
+use dawn_storage::{EventStore, FileEventStore, FileJournal};
 use std::time::Instant;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -309,6 +309,7 @@ pub(crate) fn run_phase3_demo() {
 
     let dir = tempfile::tempdir().expect("failed to create temp dir");
     let event_path = dir.path().join("sector0_events.log");
+    let recovery_path = dir.path().join("sector0_recovery.log");
     let snapshot_path = dir.path().join("sector0_snapshot.bin");
     let cold_path = dir.path().join("sector0_cold.log");
 
@@ -324,7 +325,10 @@ pub(crate) fn run_phase3_demo() {
     let session1_tick: dawn_core::Tick;
     let session1_positions: Vec<Position>;
     {
-        let mut store = FileEventStore::open(&event_path).expect("failed to open event log");
+        let public_event_store =
+            FileEventStore::open(&event_path).expect("failed to open event log");
+        let mut recovery_journal =
+            FileJournal::open(&recovery_path).expect("failed to open recovery journal");
         let mut node = SimulationNode::new(
             NodeId(0),
             SectorId(0),
@@ -353,14 +357,18 @@ pub(crate) fn run_phase3_demo() {
         for _ in 0..P3_TICKS {
             node.tick();
             if let Some(snap) = scheduler
-                .maybe_checkpoint(&mut node, &mut store)
+                .maybe_checkpoint(
+                    &mut node,
+                    &mut recovery_journal,
+                    public_event_store.next_index().into(),
+                )
                 .expect("checkpoint failed")
             {
                 println!(
                     "  [session 1] checkpoint at tick {}  (covered_recovery_index={}, hot_base={})",
                     snap.tick.value(),
                     snap.covered_recovery_index,
-                    store.base_index(),
+                    recovery_journal.base_index(),
                 );
             }
         }

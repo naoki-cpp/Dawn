@@ -58,6 +58,7 @@ use dawn_core::{
     fitting::FittingSnapshot, AbsolutePosition, JumpGateId, NodeId, Position, SectorBounds,
     SectorId, ShipId, ShipTypeId, Tick, TransitAttemptId, TransitHandoffState, Velocity,
 };
+use dawn_storage::{PublicEventIndex, RecoveryIndex};
 use serde::{Deserialize, Serialize};
 
 const TEMP_FILE_CREATE_ATTEMPTS: usize = 128;
@@ -216,7 +217,7 @@ pub struct TransitSagaSnapshot {
 /// Bumped 2 -> 3: node-level authority is carried as one canonical
 /// `NodeState` member instead of a flattened field list. Pre-release; no
 /// upcaster required.
-pub const CHECKPOINT_FORMAT_VERSION: u16 = 3;
+pub const CHECKPOINT_FORMAT_VERSION: u16 = 4;
 
 const CHECKPOINT_MAGIC: [u8; 8] = *b"DAWNCKP1";
 const CHECKPOINT_HEADER_LEN: usize = CHECKPOINT_MAGIC.len() + size_of::<u16>() + size_of::<u64>();
@@ -260,7 +261,11 @@ pub struct StateSnapshot {
     /// Authoritative recovery-journal coverage: committed recovery records
     /// with index below this position are covered by the checkpoint. Recovery
     /// resumes by applying records at and after this position.
-    pub covered_recovery_index: u64,
+    pub covered_recovery_index: RecoveryIndex,
+    /// Public-event tail captured alongside this checkpoint. Public
+    /// replication resumes from this next position; it must not be inferred
+    /// from `covered_recovery_index`.
+    pub public_event_next_index: PublicEventIndex,
     /// Logical tick at the time of the snapshot.
     pub tick: Tick,
     /// Content fingerprint of the validated module/ship catalog used to
@@ -942,7 +947,8 @@ mod tests {
             node_id: NodeId(0),
             sector_id: dawn_core::SectorId(0),
             bounds: SectorBounds::centered(SectorBounds::DEFAULT_HALF),
-            covered_recovery_index: 42,
+            covered_recovery_index: 42.into(),
+            public_event_next_index: 0.into(),
             tick: Tick(10),
             catalog_fingerprint: 0x1234,
             ships: vec![crate::transition::ShipState {
@@ -1128,12 +1134,12 @@ mod tests {
         let path = dir.path().join("snapshot.bin");
 
         let mut previous = sample_snapshot();
-        previous.covered_recovery_index = 7;
+        previous.covered_recovery_index = 7.into();
         previous.tick = Tick(3);
         previous.save(&path).unwrap();
 
         let mut replacement = sample_snapshot();
-        replacement.covered_recovery_index = 99;
+        replacement.covered_recovery_index = 99.into();
         replacement.tick = Tick(25);
         replacement.save(&path).unwrap();
 
@@ -1153,12 +1159,12 @@ mod tests {
         let path = dir.path().join("snapshot.bin");
 
         let mut previous = sample_snapshot();
-        previous.covered_recovery_index = 7;
+        previous.covered_recovery_index = 7.into();
         previous.save(&path).unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
 
         let mut replacement = sample_snapshot();
-        replacement.covered_recovery_index = 99;
+        replacement.covered_recovery_index = 99.into();
         replacement
             .save_with_before_publish(&path, |temp_path| {
                 assert_eq!(file_mode(temp_path), 0o600);
@@ -1178,12 +1184,12 @@ mod tests {
         let path = dir.path().join("snapshot.bin");
 
         let mut previous = sample_snapshot();
-        previous.covered_recovery_index = 7;
+        previous.covered_recovery_index = 7.into();
         previous.save(&path).unwrap();
         let previous_bytes = fs::read(&path).unwrap();
 
         let mut replacement = sample_snapshot();
-        replacement.covered_recovery_index = 99;
+        replacement.covered_recovery_index = 99.into();
         let error = replacement
             .save_with_before_publish(&path, |_| {
                 Err(io::Error::other("injected failure before replacement"))
@@ -1205,13 +1211,13 @@ mod tests {
         let path = dir.path().join("snapshot.bin");
 
         let mut previous = sample_snapshot();
-        previous.covered_recovery_index = 7;
+        previous.covered_recovery_index = 7.into();
         previous.tick = Tick(3);
         previous.save(&path).unwrap();
         let previous_bytes = fs::read(&path).unwrap();
 
         let mut replacement = sample_snapshot();
-        replacement.covered_recovery_index = 99;
+        replacement.covered_recovery_index = 99.into();
         replacement.tick = Tick(25);
         inject_directory_sync_failure(&path, 2);
         let error = replacement.save(&path).unwrap_err();
