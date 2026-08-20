@@ -19,6 +19,7 @@ mod server_message_gd;
 mod server_message_validation;
 mod session_record_gd;
 mod ship_motion_gd;
+mod station_inventory_gd;
 mod world_session_gd;
 mod world_space_gd;
 
@@ -42,6 +43,9 @@ pub use presentation_gd::{
 };
 pub use server_message_gd::{ServerMessageDecoder, ServerMessageOutcome};
 pub use ship_motion_gd::ShipMotion;
+pub use station_inventory_gd::{
+    StationInventoryAction, StationInventoryInteraction, StationInventoryRow,
+};
 pub use world_session_gd::WorldSession;
 pub use world_space_gd::WorldSpace;
 

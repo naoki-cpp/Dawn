@@ -40,6 +40,7 @@ mod loadout;
 mod module_row;
 mod motion;
 mod ship_motion;
+mod station_inventory;
 mod world_session;
 mod world_space;
 
@@ -57,6 +58,10 @@ pub use loadout::{
 pub use module_row::{ModuleKind, ModuleRow};
 pub use motion::{MotionInput, MotionPredictor, MotionProfile, MotionState};
 pub use ship_motion::{MotionCommand, MotionDispatch, MotionFrame, ShipMotion};
+pub use station_inventory::{
+    FittedModuleRow, StationInventoryAction, StationInventoryColumn, StationInventoryContext,
+    StationInventoryInteraction, StationInventoryLocalAction, StationInventoryRow,
+};
 pub use world_session::{
     default_cap_max, default_cap_recharge, default_max_armor, default_max_hull, default_max_shield,
     BuildableShipTypeInput, BuildableShipTypeRecord, CelestialBodyInput, CelestialBodyRecord,

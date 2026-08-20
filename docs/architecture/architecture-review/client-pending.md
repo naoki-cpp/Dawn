@@ -9,7 +9,7 @@ date     : 2026-08-11
 
 # Architecture Review — Dawn Client（未完項目）
 
-C-1〜C-8、C-11、C-13〜C-15、C-17は解消済み。実装詳細と完了条件は各GitHub Issueに置き、ここでは判断だけを保持する。
+C-1〜C-8、C-11、C-13〜C-15、C-17〜C-18は解消済み。実装詳細と完了条件は各GitHub Issueに置き、ここでは判断だけを保持する。
 
 ## C-9（保留）: `hud_manager.gd` watch帯
 

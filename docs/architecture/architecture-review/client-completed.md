@@ -32,6 +32,7 @@ date     : 2026-08-10
 | C-13 | server outcomeのtyped stateをDictionary経由でRustへ戻す二重変換（#238） | `ServerMessageOutcome::dispatch` がdecoded wire valueを`ClientFact`へ変換し、`ClientState`を通じて`WorldSessionState`へ適用してからtyped presentation recordをGDScriptへ通知する単一経路へ移行。navigation/ship lifecycle/AoI/health/lock/motion/dock/system/loadout/marketのDictionary再入力を削除し、pure Rust testとtyped fixture GdUnitを追加。 |
 | C-15 | Dictionary/string-tag intentとMarket JSON builder（#281） | `ClientIntent`/`ClientSelection` GDExtension型を追加し、`InputDecoder`/`WorldInteraction`/`main.gd`をsemantic predicateとtyped accessorへ移行。Marketの専用builder化、`MarketOrderSide` enum化、`ClientCommandResult`による明示的エラー、fallible `ClientMessage::encode`を導入し、JSON往復と空byte sentinelを削除。 |
 | C-17 | Client Action ladder | `ClientIntent`/`ClientSelection`/`InputDecoder`を削除。selection・double-click・入力ポリシーを`dawn-client-core::ClientInteraction`へ移し、`ClientAction`の`Request`/`Local`へ一度だけ分類。GDScriptはkey/hit-test正規化、scene effect、typed requestの`connection.gd::send_action` transportを担当し、camera-dependentなdouble-click移動だけは`send_move_command()`を使う。 |
+| C-18 | Station Inventory interaction ladder | Station Inventoryのクリック、Fit/Unfit、Reorder、Cargo transfer、Assemble、Build、Disassemble、owned-ship selectionの方針と既存`ClientRequest`構築を`dawn-client-core::StationInventoryInteraction`へ移した。`dawn-client-gdext`はtyped row/actionの薄いadapter、Godotは描画・行hit-test・drag geometry・build picker表示を担当する。Unfit Allの非atomicな個別送信、shipless docked Assemble/SelectActiveShip、active+docked必須のBuild/Disassemble、canonical `ItemId` transferを直接Rust testとGdUnit4境界testで固定した。 |
 
 ### 2026-08-17 — Client Action ladderの削除
 
@@ -45,6 +46,13 @@ scene/presentation side effectだけを残した。
 
 Rust unit testでinteraction policyを検証し、GdUnit4はGDExtension境界を検証する。
 旧`input_decoder_test.gd`は削除し、`world_interaction_test.gd`は10件の薄い境界テストへ整理した。
+
+### 2026-08-19 — Station Inventory interaction policyの抽出
+
+`main.gd`に残っていたStation Inventoryのstring action分岐と、
+`connection.gd`の個別送信wrapperを削除した。Rust coreが既存wire requestを
+構築し、Godot側には表示・hit-test・drag geometry・local build-picker effectだけを残した。
+coreの直接テスト97件と、Station Inventoryを含むGdUnit4 218件で検証した。
 
 ### 2026-07-24: client WorldSpace の座標計算をRustへ移管
 
