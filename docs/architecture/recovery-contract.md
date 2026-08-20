@@ -587,6 +587,19 @@ obligation. Disconnected ephemeral clients never hold public-event compaction op
 
 ## 10. Replica catch-up and promotion
 
+Recovery coverage and public-event replication are different positions. A
+checkpoint records `covered_recovery_index` for the authoritative
+`RecoveryDelta` stream and `public_event_next_index` for the append-only
+`DomainEvent` stream. An eventless Tick can increase recovery coverage while
+leaving the public-event position unchanged.
+
+The replica snapshot envelope carries both values. Snapshot installation and
+suffix requests advance only `public_event_next_index` through the public
+`EventStore`; `covered_recovery_index` remains recovery metadata used when the
+checkpoint is applied to authoritative state. Neither value is copied into the
+other, and a public suffix is never skipped because a recovery checkpoint is
+newer.
+
 A snapshot/catch-up representation consumed by #280 must be sufficient to obtain:
 
 - a complete compatible checkpoint and its authoritative covered position;

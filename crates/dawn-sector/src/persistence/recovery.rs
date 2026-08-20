@@ -212,7 +212,7 @@ mod tests {
         let restored =
             SimulationNode::restore_from(&checkpoint, Arc::new(Galaxy::demo()), test_catalog_arc());
         let (restored, recovered_to) =
-            apply_tail(restored, &journal, checkpoint.covered_recovery_index)
+            apply_tail(restored, &journal, checkpoint.covered_recovery_index.0)
                 .expect("checkpoint tail should apply");
 
         assert_eq!(recovered_to, journal.next_index().unwrap());

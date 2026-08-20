@@ -6,7 +6,7 @@ use crate::{
     ReplicationTransport,
 };
 use dawn_core::{NodeId, SectorId};
-use dawn_storage::{DurabilityTransportMessage, JournalError};
+use dawn_storage::{DurabilityTransportMessage, JournalError, PublicEventIndex, RecoveryIndex};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::broadcast;
@@ -30,8 +30,9 @@ struct SnapshotFrameHeader {
     requester_sector_id: SectorId,
     owner_sector_id: SectorId,
     snapshot_sector_id: SectorId,
-    snapshot_log_index: u64,
-    owner_next_index: u64,
+    snapshot_covered_recovery_index: RecoveryIndex,
+    snapshot_public_event_next_index: PublicEventIndex,
+    owner_next_public_event_index: PublicEventIndex,
     snapshot_len: u32,
 }
 
@@ -40,7 +41,7 @@ struct CatchUpRangeFrameHeader {
     request_id: u64,
     requester_sector_id: SectorId,
     owner_sector_id: SectorId,
-    owner_next_index: u64,
+    owner_next_public_event_index: PublicEventIndex,
 }
 
 /// Adapts shared control/bulk frames to the replication and catch-up traits.
@@ -97,7 +98,8 @@ impl PeerReplicationTransport {
                                         owner_sector_id: header.owner_sector_id,
                                         payload: CatchUpPayload::Suffix {
                                             batch,
-                                            owner_next_index: header.owner_next_index,
+                                            owner_next_public_event_index: header
+                                                .owner_next_public_event_index,
                                         },
                                     }));
                             }
@@ -152,10 +154,12 @@ impl PeerReplicationTransport {
                                         payload: CatchUpPayload::Snapshot {
                                             snapshot: ReplicaSnapshot::new(
                                                 header.snapshot_sector_id,
-                                                header.snapshot_log_index,
+                                                header.snapshot_covered_recovery_index,
+                                                header.snapshot_public_event_next_index,
                                                 frame.payload,
                                             ),
-                                            owner_next_index: header.owner_next_index,
+                                            owner_next_public_event_index: header
+                                                .owner_next_public_event_index,
                                         },
                                     }));
                             }
@@ -188,7 +192,8 @@ impl PeerReplicationTransport {
             return;
         };
         let CatchUpPayload::Snapshot {
-            owner_next_index, ..
+            owner_next_public_event_index,
+            ..
         } = response.payload
         else {
             return;
@@ -201,8 +206,9 @@ impl PeerReplicationTransport {
             requester_sector_id: response.requester_sector_id,
             owner_sector_id: response.owner_sector_id,
             snapshot_sector_id: snapshot.sector_id,
-            snapshot_log_index: snapshot.log_index,
-            owner_next_index,
+            snapshot_covered_recovery_index: snapshot.covered_recovery_index,
+            snapshot_public_event_next_index: snapshot.public_event_next_index,
+            owner_next_public_event_index,
             snapshot_len,
         };
         let Ok(metadata) = postcard::to_stdvec(&header) else {
@@ -252,7 +258,7 @@ impl CatchUpTransport for PeerReplicationTransport {
             CatchUpMessage::Response(response) => match response.payload.clone() {
                 CatchUpPayload::Suffix {
                     batch,
-                    owner_next_index,
+                    owner_next_public_event_index,
                 } => {
                     let Some(peer) = self.peer.peer_for_sector(response.requester_sector_id) else {
                         return;
@@ -261,7 +267,7 @@ impl CatchUpTransport for PeerReplicationTransport {
                         request_id: response.request_id,
                         requester_sector_id: response.requester_sector_id,
                         owner_sector_id: response.owner_sector_id,
-                        owner_next_index,
+                        owner_next_public_event_index,
                     };
                     let Ok(metadata) = postcard::to_stdvec(&header) else {
                         return;
@@ -397,13 +403,13 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(batch.sector_id, SectorId(1));
-        assert_eq!(batch.from_index, 4);
+        assert_eq!(batch.from_public_event_index, 4);
 
         a.send_catch_up(CatchUpMessage::Request(CatchUpRequest {
             request_id: 7,
             requester_sector_id: SectorId(1),
             owner_sector_id: SectorId(2),
-            from_index: 4,
+            from_public_event_index: 4.into(),
             max_events: 32,
         }));
         assert!(matches!(
@@ -420,7 +426,7 @@ mod tests {
             owner_sector_id: SectorId(2),
             payload: CatchUpPayload::Suffix {
                 batch: LogBatch::new(SectorId(2), 4, Vec::new()),
-                owner_next_index: 16,
+                owner_next_public_event_index: 16.into(),
             },
         }));
         let suffix = timeout(Duration::from_secs(2), reverse_catch_up_rx.recv())
@@ -441,8 +447,13 @@ mod tests {
             requester_sector_id: SectorId(1),
             owner_sector_id: SectorId(2),
             payload: CatchUpPayload::Snapshot {
-                snapshot: ReplicaSnapshot::new(SectorId(2), 12, vec![5; 1024]),
-                owner_next_index: 16,
+                snapshot: ReplicaSnapshot::new(
+                    SectorId(2),
+                    RecoveryIndex(12),
+                    PublicEventIndex(12),
+                    vec![5; 1024],
+                ),
+                owner_next_public_event_index: 16.into(),
             },
         }));
         let snapshot = timeout(Duration::from_secs(2), reverse_catch_up_rx.recv())

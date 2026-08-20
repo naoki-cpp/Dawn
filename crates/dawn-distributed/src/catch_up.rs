@@ -8,7 +8,7 @@
 
 use crate::{Ingest, LogBatch, ReplicaSet, ReplicaSnapshot, SnapshotInstall};
 use dawn_core::SectorId;
-use dawn_storage::EventStore;
+use dawn_storage::{EventStore, PublicEventIndex, RecoveryIndex};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio::sync::broadcast;
@@ -55,7 +55,7 @@ pub struct CatchUpRequest {
     pub request_id: u64,
     pub requester_sector_id: SectorId,
     pub owner_sector_id: SectorId,
-    pub from_index: u64,
+    pub from_public_event_index: PublicEventIndex,
     pub max_events: u32,
 }
 
@@ -83,18 +83,20 @@ pub struct CatchUpResponse {
 /// Catch-up response body.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum CatchUpPayload {
-    /// A bounded retained suffix and the owner's current tail index.
+    /// A bounded retained suffix and the owner's current public-event tail.
     Suffix {
         batch: LogBatch,
-        owner_next_index: u64,
+        owner_next_public_event_index: PublicEventIndex,
     },
-    /// Opaque recovery snapshot; receiver resumes at `snapshot.log_index`.
+    /// Opaque recovery snapshot; receiver resumes at its public-event cursor.
     Snapshot {
         snapshot: ReplicaSnapshot,
-        owner_next_index: u64,
+        owner_next_public_event_index: PublicEventIndex,
     },
     /// Receiver is already at the owner's tail.
-    UpToDate { owner_next_index: u64 },
+    UpToDate {
+        owner_next_public_event_index: PublicEventIndex,
+    },
     /// Owner cannot currently recover the receiver.
     Unavailable { reason: CatchUpUnavailable },
 }
@@ -120,7 +122,7 @@ pub enum CatchUpFailureKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CatchUpFailure {
     pub sector_id: SectorId,
-    pub from_index: u64,
+    pub from_public_event_index: PublicEventIndex,
     pub kind: CatchUpFailureKind,
 }
 
@@ -134,13 +136,14 @@ pub enum CatchUpEvent {
     },
     RequestIssued {
         owner_sector_id: SectorId,
-        from_index: u64,
+        from_public_event_index: PublicEventIndex,
         request_id: u64,
         attempt: u32,
     },
     SnapshotInstalled {
         sector_id: SectorId,
-        log_index: u64,
+        covered_recovery_index: RecoveryIndex,
+        public_event_next_index: PublicEventIndex,
         bytes: usize,
     },
     Completed {
@@ -252,7 +255,11 @@ impl CatchUpManager {
             }
             Ingest::Duplicate => {}
             Ingest::Gap(request) => {
-                self.ensure_request(request.sector_id, request.from_index, &mut step);
+                self.ensure_request(
+                    request.sector_id,
+                    request.from_public_event_index.0,
+                    &mut step,
+                );
             }
         }
 
@@ -301,7 +308,7 @@ impl CatchUpManager {
                     session.ticks_until_retry = self.config.retry_interval_ticks;
                     retry = Some((session.request.clone(), session.retries + 1));
                 } else {
-                    exhausted = Some(session.request.from_index);
+                    exhausted = Some(session.request.from_public_event_index.0);
                 }
             }
 
@@ -309,7 +316,7 @@ impl CatchUpManager {
                 step.outbound.push(CatchUpMessage::Request(request.clone()));
                 step.events.push(CatchUpEvent::RequestIssued {
                     owner_sector_id: sector_id,
-                    from_index: request.from_index,
+                    from_public_event_index: request.from_public_event_index,
                     request_id: request.request_id,
                     attempt,
                 });
@@ -341,7 +348,7 @@ impl CatchUpManager {
 
             if restart {
                 self.failures.remove(&sector_id);
-                let from_index = self.replicas.next_index(sector_id);
+                let from_index = self.replicas.next_public_event_index(sector_id);
                 self.issue_request(sector_id, from_index, 0, &mut step);
             }
         }
@@ -379,7 +386,7 @@ impl CatchUpManager {
             request_id,
             requester_sector_id: self.local_sector_id,
             owner_sector_id: sector_id,
-            from_index,
+            from_public_event_index: from_index.into(),
             max_events: self.config.max_events as u32,
         };
         let requests_sent = previous_requests + 1;
@@ -395,7 +402,7 @@ impl CatchUpManager {
         step.outbound.push(CatchUpMessage::Request(request.clone()));
         step.events.push(CatchUpEvent::RequestIssued {
             owner_sector_id: sector_id,
-            from_index,
+            from_public_event_index: from_index.into(),
             request_id,
             attempt: 1,
         });
@@ -418,20 +425,22 @@ impl CatchUpManager {
             return step;
         }
 
-        let owner_next_index = store.next_index();
+        let owner_next_public_event_index = PublicEventIndex(store.next_index());
         let payload = if request.max_events == 0 {
             CatchUpPayload::Unavailable {
                 reason: CatchUpUnavailable::InvalidRequest,
             }
-        } else if request.from_index >= owner_next_index {
-            CatchUpPayload::UpToDate { owner_next_index }
+        } else if request.from_public_event_index.0 >= owner_next_public_event_index.0 {
+            CatchUpPayload::UpToDate {
+                owner_next_public_event_index,
+            }
         } else {
             let first_retained_index = store
                 .iter_from(0)
                 .next()
-                .map_or(owner_next_index, |record| record.log_index);
+                .map_or(owner_next_public_event_index.0, |record| record.log_index);
 
-            if request.from_index < first_retained_index {
+            if request.from_public_event_index.0 < first_retained_index {
                 match snapshot_provider() {
                     None => CatchUpPayload::Unavailable {
                         reason: CatchUpUnavailable::SnapshotUnavailable,
@@ -446,36 +455,38 @@ impl CatchUpManager {
                             reason: CatchUpUnavailable::SnapshotSectorMismatch,
                         }
                     }
-                    Some(snapshot) if snapshot.log_index < first_retained_index => {
+                    Some(snapshot) if snapshot.public_event_next_index.0 < first_retained_index => {
                         CatchUpPayload::Unavailable {
                             reason: CatchUpUnavailable::SnapshotBehindRetainedPrefix,
                         }
                     }
-                    Some(snapshot) if snapshot.log_index > owner_next_index => {
+                    Some(snapshot)
+                        if snapshot.public_event_next_index.0 > owner_next_public_event_index.0 =>
+                    {
                         CatchUpPayload::Unavailable {
                             reason: CatchUpUnavailable::SnapshotAheadOfOwner,
                         }
                     }
                     Some(snapshot) => CatchUpPayload::Snapshot {
                         snapshot,
-                        owner_next_index,
+                        owner_next_public_event_index,
                     },
                 }
             } else {
                 let max_events = (request.max_events as usize).min(self.config.max_events);
                 let records: Vec<_> = store
-                    .iter_from(request.from_index)
+                    .iter_from(request.from_public_event_index.0)
                     .take(max_events)
                     .collect();
                 match records.first() {
-                    Some(first) if first.log_index == request.from_index => {
+                    Some(first) if first.log_index == request.from_public_event_index.0 => {
                         CatchUpPayload::Suffix {
                             batch: LogBatch::new(
                                 self.local_sector_id,
                                 first.log_index,
                                 records.iter().map(|record| record.event.clone()).collect(),
                             ),
-                            owner_next_index,
+                            owner_next_public_event_index,
                         }
                     }
                     _ => CatchUpPayload::Unavailable {
@@ -517,16 +528,16 @@ impl CatchUpManager {
             .sessions
             .remove(&sector_id)
             .expect("session checked above");
-        let from_index = session.request.from_index;
+        let from_index = session.request.from_public_event_index.0;
 
         match response.payload {
             CatchUpPayload::Suffix {
                 batch,
-                owner_next_index,
+                owner_next_public_event_index,
             } => {
                 if batch.sector_id != sector_id
                     || batch.events.len() > self.config.max_events
-                    || batch.next_index() > owner_next_index
+                    || batch.next_public_event_index().0 > owner_next_public_event_index.0
                 {
                     self.fail(
                         sector_id,
@@ -537,7 +548,7 @@ impl CatchUpManager {
                     return step;
                 }
 
-                let before = self.replicas.next_index(sector_id);
+                let before = self.replicas.next_public_event_index(sector_id);
                 match self.replicas.ingest(&batch) {
                     Ingest::Applied {
                         applied,
@@ -567,18 +578,18 @@ impl CatchUpManager {
                 self.resume_or_complete(
                     sector_id,
                     before,
-                    owner_next_index,
+                    owner_next_public_event_index.0,
                     session.requests_sent,
                     &mut step,
                 );
             }
             CatchUpPayload::Snapshot {
                 snapshot,
-                owner_next_index,
+                owner_next_public_event_index,
             } => {
                 if snapshot.sector_id != sector_id
                     || snapshot.bytes.len() > self.config.max_snapshot_bytes
-                    || snapshot.log_index > owner_next_index
+                    || snapshot.public_event_next_index.0 > owner_next_public_event_index.0
                 {
                     self.fail(
                         sector_id,
@@ -589,29 +600,33 @@ impl CatchUpManager {
                     return step;
                 }
 
-                let before = self.replicas.next_index(sector_id);
+                let before = self.replicas.next_public_event_index(sector_id);
                 let bytes = snapshot.bytes.len();
-                let log_index = snapshot.log_index;
+                let covered_recovery_index = snapshot.covered_recovery_index;
+                let public_event_next_index = snapshot.public_event_next_index;
                 if let SnapshotInstall::Installed { .. } = self.replicas.install_snapshot(snapshot)
                 {
                     self.failures.remove(&sector_id);
                     step.events.push(CatchUpEvent::SnapshotInstalled {
                         sector_id,
-                        log_index,
+                        covered_recovery_index,
+                        public_event_next_index,
                         bytes,
                     });
                 }
                 self.resume_or_complete(
                     sector_id,
                     before,
-                    owner_next_index,
+                    owner_next_public_event_index.0,
                     session.requests_sent,
                     &mut step,
                 );
             }
-            CatchUpPayload::UpToDate { owner_next_index } => {
-                let next_index = self.replicas.next_index(sector_id);
-                if next_index == owner_next_index {
+            CatchUpPayload::UpToDate {
+                owner_next_public_event_index,
+            } => {
+                let next_index = self.replicas.next_public_event_index(sector_id);
+                if next_index == owner_next_public_event_index.0 {
                     self.failures.remove(&sector_id);
                     step.events.push(CatchUpEvent::Completed {
                         sector_id,
@@ -643,19 +658,19 @@ impl CatchUpManager {
         &mut self,
         sector_id: SectorId,
         before: u64,
-        owner_next_index: u64,
+        owner_next_public_event_index: u64,
         requests_sent: u32,
         step: &mut CatchUpStep,
     ) {
-        let next_index = self.replicas.next_index(sector_id);
-        if next_index > owner_next_index {
+        let next_index = self.replicas.next_public_event_index(sector_id);
+        if next_index > owner_next_public_event_index {
             self.fail(
                 sector_id,
                 next_index,
                 CatchUpFailureKind::InvalidResponse,
                 step,
             );
-        } else if next_index == owner_next_index {
+        } else if next_index == owner_next_public_event_index {
             self.failures.remove(&sector_id);
             step.events.push(CatchUpEvent::Completed {
                 sector_id,
@@ -686,7 +701,7 @@ impl CatchUpManager {
         );
         step.events.push(CatchUpEvent::Failed(CatchUpFailure {
             sector_id,
-            from_index,
+            from_public_event_index: from_index.into(),
             kind,
         }));
     }
@@ -812,7 +827,7 @@ mod tests {
             None,
         );
 
-        assert_eq!(receiver.replicas().next_index(owner_sector), 8);
+        assert_eq!(receiver.replicas().next_public_event_index(owner_sector), 8);
         assert_eq!(receiver.replicas().replicated_len(owner_sector), 8);
         assert!(receiver.replicas().snapshot(owner_sector).is_none());
     }
@@ -828,7 +843,12 @@ mod tests {
         fill(&mut store, 10);
         store.compact(6, &cold).unwrap();
 
-        let snapshot = ReplicaSnapshot::new(owner_sector, 6, vec![1, 2, 3, 4]);
+        let snapshot = ReplicaSnapshot::new(
+            owner_sector,
+            RecoveryIndex(12),
+            PublicEventIndex(6),
+            vec![1, 2, 3, 4],
+        );
         let receiver_store = InMemoryEventStore::new();
         let mut owner = CatchUpManager::new(owner_sector, config(2));
         let mut receiver = CatchUpManager::new(receiver_sector, config(2));
@@ -843,10 +863,63 @@ mod tests {
             Some(snapshot.clone()),
         );
 
-        assert_eq!(receiver.replicas().next_index(owner_sector), 10);
-        assert_eq!(receiver.replicas().base_index(owner_sector), 6);
+        assert_eq!(
+            receiver.replicas().next_public_event_index(owner_sector),
+            10
+        );
+        assert_eq!(receiver.replicas().base_public_event_index(owner_sector), 6);
         assert_eq!(receiver.replicas().replicated_len(owner_sector), 4);
         assert_eq!(receiver.replicas().snapshot(owner_sector), Some(&snapshot));
+    }
+
+    #[test]
+    fn eventless_recovery_ticks_do_not_advance_public_snapshot_catch_up() {
+        let dir = tempfile::tempdir().unwrap();
+        let hot = dir.path().join("events.log");
+        let cold = dir.path().join("cold.log");
+        let owner_sector = SectorId(1);
+        let receiver_sector = SectorId(2);
+        let mut store = FileEventStore::open(&hot).unwrap();
+        fill(&mut store, 4);
+        store.compact(2, &cold).unwrap();
+
+        // The recovery journal may have advanced through eventless Ticks while
+        // the public stream remained at four events. Installing this checkpoint
+        // must resume public catch-up at 2, not at its recovery coverage (11).
+        let snapshot = ReplicaSnapshot::new(
+            owner_sector,
+            RecoveryIndex(11),
+            PublicEventIndex(2),
+            vec![1, 2, 3, 4],
+        );
+        let receiver_store = InMemoryEventStore::new();
+        let mut owner = CatchUpManager::new(owner_sector, config(2));
+        let mut receiver = CatchUpManager::new(receiver_sector, config(2));
+
+        let gap = receiver.ingest_batch(batch(&store, owner_sector, 3, 1));
+        drive(
+            &mut owner,
+            &mut receiver,
+            &store,
+            &receiver_store,
+            gap.outbound,
+            Some(snapshot.clone()),
+        );
+
+        assert_eq!(receiver.replicas().next_public_event_index(owner_sector), 4);
+        assert_eq!(
+            receiver.replicas().events(owner_sector),
+            &[event(2), event(3)]
+        );
+        assert_eq!(receiver.replicas().snapshot(owner_sector), Some(&snapshot));
+        assert_eq!(
+            receiver
+                .replicas()
+                .snapshot(owner_sector)
+                .unwrap()
+                .covered_recovery_index,
+            11
+        );
     }
 
     #[test]
@@ -859,7 +932,7 @@ mod tests {
         manager.ingest_batch(batch(&store, sector, 0, 3));
         manager.ingest_batch(batch(&store, sector, 0, 3));
         manager.ingest_batch(batch(&store, sector, 2, 3));
-        assert_eq!(manager.replicas().next_index(sector), 5);
+        assert_eq!(manager.replicas().next_public_event_index(sector), 5);
         assert_eq!(manager.replicas().replicated_len(sector), 5);
 
         let first_gap = manager.ingest_batch(batch(&store, sector, 8, 2));
@@ -894,7 +967,7 @@ mod tests {
         manager.ingest_batch(batch(&store, owner_sector, 0, 3));
         let gap = manager.ingest_batch(batch(&store, owner_sector, 5, 1));
         let initial = only_request(&gap);
-        assert_eq!(initial.from_index, 3);
+        assert_eq!(initial.from_public_event_index, 3);
 
         assert_eq!(manager.tick().outbound.len(), 1, "one retransmission");
         let exhausted = manager.tick();
@@ -909,7 +982,7 @@ mod tests {
 
         let restarted = manager.tick();
         let request = only_request(&restarted);
-        assert_eq!(request.from_index, 3);
+        assert_eq!(request.from_public_event_index, 3);
         assert_ne!(request.request_id, initial.request_id);
         assert!(matches!(
             restarted.events.as_slice(),
@@ -938,7 +1011,7 @@ mod tests {
             })]
         ));
         assert!(manager.tick().outbound.is_empty());
-        assert_eq!(only_request(&manager.tick()).from_index, 0);
+        assert_eq!(only_request(&manager.tick()).from_public_event_index, 0);
     }
 
     #[test]
@@ -962,7 +1035,7 @@ mod tests {
             })]
         ));
         assert!(manager.tick().outbound.is_empty());
-        assert_eq!(only_request(&manager.tick()).from_index, 0);
+        assert_eq!(only_request(&manager.tick()).from_public_event_index, 0);
     }
 
     #[test]
@@ -1046,7 +1119,7 @@ mod tests {
 
         manager.ingest_batch(batch(&store, local, 0, 2));
 
-        assert_eq!(manager.replicas().next_index(local), 0);
+        assert_eq!(manager.replicas().next_public_event_index(local), 0);
         assert_eq!(manager.replicas().replicated_len(local), 0);
     }
 }

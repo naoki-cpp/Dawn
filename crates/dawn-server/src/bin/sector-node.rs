@@ -277,7 +277,10 @@ async fn main() -> anyhow::Result<()> {
         // than killing the live server -- the hot log keeps appending
         // normally on the next tick either way, and the next scheduled
         // checkpoint will retry.
-        match runtime.with_state_mut(|node, journal| checkpoints.maybe_checkpoint(node, journal)) {
+        let public_event_next_index = event_store.next_index();
+        match runtime.with_state_mut(|node, journal| {
+            checkpoints.maybe_checkpoint(node, journal, public_event_next_index.into())
+        }) {
             Ok(Ok(Some(snapshot))) => {
                 println!(
                     "[Node] checkpoint at tick {} (covered_recovery_index={})",
@@ -329,19 +332,20 @@ fn emit_catch_up_step<T: CatchUpTransport>(transport: &T, step: CatchUpStep) {
             }
             CatchUpEvent::RequestIssued {
                 owner_sector_id,
-                from_index,
+                from_public_event_index,
                 request_id,
                 attempt,
             } => eprintln!(
-                "[Repl] catch-up request owner={owner_sector_id:?} from={from_index} id={request_id} attempt={attempt}"
+                "[Repl] catch-up request owner={owner_sector_id:?} from_public_event_index={from_public_event_index} id={request_id} attempt={attempt}"
             ),
             CatchUpEvent::SnapshotInstalled {
                 sector_id,
-                log_index,
+                covered_recovery_index,
+                public_event_next_index,
                 bytes,
             } => {
                 eprintln!(
-                    "[Repl] sector={sector_id:?} installed recovery snapshot covered_recovery_index={log_index} bytes={bytes}"
+                    "[Repl] sector={sector_id:?} installed snapshot covered_recovery_index={covered_recovery_index} public_event_next_index={public_event_next_index} bytes={bytes}"
                 );
             }
             CatchUpEvent::Completed {
@@ -387,6 +391,7 @@ fn load_replica_snapshot(
     Ok(Some(ReplicaSnapshot::new(
         snapshot.sector_id,
         snapshot.covered_recovery_index,
+        snapshot.public_event_next_index,
         bytes,
     )))
 }
@@ -404,6 +409,7 @@ fn replica_snapshot_from_state(
     Ok(ReplicaSnapshot::new(
         snapshot.sector_id,
         snapshot.covered_recovery_index,
+        snapshot.public_event_next_index,
         bytes,
     ))
 }
@@ -483,7 +489,7 @@ fn build_node(
                     cfg.snapshot_path
                 )
             });
-            let (node, _) = apply_tail(node, &recovery_journal, snapshot.covered_recovery_index)
+            let (node, _) = apply_tail(node, &recovery_journal, snapshot.covered_recovery_index.0)
                 .unwrap_or_else(|error| {
                     panic!(
                         "checkpoint tail cannot be applied from recovery journal '{}': {error}",

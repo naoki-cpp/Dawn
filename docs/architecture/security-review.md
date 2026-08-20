@@ -6,10 +6,16 @@ related  : .agents/skills/security-check/SKILL.md,
            .agents/skills/security-check/references/owasp-map.md,
            .agents/skills/security-check/references/baseline.md（初回レビューの凍結記録）,
            docs/architecture/security-review-completed.md（解消済みfindingの作業ログ）
-date     : 2026-08-17
+date     : 2026-08-20
 ---
 
 # Security Review — Dawn Server（OWASP観点）
+
+2026-08-20 update: Recovery/Public replication cursor separation changed
+peer catch-up metadata to carry two fixed-width positions. Peer protocol v2
+rejects mixed layouts during the handshake; existing control/bulk frame caps,
+bounded channels, Sector identity checks, suffix event limits, and snapshot
+byte limits remain in force. No new security finding was introduced.
 
 2026-08-17 update: Issue #317 replaced cargo/admission event snapshots with
 `BTreeMap<ItemId, u64>` stack rows, removing per-unit expansion. Market wire

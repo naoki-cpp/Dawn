@@ -315,8 +315,8 @@ mod tests {
     fn assert_same_runtime_state(live: &SimulationNode, comparison: &SimulationNode) {
         let mut live_snapshot = live.take_snapshot();
         let mut comparison_snapshot = comparison.take_snapshot();
-        live_snapshot.covered_recovery_index = 0;
-        comparison_snapshot.covered_recovery_index = 0;
+        live_snapshot.covered_recovery_index = 0.into();
+        comparison_snapshot.covered_recovery_index = 0.into();
         assert_eq!(
             postcard::to_stdvec(&live_snapshot).unwrap(),
             postcard::to_stdvec(&comparison_snapshot).unwrap()

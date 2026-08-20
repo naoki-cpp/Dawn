@@ -37,6 +37,28 @@ The first implementation is plaintext LAN transport. Identity matching is
 configuration validation, not cryptographic authentication. TLS can be added
 below this API without changing domain messages.
 
+### Cursor contract
+
+Recovery and public-event replication are separate ordered streams. A
+checkpoint carries both:
+
+- `covered_recovery_index`: the next authoritative `RecoveryDelta` position
+  needed for exact state recovery; and
+- `public_event_next_index`: the next append-only `DomainEvent` position that
+  a public replica must receive.
+
+Eventless Ticks may advance the first cursor without advancing the second.
+`ReplicaSnapshot`, `ReplicaSet`, catch-up requests, suffix batches, and peer
+frame headers therefore use the explicit public-event cursor for public
+catch-up, while retaining recovery coverage as snapshot metadata. No catch-up
+or snapshot-install path may derive one cursor from the other. The checkpoint
+scheduler accepts only the authoritative recovery journal and receives the
+public-event cursor from the separate public-event store.
+
+The additional snapshot cursor changes catch-up frame metadata. The peer
+handshake version is therefore bumped to 2 so mixed binaries reject each
+other before decoding incompatible metadata.
+
 ## Options considered
 
 1. One interleaved TCP stream: rejected because a bounded frame still lets

@@ -366,6 +366,11 @@ ADR-0049 does not authorize destructive in-place Event mutation. State-delta com
 
 ### Checkpoint/compaction/catch-up
 
+- checkpoints persist independent `covered_recovery_index` and
+  `public_event_next_index` cursors; eventless RecoveryDelta transitions do not
+  advance the public-event cursor;
+- replica snapshot installation and public suffix catch-up use only the public
+  event cursor, while recovery coverage remains checkpoint metadata;
 - checkpoint formats become explicitly versioned/fingerprinted under #284/#271;
 - replacement checkpoint publication remains write/validate/sync/atomic-select before old recovery material is retired;
 - #271 owns physical journal/commit/compaction mechanics;

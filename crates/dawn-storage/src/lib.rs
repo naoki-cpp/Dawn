@@ -17,6 +17,8 @@
 //! - `DurableJournal` — the generic recovery-journal contract.
 //! - `EventStore` — the legacy public-event store still used by the migration
 //!   path.
+//! - `RecoveryIndex` / `PublicEventIndex` — non-interchangeable positions for
+//!   authoritative recovery and public replication.
 //! - `InMemoryEventStore` — in-process store used by MVP and all tests.
 //! - `EventRecord` — a single entry in the log.
 //!
@@ -45,6 +47,7 @@
 // Debug at compile time instead of relying on periodic audits (see #83).
 #![warn(missing_debug_implementations)]
 
+pub mod cursor;
 pub mod file;
 pub mod file_journal;
 pub mod journal;
@@ -53,6 +56,7 @@ pub mod memory_journal;
 pub mod record;
 pub mod store;
 
+pub use cursor::{PublicEventIndex, RecoveryIndex};
 pub use file::FileEventStore;
 pub use file_journal::FileJournal;
 pub use journal::{
