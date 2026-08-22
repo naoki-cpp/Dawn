@@ -83,6 +83,30 @@ mod tests {
         .expect("fresh admission should begin")
     }
 
+    fn commit_runtime_frame(node: &mut SimulationNode) {
+        let mut journal = dawn_storage::InMemoryJournal::new();
+        let mut consensus = crate::transit::LocalRuntimeConsensus;
+        let mut health = crate::transit::RuntimeHealth::default();
+        let transition_id = crate::transit::runtime_transition_id(node);
+        crate::transit::run_durable_runtime_frame(
+            node,
+            &mut journal,
+            &mut consensus,
+            &crate::transit::LocalRuntimeDurabilityPolicy,
+            &mut health,
+            crate::transition::FrameInput::lock_only(&[]),
+            crate::transit::DurableRuntimeTickContext {
+                transition_id,
+                owner_epoch: 0,
+                durability: dawn_storage::DurabilityMode::Synced,
+                profile: crate::transit::RuntimeDurabilityProfile::LocalDurable,
+            },
+            crate::transit::reconcile_runtime_repositories,
+            |_, _, _| {},
+        )
+        .expect("admission frame should commit");
+    }
+
     #[test]
     fn successful_transport_commits_and_returns_adapter_value() {
         let mut node = node();
@@ -141,6 +165,7 @@ mod tests {
         let fresh = fresh_attempt(&mut node);
         let current_ticket = fresh.resume_ticket();
         let committed = fresh.commit(&mut node).expect("fresh commit");
+        commit_runtime_frame(&mut node);
 
         let resume = node
             .begin_client_admission(
@@ -215,6 +240,7 @@ mod tests {
             resolve_client_admission(&mut node, fresh, Ok::<_, ()>(())),
             ClientAdmissionResolution::Committed { .. }
         ));
+        commit_runtime_frame(&mut node);
 
         let first = node
             .begin_client_admission(

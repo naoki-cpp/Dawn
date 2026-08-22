@@ -388,6 +388,30 @@ mod tests {
         ticket
     }
 
+    fn commit_runtime_frame(node: &mut SimulationNode) {
+        let mut journal = dawn_storage::InMemoryJournal::new();
+        let mut consensus = crate::transit::LocalRuntimeConsensus;
+        let mut health = crate::transit::RuntimeHealth::default();
+        let transition_id = crate::transit::runtime_transition_id(node);
+        crate::transit::run_durable_runtime_frame(
+            node,
+            &mut journal,
+            &mut consensus,
+            &crate::transit::LocalRuntimeDurabilityPolicy,
+            &mut health,
+            crate::transition::FrameInput::lock_only(&[]),
+            crate::transit::DurableRuntimeTickContext {
+                transition_id,
+                owner_epoch: 0,
+                durability: dawn_storage::DurabilityMode::Synced,
+                profile: crate::transit::RuntimeDurabilityProfile::LocalDurable,
+            },
+            crate::transit::reconcile_runtime_repositories,
+            |_, _, _| {},
+        )
+        .expect("admission frame should commit");
+    }
+
     #[test]
     fn fresh_commit_keeps_the_spawned_ship() {
         let mut node = node();
@@ -400,6 +424,7 @@ mod tests {
             )
             .expect("fresh admission should begin");
         let ship_id = attempt.ship_id();
+        let resume_ticket = attempt.resume_ticket();
         assert_eq!(node.ship_count(), 0);
         assert!(matches!(
             node.pending_events(),
@@ -411,6 +436,19 @@ mod tests {
         assert_eq!(committed.ship_id, ship_id);
         assert!(!committed.resumed);
         assert_eq!(node.ship_count(), 1);
+        assert!(node.prepared_fresh_admission(resume_ticket).is_some());
+
+        commit_runtime_frame(&mut node);
+
+        assert!(node.prepared_fresh_admission(resume_ticket).is_none());
+        assert_eq!(
+            node.station_item_count(
+                committed.player_id,
+                dawn_core::StationId(0),
+                dawn_core::ItemId::PackagedShip(crate::ship_types::SHIP_TYPE_MAGPIE),
+            ),
+            1
+        );
     }
 
     #[test]
@@ -621,6 +659,7 @@ mod tests {
         let committed = fresh
             .commit(&mut node)
             .expect("fresh admission should commit");
+        commit_runtime_frame(&mut node);
 
         let resume = node
             .begin_client_admission(

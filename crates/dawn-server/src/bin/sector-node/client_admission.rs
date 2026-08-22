@@ -211,6 +211,30 @@ mod tests {
         )
     }
 
+    fn commit_runtime_frame(node: &mut SimulationNode) {
+        let mut journal = dawn_storage::InMemoryJournal::new();
+        let mut consensus = dawn_sector::transit::LocalRuntimeConsensus;
+        let mut health = dawn_sector::transit::RuntimeHealth::default();
+        let transition_id = dawn_sector::transit::runtime_transition_id(node);
+        dawn_sector::transit::run_durable_runtime_frame(
+            node,
+            &mut journal,
+            &mut consensus,
+            &dawn_sector::transit::LocalRuntimeDurabilityPolicy,
+            &mut health,
+            dawn_sector::transition::FrameInput::lock_only(&[]),
+            dawn_sector::transit::DurableRuntimeTickContext {
+                transition_id,
+                owner_epoch: 0,
+                durability: dawn_storage::DurabilityMode::Synced,
+                profile: dawn_sector::transit::RuntimeDurabilityProfile::LocalDurable,
+            },
+            dawn_sector::transit::reconcile_runtime_repositories,
+            |_, _, _| {},
+        )
+        .expect("admission frame should commit");
+    }
+
     #[test]
     fn production_adapter_commits_successful_fresh_attempt() {
         let mut node = test_node();
@@ -332,6 +356,7 @@ mod tests {
         };
         let player_id = committed.player_id;
         let ship_id = committed.ship_id;
+        commit_runtime_frame(&mut node);
         let attempt = node
             .begin_client_admission(
                 ClientAdmissionIntent::Resume { resume_ticket },

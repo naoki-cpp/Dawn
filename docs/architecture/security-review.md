@@ -6,10 +6,17 @@ related  : .agents/skills/security-check/SKILL.md,
            .agents/skills/security-check/references/owasp-map.md,
            .agents/skills/security-check/references/baseline.md（初回レビューの凍結記録）,
            docs/architecture/security-review-completed.md（解消済みfindingの作業ログ）
-date     : 2026-08-20
+date     : 2026-08-22
 ---
 
 # Security Review — Dawn Server（OWASP観点）
+
+2026-08-22 SQL-only update: the production Station projection added an
+idempotency range column, a fixed-schema migration, and transactional ordered
+stack mutations. SQL identifiers remain static, every transition/range/item
+value is parameter-bound or derived from a closed server enum, and invalid
+zero/underflowing mutations roll back the row changes and cursor together. No
+new security finding was introduced.
 
 2026-08-20 update: Recovery/Public replication cursor separation changed
 peer catch-up metadata to carry two fixed-width positions. Peer protocol v2
@@ -74,6 +81,10 @@ SQLite INTEGER境界を検証する。ownership・入力値・queue/snapshot上�
 Repository queryは`params![]`によるパラメータ化済み。テーブル/カラム名はクライアント入力から
 導出されない（`item_id_to_columns`は`ItemId` enumへの閉じたmatch）。詳細は
 [baseline.md](../../.agents/skills/security-check/references/baseline.md)参照。
+
+2026-08-22のStation projection差分も、schema migrationを含めSQL文字列は固定で、
+`transition_id`、journal range、Player/Station/Item値、deltaはparameter bindingを使用する。
+projection cursorとstack mutationは一つのSQLite transactionでcommitされる。
 
 ### A03 非SQLインジェクション
 

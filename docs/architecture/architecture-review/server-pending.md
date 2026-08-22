@@ -50,7 +50,7 @@ typed outputへ移し、closure bridgeはbootstrap/fixture専用に縮小する�
 
 ### R-7（Fix候補）: `SectorRepository`のbounded-context分割
 
-`node/repositories.rs`は1964行で、Admission、Identity/ResumeTicket、Station projectionのschema、
+`node/repositories.rs`は2104行で、Admission、Identity/ResumeTicket、Station projectionのschema、
 typed codec、allocator、transaction boundary、全ての回帰testsを一つのfileに保持している。
 `SectorRepository`が一つのSQLite connectionとtransactionを所有する設計自体は正しいが、domainごとの
 変更理由が同じmoduleへ蓄積している。**根本原因:** shared connection boundaryと各repository viewの

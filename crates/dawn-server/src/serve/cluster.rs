@@ -209,6 +209,7 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
         }
 
         let mut lock_commands: Vec<Vec<dawn_core::LockOnCommand>> = vec![Vec::new(); SECTORS];
+        let mut pending_loadout_refreshes = Vec::new();
 
         for sess in sessions.iter_mut() {
             let sector = *player_sector.get(&sess.player_id).unwrap_or(&0);
@@ -276,12 +277,7 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                         }
                     }
                     RuntimeCommandDispatch::RefreshPlayerLoadout { player_id, .. } => {
-                        if let Some(loadout) = hosts[sector]
-                            .node()
-                            .build_player_loadout_json_for_player(player_id)
-                        {
-                            sess.send_message(&ServerMessage::PlayerLoadout(loadout));
-                        }
+                        pending_loadout_refreshes.push((player_id, sector));
                     }
                     RuntimeCommandDispatch::Rejected { error, .. } => {
                         sess.send_message(&ServerMessage::ClientRequestRejected(
@@ -304,6 +300,20 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
             },
             &lock_commands,
         );
+
+        for (player_id, sector) in pending_loadout_refreshes {
+            if let Some(loadout) = hosts[sector]
+                .node()
+                .build_player_loadout_json_for_player(player_id)
+            {
+                if let Some(session) = sessions
+                    .iter_mut()
+                    .find(|session| session.player_id == player_id)
+                {
+                    session.send_message(&ServerMessage::PlayerLoadout(loadout));
+                }
+            }
+        }
 
         for sess in &sessions {
             let sector = *player_sector.get(&sess.player_id).unwrap_or(&0);
@@ -551,6 +561,7 @@ mod tests {
         };
         let player_id = committed.player_id;
         let ship_id = committed.ship_id;
+        crate::serve::commit_test_runtime_frame(&mut nodes[1]);
         let sector = find_resume_sector(&nodes, resume_ticket).expect("unique owning Sector");
         let attempt = nodes[sector]
             .begin_client_admission(
@@ -630,6 +641,7 @@ mod tests {
             other => panic!("fresh admission should commit, got {other:?}"),
         };
         let ship_id = committed.ship_id;
+        crate::serve::commit_test_runtime_frame(&mut node);
         let attempt = node
             .begin_client_admission(
                 ClientAdmissionIntent::Resume { resume_ticket },

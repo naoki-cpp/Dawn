@@ -59,15 +59,14 @@ mod warp;
 
 pub use crate::transit::StopTransitionError;
 pub use crate::transit::TickTransitionError;
+pub use crate::transition::StationProjectionMutation;
 pub use command_module::ModuleActivationRejection;
 pub use commands::{
     collect_runtime_commands, ClientCommandFollowup, ClientRequestAdmissionError,
     RuntimeCommandDispatch,
 };
 pub use jump::JumpOutcome;
-pub use repositories::{
-    ProjectionApplyError, ProjectionApplyResult, ProjectionReadError, StationProjectionMutation,
-};
+pub use repositories::{ProjectionApplyError, ProjectionApplyResult, ProjectionReadError};
 pub use serialization::{HandoffPayload, MissingObserverShip};
 pub use tick::TickPreparationError;
 
@@ -186,8 +185,8 @@ pub struct FittedModuleStatus {
 ///
 /// The recovery journal is owned by the runtime boundary. The engine only
 /// prepares and exposes public outputs; it never appends them to a journal
-/// itself. The compatibility SQLite adapter is isolated in `PersistenceBoundary`
-/// until the runtime-owned repository ports replace the legacy API.
+/// itself. The SQLite adapter is isolated in `PersistenceBoundary` and is
+/// advanced only by the runtime's committed Station projection step.
 pub struct SimulationNode {
     node_id: NodeId,
     sector_id: SectorId,

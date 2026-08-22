@@ -122,10 +122,10 @@ impl<'a> FrameInput<'a> {
 
 /// Version of the recovery-delta payload produced by this module.
 ///
-/// Bumped 2 -> 3: `TickRecoveryDelta` now carries the canonical `NodeState`
-/// directly instead of flattening its fields into the delta. Pre-release; no
-/// upcaster required.
-pub const RECOVERY_DELTA_VERSION: u16 = 3;
+/// Bumped 3 -> 4: `TickRecoveryDelta` now carries ordered Station projection
+/// mutations. The aggregate remains in the caught-up SQLite read model rather
+/// than being copied into `NodeState`. Pre-release; no upcaster is required.
+pub const RECOVERY_DELTA_VERSION: u16 = 4;
 
 /// Node-level scalar/collection authoritative state that both a tick's
 /// recovery delta and a checkpoint must reproduce exactly (ADR-0049, issue
@@ -147,6 +147,24 @@ pub struct NodeState {
     pub pending_auto_jumps: Vec<(ShipId, JumpGateId)>,
     pub applied_market_settlements: Vec<u64>,
     pub transit_saga: crate::persistence::TransitSagaSnapshot,
+}
+
+/// One committed change to the Station inventory projection.
+///
+/// The mutation is part of the same RecoveryDelta as the Sector state. The
+/// SQLite adapter applies the ordered list atomically after the delta becomes
+/// durable and the live Sector state is applied.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StationProjectionMutation {
+    /// Player whose Station inventory changes.
+    pub player_id: PlayerId,
+    /// Station containing the projected stack.
+    pub station_id: StationId,
+    /// Typed item stack changed by this mutation.
+    pub item_id: dawn_core::ItemId,
+    /// Signed stack delta. Zero and underflowing debits are rejected by the
+    /// projection transaction.
+    pub delta: i64,
 }
 
 /// Opaque identity for one logical Sector transition.
@@ -213,6 +231,9 @@ pub struct TickRecoveryDelta {
     /// Presentation corrections are carried with the transition output so a
     /// runtime can publish them after the durable commit.
     pub completed_warps: Vec<ShipId>,
+    /// Ordered Station projection mutations prepared with this transition.
+    /// Empty means this transition advances the projection cursor as a no-op.
+    pub station_projection: Vec<StationProjectionMutation>,
     /// Node-level authority captured after the tick. This includes command
     /// mutations that happened before the tick runner prepared its write set,
     /// so a successful tick is a complete recovery boundary rather than only
@@ -235,6 +256,7 @@ impl TickRecoveryDelta {
             ship_states: Vec::new(),
             removed_ships: Vec::new(),
             completed_warps: Vec::new(),
+            station_projection: Vec::new(),
             node_state: NodeState::default(),
         }
     }
@@ -623,6 +645,7 @@ mod tests {
             ship_states: Vec::new(),
             removed_ships: Vec::new(),
             completed_warps: vec![ship_id],
+            station_projection: Vec::new(),
             node_state,
         }));
 

@@ -9,6 +9,16 @@ related : ADR-0001 (Event Sourcing), ADR-0014 (Raft / Transit), ADR-0017 (snapsh
 
 # ADR-0049 - Exact Sector recovery with a versioned state-delta journal
 
+> **Implementation correction (2026-08-22):** `TickRecoveryDelta` now carries
+> ordered Station mutations and `RECOVERY_DELTA_VERSION` is 4. The production
+> runtime applies the SQLite Station projection only after durable append and
+> live apply, advances its cursor across the complete journal batch, and fences
+> before publication on projection failure. Fresh-admission prepared rows are
+> finalized from the committed `ClientAdmissionCommitted` record only after the
+> starter grant projects; recovery decodes that record and repeats the same
+> idempotent reconciliation. The production repository is attached before tail
+> replay so catch-up never writes into the temporary in-memory adapter.
+
 > **Implementation correction (2026-08-20):** checkpoints now persist
 > independent authoritative-recovery and public-event cursors. Adding
 > `public_event_next_index` changes the postcard checkpoint payload, so
@@ -64,13 +74,12 @@ related : ADR-0001 (Event Sourcing), ADR-0014 (Raft / Transit), ADR-0017 (snapsh
 > `serve/market_settlement.rs` was rewritten from a synchronous
 > apply-and-acknowledge loop into a two-phase outbox drain
 > (`drain_pending_inputs` before the tick, `acknowledge_outcomes` after it
-> commits) built on this substrate. Admission and fixture/NPC spawn, which
-> already have their own durability story independent of the tick pipeline
-> (see `dawn_sector::node::admission_provisional`), were left on a narrowed
-> but still-synchronous typed `RuntimeFrameHost` surface -- that was an
-> interface-leak cleanup, not a correctness fix. This is an implementation
-> fix, not a new decision -- the recovery contract this ADR already
-> committed to is unchanged.
+> commits) built on this substrate. Fixture/NPC spawn remains bootstrap-only.
+> Fresh admission still begins through a typed synchronous host surface, but
+> its materialized Ship and starter Station grant are now finalized through the
+> next durable frame as described in the 2026-08-22 correction above. This is
+> an implementation fix, not a new decision -- the recovery contract this ADR
+> already committed to is unchanged.
 
 ## Context
 
@@ -710,8 +719,10 @@ retry use explicit operation IDs.
 - [x] Add the `DAWNCKP1` checkpoint envelope, payload checksum, catalog fingerprint, explicit covered recovery position, and rejection of incompatible/corrupt checkpoints.
 - [x] Persist Player routing, allocator state, docking context, and pending bot/auto-jump authoritative state.
 - [x] Implement Station projection API plus admission/identity repository,
-  allocator, and local identity-watermark reconciliation under #277; #278
-  supplies the runtime reconciliation boundary and #280 owns remote catch-up.
+  allocator, and local identity-watermark reconciliation under #277; the
+  shared runtime now supplies the production prepare -> durable -> live apply
+  -> projection boundary. The projection advances by complete journal ranges,
+  including no-op non-Station transitions, and #280 owns remote catch-up.
 - [x] Establish one durable runtime Tick frame with injected consensus,
   durability-policy, and reconciliation ports; production, single-sector serve,
   clustered serve, and the in-memory `SectorRuntimeDriver` use the same

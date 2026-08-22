@@ -465,7 +465,7 @@ fn build_node(
         )
     });
 
-    let (mut node, is_fresh) = match StateSnapshot::load(&cfg.snapshot_path) {
+    let (mut node, recovery_start, is_fresh) = match StateSnapshot::load(&cfg.snapshot_path) {
         Ok(snapshot) => {
             println!(
                 "[Node] restoring from checkpoint (tick={}, covered_recovery_index={})",
@@ -489,14 +489,7 @@ fn build_node(
                     cfg.snapshot_path
                 )
             });
-            let (node, _) = apply_tail(node, &recovery_journal, snapshot.covered_recovery_index.0)
-                .unwrap_or_else(|error| {
-                    panic!(
-                        "checkpoint tail cannot be applied from recovery journal '{}': {error}",
-                        cfg.recovery_journal_path
-                    )
-                });
-            (node, false)
+            (node, Some(snapshot.covered_recovery_index.0), false)
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             let mut node = SimulationNode::new(
@@ -514,7 +507,7 @@ fn build_node(
                     "[Node] no snapshot at '{}', starting fresh",
                     cfg.snapshot_path
                 );
-                (node, true)
+                (node, None, true)
             } else {
                 // A crash before the first checkpoint still has an exact
                 // recovery path: reconstruct only the configured genesis
@@ -525,13 +518,7 @@ fn build_node(
                     cfg.snapshot_path, recovery_index
                 );
                 node.spawn_npc_frigates(cfg.npc_ships);
-                let (node, _) = apply_tail(node, &recovery_journal, 0).unwrap_or_else(|error| {
-                    panic!(
-                        "genesis recovery tail cannot be applied from recovery journal '{}': {error}",
-                        cfg.recovery_journal_path
-                    )
-                });
-                (node, false)
+                (node, Some(0), false)
             }
         }
         Err(e) => panic!(
@@ -540,10 +527,8 @@ fn build_node(
         ),
     };
 
-    node.set_population_cap(cfg.pop_cap);
-    // ADR-0038: Station inventory's durability is independent of the event
-    // log / snapshot lifecycle above -- opening it is just pointing at the
-    // (persistent, on-disk) file, whether this node is fresh or restored.
+    // RecoveryDelta replay advances the required Station projection, so the
+    // production repository must be attached before applying any tail.
     node.open_repositories(&cfg.repository_path)
         .unwrap_or_else(|e| {
             panic!(
@@ -551,6 +536,22 @@ fn build_node(
                 cfg.repository_path
             )
         });
+    if let Some(covered_index) = recovery_start {
+        let replay_context = if covered_index == 0 {
+            "genesis recovery tail"
+        } else {
+            "checkpoint tail"
+        };
+        let (recovered, _) =
+            apply_tail(node, &recovery_journal, covered_index).unwrap_or_else(|error| {
+                panic!(
+                    "{replay_context} cannot be applied from recovery journal '{}': {error}",
+                    cfg.recovery_journal_path
+                )
+            });
+        node = recovered;
+    }
+    node.set_population_cap(cfg.pop_cap);
     (node, store, recovery_journal, is_fresh)
 }
 

@@ -6,7 +6,9 @@
 //! batch are public projections or reliable effects and are deliberately not
 //! applied to the authoritative world.
 
-use dawn_storage::{DurableJournal, JournalError, JournalIndex, JournalStream, TransitionId};
+use dawn_storage::{
+    DurableJournal, JournalError, JournalIndex, JournalRange, JournalStream, TransitionId,
+};
 use std::collections::HashSet;
 use thiserror::Error;
 
@@ -35,8 +37,19 @@ pub enum RecoveryError {
     DuplicateTransition { transition_id: TransitionId },
     #[error("recovery delta decode failed: {0}")]
     Decode(#[from] TransitionCodecError),
+    #[error(
+        "public event in recovery transition {transition_id:?} could not be decoded: {reason}"
+    )]
+    PublicEventDecode {
+        transition_id: TransitionId,
+        reason: String,
+    },
     #[error("recovery delta apply failed: {0}")]
     Apply(#[from] TransitionApplyError),
+    #[error("recovery Station projection apply failed: {0}")]
+    Projection(String),
+    #[error("recovery repository reconciliation failed: {0}")]
+    Repository(String),
     #[error("recovery record belongs to sector {actual:?}; expected {expected:?}")]
     SectorMismatch {
         expected: dawn_core::SectorId,
@@ -73,9 +86,13 @@ pub fn apply_tail<J: DurableJournal>(
     let records = journal.read_from(start)?;
     let mut expected = start;
     let mut current_transition = None;
+    let mut current_first = start;
+    let mut current_len = 0_u32;
     let mut validated_delta = false;
     let mut seen_transitions = HashSet::new();
-    let mut pending_deltas: Vec<(SectorRecoveryDelta, TransitionContext)> = Vec::new();
+    let mut pending_delta: Option<(TransitionId, SectorRecoveryDelta, TransitionContext)> = None;
+    let mut pending_deltas = Vec::new();
+    let mut current_public_events = Vec::new();
 
     for record in records {
         let record = record?;
@@ -93,7 +110,21 @@ pub fn apply_tail<J: DurableJournal>(
             });
         }
         if current_transition != Some(record.transition_id) {
+            if let Some((transition_id, delta, context)) = pending_delta.take() {
+                pending_deltas.push((
+                    JournalRange {
+                        first: current_first,
+                        len: current_len,
+                    },
+                    transition_id,
+                    delta,
+                    context,
+                    std::mem::take(&mut current_public_events),
+                ));
+            }
             current_transition = Some(record.transition_id);
+            current_first = record.index;
+            current_len = 0;
             validated_delta = false;
             if !seen_transitions.insert(record.transition_id) {
                 return Err(RecoveryError::DuplicateTransition {
@@ -106,9 +137,22 @@ pub fn apply_tail<J: DurableJournal>(
                 });
             }
         }
+        current_len = current_len
+            .checked_add(1)
+            .ok_or(JournalError::IndexOverflow)?;
 
-        if record.stream != JournalStream::RecoveryDelta {
-            continue;
+        match record.stream {
+            JournalStream::PublicEvent => {
+                let event = postcard::from_bytes::<dawn_core::DomainEvent>(&record.payload)
+                    .map_err(|error| RecoveryError::PublicEventDecode {
+                        transition_id: record.transition_id,
+                        reason: error.to_string(),
+                    })?;
+                current_public_events.push(event);
+                continue;
+            }
+            JournalStream::ReliableEffect => continue,
+            JournalStream::RecoveryDelta => {}
         }
         if validated_delta {
             return Err(RecoveryError::DuplicateDelta {
@@ -124,7 +168,8 @@ pub fn apply_tail<J: DurableJournal>(
             });
         }
         let delta = decode_recovery_delta(&record.payload)?;
-        pending_deltas.push((
+        pending_delta = Some((
+            record.transition_id,
             delta,
             TransitionContext {
                 sector_id: record.context.sector_id,
@@ -139,9 +184,31 @@ pub fn apply_tail<J: DurableJournal>(
             expected: expected_end,
         });
     }
-    for (delta, context) in pending_deltas {
-        node.apply_recovery_delta(delta, context)?;
+    if let Some((transition_id, delta, context)) = pending_delta {
+        pending_deltas.push((
+            JournalRange {
+                first: current_first,
+                len: current_len,
+            },
+            transition_id,
+            delta,
+            context,
+            current_public_events,
+        ));
     }
+    for (range, transition_id, delta, context, public_events) in pending_deltas {
+        let mutations = match &delta {
+            SectorRecoveryDelta::Tick(delta) => delta.station_projection.clone(),
+            SectorRecoveryDelta::Stop(_) => Vec::new(),
+        };
+        node.apply_recovery_delta(delta, context)?;
+        node.apply_station_projection(&transition_id.0.to_string(), range, &mutations)
+            .map_err(|error| RecoveryError::Projection(error.to_string()))?;
+        node.reconcile_committed_admission_events(&public_events)
+            .map_err(RecoveryError::Repository)?;
+    }
+    node.reconcile_runtime_repositories()
+        .map_err(RecoveryError::Repository)?;
     Ok((node, expected))
 }
 
@@ -230,6 +297,151 @@ mod tests {
             restored.take_snapshot_at(recovered_to.0).ships,
             expected.ships
         );
+    }
+
+    #[test]
+    fn station_projection_uses_the_full_batch_range_before_the_next_transition() {
+        let mutation = crate::transition::StationProjectionMutation {
+            player_id: dawn_core::PlayerId(7),
+            station_id: dawn_core::StationId(0),
+            item_id: dawn_core::ItemId::ScrapMetal,
+            delta: 4,
+        };
+        let first_delta = SectorRecoveryDelta::Tick(Box::new({
+            let mut delta = crate::transition::TickRecoveryDelta::logical(
+                dawn_core::Tick::ZERO,
+                dawn_core::Tick(1),
+            );
+            delta.station_projection.push(mutation);
+            delta
+        }));
+        let second_delta = SectorRecoveryDelta::Tick(Box::new(
+            crate::transition::TickRecoveryDelta::logical(dawn_core::Tick(1), dawn_core::Tick(2)),
+        ));
+        let context = DurabilityContext {
+            sector_id: SectorId(0),
+            owner_epoch: 0,
+        };
+        let mut journal = InMemoryJournal::new();
+        journal
+            .append_batch(
+                JournalBatch::with_entries(
+                    TransitionId(10),
+                    context,
+                    vec![
+                        JournalEntry::new(
+                            JournalStream::RecoveryDelta,
+                            crate::transition::encode_recovery_delta(&first_delta).unwrap(),
+                        ),
+                        JournalEntry::new(
+                            JournalStream::PublicEvent,
+                            dawn_storage::encode_payload(&dawn_core::DomainEvent::ShipDespawned(
+                                dawn_core::events::ShipDespawned {
+                                    ship_id: dawn_core::ShipId::new(dawn_core::NodeId(0), 99),
+                                    tick: dawn_core::Tick::ZERO,
+                                },
+                            ))
+                            .unwrap(),
+                        ),
+                    ],
+                    DurabilityMode::Synced,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        journal
+            .append_batch(
+                JournalBatch::with_entries(
+                    TransitionId(11),
+                    context,
+                    vec![JournalEntry::new(
+                        JournalStream::RecoveryDelta,
+                        crate::transition::encode_recovery_delta(&second_delta).unwrap(),
+                    )],
+                    DurabilityMode::Synced,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+
+        let restored = apply_tail(node(), &journal, 0)
+            .expect("Station projection must advance over the public event")
+            .0;
+        assert_eq!(
+            restored.station_item_count(
+                dawn_core::PlayerId(7),
+                dawn_core::StationId(0),
+                dawn_core::ItemId::ScrapMetal,
+            ),
+            4
+        );
+    }
+
+    #[test]
+    fn admission_and_starter_grant_recover_into_the_attached_repository() {
+        let mut source = node();
+        let attempt = source
+            .begin_client_admission(
+                crate::client_admission::ClientAdmissionIntent::Fresh {
+                    spawn_position: dawn_core::Position::ORIGIN,
+                },
+                1_000.0,
+            )
+            .expect("fresh admission should begin");
+        let player_id = attempt.player_id();
+        let ship_id = attempt.ship_id();
+        let resume_ticket = attempt.resume_ticket();
+        attempt
+            .commit(&mut source)
+            .expect("fresh admission should materialize");
+
+        let mut journal = InMemoryJournal::new();
+        let mut consensus = crate::transit::LocalRuntimeConsensus;
+        let mut health = crate::transit::RuntimeHealth::default();
+        let transition_id = crate::transit::runtime_transition_id(&source);
+        crate::transit::run_durable_runtime_frame(
+            &mut source,
+            &mut journal,
+            &mut consensus,
+            &crate::transit::LocalRuntimeDurabilityPolicy,
+            &mut health,
+            crate::transition::FrameInput::lock_only(&[]),
+            crate::transit::DurableRuntimeTickContext {
+                transition_id,
+                owner_epoch: 0,
+                durability: DurabilityMode::Synced,
+                profile: crate::transit::RuntimeDurabilityProfile::LocalDurable,
+            },
+            crate::transit::reconcile_runtime_repositories,
+            |_, _, _| {},
+        )
+        .expect("admission frame should commit");
+
+        let repository_file = tempfile::NamedTempFile::new().unwrap();
+        let mut recovered = node();
+        recovered
+            .open_repositories(repository_file.path().to_str().unwrap())
+            .unwrap();
+        let (recovered, recovered_to) = apply_tail(recovered, &journal, 0).unwrap();
+
+        assert_eq!(recovered_to, journal.next_index().unwrap());
+        assert_eq!(
+            recovered.ship_absolute_pos(ship_id),
+            Some(dawn_core::AbsolutePosition::ORIGIN)
+        );
+        assert_eq!(
+            recovered.station_item_count(
+                player_id,
+                dawn_core::StationId(0),
+                dawn_core::ItemId::PackagedShip(crate::ship_types::SHIP_TYPE_MAGPIE),
+            ),
+            1
+        );
+        assert_eq!(
+            recovered.resolve_client_resume_ticket(resume_ticket),
+            Some((player_id, ship_id))
+        );
+        assert!(recovered.prepared_fresh_admission(resume_ticket).is_none());
     }
 
     #[test]

@@ -255,6 +255,52 @@ fn failed_reconciliation_stops_publication_after_live_apply() {
 }
 
 #[test]
+fn station_projection_gap_fences_before_publication() {
+    let mut node = mem_node();
+    node.apply_station_projection(
+        "projection-ahead-of-journal",
+        JournalRange {
+            first: JournalIndex::ZERO,
+            len: 1,
+        },
+        &[],
+    )
+    .expect("test setup should advance the projection cursor");
+    let mut journal = InMemoryJournal::new();
+    let mut consensus = LocalRuntimeConsensus;
+    let mut hook_called = false;
+    let mut health = RuntimeHealth::new();
+
+    let result = run_durable_runtime_frame(
+        &mut node,
+        &mut journal,
+        &mut consensus,
+        &LocalRuntimeDurabilityPolicy,
+        &mut health,
+        crate::transition::FrameInput::lock_only(&[]),
+        DurableRuntimeTickContext {
+            transition_id: crate::transition::SectorTransitionId(206),
+            owner_epoch: 4,
+            durability: DurabilityMode::Synced,
+            profile: RuntimeDurabilityProfile::LocalDurable,
+        },
+        reconcile_runtime_repositories,
+        |_, _, _| hook_called = true,
+    );
+
+    assert!(matches!(
+        result,
+        Err(TickTransitionError::Reconciliation(
+            RuntimeReconciliationError::Projection { .. }
+        ))
+    ));
+    assert!(health.is_fenced());
+    assert!(!hook_called);
+    assert_eq!(node.current_tick(), dawn_core::Tick(1));
+    assert_eq!(journal.records().len(), 1);
+}
+
+#[test]
 fn post_append_failure_fences_a_long_lived_runtime_until_recovery() {
     let mut node = mem_node();
     let mut journal = InMemoryJournal::new();

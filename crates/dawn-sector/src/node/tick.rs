@@ -184,6 +184,7 @@ impl SimulationNode {
         // newly admitted player ship receives PLAYER stats rather than NPC
         // stats. Transit Saga reconciliation remains below, after ships.
         self.restore_node_state(&delta.node_state);
+        self.stations.clear_projection_overlay();
 
         for state in &delta.ship_states {
             if !self
@@ -242,6 +243,7 @@ impl SimulationNode {
         let before_transit_saga = self.transit_saga_snapshot();
         let before_transit_journal = self.transit.transit_journal.clone();
         let before_market_settlements = self.simulation.applied_market_settlements.clone();
+        let before_station_overlay = self.stations.snapshot_projection_overlay();
 
         // Retire settlement identities the Market ledger has already decided
         // before admitting new ones, so the idempotency guard stays bounded
@@ -297,6 +299,7 @@ impl SimulationNode {
             ship_states,
             removed_ships,
             completed_warps: self.frame_outputs.completed_warps.clone(),
+            station_projection: self.stations.pending_projection().to_vec(),
             node_state: self.capture_node_state(),
         };
 
@@ -312,6 +315,8 @@ impl SimulationNode {
         self.frame_outputs.completed_warps = before_completed_warps;
         self.transit.transit_attempt_counter = before_transit_attempt_counter;
         self.simulation.applied_market_settlements = before_market_settlements;
+        self.stations
+            .restore_projection_overlay(before_station_overlay);
         self.restore_transit_saga(before_transit_saga)
             .expect("prepared Tick must restore the previous Transit Saga");
         self.frame_outputs

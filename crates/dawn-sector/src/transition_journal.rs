@@ -12,6 +12,7 @@ use dawn_storage::{
 use crate::transition::{encode_recovery_delta, PreparedSectorTransition};
 
 /// Append one prepared transition as one atomic journal batch.
+#[cfg(test)]
 pub(crate) fn append_prepared_transition<J: DurableJournal>(
     journal: &mut J,
     prepared: &PreparedSectorTransition,

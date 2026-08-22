@@ -7,7 +7,7 @@
 //! boundary while exposing explicit #277 repository views:
 //!
 //! - `station_inventory`: **not** independent Sector-world authority under
-//!   ADR-0049. The target model is an idempotent SQLite/read-model projection of
+//!   ADR-0049. It is the production idempotent SQLite/read-model projection of
 //!   journal-owned Station state, with a global contiguous applied-through
 //!   watermark.
 //! - `client_admission_prepared`, `client_admission_grants`, and
@@ -34,7 +34,10 @@ use dawn_core::{ItemId, PlayerId, Position, ResumeTicket, ShipId, StationId};
 use dawn_core::{ModuleId, ShipTypeId};
 use rusqlite::{params, Connection, OptionalExtension};
 
+#[cfg(test)]
 use super::station::StationOperationRejection;
+use crate::transition::StationProjectionMutation;
+use dawn_storage::JournalRange;
 
 fn item_id_to_columns(item_id: ItemId) -> (&'static str, u32, u32) {
     item_id.storage_columns().into_tuple()
@@ -152,18 +155,6 @@ pub(super) struct SectorTransaction<'a> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct StationProjectionMutation {
-    /// Player owning the Station inventory row.
-    pub player_id: PlayerId,
-    /// Station receiving or losing the item.
-    pub station_id: StationId,
-    /// Typed item identity being projected.
-    pub item_id: ItemId,
-    /// Signed stack delta. Zero is invalid; negative values must not underflow.
-    pub delta: i64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Result of applying one Station projection transition.
 pub enum ProjectionApplyResult {
     /// The transition was applied and the cursor now covers this position.
@@ -175,17 +166,21 @@ pub enum ProjectionApplyResult {
 /// Failure while applying a committed Station projection transition.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ProjectionApplyError {
-    /// The caller skipped a global journal position.
-    #[error("station projection is out of order: expected journal index {expected}, got {actual}")]
-    OutOfOrder { expected: u64, actual: u64 },
-    /// A stable transition identity was reused at another journal position.
+    /// The caller skipped a global journal boundary.
     #[error(
-        "station projection transition {transition_id} was already recorded at journal index {existing}, not {actual}"
+        "station projection is out of order: expected journal boundary {expected}, got {actual}"
+    )]
+    OutOfOrder { expected: u64, actual: u64 },
+    /// A stable transition identity was reused with another journal range.
+    #[error(
+        "station projection transition {transition_id} was already recorded at journal range starting at {existing} (length {existing_len}), not {actual} (length {actual_len})"
     )]
     DuplicateTransitionAtDifferentIndex {
         transition_id: String,
         existing: u64,
         actual: u64,
+        existing_len: u32,
+        actual_len: u32,
     },
     /// The mutation or stored projection data violates its invariants.
     #[error("station projection invariant failed: {reason}")]
@@ -193,7 +188,6 @@ pub enum ProjectionApplyError {
 }
 
 impl ProjectionApplyError {
-    #[cfg(test)]
     fn invalid(reason: &'static str) -> Self {
         Self::InvalidDelta { reason }
     }
@@ -322,10 +316,29 @@ impl SectorRepository {
         conn.execute(
             "CREATE TABLE IF NOT EXISTS station_projection_transitions (
                 transition_id TEXT PRIMARY KEY,
-                journal_index INTEGER NOT NULL UNIQUE CHECK (journal_index >= 0)
+                journal_index INTEGER NOT NULL UNIQUE CHECK (journal_index >= 0),
+                journal_len INTEGER NOT NULL DEFAULT 1 CHECK (journal_len > 0)
             )",
             [],
         )?;
+        let has_station_projection_journal_len: bool = conn.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM pragma_table_info('station_projection_transitions')
+                WHERE name = 'journal_len'
+            )",
+            [],
+            |row| row.get(0),
+        )?;
+        if !has_station_projection_journal_len {
+            // Before the production projection owned complete transition
+            // ranges, its test-only dedup rows represented one journal record.
+            conn.execute(
+                "ALTER TABLE station_projection_transitions
+                 ADD COLUMN journal_len INTEGER NOT NULL DEFAULT 1
+                 CHECK (journal_len > 0)",
+                [],
+            )?;
+        }
         conn.execute(
             "CREATE TABLE IF NOT EXISTS station_projection_cursor (
                 singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -468,10 +481,10 @@ impl SectorRepository {
 
     /// Rebuild identity watermarks from durable admission grant markers.
     ///
-    /// Admission finalization writes the grant marker, Station row, ownership,
-    /// and consumed IDs atomically. Reconciliation must therefore not replay
-    /// the Station grant: a player may have consumed the starter item since
-    /// the marker was written, and recreating it would duplicate the item.
+    /// Admission finalization runs only after the starter Station mutation has
+    /// projected. It writes the grant marker, ownership, and consumed IDs as
+    /// one transaction, but never replays the Station row: a player may have
+    /// consumed that item after the marker was written.
     pub(super) fn reconcile_admission_identity_watermarks(&self) -> rusqlite::Result<()> {
         let tx = self.conn.unchecked_transaction()?;
         let mut next_by_node = BTreeMap::<u8, u64>::new();
@@ -941,6 +954,7 @@ impl SectorRepository {
     }
 
     /// Add `count` of `item_id` to `player_id`'s stack at `station_id` (upsert).
+    #[cfg(test)]
     pub(super) fn credit(
         &self,
         player_id: PlayerId,
@@ -970,6 +984,7 @@ impl SectorRepository {
     /// Subtract `count` from `player_id`'s stack at `station_id`, rejecting rather than going
     /// negative (mirrors the rejection reasons `station.rs` already surfaces
     /// to callers). Deletes the row once it hits zero.
+    #[cfg(test)]
     pub(super) fn try_debit(
         &self,
         player_id: PlayerId,
@@ -1072,46 +1087,57 @@ impl SectorRepository {
         )
     }
 
-    /// Apply one Station mutation at a global journal position.
+    /// Apply one committed transition's Station mutations at its global
+    /// journal range.
     ///
     /// The transition identity is checked before the mutation. Replaying the
     /// same identity is a no-op, while a gap is rejected so the cursor can only
     /// represent a contiguous global prefix. Non-Station transitions use the
-    /// same method with `mutation = None`.
-    #[cfg(test)]
+    /// same method with an empty mutation slice. The cursor advances to the
+    /// range's exclusive end, not merely one record past its first index.
     pub(super) fn apply_station_projection(
         &self,
         transition_id: &str,
-        journal_index: u64,
-        mutation: Option<StationProjectionMutation>,
+        range: JournalRange,
+        mutations: &[StationProjectionMutation],
     ) -> Result<ProjectionApplyResult, ProjectionApplyError> {
         if transition_id.is_empty() {
             return Err(ProjectionApplyError::invalid(
                 "projection transition identity must not be empty",
             ));
         }
+        if range.len == 0 {
+            return Err(ProjectionApplyError::invalid(
+                "projection journal range must not be empty",
+            ));
+        }
+        let journal_index = range.first.0;
         let journal_index_sql = i64::try_from(journal_index)
             .map_err(|_| ProjectionApplyError::invalid("journal index exceeds SQLite INTEGER"))?;
+        let journal_len_sql = i64::from(range.len);
         let tx = self
             .conn
             .unchecked_transaction()
             .map_err(|_| ProjectionApplyError::invalid("could not begin projection transaction"))?;
-        let existing: Option<i64> = tx
+        let existing: Option<(i64, i64)> = tx
             .query_row(
-                "SELECT journal_index FROM station_projection_transitions
+                "SELECT journal_index, journal_len FROM station_projection_transitions
                  WHERE transition_id = ?1",
                 params![transition_id],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()
             .map_err(|_| {
                 ProjectionApplyError::invalid("could not read transition deduplication state")
             })?;
-        if let Some(existing) = existing {
+        if let Some((existing, existing_len)) = existing {
             let existing = u64::try_from(existing).map_err(|_| {
                 ProjectionApplyError::invalid("stored transition index is negative")
             })?;
-            if existing == journal_index {
+            let existing_len = u32::try_from(existing_len).map_err(|_| {
+                ProjectionApplyError::invalid("stored transition range length is invalid")
+            })?;
+            if existing == journal_index && existing_len == range.len {
                 tx.rollback().ok();
                 return Ok(ProjectionApplyResult::Duplicate);
             }
@@ -1120,6 +1146,8 @@ impl SectorRepository {
                 transition_id: transition_id.to_owned(),
                 existing,
                 actual: journal_index,
+                existing_len,
+                actual_len: range.len,
             });
         }
         let through: u64 = tx
@@ -1137,7 +1165,7 @@ impl SectorRepository {
                 actual: journal_index,
             });
         }
-        if let Some(mutation) = mutation {
+        for mutation in mutations {
             if mutation.delta == 0 {
                 tx.rollback().ok();
                 return Err(ProjectionApplyError::invalid(
@@ -1234,13 +1262,14 @@ impl SectorRepository {
             }
         }
         tx.execute(
-            "INSERT INTO station_projection_transitions (transition_id, journal_index)
-             VALUES (?1, ?2)",
-            params![transition_id, journal_index_sql],
+            "INSERT INTO station_projection_transitions
+             (transition_id, journal_index, journal_len) VALUES (?1, ?2, ?3)",
+            params![transition_id, journal_index_sql, journal_len_sql],
         )
         .map_err(|_| ProjectionApplyError::invalid("could not record projection transition"))?;
-        let next = journal_index
-            .checked_add(1)
+        let next = range
+            .checked_last_exclusive()
+            .map(|index| index.0)
             .ok_or_else(|| ProjectionApplyError::invalid("projection cursor overflowed"))?;
         let next_sql = i64::try_from(next).map_err(|_| {
             ProjectionApplyError::invalid("projection cursor exceeds SQLite INTEGER")
@@ -1302,15 +1331,14 @@ impl StationInventoryRepository<'_> {
         self.repository.projection_applied_through()
     }
 
-    #[cfg(test)]
     pub(super) fn apply_projection(
         &self,
         transition_id: &str,
-        journal_index: u64,
-        mutation: Option<StationProjectionMutation>,
+        range: JournalRange,
+        mutations: &[StationProjectionMutation],
     ) -> Result<ProjectionApplyResult, ProjectionApplyError> {
         self.repository
-            .apply_station_projection(transition_id, journal_index, mutation)
+            .apply_station_projection(transition_id, range, mutations)
     }
 
     pub(super) fn get_all(
@@ -1320,33 +1348,11 @@ impl StationInventoryRepository<'_> {
     ) -> BTreeMap<ItemId, u64> {
         self.repository.get_all(player_id, station_id)
     }
-
-    pub(super) fn credit(
-        &self,
-        player_id: PlayerId,
-        station_id: StationId,
-        item_id: ItemId,
-        count: u64,
-    ) {
-        self.repository
-            .credit(player_id, station_id, item_id, count);
-    }
-
-    pub(super) fn try_debit(
-        &self,
-        player_id: PlayerId,
-        station_id: StationId,
-        item_id: ItemId,
-        count: u64,
-    ) -> Result<(), StationOperationRejection> {
-        self.repository
-            .try_debit(player_id, station_id, item_id, count)
-    }
 }
 
 impl SectorTransaction<'_> {
-    /// Commit an admission grant across the admission, identity, and Station
-    /// repositories as one local transaction.
+    /// Finalize one admission/identity grant after its Station mutation has
+    /// projected through the durable runtime frame.
     pub(super) fn ensure_client_admission_grant(
         self,
         ship_id: ShipId,
@@ -1404,22 +1410,6 @@ impl SectorTransaction<'_> {
                     "admission grant identity does not match the existing grant",
                 ));
             }
-        } else {
-            self.transaction.execute(
-                "INSERT INTO station_inventory
-                 (player_id, station_id, item_type, module_id, ship_type_id, count)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-                 ON CONFLICT (player_id, station_id, item_type, module_id, ship_type_id)
-                 DO UPDATE SET count = count + excluded.count",
-                params![
-                    player_id.0 as i64,
-                    station_id.0 as i64,
-                    item_type,
-                    module_id,
-                    ship_type_id,
-                    count,
-                ],
-            )?;
         }
         let existing_owner: Option<i64> = self
             .transaction
@@ -1629,7 +1619,9 @@ mod tests {
             item,
             1,
         ));
-        assert_eq!(db.get_all(PlayerId(1), StationId(7)).get(&item), Some(&1));
+        // Admission/identity finalization no longer mutates Station rows.
+        // The starter item is projected from the committed RecoveryDelta.
+        assert!(db.get_all(PlayerId(1), StationId(7)).is_empty());
     }
 
     #[test]
@@ -1647,6 +1639,7 @@ mod tests {
             item,
             1,
         ));
+        db.credit(PlayerId(1), StationId(7), item, 1);
         assert!(db.try_debit(PlayerId(1), StationId(7), item, 1).is_ok());
 
         db.reconcile_admission_identity_watermarks().unwrap();
@@ -1828,11 +1821,7 @@ mod tests {
                 2,
             )
             .is_err());
-        assert_eq!(
-            db.get_all(PlayerId(1), StationId(7))
-                .get(&ItemId::ScrapMetal),
-            Some(&1)
-        );
+        assert!(db.get_all(PlayerId(1), StationId(7)).is_empty());
     }
 
     #[test]
@@ -1871,34 +1860,58 @@ mod tests {
         };
 
         assert_eq!(
-            db.station_inventory()
-                .apply_projection("transition-0", 0, Some(mutation)),
+            db.station_inventory().apply_projection(
+                "transition-0",
+                JournalRange {
+                    first: dawn_storage::JournalIndex(0),
+                    len: 2,
+                },
+                &[mutation],
+            ),
             Ok(ProjectionApplyResult::Applied {
-                projection_applied_through: 1
+                projection_applied_through: 2
             })
         );
         assert_eq!(
-            db.station_inventory()
-                .apply_projection("transition-0", 0, Some(mutation)),
+            db.station_inventory().apply_projection(
+                "transition-0",
+                JournalRange {
+                    first: dawn_storage::JournalIndex(0),
+                    len: 2,
+                },
+                &[mutation],
+            ),
             Ok(ProjectionApplyResult::Duplicate)
         );
         assert_eq!(
             db.station_inventory().projection_applied_through().unwrap(),
-            1
+            2
         );
         assert_eq!(
-            db.station_inventory()
-                .apply_projection("transition-2", 2, None),
+            db.station_inventory().apply_projection(
+                "transition-2",
+                JournalRange {
+                    first: dawn_storage::JournalIndex(3),
+                    len: 1,
+                },
+                &[],
+            ),
             Err(ProjectionApplyError::OutOfOrder {
-                expected: 1,
-                actual: 2
+                expected: 2,
+                actual: 3
             })
         );
         assert_eq!(
-            db.station_inventory()
-                .apply_projection("transition-1", 1, None),
+            db.station_inventory().apply_projection(
+                "transition-1",
+                JournalRange {
+                    first: dawn_storage::JournalIndex(2),
+                    len: 1,
+                },
+                &[],
+            ),
             Ok(ProjectionApplyResult::Applied {
-                projection_applied_through: 2
+                projection_applied_through: 3
             })
         );
         assert_eq!(
@@ -1910,18 +1923,140 @@ mod tests {
     }
 
     #[test]
+    fn repository_init_migrates_legacy_station_projection_ranges() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute(
+            "CREATE TABLE station_projection_transitions (
+                transition_id TEXT PRIMARY KEY,
+                journal_index INTEGER NOT NULL UNIQUE CHECK (journal_index >= 0)
+            )",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO station_projection_transitions
+             (transition_id, journal_index) VALUES ('legacy', 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "CREATE TABLE station_projection_cursor (
+                singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                projection_applied_through INTEGER NOT NULL
+                    CHECK (projection_applied_through >= 0)
+            )",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO station_projection_cursor
+             (singleton, projection_applied_through) VALUES (1, 1)",
+            [],
+        )
+        .unwrap();
+
+        let db = SectorRepository::init(conn).unwrap();
+
+        assert_eq!(
+            db.conn
+                .query_row(
+                    "SELECT journal_len FROM station_projection_transitions
+                     WHERE transition_id = 'legacy'",
+                    [],
+                    |row| row.get::<_, u32>(0),
+                )
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            db.station_inventory().apply_projection(
+                "production-range",
+                JournalRange {
+                    first: dawn_storage::JournalIndex(1),
+                    len: 2,
+                },
+                &[],
+            ),
+            Ok(ProjectionApplyResult::Applied {
+                projection_applied_through: 3,
+            })
+        );
+    }
+
+    #[test]
     fn station_projection_rejects_journal_indices_outside_sqlite_integer_range() {
         let db = SectorRepository::open_in_memory().unwrap();
 
         assert!(matches!(
-            db.station_inventory().apply_projection("", 0, None),
+            db.station_inventory().apply_projection(
+                "",
+                JournalRange {
+                    first: dawn_storage::JournalIndex(0),
+                    len: 1,
+                },
+                &[],
+            ),
             Err(ProjectionApplyError::InvalidDelta { .. })
         ));
         assert!(matches!(
-            db.station_inventory()
-                .apply_projection("too-large", u64::MAX, None),
+            db.station_inventory().apply_projection(
+                "too-large",
+                JournalRange {
+                    first: dawn_storage::JournalIndex(u64::MAX),
+                    len: 1,
+                },
+                &[],
+            ),
             Err(ProjectionApplyError::InvalidDelta { .. })
         ));
+    }
+
+    #[test]
+    fn station_projection_failure_keeps_rows_and_cursor_atomic() {
+        let db = SectorRepository::open_in_memory().unwrap();
+        let item = ItemId::ScrapMetal;
+        let credit = StationProjectionMutation {
+            player_id: PlayerId(1),
+            station_id: StationId(7),
+            item_id: item,
+            delta: 1,
+        };
+        db.station_inventory()
+            .apply_projection(
+                "credit",
+                JournalRange {
+                    first: dawn_storage::JournalIndex(0),
+                    len: 1,
+                },
+                &[credit],
+            )
+            .unwrap();
+
+        let debit = StationProjectionMutation {
+            delta: -2,
+            ..credit
+        };
+        assert!(matches!(
+            db.station_inventory().apply_projection(
+                "invalid-debit",
+                JournalRange {
+                    first: dawn_storage::JournalIndex(1),
+                    len: 1,
+                },
+                &[debit],
+            ),
+            Err(ProjectionApplyError::InvalidDelta { .. })
+        ));
+        assert_eq!(
+            db.station_inventory().projection_applied_through().unwrap(),
+            1
+        );
+        assert_eq!(
+            db.station_inventory()
+                .get_all(PlayerId(1), StationId(7))
+                .get(&item),
+            Some(&1)
+        );
     }
 
     #[test]
