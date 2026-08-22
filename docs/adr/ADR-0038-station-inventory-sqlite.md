@@ -32,14 +32,17 @@ related : ADR-0034（Economy Foundations）, ADR-0017（snapshot/public Event ar
 > 以下の旧本文中「SQLiteがauthority」「snapshot+event tail」「不整合windowを許容」は**歴史的な
 > 原決定の記録**であり、現在のnormative recovery behaviorではない。
 
-> **#277 implementation amendment (2026-08-09):** `repositories.rs` now owns the
+> **#277 / Station production projection amendment (2026-08-22):** `repositories.rs` now owns the
 > node-local SQLite schema. Fresh admission reservations durably consume IDs and
 > persist allocator watermarks before `Welcome`; existing protocol rows and
 > materialized snapshot IDs raise those watermarks on reopen. Station rows are
 > read through `StationInventoryRepository`, while projection transitions are
 > deduplicated and advanced through a contiguous global journal cursor. The
-> runtime hook that feeds committed RecoveryDeltas into that projection remains
-> the #278 orchestration responsibility.
+> production projection API. The shared runtime now feeds each committed
+> RecoveryDelta into it after local live apply, passing the complete journal
+> range and ordered Station mutations. Command preparation uses only a
+> frame-local touched-key overlay; the full Station aggregate is never copied
+> into `SimulationNode`, `NodeState`, or every checkpoint.
 
 ## 背景
 

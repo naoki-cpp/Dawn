@@ -16,7 +16,7 @@ date     : 2026-08-20（Recovery/Public replication cursor分離後、全Rustク
 ## 現状評価
 
 **総合: B+。** crate DAGとdeep module境界は健全で、production / single-sector / cluster /
-in-process driverは`RuntimeFrameHost`へ統合された。一方、`repositories.rs`（1969行）は複数の
+in-process driverは`RuntimeFrameHost`へ統合された。一方、`repositories.rs`（2104行）は複数の
 独立した変更理由を抱え、分割triggerが発火している。Transit handoffは今回、root入口を11行へ
 縮小し、lifecycle / materializationをprivate moduleへ分離した。今回の再計測では、
 共有ランタイムとTransit deepeningを反映しつつ、実装行数と責務混在を分けて再評価した。
@@ -54,6 +54,13 @@ Resolved in #278: production, single-sector, clustered, and in-process test
 drivers now call the shared durable runtime frame. `SectorRuntimeDriver` remains
 only as an async in-memory adapter; it is not a second Tick implementation.
 
+Station projection production wiring is also complete: preparation carries only
+touched-key overlay mutations, the durable RecoveryDelta is applied before the
+SQLite read model, and the projection cursor advances by complete journal batch
+ranges with no-op progression for non-Station transitions. Production recovery
+attaches the real repository before tail replay, and success-side loadout refreshes
+run only after the required projection completes.
+
 `ClientCommand`外側matchと`StationDispatchCommand`、domain固有の戻り値、process model固有の薄いadapterは
 意図的に維持する。
 
@@ -61,12 +68,12 @@ only as an async in-memory adapter; it is not a second Tick implementation.
 
 | ファイル | 行数 | 判定 |
 |---|---:|---|
-| `crates/dawn-sector/src/node/repositories.rs` | 1969 | 🔴 Admission / Identity / Station projectionのschema・codec・transaction・testsを一つの入口に集約。R-7でbounded-context分割をFix |
+| `crates/dawn-sector/src/node/repositories.rs` | 2104 | 🔴 Admission / Identity / Station projectionのschema・codec・transaction・testsを一つの入口に集約。R-7でbounded-context分割をFix |
 | `crates/dawn-sector/src/node/transit.rs` | 11 | 🟢 lifecycle / materializationを束ねる薄いprivate module root |
 | `crates/dawn-sector/src/node/transit/lifecycle.rs` | 512 | 🟢 source freeze / handoff snapshot / Ack cleanup。Saga policyとはprivate node state seamで接続 |
 | `crates/dawn-sector/src/node/transit/materialization.rs` | 134 | 🟢 live Commitのhandoff-to-ECS materialization kernel |
 | `crates/dawn-sector/src/node/transit/tests.rs` | 880 | 🟢 Transit lifecycle・materialization・checkpoint recovery・cross-Sector統合tests |
-| `crates/dawn-sector/src/node/tick.rs` | 1691 | 🟢 authoritative tick orderとprepare→durable→applyのkernel・tests。単一の順序機械なので分割しない |
+| `crates/dawn-sector/src/node/tick.rs` | 1696 | 🟢 authoritative tick orderとprepare→durable→applyのkernel・tests。単一の順序機械なので分割しない |
 | `crates/dawn-sector/src/node/commands.rs` | 1382 | 🟢 外側のfamily選択・runtime command collection・follow-up射影・統合tests。policyは専用moduleへ分離済み |
 | `crates/dawn-storage/src/file_journal.rs` | 1366 | 🟢 versioned journal framing・compaction・corruption recoveryの一つのstorage kernel・tests |
 | `crates/dawn-sector/src/persistence/snapshot.rs` | 1246 | 🟢 checkpoint envelope・atomic publication・platform adapter・tests。単一のsnapshot publication boundary |
@@ -74,13 +81,13 @@ only as an async in-memory adapter; it is not a second Tick implementation.
 | `crates/dawn-sector/src/node/mod.rs` | 1071 | 🟢 node composition・identity/accessor・population/repository boundary。座標helperはR-4で分離済み |
 | `crates/dawn-distributed/src/catch_up.rs` | 1125 | 🟢 catch-up / snapshot-tail policy・tests |
 | `crates/dawn-market/src/order_book.rs` | 1044 | 🟢 pure order/matching/SettlementIntent policy。SQLは`repository.rs`へ分離済み（#279） |
-| `crates/dawn-sector/src/transit.rs` | 782 | 🟢 runtime consensus / durable transition policy。Ship handoff state mutationとは分離済み |
+| `crates/dawn-sector/src/transit.rs` | 830 | 🟢 runtime consensus / durable transition policy。Ship handoff state mutationとは分離済み |
 | `crates/dawn-sector/src/node/orbit.rs` | 990 | 🟢 Orbit / Keep-at-Range steering kernel・tests |
 | `crates/dawn-distributed/src/peer_transport.rs` | 963 | 🟡 shared peer framing/lifecycle・control/bulk isolation・tests。adapter surfaceが増えたらprotocol/framing分割 |
 | `crates/dawn-sector/src/transit/handoff.rs` | 944 | 🟢 Transit Saga request/commit/ack policy・retry/idempotency/recovery |
-| `crates/dawn-sector/src/node/snapshot_io.rs` | 944 | 🟢 snapshot/checkpoint/restore seam・tests |
+| `crates/dawn-sector/src/node/snapshot_io.rs` | 955 | 🟢 snapshot/checkpoint/restore seam・tests |
 | `crates/dawn-sector/src/node/inventory.rs` | 908 | 🟢 fitting mutation boundary・tests。cargo操作は`ship_cargo.rs`へ分離済み |
-| `crates/dawn-sector/src/client_admission.rs` | 906 | 🟢 admission protocol state machine・tests |
+| `crates/dawn-sector/src/client_admission.rs` | 945 | 🟢 admission protocol state machine・tests |
 | `crates/dawn-protocol/src/server_fact.rs` | 806 | 🟢 server fact projection/schema・tests |
 | `crates/dawn-core/src/commands.rs` | 795 | 🟢 domain command types/validation data・tests |
 | `crates/dawn-sector/src/aoi.rs` | 781 | 🟢 AoI index/delta delivery contract・tests |
@@ -90,17 +97,17 @@ only as an async in-memory adapter; it is not a second Tick implementation.
 | `crates/dawn-server/src/serve/market_settlement.rs` | 774 | 🟢 Market settlementのdurable frame input / acknowledgement adapter・tests |
 | `crates/dawn-sector/src/node/station_materialization.rs` | 650 | 🟢 station assemble/disassemble materialization・tests |
 | `crates/dawn-server/src/cluster.rs` | 670 | 🟢 in-process cluster wiring・fault tests |
-| `crates/dawn-server/src/serve/cluster.rs` | 659 | 🟢 clustered serve composition・admission/jump tests |
+| `crates/dawn-server/src/serve/cluster.rs` | 671 | 🟢 clustered serve composition・admission/jump tests |
 | `crates/dawn-sector/src/node/approach.rs` | 631 | 🟢 approach steering state machine・tests |
 | `crates/dawn-sector/src/node/ship_cargo.rs` | 681 | 🟢 ship cargo ownership/bridge boundary・tests |
 | `crates/dawn-market/src/repository.rs` | 623 | 🟡 SQLite order/Currency/outbox persistence。bounded-memory streamingはfollow-up |
 | `crates/dawn-distributed/src/state.rs` | 593 | 🟢 Raft state transition/persistence boundary・tests |
 | `crates/dawn-ecs/src/systems/combat.rs` | 584 | 🟢 combat system・tests |
-| `crates/dawn-server/src/bin/sector-node.rs` | 583 | 🟢 production node bootstrap/config |
-| `crates/dawn-sector/src/transition.rs` | 714 | 🟢 durable transition preparation / output boundary |
+| `crates/dawn-server/src/bin/sector-node.rs` | 584 | 🟢 production node bootstrap/config |
+| `crates/dawn-sector/src/transition.rs` | 737 | 🟢 durable transition preparation / output boundary |
 | `crates/dawn-protocol/src/lib.rs` | 554 | 🟢 wire envelope/schema exports・tests |
 | `crates/dawn-server/src/sector_runtime_driver.rs` | 547 | 🟢 in-process Sector actor/runtime adapter・tests |
-| `crates/dawn-server/src/serve/single.rs` | 544 | 🟢 single-sector serve composition・admission tests |
+| `crates/dawn-server/src/serve/single.rs` | 545 | 🟢 single-sector serve composition・admission tests |
 | `crates/dawn-sector/src/node/serialization.rs` | 542 | 🟢 observer-scoped state projection |
 | `crates/dawn-sector/src/node/player_loadout_projection.rs` | 535 | 🟢 PlayerLoadout wire projection |
 | `crates/dawn-server/src/runtime_frame.rs` | 960 | 🟢 shared one-Sector frame host・policy injection・output boundary・tests |

@@ -859,9 +859,10 @@ mod tests {
         );
     }
 
-    /// ADR-0038: Station inventory survives a restart because it lives in its
-    /// own durable SQLite file, independent of the checkpoint lifecycle -- not
-    /// because `take_snapshot()`/`restore_from()` carry it. Simulates a real
+    /// ADR-0038: Station inventory survives a restart because the committed
+    /// Station projection lives in its own durable SQLite file, independent of
+    /// the checkpoint lifecycle -- not because `take_snapshot()`/`restore_from()`
+    /// carry it. Simulates a real
     /// restart: `node` and `node2` are otherwise-independent
     /// `SimulationNode`s, but both point `open_repositories` at the same
     /// on-disk file.
@@ -881,6 +882,16 @@ mod tests {
             ItemId::PackagedShip(dawn_core::ShipTypeId(1)),
             1,
         );
+        let mutations = node.stations.pending_projection().to_vec();
+        node.apply_station_projection(
+            "seed-station-projection",
+            dawn_storage::JournalRange {
+                first: dawn_storage::JournalIndex(0),
+                len: 1,
+            },
+            &mutations,
+        )
+        .unwrap();
 
         let snap = node.take_snapshot();
         let mut node2 = SimulationNode::restore_from(

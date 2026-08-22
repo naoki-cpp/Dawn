@@ -8,7 +8,7 @@
 use super::client_admission::ClientAdmission;
 use crate::runtime_frame::{OwnedRaftRuntimeConsensus, RuntimeFrameHost, RuntimeFrameHostError};
 use dawn_actor::ws_server;
-use dawn_core::{DomainEvent, SectorId, ShipId};
+use dawn_core::{DomainEvent, PlayerId, SectorId, ShipId};
 use dawn_distributed::{OutboundLogPublisher, PeerReplicationTransport};
 use dawn_protocol::ServerMessage;
 use dawn_sector::aoi::{AoiMessage, AoiSink, Observer};
@@ -21,7 +21,12 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 
 type PendingPlayerJump = (usize, ShipId, dawn_core::JumpCommand);
-type CollectedPlayerCommands = (Vec<dawn_core::LockOnCommand>, Vec<PendingPlayerJump>);
+type PendingPlayerLoadoutRefresh = (usize, PlayerId);
+type CollectedPlayerCommands = (
+    Vec<dawn_core::LockOnCommand>,
+    Vec<PendingPlayerJump>,
+    Vec<PendingPlayerLoadoutRefresh>,
+);
 
 impl RuntimeFrameHost<FileJournal, OwnedRaftRuntimeConsensus> {
     /// Advance production client-handshake admission against the owned node.
@@ -122,7 +127,8 @@ impl SectorNodeRuntime {
     }
 
     pub(crate) fn run_frame(&mut self, event_store: &mut impl EventStore) -> anyhow::Result<()> {
-        let (lock_commands, pending_jumps) = self.collect_player_commands()?;
+        let (lock_commands, pending_jumps, pending_loadout_refreshes) =
+            self.collect_player_commands()?;
         self.propose_player_jumps(pending_jumps)?;
 
         let outbound_replication = &mut self.outbound_replication;
@@ -137,6 +143,17 @@ impl SectorNodeRuntime {
             )
             .map_err(|error| anyhow::anyhow!("authoritative recovery tick failed: {error}"))?;
 
+        for (session_index, player_id) in pending_loadout_refreshes {
+            if let Some(loadout) = self
+                .host
+                .node()
+                .build_player_loadout_json_for_player(player_id)
+            {
+                if let Some(session) = self.sessions.get_mut(session_index) {
+                    session.send_message(&ServerMessage::PlayerLoadout(loadout));
+                }
+            }
+        }
         self.log_auto_jumps(&output.pending_auto_jumps);
         let jumped_ships = self.jumped_ships(&output.events);
         self.deliver_frames(&output.events, &output.completed_warps, &jumped_ships);
@@ -148,6 +165,7 @@ impl SectorNodeRuntime {
     ) -> Result<CollectedPlayerCommands, RuntimeFrameHostError> {
         let mut lock_commands = Vec::new();
         let mut pending_jumps = Vec::new();
+        let mut pending_loadout_refreshes = Vec::new();
 
         for dispatch in self.host.collect_runtime_commands(
             &mut self.sessions,
@@ -164,17 +182,7 @@ impl SectorNodeRuntime {
                 RuntimeCommandDispatch::RefreshPlayerLoadout {
                     session_index,
                     player_id,
-                } => {
-                    if let Some(loadout) = self
-                        .host
-                        .node()
-                        .build_player_loadout_json_for_player(player_id)
-                    {
-                        if let Some(session) = self.sessions.get_mut(session_index) {
-                            session.send_message(&ServerMessage::PlayerLoadout(loadout));
-                        }
-                    }
-                }
+                } => pending_loadout_refreshes.push((session_index, player_id)),
                 RuntimeCommandDispatch::Rejected {
                     session_index,
                     error,
@@ -188,7 +196,7 @@ impl SectorNodeRuntime {
             }
         }
 
-        Ok((lock_commands, pending_jumps))
+        Ok((lock_commands, pending_jumps, pending_loadout_refreshes))
     }
 
     fn propose_player_jumps(

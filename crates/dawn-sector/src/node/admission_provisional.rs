@@ -20,8 +20,8 @@
 //! - public admission events may remain useful facts, but are not the sole exact
 //!   recovery reducer or allocator authority.
 //!
-//! #278 still owns the runtime hook that applies Station projection records
-//! after the authoritative RecoveryDelta is durable.
+//! The starter Station item is staged in authoritative `StationState`; the
+//! next durable RecoveryDelta carries it to the production projection hook.
 
 use dawn_core::{
     events::{ClientAdmissionCommitted, ClientAdmissionIdentityReserved},
@@ -200,18 +200,16 @@ impl SimulationNode {
         handoff
     }
 
-    /// Commit a reserved fresh admission and finalize its repository grant.
+    /// Materialize a reserved fresh admission for the next durable frame.
     ///
-    /// It materializes live state, emits `ClientAdmissionCommitted`, then
-    /// finalizes the SQLite grant/identity rows. Retryable finalization repairs
-    /// the identity watermark after a restart without replaying the Station
-    /// item grant.
+    /// It materializes live state, stages the starter item in authoritative
+    /// Station state, and emits `ClientAdmissionCommitted`. The prepared
+    /// admission claim remains held until the next durable frame projects the
+    /// Station mutation and reconciles the admission/identity repository.
     ///
-    /// ADR-0049/#272/#277 replaces this as the normative commit contract with a
-    /// prepared Sector transition whose `RecoveryDelta` is durable before live
-    /// apply, followed by idempotent Admission/Identity repository finalization.
-    /// The public event may remain a business fact but is not the sole
-    /// recovery authority.
+    /// ADR-0049/#272/#277 keeps the public event as a business fact, but the
+    /// authoritative Station mutation is recovered from the prepared
+    /// `RecoveryDelta`, not from event replay or direct SQLite mutation.
     pub(crate) fn commit_reserved_fresh_admission(
         &mut self,
         player_id: PlayerId,
@@ -267,8 +265,12 @@ impl SimulationNode {
         };
 
         self.emit_event(DomainEvent::ClientAdmissionCommitted(event.clone()));
-        self.players.pending_fresh_admissions.remove(&ship_id);
-        self.ensure_client_admission_grant(&event);
+        self.credit_station_item(
+            event.player_id,
+            event.starter_station_id,
+            event.starter_item_id,
+            event.starter_item_count,
+        );
         true
     }
 

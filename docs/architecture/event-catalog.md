@@ -105,8 +105,8 @@ See [ADR-0017](../adr/ADR-0017-snapshot-compaction.md), [ADR-0049](../adr/ADR-00
 | Event | Description | Emitter | Status |
 |---|---|---|---|
 | `ShipSpawned` | Ship appeared in the world | `SimulationNode::spawn_ship()` | ✅ implemented |
-| `ClientAdmissionIdentityReserved` | Fresh admission durably consumed a `PlayerId`/`ShipId` pair without materializing a Ship; this is an append-only audit fact, while exact allocation watermarks are checkpoint/RecoveryDelta authority | `SimulationNode::reserve_fresh_admission_identity()` | ✅ implemented |
-| `ClientAdmissionCommitted` | Atomic fresh-admission starter public fact: Ship, fitting/stacked-cargo snapshot, ownership identity, and idempotent Station grant description | `SimulationNode::commit_reserved_fresh_admission()` | ✅ implemented |
+| `ClientAdmissionIdentityReserved` | Fresh admission durably consumed a `PlayerId`/`ShipId` pair without materializing a Ship; this is an append-only audit fact, while the prepared row and allocation watermarks are repository protocol authority | `SimulationNode::reserve_fresh_admission_identity()` | ✅ implemented |
+| `ClientAdmissionCommitted` | Fresh-admission public fact carried with the materializing RecoveryDelta: Ship, fitting/stacked-cargo snapshot, ownership identity, and idempotent Station grant description. After Station projection, live/recovery reconciliation uses this record to finalize the prepared admission repository row | `SimulationNode::commit_reserved_fresh_admission()` | ✅ implemented |
 | `ShipDespawned` | Ship manually removed from the world | `SimulationNode` | type only (no emission site) |
 | `ShipDestroyed` | Ship destroyed in combat | `CombatSystem` | ✅ implemented |
 

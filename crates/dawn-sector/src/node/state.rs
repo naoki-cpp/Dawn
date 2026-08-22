@@ -9,8 +9,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use dawn_core::{
-    DomainEvent, JumpGateId, LockOnCommand, ModuleDefinition, ModuleId, NodeId, PlayerId, Position,
-    ResumeTicket, ShipId, ShipTypeDefinition, ShipTypeId, StationId, Tick,
+    DomainEvent, ItemId, JumpGateId, LockOnCommand, ModuleDefinition, ModuleId, NodeId, PlayerId,
+    Position, ResumeTicket, ShipId, ShipTypeDefinition, ShipTypeId, StationId, Tick,
 };
 use dawn_ecs::{components::ShipStatsComp, SimWorld};
 
@@ -21,6 +21,7 @@ use super::repositories::{
 use super::sector_map::SectorMap;
 use super::ship_registry::ShipRegistry;
 use super::TransitJournal;
+use crate::transition::StationProjectionMutation;
 
 /// ECS and authoritative simulation counters.
 pub(super) struct SimulationState {
@@ -50,6 +51,10 @@ pub(super) struct PlayerState {
 pub(super) struct StationState {
     docked_ships: BTreeMap<ShipId, StationId>,
     docked_players: BTreeMap<PlayerId, StationId>,
+    /// Only keys touched since the last committed frame are staged here.
+    /// SQLite remains the caught-up Station read model; this overlay is never
+    /// serialized and is cleared after the enclosing RecoveryDelta commits.
+    projection_overlay: Option<StationProjectionOverlay>,
 }
 
 impl StationState {
@@ -57,6 +62,7 @@ impl StationState {
         Self {
             docked_ships: BTreeMap::new(),
             docked_players: BTreeMap::new(),
+            projection_overlay: None,
         }
     }
 
@@ -100,6 +106,98 @@ impl StationState {
         self.docked_players.clone()
     }
 
+    pub(super) fn overlay_inventory(
+        &self,
+        player_id: PlayerId,
+        station_id: StationId,
+    ) -> impl Iterator<Item = (ItemId, u64)> + '_ {
+        self.projection_overlay
+            .as_ref()
+            .into_iter()
+            .flat_map(move |overlay| overlay.values.iter())
+            .filter_map(move |(&(owner, station, item_id), &count)| {
+                (owner == player_id && station == station_id.0).then_some((item_id, count))
+            })
+    }
+
+    pub(super) fn pending_projection(&self) -> &[StationProjectionMutation] {
+        self.projection_overlay
+            .as_ref()
+            .map(|overlay| overlay.mutations.as_slice())
+            .unwrap_or(&[])
+    }
+
+    pub(super) fn snapshot_projection_overlay(&self) -> Option<StationProjectionOverlay> {
+        self.projection_overlay.clone()
+    }
+
+    pub(super) fn restore_projection_overlay(&mut self, overlay: Option<StationProjectionOverlay>) {
+        self.projection_overlay = overlay;
+    }
+
+    pub(super) fn clear_projection_overlay(&mut self) {
+        self.projection_overlay = None;
+    }
+
+    pub(super) fn credit(
+        &mut self,
+        player_id: PlayerId,
+        station_id: StationId,
+        item_id: ItemId,
+        current: u64,
+        count: u64,
+    ) {
+        if count == 0 {
+            return;
+        }
+        let overlay = self.projection_overlay.get_or_insert_with(Default::default);
+        let entry = overlay
+            .values
+            .entry((player_id, station_id.0, item_id))
+            .or_insert(current);
+        *entry = entry
+            .checked_add(count)
+            .expect("Station inventory count overflow");
+        let delta = i64::try_from(count).expect("Station projection delta exceeds i64");
+        overlay.mutations.push(StationProjectionMutation {
+            player_id,
+            station_id,
+            item_id,
+            delta,
+        });
+    }
+
+    pub(super) fn try_debit(
+        &mut self,
+        player_id: PlayerId,
+        station_id: StationId,
+        item_id: ItemId,
+        count: u64,
+        current: u64,
+    ) -> Result<(), super::station::StationOperationRejection> {
+        if count == 0 {
+            return Ok(());
+        }
+        let key = (player_id, station_id.0, item_id);
+        let overlay = self.projection_overlay.get_or_insert_with(Default::default);
+        let available = overlay.values.get(&key).copied().unwrap_or(current);
+        if available == 0 {
+            return Err(super::station::StationOperationRejection::MissingStationItem);
+        }
+        if available < count {
+            return Err(super::station::StationOperationRejection::InsufficientStationItem);
+        }
+        overlay.values.insert(key, available - count);
+        let delta = i64::try_from(count).expect("Station projection delta exceeds i64");
+        overlay.mutations.push(StationProjectionMutation {
+            player_id,
+            station_id,
+            item_id,
+            delta: -delta,
+        });
+        Ok(())
+    }
+
     pub(super) fn restore(
         &mut self,
         docked_ships: BTreeMap<ShipId, StationId>,
@@ -108,6 +206,12 @@ impl StationState {
         self.docked_ships = docked_ships;
         self.docked_players = docked_players;
     }
+}
+
+#[derive(Clone, Default)]
+pub(super) struct StationProjectionOverlay {
+    values: BTreeMap<(PlayerId, u32, ItemId), u64>,
+    mutations: Vec<StationProjectionMutation>,
 }
 
 /// Composition-wired persistence boundary.

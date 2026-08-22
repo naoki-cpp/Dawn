@@ -34,6 +34,8 @@ pub enum StopTransitionError {
     Durable(#[from] JournalError),
     #[error("prepared Stop cannot be applied to the current state: {0}")]
     Validation(#[from] crate::transition::TransitionApplyError),
+    #[error(transparent)]
+    Reconciliation(#[from] RuntimeReconciliationError),
 }
 
 /// Failure returned by the Tick prepare -> durable -> live-apply boundary.
@@ -65,14 +67,17 @@ pub enum RuntimeReconciliationError {
 
 /// Run the repository reconciliation owned by the shared runtime frame.
 ///
-/// Station projection mutation remains an injected follow-up port, while the
-/// existing admission/identity allocator watermark reconciliation is common to
-/// every deployment adapter.
+/// The required Station projection is applied by the durable runtime frame
+/// before acknowledgement. This hook reconciles the remaining
+/// admission/identity allocator watermarks common to every deployment
+/// adapter.
 pub fn reconcile_runtime_repositories(
     node: &mut SimulationNode,
     _result: &crate::node::TickResult,
-    _events: &[DomainEvent],
+    events: &[DomainEvent],
 ) -> Result<(), RuntimeReconciliationError> {
+    node.reconcile_committed_admission_events(events)
+        .map_err(|reason| RuntimeReconciliationError::Repository { reason })?;
     node.reconcile_runtime_repositories()
         .map_err(|reason| RuntimeReconciliationError::Repository { reason })
 }
@@ -128,8 +133,12 @@ impl RuntimeHealth {
     }
 }
 
-/// Commit a prepared Stop transition through the runtime-owned journal.
-pub fn commit_stop_transition<J: DurableJournal>(
+/// Internal low-level commit helper used by transition tests.
+///
+/// Production adapters use [`run_durable_runtime_frame`] so health fencing and
+/// required repository reconciliation cannot be skipped.
+#[cfg(test)]
+pub(crate) fn commit_stop_transition<J: DurableJournal>(
     node: &mut SimulationNode,
     journal: &mut J,
     ship_id: ShipId,
@@ -152,11 +161,16 @@ pub fn commit_stop_transition<J: DurableJournal>(
     let receipt =
         crate::transition_journal::append_prepared_transition(journal, &prepared, durability)?;
     node.apply_stop_delta(entity, delta);
+    apply_required_station_projection(node, receipt, prepared.transition_id, &[])?;
     Ok(receipt)
 }
 
-/// Commit the complete bounded ECS Tick write set through the runtime journal.
-pub fn commit_tick_state_transition<J: DurableJournal>(
+/// Internal low-level commit helper for the complete bounded ECS Tick write set.
+///
+/// This applies the Station projection but deliberately omits the production
+/// frame's health gate and admission/identity reconciliation.
+#[cfg(test)]
+pub(crate) fn commit_tick_state_transition<J: DurableJournal>(
     node: &mut SimulationNode,
     journal: &mut J,
     input: crate::transition::FrameInput<'_>,
@@ -173,11 +187,18 @@ pub fn commit_tick_state_transition<J: DurableJournal>(
     let receipt =
         crate::transition_journal::append_prepared_transition(journal, &prepared, durability)?;
     node.apply_validated_full_tick(delta.as_ref().clone())?;
+    apply_required_station_projection(
+        node,
+        receipt,
+        prepared.transition_id,
+        &delta.station_projection,
+    )?;
     Ok(receipt)
 }
 
-/// Commit the logical Tick counter through the runtime journal.
-pub fn commit_tick_transition<J: DurableJournal>(
+/// Internal low-level commit helper for the logical Tick counter.
+#[cfg(test)]
+pub(crate) fn commit_tick_transition<J: DurableJournal>(
     node: &mut SimulationNode,
     journal: &mut J,
     transition_id: crate::transition::SectorTransitionId,
@@ -194,7 +215,21 @@ pub fn commit_tick_transition<J: DurableJournal>(
     let receipt =
         crate::transition_journal::append_prepared_transition(journal, &prepared, durability)?;
     node.apply_validated_logical_tick(delta.as_ref().clone());
+    apply_required_station_projection(node, receipt, prepared.transition_id, &[])?;
     Ok(receipt)
+}
+
+fn apply_required_station_projection(
+    node: &SimulationNode,
+    receipt: AppendReceipt,
+    transition_id: crate::transition::SectorTransitionId,
+    mutations: &[crate::transition::StationProjectionMutation],
+) -> Result<(), RuntimeReconciliationError> {
+    node.apply_station_projection(&transition_id.0.to_string(), receipt.range, mutations)
+        .map(|_| ())
+        .map_err(|error| RuntimeReconciliationError::Projection {
+            reason: error.to_string(),
+        })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -680,9 +715,22 @@ where
         ));
         return Err(TickTransitionError::Policy(error));
     }
+    let station_projection = match &prepared.recovery_delta {
+        crate::transition::SectorRecoveryDelta::Tick(delta) => delta.station_projection.clone(),
+        crate::transition::SectorRecoveryDelta::Stop(_) => Vec::new(),
+    };
     if let Err(error) = node.apply_tick_transition(delta, prepared.context) {
         health.fence(format!("live apply failed after durable append: {error}"));
         return Err(TickTransitionError::Validation(error));
+    }
+    if let Err(error) = apply_required_station_projection(
+        node,
+        receipt,
+        prepared.transition_id,
+        &station_projection,
+    ) {
+        health.fence(format!("required Station projection failed: {error}"));
+        return Err(TickTransitionError::Reconciliation(error));
     }
     let mut events = prior_events;
     events.extend(node.drain_pending_events());

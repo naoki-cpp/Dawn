@@ -174,3 +174,16 @@ are shared, while deployment-specific consensus, journal, durability policy,
 repository reconciliation, and transport remain injected adapters. The old
 simulator-only orchestration name and module path were removed; the remaining
 `SectorRuntimeDriver` is only an async in-memory driver around the shared frame.
+
+### 2026-08-22 — production Station projection path
+
+Station mutations now use a bounded frame-local touched-key overlay during
+preparation, are carried as ordered `RecoveryDelta` mutations, and are applied
+to the shared SQLite projection only after durable append and live apply. The
+projection records transition identity plus the complete journal range, so its
+global cursor advances across public-event/effect records and explicit no-op
+transitions. The full Station inventory is not copied into `SimulationNode`,
+`NodeState`, or checkpoints; projection failures remain fail-stop/recovery
+conditions. Production recovery attaches the real repository before tail replay,
+and fresh-admission grant/ownership finalization runs after the same transition's
+starter mutation has projected.

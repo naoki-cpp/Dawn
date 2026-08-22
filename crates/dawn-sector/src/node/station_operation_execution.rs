@@ -1,8 +1,9 @@
 //! Execution seam for accepted Station operations.
 //!
 //! The sibling Station modules validate commands and build a plan. This
-//! module owns the ordered live side effects: durable Station inventory work,
-//! runtime state mutation, and the corresponding `DomainEvent` publication.
+//! module owns the ordered live side effects: authoritative Station overlay
+//! staging, runtime state mutation, and the corresponding `DomainEvent`
+//! publication.
 //!
 //! ADR-0049 changes the target contract: the journal-owned Station aggregate is
 //! durable before live apply, then the required SQLite projection is applied
@@ -143,11 +144,11 @@ impl SimulationNode {
 
     /// Execute one already-validated Station plan.
     ///
-    /// A fallible inventory debit happens before any other live mutation. Once
-    /// that succeeds, each plan applies its complete runtime state change and
-    /// emits exactly one public event as the final step. This preserves
-    /// ADR-0038's accepted SQLite/output crash window while making the order a
-    /// single local invariant for all Station operations.
+    /// Inventory debits and credits update only the bounded authoritative
+    /// overlay. Each plan then applies its complete runtime state change and
+    /// emits exactly one public event as the final step. The enclosing durable
+    /// runtime frame carries the ordered overlay mutations in its
+    /// `RecoveryDelta` and applies the SQLite projection after live apply.
     pub(super) fn execute_station_operation(
         &mut self,
         plan: StationOperationPlan,

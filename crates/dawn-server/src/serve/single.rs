@@ -215,6 +215,7 @@ pub(crate) async fn run_phase4_server(
         let mut all_new_events = Vec::new();
 
         let mut lock_commands: Vec<dawn_core::LockOnCommand> = Vec::new();
+        let mut pending_loadout_refreshes = Vec::new();
         for sess in sessions.iter_mut() {
             while let Some(market_command) = sess.try_recv_market_command() {
                 let snapshot = market.handle_single(sess.player_id, market_command, host.node());
@@ -244,15 +245,7 @@ pub(crate) async fn run_phase4_server(
                 RuntimeCommandDispatch::RefreshPlayerLoadout {
                     session_index,
                     player_id,
-                } => {
-                    if let Some(loadout) =
-                        host.node().build_player_loadout_json_for_player(player_id)
-                    {
-                        if let Some(session) = sessions.get_mut(session_index) {
-                            session.send_message(&ServerMessage::PlayerLoadout(loadout));
-                        }
-                    }
-                }
+                } => pending_loadout_refreshes.push((session_index, player_id)),
                 RuntimeCommandDispatch::Rejected {
                     session_index,
                     error,
@@ -286,6 +279,13 @@ pub(crate) async fn run_phase4_server(
             })
             .expect("in-memory single-sector runtime must accept durable Tick");
         let tick_result = output.tick_result;
+        for (session_index, player_id) in pending_loadout_refreshes {
+            if let Some(loadout) = host.node().build_player_loadout_json_for_player(player_id) {
+                if let Some(session) = sessions.get_mut(session_index) {
+                    session.send_message(&ServerMessage::PlayerLoadout(loadout));
+                }
+            }
+        }
         let acknowledgement = market
             .acknowledge_settlements(&queued_settlements, &tick_result.market_settlement_outcomes);
         // Retired on the next frame, through the same durable boundary as
@@ -523,6 +523,7 @@ mod tests {
             other => panic!("fresh admission should commit, got {other:?}"),
         };
         let ship_id = committed.ship_id;
+        crate::serve::commit_test_runtime_frame(&mut node);
         let attempt = node
             .begin_client_admission(
                 ClientAdmissionIntent::Resume { resume_ticket },

@@ -268,18 +268,25 @@ Station inventoryは呼び出し側からSQLite実装を隠せるseamを維持�
 - `IdentityRepository`: ownership、current/pending ticket、allocatorの観測
 - `StationInventoryRepository`: Station rows、transition dedup、global
   `projection_applied_through`
-- `SectorTransaction`: admission grantのStation upsert、identity consumption、ownership、
-  prepared-row cleanupを一つのSQLite transactionへ束ねる
+- `SectorTransaction`: identity consumption、ownership、prepared-row cleanupを一つのSQLite
+  transactionへ束ねる。Admission grantはStation rowを直接更新せず、スターター在庫は
+  RecoveryDeltaのStation mutationから投影する
 
 Fresh admissionは `reserve_fresh_admission_identity` で、Player/Ship ID・resume ticket・prepared
 row・allocator watermarkをcommitしてからWelcomeを返す。abortはlive claimだけを解放し、
 `consumed_*_ids` とallocator watermarkは残す。既存DBを開く際とsnapshot後にmaterialized IDを
 観測してwatermarkを単調に引き上げるため、予約行が先に失われた場合でもIDを再利用しない。
+fresh commit後もprepared rowは次のdurable frameまで保持し、starter Station mutationの投影後に
+同じtransitionの`ClientAdmissionCommitted`からownership/grantをidempotentにfinalizeする。
+crash recoveryもpublic recordをdecodeして同じreconciliationを行う。
 
-Station projectionはjournal transitionをglobal index順に受け、同じtransition identityの同じ
-indexを重複適用せず、gapを拒否する。非Station transitionは`mutation = None`でcursorだけを進める。
-#278の共有runtime frameがこのAPIの後段にreconciliation hookとfail-stop health gateを
-提供する。#277が具体的なprojection/repository transactionを、#280がcatch-up transportを所有する。
+Station projectionはjournal transitionをglobal index順に受け、同じtransition identityと
+rangeを重複適用せず、gapを拒否する。非Station transitionは空のmutation sliceでcursorだけを
+進める。cursorはbatchの先頭ではなくexclusive endまで進み、public event/effectを含む複数
+record batchでも次のtransitionと連続する。#278の共有runtime frameがこのAPIをlocal live apply
+の後段で呼び、projection failure時はfail-stop health gateへ入る。#280はcatch-up transportを
+所有する。production起動時は実repositoryをRecoveryDelta tail再生前に接続し、catch-upを
+一時in-memory adapterへ誤って適用しない。
 
 現在の`MarketDb` public interfaceが`rusqlite::Result`を返す点は、2つ目のadapterを導入する時点で
 Market固有errorへ変換する。将来可能性だけを理由に今すぐ抽象traitを増やさない。
@@ -295,7 +302,9 @@ Current implementation:
   explicit viewを通す。Station inventoryのin-memory cacheはない
 - fresh identity reservation、allocator watermark再構築、ownership conflict検証、admission grantの
   atomic finalization/idempotency、Station projectionのdedup/global cursor schemaは実装済み
-- #278のruntime projection hookとfail-stop/reconciliation orchestrationは共有frameに実装済み
+- #278のruntime projection hookとfail-stop/reconciliation orchestrationは共有frameに実装済み。
+  Station aggregateはframe-local touched-key overlayとordered RecoveryDelta mutationで扱い、
+  `SimulationNode`/checkpointへ全件を常駐・複製しない
 - Marketはsingle `MarketRuntime` + SQLite
 
 Accepted target / work package:
@@ -303,7 +312,7 @@ Accepted target / work package:
 - #284/ADR-0049: exact Sector-world recovery = versioned checkpoint + authoritative state-delta tail
 - #271: fallible atomic durable journal
 - #272: pure engineからstorage ownershipを除去するruntime orchestration
-- #277: explicit repository view、fresh identity consumption、Station projection schema/APIを実装（本PR）
+- #277: explicit repository view、fresh identity consumption、Station projection schema/APIを実装
 - #276: Transit EventStore scanをdurable Sagaへ置換（implemented）
 - #278: runtime durability profile/quorum/fencing/repository reconciliation/ack policyを統一
 - #280: selected recovery/repository catch-up/durability representationをpeer transportへ載せる
