@@ -65,7 +65,7 @@ MovementSystem（物理計算）
     ↓
 VelocityChanged  ← 物理計算の出力 = 決定済みの事実
     ↓
-EventStore に記録
+DurableJournal の `JournalStream::PublicEvent` に記録
 
 Replay:
   VelocityChanged を順番に適用する

@@ -2,11 +2,13 @@
 //!
 //! The transport layer can drop or reorder gossip batches. Anti-entropy keeps
 //! the recovery rule simple: peers compare the next log index they expect for a
-//! Sector, then ask the owner for the missing suffix via `EventStore::iter_from`.
+//! Sector, then ask the owner for the missing suffix via [`PublicEventTail`].
 
 use crate::LogBatch;
 use dawn_core::SectorId;
-use dawn_storage::{EventStore, PublicEventIndex};
+use dawn_storage::PublicEventIndex;
+
+use crate::PublicEventTail;
 
 /// A request for the suffix of one Sector's append-only log.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,28 +61,23 @@ impl AntiEntropy {
         MissingLogRequest::new(sector_id, expected_next_index, max_events)
     }
 
-    /// Serve a missing-log request from an append-only store.
+    /// Serve a missing-log request from the retained, rebuildable public tail.
     ///
-    /// Returns `None` when the requester is already caught up. If the store has
-    /// compacted away the requested prefix, the returned batch starts at the
-    /// first retained `log_index`; the receiver will observe that as a gap and
-    /// the shared peer bulk channel can take over.
-    pub fn batch_from_store<S: EventStore>(
-        store: &S,
+    /// A cursor before the retained base is returned as an error so the caller
+    /// must select snapshot fallback rather than emit a truncated suffix.
+    pub fn batch_from_tail(
+        tail: &PublicEventTail,
         request: MissingLogRequest,
-    ) -> Option<LogBatch> {
-        let records: Vec<_> = store
-            .iter_from(request.from_public_event_index.0)
-            .take(request.max_events)
-            .collect();
-
-        let first = records.first()?;
-        let events = records.iter().map(|record| record.event.clone()).collect();
-        Some(LogBatch::new(
+    ) -> Result<Option<LogBatch>, crate::PublicEventTailError> {
+        let suffix = tail.read_from(request.from_public_event_index, request.max_events)?;
+        if suffix.events.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(LogBatch::new(
             request.sector_id,
-            PublicEventIndex(first.log_index),
-            events,
-        ))
+            suffix.from_public_event_index,
+            suffix.events,
+        )))
     }
 
     /// Decide whether an incoming batch is duplicate, contiguous, overlapping,
@@ -113,8 +110,8 @@ impl AntiEntropy {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::PublicEventTail;
     use dawn_core::{events::VelocityChanged, DomainEvent, NodeId, ShipId, Tick, Velocity};
-    use dawn_storage::{EventStore, InMemoryEventStore};
 
     fn event(n: u64) -> DomainEvent {
         DomainEvent::VelocityChanged(VelocityChanged {
@@ -124,12 +121,12 @@ mod tests {
         })
     }
 
-    fn store_with(count: u64) -> InMemoryEventStore {
-        let mut store = InMemoryEventStore::new();
+    fn tail_with(count: u64) -> PublicEventTail {
+        let mut tail = PublicEventTail::new(0.into(), 32).unwrap();
         for i in 0..count {
-            store.append(event(i));
+            tail.append_committed(&[event(i)]).unwrap();
         }
-        store
+        tail
     }
 
     #[test]
@@ -139,11 +136,13 @@ mod tests {
     }
 
     #[test]
-    fn batch_from_store_returns_the_requested_suffix() {
-        let store = store_with(5);
+    fn batch_from_tail_returns_the_requested_suffix() {
+        let tail = tail_with(5);
         let request = MissingLogRequest::new(SectorId(1), 2, 10);
 
-        let batch = AntiEntropy::batch_from_store(&store, request).expect("suffix exists");
+        let batch = AntiEntropy::batch_from_tail(&tail, request)
+            .unwrap()
+            .expect("suffix exists");
 
         assert_eq!(batch.sector_id, SectorId(1));
         assert_eq!(batch.from_public_event_index, 2);
@@ -152,11 +151,13 @@ mod tests {
     }
 
     #[test]
-    fn batch_from_store_respects_max_events() {
-        let store = store_with(10);
+    fn batch_from_tail_respects_max_events() {
+        let tail = tail_with(10);
         let request = MissingLogRequest::new(SectorId(1), 3, 4);
 
-        let batch = AntiEntropy::batch_from_store(&store, request).expect("suffix exists");
+        let batch = AntiEntropy::batch_from_tail(&tail, request)
+            .unwrap()
+            .expect("suffix exists");
 
         assert_eq!(batch.from_public_event_index, 3);
         assert_eq!(batch.events.len(), 4);
@@ -164,11 +165,26 @@ mod tests {
     }
 
     #[test]
-    fn batch_from_store_returns_none_when_peer_is_caught_up() {
-        let store = store_with(3);
+    fn batch_from_tail_returns_none_when_peer_is_caught_up() {
+        let tail = tail_with(3);
         let request = MissingLogRequest::new(SectorId(1), 3, 10);
 
-        assert!(AntiEntropy::batch_from_store(&store, request).is_none());
+        assert!(AntiEntropy::batch_from_tail(&tail, request)
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn batch_from_tail_rejects_a_cursor_before_the_retained_base() {
+        let mut tail = PublicEventTail::new(0.into(), 2).unwrap();
+        tail.append_committed(&[event(0), event(1), event(2)])
+            .unwrap();
+        let request = MissingLogRequest::new(SectorId(1), 0, 10);
+
+        assert!(matches!(
+            AntiEntropy::batch_from_tail(&tail, request),
+            Err(crate::PublicEventTailError::CursorTooOld { .. })
+        ));
     }
 
     #[test]

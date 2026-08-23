@@ -5,7 +5,7 @@ update   : 大規模リファクタ実施後 / 新クレート追加時 / archit
 related  : AI_DEVELOPMENT_GUIDE.md「Crate Boundaries」, docs/architecture/architecture.md,
            docs/architecture/architecture-review/server-completed.md（完了済みログ）,
            docs/architecture/architecture-review/server-pending.md（未完項目・issue一覧）
-date     : 2026-08-20（Recovery/Public replication cursor分離後、全Rustクレートを再計測）
+date     : 2026-08-23（#336反映。全Rustクレートの再計測は2026-08-20）
 ---
 
 # Architecture Review — Dawn Codebase（現行構造評価）
@@ -45,10 +45,14 @@ Transitについては、Raftの回復判断を`transit::handoff`に残し、Shi
 - canonical NodeState checkpoint/delta capture/restore
 
 Open:
+1. **R-6** `RuntimeFrameHost`のFrameInput境界（Fix候補）
+2. **R-7** `SectorRepository`のbounded-context分割（Fix候補）
 
-1. **M-9** `EventStore::append`のinfallible contract（保留）
-2. **R-6** `RuntimeFrameHost`のFrameInput境界（Fix候補）
-3. **R-7** `SectorRepository`のbounded-context分割（Fix候補）
+Resolved in #336: the legacy EventStore/FileEventStore path is deleted. The
+DurableJournal is the sole persistent source of committed public facts, and
+replication/catch-up consume the bounded rebuildable PublicEventTail. Cursor
+expiry explicitly selects snapshot fallback; the former infallible append
+contract and duplicate persistence path no longer exist.
 
 Resolved in #278: production, single-sector, clustered, and in-process test
 drivers now call the shared durable runtime frame. `SectorRuntimeDriver` remains
@@ -75,11 +79,11 @@ run only after the required projection completes.
 | `crates/dawn-sector/src/node/transit/tests.rs` | 880 | 🟢 Transit lifecycle・materialization・checkpoint recovery・cross-Sector統合tests |
 | `crates/dawn-sector/src/node/tick.rs` | 1696 | 🟢 authoritative tick orderとprepare→durable→applyのkernel・tests。単一の順序機械なので分割しない |
 | `crates/dawn-sector/src/node/commands.rs` | 1382 | 🟢 外側のfamily選択・runtime command collection・follow-up射影・統合tests。policyは専用moduleへ分離済み |
-| `crates/dawn-storage/src/file_journal.rs` | 1366 | 🟢 versioned journal framing・compaction・corruption recoveryの一つのstorage kernel・tests |
+| `crates/dawn-storage/src/file_journal.rs` | 1367 | 🟢 versioned journal framing・compaction・corruption recoveryの一つのstorage kernel・tests |
 | `crates/dawn-sector/src/persistence/snapshot.rs` | 1246 | 🟢 checkpoint envelope・atomic publication・platform adapter・tests。単一のsnapshot publication boundary |
 | `crates/dawn-sector/src/node/warp.rs` | 1281 | 🟡 warp state machine・geometry kernel・tests。実装573行のためR-3の再評価trigger待ち |
 | `crates/dawn-sector/src/node/mod.rs` | 1071 | 🟢 node composition・identity/accessor・population/repository boundary。座標helperはR-4で分離済み |
-| `crates/dawn-distributed/src/catch_up.rs` | 1125 | 🟢 catch-up / snapshot-tail policy・tests |
+| `crates/dawn-distributed/src/catch_up.rs` | 1115 | 🟢 catch-up / snapshot-tail policy・tests |
 | `crates/dawn-market/src/order_book.rs` | 1044 | 🟢 pure order/matching/SettlementIntent policy。SQLは`repository.rs`へ分離済み（#279） |
 | `crates/dawn-sector/src/transit.rs` | 830 | 🟢 runtime consensus / durable transition policy。Ship handoff state mutationとは分離済み |
 | `crates/dawn-sector/src/node/orbit.rs` | 990 | 🟢 Orbit / Keep-at-Range steering kernel・tests |
@@ -101,9 +105,9 @@ run only after the required projection completes.
 | `crates/dawn-sector/src/node/approach.rs` | 631 | 🟢 approach steering state machine・tests |
 | `crates/dawn-sector/src/node/ship_cargo.rs` | 681 | 🟢 ship cargo ownership/bridge boundary・tests |
 | `crates/dawn-market/src/repository.rs` | 623 | 🟡 SQLite order/Currency/outbox persistence。bounded-memory streamingはfollow-up |
-| `crates/dawn-distributed/src/state.rs` | 593 | 🟢 Raft state transition/persistence boundary・tests |
+| `crates/dawn-distributed/src/state.rs` | 594 | 🟢 Raft state transition/persistence boundary・tests |
 | `crates/dawn-ecs/src/systems/combat.rs` | 584 | 🟢 combat system・tests |
-| `crates/dawn-server/src/bin/sector-node.rs` | 584 | 🟢 production node bootstrap/config |
+| `crates/dawn-server/src/bin/sector-node.rs` | 601 | 🟢 production node bootstrap/config・public tail rebuild wiring |
 | `crates/dawn-sector/src/transition.rs` | 737 | 🟢 durable transition preparation / output boundary |
 | `crates/dawn-protocol/src/lib.rs` | 554 | 🟢 wire envelope/schema exports・tests |
 | `crates/dawn-server/src/sector_runtime_driver.rs` | 547 | 🟢 in-process Sector actor/runtime adapter・tests |
@@ -112,7 +116,7 @@ run only after the required projection completes.
 | `crates/dawn-sector/src/node/player_loadout_projection.rs` | 535 | 🟢 PlayerLoadout wire projection |
 | `crates/dawn-server/src/runtime_frame.rs` | 960 | 🟢 shared one-Sector frame host・policy injection・output boundary・tests |
 | `crates/dawn-sector/src/node/station_operation_execution.rs` | 519 | 🟢 accepted station-operation effects |
-| `crates/dawn-server/src/bench.rs` | 532 | 🟢 benchmark scenarios |
+| `crates/dawn-server/src/bench.rs` | 535 | 🟢 benchmark scenarios |
 | `crates/dawn-sector/src/node/station_lifecycle.rs` | 428 | 🟢 station operation validation/planning |
 
 全体の再計測ではテストコードが行数の大きな割合を占めるファイルが多かった。総行数だけでは

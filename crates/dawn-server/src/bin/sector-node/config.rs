@@ -30,11 +30,6 @@ pub struct NodeConfig {
     /// Every other node in the cluster.
     #[serde(default)]
     pub peers: Vec<PeerConfig>,
-    /// Path to this node's hot public-event log (ADR-0017 two-tier log).
-    /// Created on first run and reopened as an append-only audit/projection
-    /// source. Exact world recovery uses the ADR-0049 journal boundary.
-    #[serde(default = "default_event_log_path")]
-    pub event_log_path: String,
     /// Path to the authoritative ADR-0049 RecoveryDelta journal.
     #[serde(default = "default_recovery_journal_path")]
     pub recovery_journal_path: String,
@@ -42,10 +37,6 @@ pub struct NodeConfig {
     /// on every checkpoint.
     #[serde(default = "default_snapshot_path")]
     pub snapshot_path: String,
-    /// Path to the append-only cold archive that compaction migrates
-    /// snapshotted-and-confirmed segments into.
-    #[serde(default = "default_cold_path")]
-    pub cold_path: String,
     /// Path to the cold archive for compacted authoritative recovery records.
     #[serde(default = "default_recovery_cold_path")]
     pub recovery_cold_path: String,
@@ -67,17 +58,11 @@ fn default_npc_ships() -> usize {
 fn default_pop_cap() -> usize {
     500
 }
-fn default_event_log_path() -> String {
-    "data/events.log".to_string()
-}
 fn default_snapshot_path() -> String {
     "data/snapshot.bin".to_string()
 }
 fn default_recovery_journal_path() -> String {
     "data/recovery.log".to_string()
-}
-fn default_cold_path() -> String {
-    "data/cold.log".to_string()
 }
 fn default_recovery_cold_path() -> String {
     "data/recovery.cold.log".to_string()
@@ -159,10 +144,8 @@ mod tests {
                 bulk_addr: "127.0.0.1:7882".parse().unwrap(),
                 ws_addr: "127.0.0.1:7883".parse().unwrap(),
             }],
-            event_log_path: String::new(),
             recovery_journal_path: String::new(),
             snapshot_path: String::new(),
-            cold_path: String::new(),
             recovery_cold_path: String::new(),
             checkpoint_interval_ticks: 1,
             repository_path: String::new(),

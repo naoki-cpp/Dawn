@@ -95,7 +95,8 @@ docs/architecture/ownership.md は「**各 Sector は必ず 1 ノードが所有
              Raft を経由しない（Raft は Sector 越え transit 専用 / ADR-0014）
 整列       : 受信側は (論理 Tick, NodeId) で整列して適用（INV-005・決定的）
 冪等性     : 同一イベントの重複適用は no-op（INV-004 の一意 ID で識別）
-アンチエントロピー: 取りこぼしは log index 範囲で再要求（EventStore::iter_from が既に対応）
+アンチエントロピー: 取りこぼしは `PublicEventIndex` 範囲で再要求し、
+`PublicEventTail` が保持範囲外を返した場合は snapshotへ切り替える。
 追いつき   : base_index より遅れた複製はスナップショット転送で追いつく（ADR-0017・InstallSnapshot）
 ```
 

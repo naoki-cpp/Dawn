@@ -1,8 +1,9 @@
 //! Versioned file implementation of the generic durable-journal contract.
 //!
-//! The format is intentionally separate from the legacy `FileEventStore`:
-//! callers can migrate to this journal without pretending that public
-//! `DomainEvent` bytes are the complete recovery payload.
+//! The journal stores logical transitions rather than a second public-event
+//! file. Public `DomainEvent` bytes are one stream inside the authoritative
+//! journal and are projected into a rebuildable replication tail by the
+//! distributed runtime.
 //!
 //! ```text
 //! magic[8] once per file (`DAWNJNL3`)

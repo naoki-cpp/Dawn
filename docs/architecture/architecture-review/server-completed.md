@@ -4,7 +4,7 @@ audience : AI Agent / Human Developer
 update   : /architecture-review が issue を解消済みへ移動するたびに追記
 related  : docs/architecture/architecture-review/server.md（構造評価）,
            docs/architecture/architecture-review/server-pending.md（未完項目）
-date     : 2026-08-11
+date     : 2026-08-23
 ---
 
 # Architecture Review — Dawn Codebase（完了済みログ）
@@ -16,6 +16,14 @@ date     : 2026-08-11
 ---
 
 ## 改善ロードマップ > 完了済み
+
+### 2026-08-23: Legacy EventStore persistence retirement (#336)
+
+`DurableJournal`をコミット済み公開事実の唯一の永続ソースへ統一し、旧`EventStore`一式と
+設定・本番配線を削除した。`PublicEventTail`はチェックポイントの公開カーソルと保持された
+`JournalStream::PublicEvent`から再構築できる有界read modelとして導入し、保持範囲外のcursorは
+snapshot fallbackへ明示的に切り替える。Outbound replication、anti-entropy、catch-up、
+production runtime、checkpoint/bench wiringをこの契約へ更新した。
 
 ### 2026-07-30: Transit state mutation module の deepening
 

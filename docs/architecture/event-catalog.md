@@ -89,7 +89,7 @@ Exact operational recovery:
 ```
 
 - Committed public events are never updated/re-written in place. FBD-001 protects this public history.
-- A public EventStore append **alone is not the complete authoritative commit boundary**. ADR-0049's logical durable transition includes the exact recovery outcome and its public facts/reliable obligations with one atomic visibility boundary; #271 owns physical framing.
+- A public-event projection update **alone is not the complete authoritative commit boundary**. ADR-0049's logical durable transition includes the exact recovery outcome and its public facts/reliable obligations with one atomic visibility boundary; #271 owns physical framing. The durable source is `DurableJournal::PublicEvent`; `PublicEventTail` is rebuilt after the boundary and is never a second store.
 - Position, capacitor, lock countdowns, module cycles, flight/routing state, authoritative queues, and other exact final values are checkpoint/RecoveryDelta authority even when no event is emitted.
 - State-delta checkpoint compaction and public-event/outbox retention may use different watermarks. A state checkpoint does not prove a public output was delivered or archived.
 - Event-specific consumer notes describe what append-only payloads make available to audit or projection code. They do not establish exact recovery or claim that a projection exists unless one is named.

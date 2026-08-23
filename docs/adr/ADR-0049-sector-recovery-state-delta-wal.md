@@ -135,7 +135,7 @@ It amends older decisions as follows:
 
 - **ADR-0001:** `DomainEvent`s remain durable public/business facts, audit history,
   and projection inputs, but are not the sole exact operational recovery reducer.
-- **ADR-0014:** Transit remains consensus-controlled, but legacy EventStore scans
+- **ADR-0014:** Transit remains consensus-controlled, but legacy public-event scans
   and public Transit event pairs are not the final exact recovery/outbox authority;
   #276 must use this recovery contract for its durable Saga.
 - **ADR-0017:** operational recovery is not snapshot + public-event tail or

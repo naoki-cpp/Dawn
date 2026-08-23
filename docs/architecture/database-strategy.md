@@ -26,8 +26,8 @@ SQLite は Dawn の **node-local Station projection**、**admission/identity rep
 
 | 用途 | 現在の実装 | Normative / 将来方針 |
 |---|---|---|
-| Sector exact recovery | `FileEventStore` + `StateSnapshot` に依存するlegacy path | ADR-0049 authoritative state-delta journal + versioned checkpoint。#271/#272で移行 |
-| Public `DomainEvent` history | `FileEventStore` hot/cold 2層ログ | append-only public fact/archiveとして維持。exact recoveryとは別watermark |
+| Sector exact recovery | `DurableJournal` + `StateSnapshot` | ADR-0049 authoritative state-delta journal + versioned checkpoint |
+| Public `DomainEvent` history | `DurableJournal::PublicEvent` stream + rebuildable `PublicEventTail` | append-only public facts; tail is derived and bounded, with snapshot fallback below its base |
 | Station inventory | `SectorRepository::station_inventory()` が読む node-local SQLite projection | Sector recovery authorityをidempotentにproject。global contiguous watermarkとtransition dedupを保存 |
 | Prepared admission / identity / resume tickets | `AdmissionRepository` / `IdentityRepository` view | #277のdurable protocol authority。予約済みIDはallocatorとconsumed-ID表で再利用しない |
 | 単一プロセスMarket | SQLite | SQLite継続 |
@@ -48,8 +48,8 @@ newest complete compatible checkpoint
     + every contiguous committed authoritative RecoveryDelta after it
 ```
 
-現在の `FileEventStore` API/formatはこの最終contractをまだ実装していない。#271はfallible atomic
-journal framing、commit evidence、fsync/durability evidence、index/receipt、corruption/compactionを実装する。
+`DurableJournal`がこのcontractの実装境界である。#271はfallible atomic journal framing、commit
+evidence、fsync/durability evidence、index/receipt、corruption/compactionを実装する。
 #272はjournal ownershipをpure Sector engineの外へ出し、prepare -> durable -> live applyを実装する。
 
 ここで「journal」はRDBMSを意味しない。append-oriented file journalのままでも要件を満たせる。
@@ -135,11 +135,11 @@ identityについて#277 repositoryがcaught-upまたはdeterministically reconc
 > described below is no longer the recovery authority. `TransitSagaSnapshot` is
 > stored in `StateSnapshot` and `TickRecoveryDelta`; `TransitAttemptId` provides
 > direct lookup, while `OutgoingTransitAttempt` and `IncomingTransitReceipt` own
-> retry, terminal, and destination deduplication state. The public EventStore
-> remains an audit/projection stream only. The following historical notes describe
+> retry, terminal, and destination deduplication state. The journal's PublicEvent
+> stream remains an audit/projection input only. The following historical notes describe
 > the pre-#276 split and are retained only as migration context.
 
-現行Transitはpublic EventStore scanとsnapshot receiptへretry/dedup authorityが分散している。
+現行Transitは旧public-event scanとsnapshot receiptへretry/dedup authorityが分散していた。
 これは#276が置換するlegacy implementationである。
 
 #276はdurable `TransitAttemptId`、outgoing attempt、incoming receipt、retry/terminal stateをdirect
@@ -297,7 +297,8 @@ Market固有errorへ変換する。将来可能性だけを理由に今すぐ抽
 
 Current implementation:
 
-- `FileEventStore` public log + `StateSnapshot` snapshot-era restore pathが存在する
+- `DurableJournal` is the sole persistent source; `PublicEventTail` is a
+  rebuildable bounded projection for replication/catch-up
 - `SectorRepository`はSQLite connectionを所有するが、利用側はadmission/identity/Stationの
   explicit viewを通す。Station inventoryのin-memory cacheはない
 - fresh identity reservation、allocator watermark再構築、ownership conflict検証、admission grantの
@@ -313,7 +314,7 @@ Accepted target / work package:
 - #271: fallible atomic durable journal
 - #272: pure engineからstorage ownershipを除去するruntime orchestration
 - #277: explicit repository view、fresh identity consumption、Station projection schema/APIを実装
-- #276: Transit EventStore scanをdurable Sagaへ置換（implemented）
+- #276: Transit legacy scanをdurable Sagaへ置換（implemented）
 - #278: runtime durability profile/quorum/fencing/repository reconciliation/ack policyを統一
 - #280: selected recovery/repository catch-up/durability representationをpeer transportへ載せる
 

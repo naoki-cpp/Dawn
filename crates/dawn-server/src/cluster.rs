@@ -4,7 +4,7 @@
 //!
 //! # Consistency model
 //!
-//! Each node has its own ECS World and local EventStore.
+//! Each node has its own ECS World and local durable transition journal.
 //! After every tick, events are forwarded to the shared `InMemoryReplicationBus`
 //! *before* the tick reply is returned to the caller.
 //!

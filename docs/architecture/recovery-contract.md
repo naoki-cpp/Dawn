@@ -116,9 +116,10 @@ The production checkpoint and recovery path has one explicit storage boundary:
   reuse. When starting from journal index 0, the configured NPC genesis is a
   deterministic deployment invariant and must remain unchanged for that
   journal's lifetime.
-- Checkpoint scheduling and recovery-journal compaction use separate recovery
-  paths from the legacy public-event log. Public events remain an independent
-  projection/audit stream.
+- Checkpoint scheduling and recovery-journal compaction use the authoritative
+  `DurableJournal`. Its `PublicEvent` records remain an independent
+  projection/audit stream, rebuilt into the bounded `PublicEventTail` for
+  replication and catch-up.
 - Snapshot publication remains crash-safe and uses the same encode/decode path
   for disk and replica transfer.
 
@@ -594,11 +595,13 @@ checkpoint records `covered_recovery_index` for the authoritative
 leaving the public-event position unchanged.
 
 The replica snapshot envelope carries both values. Snapshot installation and
-suffix requests advance only `public_event_next_index` through the public
-`EventStore`; `covered_recovery_index` remains recovery metadata used when the
-checkpoint is applied to authoritative state. Neither value is copied into the
-other, and a public suffix is never skipped because a recovery checkpoint is
-newer.
+suffix requests advance only `public_event_next_index` through the retained,
+rebuildable `PublicEventTail` projected from `JournalStream::PublicEvent`;
+`covered_recovery_index` remains recovery metadata used when the checkpoint is
+applied to authoritative state. Neither value is copied into the other, and a
+public suffix is never skipped because a recovery checkpoint is newer. A
+request below the tail's retained base is explicitly unavailable and must use
+the snapshot path.
 
 A snapshot/catch-up representation consumed by #280 must be sufficient to obtain:
 

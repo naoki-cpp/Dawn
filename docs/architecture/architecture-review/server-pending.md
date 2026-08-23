@@ -4,19 +4,12 @@ audience : AI Agent / Human Developer
 update   : /architecture-review で issue を起票・状態更新するたびに更新
 related  : docs/architecture/architecture-review/server.md（構造評価）,
            docs/architecture/architecture-review/server-completed.md（完了済みログ）
-date     : 2026-08-11
+date     : 2026-08-23
 ---
 
 # Architecture Review — Dawn Codebase（未完項目）
 
 実装詳細と完了条件は各GitHub Issueに置き、この文書は判断と再評価triggerだけを保持する。
-
-## Medium
-
-### M-9（保留）: `EventStore::append`のinfallible contract
-
-`FileEventStore`はwrite/flush失敗時にpanicするが、1 Sector = 1 processのcrash-only recoveryと整合する。
-**再評価:** disk-full crashが運用問題になるか、1 processが複数Sectorを所有する場合。
 
 ## リファクタロードマップ
 
@@ -66,8 +59,6 @@ typed codec、allocator、transaction boundary、全ての回帰testsを一つ�
 | R-3 | commands slice・transit deepening 完了、warpはtrigger付きで保留 |
 | R-6 | Fix候補・FrameInput境界 |
 | R-7 | Fix候補・repository bounded-context分割 |
-| M-9 | 保留・trigger付き |
-
 採らない方針: CRDT/LWW、protobuf、薄いadapterだけの追加crate、行数削減目的の網羅match・domain型の破壊、初回LAN検証でのTLS/認証。
 
 ADR-0051で、薄いadapterのためではなく二重のcomposition rootを統合する

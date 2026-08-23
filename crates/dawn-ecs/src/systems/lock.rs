@@ -11,7 +11,7 @@
 //!
 //! # Contract
 //! - 純粋計算: I/O なし、グローバル状態なし。
-//! - 返り値の events を EventStore に Append するのは呼び出し元の責務。
+//! - 返り値の events を durable transition journal に含めるのは呼び出し元の責務。
 
 use crate::{
     components::{

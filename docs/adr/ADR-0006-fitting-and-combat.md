@@ -304,7 +304,7 @@ Phase 6 以降の Tick 処理:
      c. 命中した場合のみ DamageTaken を生成（ミスは WeaponFired を発行しない）
      d. HP ≤ 0 なら ShipDestroyed を生成し destroyed リストに積む
   7. Bot System を実行する                 ← Phase 6 追加（Combat の後）
-  8. 全イベントを EventStore に Append
+  8. authoritative transition を DurableJournal に Append
   9. dawn-distributed transport に差分を転送
   10. TickSummary を返す
 ```
@@ -439,7 +439,7 @@ CombatSystem::run:
 3. MovementSystem
 4. LockSystem    ← Phase 4 Cycle 3 で追加
 5. CombatSystem  ← Locked ターゲットのみ発射に変更
-6. EventStore Append
+6. DurableJournal Append（public facts は `JournalStream::PublicEvent`）
 7. Replication
 ```
 

@@ -8,10 +8,12 @@
 
 use crate::{Ingest, LogBatch, ReplicaSet, ReplicaSnapshot, SnapshotInstall};
 use dawn_core::SectorId;
-use dawn_storage::{EventStore, PublicEventIndex, RecoveryIndex};
+use dawn_storage::{PublicEventIndex, RecoveryIndex};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio::sync::broadcast;
+
+use crate::{PublicEventTail, PublicEventTailError};
 
 /// Transport side-channel for catch-up control messages.
 pub trait CatchUpTransport: Send + Sync {
@@ -268,19 +270,18 @@ impl CatchUpManager {
 
     /// Handle a directed catch-up control message. `snapshot_provider` is only
     /// evaluated when this node owns a compacted prefix requested by a peer.
-    pub fn handle_message<S, F>(
+    pub fn handle_message<F>(
         &mut self,
         message: CatchUpMessage,
-        owner_store: &S,
+        owner_tail: &PublicEventTail,
         snapshot_provider: F,
     ) -> CatchUpStep
     where
-        S: EventStore,
         F: FnOnce() -> Option<ReplicaSnapshot>,
     {
         match message {
             CatchUpMessage::Request(request) => {
-                self.serve_request(request, owner_store, snapshot_provider)
+                self.serve_request(request, owner_tail, snapshot_provider)
             }
             CatchUpMessage::Response(response) => self.apply_response(response),
         }
@@ -408,14 +409,13 @@ impl CatchUpManager {
         });
     }
 
-    fn serve_request<S, F>(
+    fn serve_request<F>(
         &self,
         request: CatchUpRequest,
-        store: &S,
+        tail: &PublicEventTail,
         snapshot_provider: F,
     ) -> CatchUpStep
     where
-        S: EventStore,
         F: FnOnce() -> Option<ReplicaSnapshot>,
     {
         let mut step = CatchUpStep::default();
@@ -425,22 +425,25 @@ impl CatchUpManager {
             return step;
         }
 
-        let owner_next_public_event_index = PublicEventIndex(store.next_index());
+        let owner_next_public_event_index = tail.next_index();
         let payload = if request.max_events == 0 {
             CatchUpPayload::Unavailable {
                 reason: CatchUpUnavailable::InvalidRequest,
             }
-        } else if request.from_public_event_index.0 >= owner_next_public_event_index.0 {
+        } else if request.from_public_event_index == owner_next_public_event_index {
             CatchUpPayload::UpToDate {
                 owner_next_public_event_index,
             }
+        } else if request.from_public_event_index > owner_next_public_event_index {
+            CatchUpPayload::Unavailable {
+                reason: CatchUpUnavailable::InvalidRequest,
+            }
         } else {
-            let first_retained_index = store
-                .iter_from(0)
-                .next()
-                .map_or(owner_next_public_event_index.0, |record| record.log_index);
-
-            if request.from_public_event_index.0 < first_retained_index {
+            let suffix = tail.read_from(
+                request.from_public_event_index,
+                (request.max_events as usize).min(self.config.max_events),
+            );
+            if matches!(suffix, Err(PublicEventTailError::CursorTooOld { .. })) {
                 match snapshot_provider() {
                     None => CatchUpPayload::Unavailable {
                         reason: CatchUpUnavailable::SnapshotUnavailable,
@@ -455,7 +458,7 @@ impl CatchUpManager {
                             reason: CatchUpUnavailable::SnapshotSectorMismatch,
                         }
                     }
-                    Some(snapshot) if snapshot.public_event_next_index.0 < first_retained_index => {
+                    Some(snapshot) if snapshot.public_event_next_index < tail.retained_base() => {
                         CatchUpPayload::Unavailable {
                             reason: CatchUpUnavailable::SnapshotBehindRetainedPrefix,
                         }
@@ -473,22 +476,15 @@ impl CatchUpManager {
                     },
                 }
             } else {
-                let max_events = (request.max_events as usize).min(self.config.max_events);
-                let records: Vec<_> = store
-                    .iter_from(request.from_public_event_index.0)
-                    .take(max_events)
-                    .collect();
-                match records.first() {
-                    Some(first) if first.log_index == request.from_public_event_index.0 => {
-                        CatchUpPayload::Suffix {
-                            batch: LogBatch::new(
-                                self.local_sector_id,
-                                first.log_index,
-                                records.iter().map(|record| record.event.clone()).collect(),
-                            ),
-                            owner_next_public_event_index,
-                        }
-                    }
+                match suffix {
+                    Ok(suffix) if !suffix.events.is_empty() => CatchUpPayload::Suffix {
+                        batch: LogBatch::new(
+                            self.local_sector_id,
+                            suffix.from_public_event_index,
+                            suffix.events,
+                        ),
+                        owner_next_public_event_index,
+                    },
                     _ => CatchUpPayload::Unavailable {
                         reason: CatchUpUnavailable::RetainedSuffixUnavailable,
                     },
@@ -719,8 +715,8 @@ impl CatchUpManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::PublicEventTail;
     use dawn_core::{events::VelocityChanged, DomainEvent, NodeId, ShipId, Tick, Velocity};
-    use dawn_storage::{EventStore, FileEventStore, InMemoryEventStore};
 
     fn event(n: u64) -> DomainEvent {
         DomainEvent::VelocityChanged(VelocityChanged {
@@ -730,21 +726,23 @@ mod tests {
         })
     }
 
-    fn fill<S: EventStore>(store: &mut S, count: u64) {
+    fn fill(tail: &mut PublicEventTail, count: u64) {
         for n in 0..count {
-            store.append(event(n));
+            tail.append_committed(&[event(n)]).unwrap();
         }
     }
 
-    fn batch<S: EventStore>(store: &S, sector_id: SectorId, from: u64, count: usize) -> LogBatch {
+    fn fill_from(tail: &mut PublicEventTail, start: u64, end: u64) {
+        for n in start..end {
+            tail.append_committed(&[event(n)]).unwrap();
+        }
+    }
+
+    fn batch(tail: &PublicEventTail, sector_id: SectorId, from: u64, count: usize) -> LogBatch {
         LogBatch::new(
             sector_id,
             from,
-            store
-                .iter_from(from)
-                .take(count)
-                .map(|record| record.event.clone())
-                .collect(),
+            tail.read_from(from.into(), count).unwrap().events,
         )
     }
 
@@ -778,11 +776,11 @@ mod tests {
         })
     }
 
-    fn drive<S: EventStore>(
+    fn drive(
         owner: &mut CatchUpManager,
         receiver: &mut CatchUpManager,
-        owner_store: &S,
-        receiver_store: &InMemoryEventStore,
+        owner_tail: &PublicEventTail,
+        receiver_tail: &PublicEventTail,
         mut outbound: Vec<CatchUpMessage>,
         snapshot: Option<ReplicaSnapshot>,
     ) {
@@ -792,11 +790,11 @@ mod tests {
             }
             assert_eq!(outbound.len(), 1, "catch-up keeps one request in flight");
             let owner_step =
-                owner.handle_message(outbound.pop().unwrap(), owner_store, || snapshot.clone());
+                owner.handle_message(outbound.pop().unwrap(), owner_tail, || snapshot.clone());
             assert_eq!(owner_step.outbound.len(), 1);
             let receiver_step = receiver.handle_message(
                 owner_step.outbound.into_iter().next().unwrap(),
-                receiver_store,
+                receiver_tail,
                 || None,
             );
             outbound = receiver_step.outbound;
@@ -808,9 +806,9 @@ mod tests {
     fn gap_automatically_catches_up_through_bounded_suffixes() {
         let owner_sector = SectorId(1);
         let receiver_sector = SectorId(2);
-        let mut store = InMemoryEventStore::new();
+        let mut store = PublicEventTail::new(0.into(), 32).unwrap();
         fill(&mut store, 8);
-        let receiver_store = InMemoryEventStore::new();
+        let receiver_store = PublicEventTail::new(0.into(), 32).unwrap();
         let mut owner = CatchUpManager::new(owner_sector, config(2));
         let mut receiver = CatchUpManager::new(receiver_sector, config(2));
 
@@ -834,14 +832,10 @@ mod tests {
 
     #[test]
     fn compacted_gap_falls_back_to_snapshot_then_resumes_at_snapshot_index() {
-        let dir = tempfile::tempdir().unwrap();
-        let hot = dir.path().join("events.log");
-        let cold = dir.path().join("cold.log");
         let owner_sector = SectorId(1);
         let receiver_sector = SectorId(2);
-        let mut store = FileEventStore::open(&hot).unwrap();
-        fill(&mut store, 10);
-        store.compact(6, &cold).unwrap();
+        let mut store = PublicEventTail::new(6.into(), 4).unwrap();
+        fill_from(&mut store, 6, 10);
 
         let snapshot = ReplicaSnapshot::new(
             owner_sector,
@@ -849,7 +843,7 @@ mod tests {
             PublicEventIndex(6),
             vec![1, 2, 3, 4],
         );
-        let receiver_store = InMemoryEventStore::new();
+        let receiver_store = PublicEventTail::new(0.into(), 32).unwrap();
         let mut owner = CatchUpManager::new(owner_sector, config(2));
         let mut receiver = CatchUpManager::new(receiver_sector, config(2));
 
@@ -874,14 +868,10 @@ mod tests {
 
     #[test]
     fn eventless_recovery_ticks_do_not_advance_public_snapshot_catch_up() {
-        let dir = tempfile::tempdir().unwrap();
-        let hot = dir.path().join("events.log");
-        let cold = dir.path().join("cold.log");
         let owner_sector = SectorId(1);
         let receiver_sector = SectorId(2);
-        let mut store = FileEventStore::open(&hot).unwrap();
-        fill(&mut store, 4);
-        store.compact(2, &cold).unwrap();
+        let mut store = PublicEventTail::new(2.into(), 4).unwrap();
+        fill_from(&mut store, 2, 4);
 
         // The recovery journal may have advanced through eventless Ticks while
         // the public stream remained at four events. Installing this checkpoint
@@ -892,7 +882,7 @@ mod tests {
             PublicEventIndex(2),
             vec![1, 2, 3, 4],
         );
-        let receiver_store = InMemoryEventStore::new();
+        let receiver_store = PublicEventTail::new(0.into(), 32).unwrap();
         let mut owner = CatchUpManager::new(owner_sector, config(2));
         let mut receiver = CatchUpManager::new(receiver_sector, config(2));
 
@@ -926,7 +916,7 @@ mod tests {
     fn duplicates_overlaps_reordering_and_repeated_gaps_stay_bounded() {
         let sector = SectorId(1);
         let mut manager = CatchUpManager::new(SectorId(2), config(2));
-        let mut store = InMemoryEventStore::new();
+        let mut store = PublicEventTail::new(0.into(), 32).unwrap();
         fill(&mut store, 10);
 
         manager.ingest_batch(batch(&store, sector, 0, 3));
@@ -961,7 +951,7 @@ mod tests {
     fn retry_exhaustion_cools_down_then_restarts_from_current_cursor() {
         let owner_sector = SectorId(1);
         let mut manager = CatchUpManager::new(SectorId(2), config(2));
-        let mut store = InMemoryEventStore::new();
+        let mut store = PublicEventTail::new(0.into(), 32).unwrap();
         fill(&mut store, 8);
 
         manager.ingest_batch(batch(&store, owner_sector, 0, 3));
@@ -994,7 +984,7 @@ mod tests {
     fn snapshot_unavailable_cools_down_then_restarts() {
         let owner_sector = SectorId(1);
         let mut manager = CatchUpManager::new(SectorId(2), config(2));
-        let receiver_store = InMemoryEventStore::new();
+        let receiver_store = PublicEventTail::new(0.into(), 32).unwrap();
         let gap = manager.ingest_batch(LogBatch::new(owner_sector, 4, vec![event(4)]));
         let request = only_request(&gap);
 
@@ -1018,7 +1008,7 @@ mod tests {
     fn retained_suffix_unavailable_cools_down_then_restarts() {
         let owner_sector = SectorId(1);
         let mut manager = CatchUpManager::new(SectorId(2), config(2));
-        let receiver_store = InMemoryEventStore::new();
+        let receiver_store = PublicEventTail::new(0.into(), 32).unwrap();
         let gap = manager.ingest_batch(LogBatch::new(owner_sector, 4, vec![event(4)]));
         let request = only_request(&gap);
 
@@ -1042,7 +1032,7 @@ mod tests {
     fn non_transient_failure_remains_terminal() {
         let owner_sector = SectorId(1);
         let mut manager = CatchUpManager::new(SectorId(2), config(2));
-        let receiver_store = InMemoryEventStore::new();
+        let receiver_store = PublicEventTail::new(0.into(), 32).unwrap();
         let gap = manager.ingest_batch(LogBatch::new(owner_sector, 4, vec![event(4)]));
         let request = only_request(&gap);
 
@@ -1067,7 +1057,7 @@ mod tests {
     fn contiguous_progress_clears_failure_cooldown() {
         let owner_sector = SectorId(1);
         let mut manager = CatchUpManager::new(SectorId(2), config(2));
-        let receiver_store = InMemoryEventStore::new();
+        let receiver_store = PublicEventTail::new(0.into(), 32).unwrap();
 
         manager.ingest_batch(LogBatch::new(owner_sector, 0, vec![event(0), event(1)]));
         let gap = manager.ingest_batch(LogBatch::new(owner_sector, 4, vec![event(4)]));
@@ -1114,7 +1104,7 @@ mod tests {
     fn local_sector_batches_are_never_added_to_the_foreign_recovery_set() {
         let local = SectorId(4);
         let mut manager = CatchUpManager::new(local, config(2));
-        let mut store = InMemoryEventStore::new();
+        let mut store = PublicEventTail::new(0.into(), 32).unwrap();
         fill(&mut store, 2);
 
         manager.ingest_batch(batch(&store, local, 0, 2));
