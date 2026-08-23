@@ -29,7 +29,11 @@ The atomicity, durability, and metadata guarantees ultimately depend on the file
 
 Any handled failure before replacement leaves the authoritative path untouched. If replacement succeeds but its durability step fails, publication atomically restores the synced rollback copy and syncs the directory again before returning the error. For a failed first publication, rollback removes the new authoritative path and restores the prior state in which no snapshot existed.
 
-`SimulationNode::checkpoint` propagates every publication error and calls `FileEventStore::compact` only after `StateSnapshot::save` returns success. Therefore a failed publication leaves both the previously published snapshot and the covered hot-log prefix available for recovery.
+`CheckpointScheduler` propagates every publication error and compacts only the
+authoritative `FileJournal` after `StateSnapshot::save` returns success.
+Public facts remain in the journal's `PublicEvent` stream and are rebuilt into
+the bounded `PublicEventTail`; a failed checkpoint never makes the tail a
+second durability source.
 
 If restoring the authoritative path encounters an additional filesystem failure, the returned error reports both failures and retains the fixed rollback file for operator recovery rather than deleting the last known readable copy. If the path is restored but the rollback directory sync also fails, the error reports that durability remains uncertain and checkpointing still leaves the hot log untouched.
 

@@ -66,13 +66,13 @@ Client comms     : WebSocket (Godot <-> WsServer, ADR-0007), postcard binary
                     InitialState/PlayerLoadout/AoI/PositionSnap (ADR-0042)
 Node             : a physical process (`sector-node config/node-N.toml`)
 Inter-node net   : TCP LAN plaintext (8D milestone; TLS is next phase)
-Persistence      : FileEventStore remains the append-only public-fact mirror and
-                    StateSnapshot remains the compatibility checkpoint path.
-                    The Sector engine owns neither store; ADR-0049 RecoveryDelta
-                    transitions use the runtime-owned DurableJournal boundary.
+Persistence      : DurableJournal is the sole persistent transition source.
+                    Its PublicEvent stream is projected into a bounded,
+                    rebuildable PublicEventTail for replication; StateSnapshot
+                    remains the checkpoint path. The Sector engine owns neither.
 ```
 
-See [ADR-0003](../adr/ADR-0003-local-first-development.md), [ADR-0027](../adr/ADR-0027-dawn-distributed-crate.md), [ADR-0049](../adr/ADR-0049-sector-recovery-state-delta-wal.md), [ADR-0051](../adr/ADR-0051-server-composition-boundary.md), and [ADR-0052](../adr/ADR-0052-workspace-boundaries.md).
+See [ADR-0003](../adr/ADR-0003-local-first-development.md), [ADR-0027](../adr/ADR-0027-dawn-replication-crate.md), [ADR-0049](../adr/ADR-0049-sector-recovery-state-delta-wal.md), [ADR-0051](../adr/ADR-0051-server-composition-boundary.md), and [ADR-0052](../adr/ADR-0052-workspace-boundaries.md).
 
 ### Future scope (direction only, not implemented)
 
@@ -97,8 +97,8 @@ See [ADR-0003](../adr/ADR-0003-local-first-development.md), [ADR-0027](../adr/AD
 | `dawn-client-gdext` | library (cdylib) | GDExtension binding exposing `dawn-client-core` to the Godot client, including typed Station Inventory rows/actions. Thin type-conversion adapter only (ADR-0040, ADR-0041, ADR-0046) |
 | `dawn-protocol` | library | Client<->server wire schema (`ClientRequest`/`ServerFact`, `ServerMessage`/`ClientMessage` binary envelope). `ServerFact` is an audience-scoped client projection distinct from durable `DomainEvent`; depends only on `dawn-core` + serde + postcard -- no transport/runtime dependency (ADR-0041, ADR-0042, #274) |
 | `dawn-ecs` | library | ECS World wrapper. Component / System definitions |
-| `dawn-storage` | library | Public EventLog plus fallible atomic `DurableJournal` mechanics capable of storing ADR-0049 recovery records; public-event archival remains logically distinct |
-| `dawn-distributed` | library | Raft, replication, and shared versioned peer transport. Raft and replication are separate modules over one transport boundary; opaque domain payloads keep the transport independent of policy (ADR-0027, ADR-0050, #280) |
+| `dawn-storage` | library | Fallible atomic `DurableJournal` mechanics. One transition batch stores ADR-0049 recovery records, committed public facts, and reliable effects; there is no second public EventLog |
+| `dawn-distributed` | library | Raft, replication, shared versioned peer transport, and the bounded rebuildable `PublicEventTail` read model. Raft and replication remain separate modules over one transport boundary; opaque domain payloads keep the transport independent of policy (ADR-0027, ADR-0050, #280, #336) |
 | `dawn-actor` | library | Client transport boundary (`ClientConnection` trait) |
 | `dawn-market` | library | Player-to-player Market: pure bid/ask, Currency, escrow, and durable `SettlementIntent` outbox policy. `MarketDb` is the SQLite adapter that atomically persists orders, balances, stable settlement IDs, and delivery state. Depends only on `dawn-core` + thiserror + rusqlite -- no transport/runtime dependency, same DAG position as `dawn-protocol` (ADR-0034 §4/§5/§6, #279). It never imports Sector bridge commands; `dawn-server` translates intents and routes them to the owning Sector |
 | `dawn-sector` | library | Per-Sector game logic plus the shared durable runtime frame. `SimulationNode` composes explicit Simulation/Player/Station/Transit/Topology/GameData/FrameOutput owners and a separate Persistence adapter; `run_durable_runtime_frame` owns the prepare -> durable append -> live-apply -> reconciliation -> output boundary with injected consensus, health, and durability-policy adapters. `aoi_frame::deliver_sector_sessions` owns the common rebuild -> session delivery -> stale-player cleanup loop; adapters inject only transport callbacks. AoI consumers read through the storage-free `SectorView` boundary while the owner split preserves ADR-0049 recovery semantics |
@@ -196,7 +196,7 @@ Publish public events / replication / reliable effects
 Acknowledge after the selected durability + local-apply conditions
 ```
 
-The concrete `SimulationNode` no longer owns an `EventStore`. The shared runtime
+The concrete `SimulationNode` no longer owns a public-event store. The shared runtime
 frame owns bounded prepare -> durable append -> live apply -> reconciliation ->
 output ordering; local and production adapters select their consensus, journal,
 durability policy, and repository ports. #275 now makes the remaining mutable
@@ -355,14 +355,17 @@ Recovery does not rerun historical Ticks to guess exact outcomes. Local live app
 
 ### Public Event history
 
-Committed `DomainEvent`s remain append-only facts. The existing hot/cold EventStore design is the current archival implementation:
+Committed `DomainEvent`s remain append-only facts. DurableJournal retains their
+`JournalStream::PublicEvent` entries, while `PublicEventTail` is a bounded,
+rebuildable read model:
 
 ```text
-recent public-event segments -> hot tier
-older retained public history -> cold/archive tier
+DurableJournal PublicEvent entries -> PublicEventTail -> replication/catch-up
 ```
 
-ADR-0049 does not authorize destructive in-place Event mutation. State-delta compaction can have a different watermark from public-event delivery/archive retention.
+ADR-0049 does not authorize destructive in-place public-fact mutation. Recovery
+compaction and public-event tail retention have distinct cursors; a cursor older
+than the retained tail base must use snapshot catch-up.
 
 ### Checkpoint/compaction/catch-up
 

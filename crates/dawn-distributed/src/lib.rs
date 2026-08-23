@@ -21,6 +21,7 @@ pub mod bus;
 pub mod catch_up;
 pub mod outbound;
 pub mod peer_transport;
+pub mod public_event_tail;
 pub mod raft_peer_transport;
 pub mod replica;
 pub mod replication_peer_transport;
@@ -46,6 +47,7 @@ pub use peer_transport::{
     PeerCapabilities, PeerChannelKind, PeerEndpoint, PeerFrame, PeerIdentity, PeerMessageKind,
     PeerSendError, PeerTransport, PeerTransportConfig,
 };
+pub use public_event_tail::{PublicEventSuffix, PublicEventTail, PublicEventTailError};
 pub use raft_peer_transport::PeerRaftTransport;
 pub use replica::{Ingest, ReplicaSet, ReplicaSnapshot, SnapshotInstall};
 pub use replication_peer_transport::{DurabilitySendError, PeerReplicationTransport};

@@ -4,8 +4,6 @@
 //!
 //! ## Invariants (INV-001, INV-002)
 //!
-//! - The public-fact `EventStore` appends `DomainEvent` values with a
-//!   monotonically increasing `log_index`.
 //! - `DurableJournal` appends encoded logical-transition batches with explicit
 //!   errors, receipts, and durability modes.
 //! - Exact authoritative recovery uses the versioned `DurableJournal` payload;
@@ -15,49 +13,48 @@
 //! ## This crate provides
 //!
 //! - `DurableJournal` — the generic recovery-journal contract.
-//! - `EventStore` — the legacy public-event store still used by the migration
-//!   path.
 //! - `RecoveryIndex` / `PublicEventIndex` — non-interchangeable positions for
 //!   authoritative recovery and public replication.
-//! - `InMemoryEventStore` — in-process store used by MVP and all tests.
-//! - `EventRecord` — a single entry in the log.
 //!
 //! ## Example
 //!
 //! ```
-//! use dawn_core::{AbsolutePosition, DomainEvent, NodeId, SectorId, ShipId, ShipTypeId, Tick};
-//! use dawn_core::events::ShipSpawned;
-//! use dawn_storage::{EventStore, InMemoryEventStore};
+//! use dawn_core::SectorId;
+//! use dawn_storage::{
+//!     DurabilityContext, DurabilityMode, DurableJournal, InMemoryJournal,
+//!     JournalBatch, JournalEntry, JournalIndex, JournalStream, TransitionId,
+//! };
 //!
-//! let mut store = InMemoryEventStore::new();
-//! let ship_id = ShipId::new(NodeId(1), 7);
-//! let index = store.append(DomainEvent::ShipSpawned(ShipSpawned {
-//!     ship_id,
-//!     sector_id: SectorId(0),
-//!     initial_position: AbsolutePosition::ORIGIN,
-//!     ship_type_id: ShipTypeId(1),
-//!     tick: Tick::ZERO,
-//! }));
+//! let mut journal = InMemoryJournal::new();
+//! let batch = JournalBatch::with_entries(
+//!     TransitionId(1),
+//!     DurabilityContext {
+//!         sector_id: SectorId(0),
+//!         owner_epoch: 0,
+//!     },
+//!     vec![JournalEntry::new(
+//!         JournalStream::PublicEvent,
+//!         b"encoded-domain-event".to_vec(),
+//!     )],
+//!     DurabilityMode::Synced,
+//! )
+//! .expect("one non-empty transition");
 //!
-//! assert_eq!(index, 0);
-//! assert_eq!(store.next_index(), 1);
+//! let receipt = journal.append_batch(batch).expect("durable append");
+//! assert_eq!(receipt.range.first, JournalIndex::ZERO);
+//! assert_eq!(journal.next_index().unwrap(), JournalIndex(1));
 //! ```
-
+//!
 // Rust API Guidelines C-DEBUG: catch new pub types that forget to derive
 // Debug at compile time instead of relying on periodic audits (see #83).
 #![warn(missing_debug_implementations)]
 
 pub mod cursor;
-pub mod file;
 pub mod file_journal;
 pub mod journal;
-pub mod memory;
 pub mod memory_journal;
-pub mod record;
-pub mod store;
 
 pub use cursor::{PublicEventIndex, RecoveryIndex};
-pub use file::FileEventStore;
 pub use file_journal::FileJournal;
 pub use journal::{
     encode_payload, AppendReceipt, CompactionReceipt, DurabilityContext, DurabilityEvidence,
@@ -65,7 +62,4 @@ pub use journal::{
     DurabilityTransportMessage, DurableJournal, JournalBatch, JournalEntry, JournalError,
     JournalIndex, JournalRange, JournalRecord, JournalStream, TransitionId,
 };
-pub use memory::InMemoryEventStore;
 pub use memory_journal::InMemoryJournal;
-pub use record::EventRecord;
-pub use store::EventStore;

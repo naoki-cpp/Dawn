@@ -32,7 +32,8 @@ impl Term {
 /// about domain types. Callers (`dawn-server`) serialize their own
 /// proposal type (e.g. a Transit proposal) into it. The Raft Log holds
 /// Commands (proposals), never Events (INV-006) — committed proposals are
-/// turned into Events by the caller and appended to its EventStore.
+/// turned into public events by the caller and appended to the durable
+/// transition journal.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct LogEntry {
     pub term: Term,

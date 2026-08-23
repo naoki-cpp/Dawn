@@ -9,10 +9,8 @@ bulk_addr    = "0.0.0.0:7912"
 npc_ships  = 0
 pop_cap    = 500
 
-event_log_path           = "data/node-2/events.log"
 recovery_journal_path    = "data/node-2/recovery.log"
 snapshot_path             = "data/node-2/snapshot.bin"
-cold_path                 = "data/node-2/cold.log"
 recovery_cold_path        = "data/node-2/recovery.cold.log"
 checkpoint_interval_ticks = 600
 

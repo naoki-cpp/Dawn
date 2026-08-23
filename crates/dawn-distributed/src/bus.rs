@@ -12,7 +12,6 @@
 //! broadcast channel so it does not affect event ordering or `event_count()`.
 
 use crate::{CatchUpMessage, CatchUpTransport, LogBatch, ReplicationTransport};
-use dawn_storage::{store::EventStore, InMemoryEventStore};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
 // ── Message type ──────────────────────────────────────────────────────────────
@@ -33,7 +32,7 @@ pub enum BusMessage {
 struct BusActor {
     rx: mpsc::Receiver<BusMessage>,
     broadcast_tx: broadcast::Sender<LogBatch>,
-    store: InMemoryEventStore,
+    event_count: usize,
 }
 
 impl BusActor {
@@ -41,7 +40,7 @@ impl BusActor {
         Self {
             rx,
             broadcast_tx,
-            store: InMemoryEventStore::new(),
+            event_count: 0,
         }
     }
 
@@ -49,11 +48,11 @@ impl BusActor {
         while let Some(msg) = self.rx.recv().await {
             match msg {
                 BusMessage::Batch(batch) => {
-                    self.store.append_batch(batch.events.iter().cloned());
+                    self.event_count = self.event_count.saturating_add(batch.events.len());
                     let _ = self.broadcast_tx.send(batch);
                 }
                 BusMessage::EventCount { reply } => {
-                    let _ = reply.send(self.store.len());
+                    let _ = reply.send(self.event_count);
                 }
                 BusMessage::Shutdown => break,
             }

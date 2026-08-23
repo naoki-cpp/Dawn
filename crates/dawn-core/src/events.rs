@@ -467,7 +467,7 @@ pub struct SectorTransitRequested {
     pub from: SectorId,
     pub to: SectorId,
     /// Source-Sector Tick that identifies this request. This is a source-local
-    /// nonce, not the Tick of every EventStore that records the transfer.
+    /// nonce, not the Tick of every journal record that carries the transfer.
     pub request_tick: Tick,
     /// Original transfer kind. `None` is a non-Gate Sector Transit and must not
     /// be inferred as a Jump after restart merely because topology has a Gate.
@@ -475,7 +475,7 @@ pub struct SectorTransitRequested {
     /// Authoritative destination entry point in the destination Sector frame.
     /// Anchor selection and local-offset derivation happen only at destination materialization.
     pub entry_pos: AbsolutePosition,
-    /// Tick local to the EventStore that appended this record.
+    /// Tick local to the Sector journal transition that emitted this record.
     pub tick: Tick,
 }
 
@@ -495,7 +495,7 @@ pub struct SectorTransitCompleted {
     pub request_tick: Tick,
     /// Authoritative destination-Sector entry position.
     pub entry_pos: AbsolutePosition,
-    /// Tick local to the EventStore that appended this record.
+    /// Tick local to the Sector journal transition that emitted this record.
     pub tick: Tick,
 }
 

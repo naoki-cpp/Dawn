@@ -66,8 +66,10 @@ dawn-core
                     └── dawn-simulation
 ```
 
-`dawn-distributed` は `dawn-storage`（`EventStore` trait + `iter_from`）に
-依存し、`dawn-sector` からは依存しない（矢印の方向に従う）。
+`dawn-distributed` は `dawn-storage` の `DurableJournal` と
+`JournalStream::PublicEvent` を読む `PublicEventTail` projectionに依存し、
+`dawn-sector` からは依存しない（矢印の方向に従う）。DurableJournalだけが
+永続化を担い、tailは再構築可能なbounded read modelである。
 
 ### 3. dawn-actor の ReplicationBus の扱い
 
@@ -118,7 +120,7 @@ pub struct SnapshotTransfer { ... }
         - dawn-actor から ReplicationBus を削除
         - dawn-simulation の配線を InMemoryReplicationBus に差し替え
 
-8D-2b: AntiEntropy（iter_from ベース取りこぼし再要求）
+8D-2b: AntiEntropy（PublicEventTail ベース取りこぼし再要求）
         - ゴシップ受信側が log index gap を検出して再要求
         - 重複受信は (SectorId, log_index) で冪等に drop
 

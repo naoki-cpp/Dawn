@@ -5,13 +5,13 @@
 
 use crate::{LogBatch, ReplicationTransport};
 use dawn_core::SectorId;
-use dawn_storage::{EventStore, PublicEventIndex};
+use dawn_storage::PublicEventIndex;
 
 /// Publishes the newly appended suffix of one owner's event log.
 ///
-/// The publisher keeps the next un-published log index. Each call reads the
-/// suffix from the owner store, wraps it in a `LogBatch`, and hands it to the
-/// configured replication transport.
+/// The publisher keeps the next unpublished public-event index. The runtime
+/// passes committed frame output directly; this adapter wraps it in a
+/// `LogBatch` and hands it to the configured replication transport.
 #[derive(Debug)]
 pub struct OutboundLogPublisher<T> {
     transport: T,
@@ -23,13 +23,6 @@ impl<T: ReplicationTransport> OutboundLogPublisher<T> {
         Self {
             transport,
             next_public_event_index: PublicEventIndex(0),
-        }
-    }
-
-    pub fn from_store_tail<S: EventStore>(transport: T, store: &S) -> Self {
-        Self {
-            transport,
-            next_public_event_index: PublicEventIndex(store.next_index()),
         }
     }
 
@@ -45,18 +38,6 @@ impl<T: ReplicationTransport> OutboundLogPublisher<T> {
 
     pub fn next_public_event_index(&self) -> u64 {
         self.next_public_event_index.0
-    }
-
-    /// Publish all events appended since the previous call.
-    ///
-    /// Returns the number of events handed to the transport.
-    pub fn publish_new_events<S: EventStore>(&mut self, sector_id: SectorId, store: &S) -> usize {
-        let events: Vec<_> = store
-            .iter_from(self.next_public_event_index.0)
-            .map(|record| record.event.clone())
-            .collect();
-
-        self.publish_events(sector_id, &events)
     }
 
     /// Publish an explicit transition output from the authoritative engine.
@@ -89,7 +70,6 @@ impl<T: ReplicationTransport> OutboundLogPublisher<T> {
 mod tests {
     use super::*;
     use dawn_core::{events::VelocityChanged, DomainEvent, NodeId, ShipId, Tick, Velocity};
-    use dawn_storage::{EventStore, InMemoryEventStore};
 
     fn event(n: u64) -> DomainEvent {
         DomainEvent::VelocityChanged(VelocityChanged {
@@ -100,16 +80,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn publish_new_events_sends_only_the_unpublished_suffix() {
+    async fn publish_events_assigns_contiguous_public_event_ranges() {
         let bus = crate::InMemoryReplicationBus::spawn();
         let mut rx = bus.subscribe();
         let mut publisher = OutboundLogPublisher::new(bus.clone());
-        let mut store = InMemoryEventStore::new();
 
-        store.append(event(0));
-        store.append(event(1));
-
-        assert_eq!(publisher.publish_new_events(SectorId(7), &store), 2);
+        assert_eq!(
+            publisher.publish_events(SectorId(7), &[event(0), event(1)]),
+            2
+        );
         assert_eq!(publisher.next_public_event_index(), 2);
 
         let first = rx.recv().await.unwrap();
@@ -117,10 +96,9 @@ mod tests {
         assert_eq!(first.from_public_event_index, 0);
         assert_eq!(first.events.len(), 2);
 
-        assert_eq!(publisher.publish_new_events(SectorId(7), &store), 0);
+        assert_eq!(publisher.publish_events(SectorId(7), &[]), 0);
 
-        store.append(event(2));
-        assert_eq!(publisher.publish_new_events(SectorId(7), &store), 1);
+        assert_eq!(publisher.publish_events(SectorId(7), &[event(2)]), 1);
 
         let second = rx.recv().await.unwrap();
         assert_eq!(second.from_public_event_index, 2);
@@ -131,21 +109,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn from_store_tail_starts_after_existing_events() {
+    async fn configured_cursor_starts_after_rebuilt_events() {
         let bus = crate::InMemoryReplicationBus::spawn();
         let mut rx = bus.subscribe();
-        let mut store = InMemoryEventStore::new();
-
-        store.append(event(0));
-        store.append(event(1));
-
-        let mut publisher = OutboundLogPublisher::from_store_tail(bus.clone(), &store);
+        let mut publisher = OutboundLogPublisher::with_next_public_event_index(bus.clone(), 2_u64);
         assert_eq!(publisher.next_public_event_index(), 2);
-        assert_eq!(publisher.publish_new_events(SectorId(7), &store), 0);
-        assert!(rx.try_recv().is_err());
-
-        store.append(event(2));
-        assert_eq!(publisher.publish_new_events(SectorId(7), &store), 1);
+        assert_eq!(publisher.publish_events(SectorId(7), &[event(2)]), 1);
 
         let batch = rx.recv().await.unwrap();
         assert_eq!(batch.sector_id, SectorId(7));

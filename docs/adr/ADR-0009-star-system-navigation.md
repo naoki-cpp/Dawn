@@ -144,8 +144,8 @@ JumpCommand 受信
   → Ship が gate_activation_radius 内にいるか検証
   → Ship を from_sector の ECS から削除
   → Ship を to_sector の ECS に追加（entry_pos に配置）
-  → JumpGateUsed イベントを EventStore に Append
-  → 宛先が別星系なら StarSystemChanged も Append
+  → JumpGateUsed イベントを DurableJournal の PublicEvent stream に Append
+  → 宛先が別星系なら StarSystemChanged も同じ stream に Append
   → Godot へブロードキャスト
 ```
 

@@ -9,14 +9,14 @@ use super::client_admission::ClientAdmission;
 use crate::runtime_frame::{OwnedRaftRuntimeConsensus, RuntimeFrameHost, RuntimeFrameHostError};
 use dawn_actor::ws_server;
 use dawn_core::{DomainEvent, PlayerId, SectorId, ShipId};
-use dawn_distributed::{OutboundLogPublisher, PeerReplicationTransport};
+use dawn_distributed::{OutboundLogPublisher, PeerReplicationTransport, PublicEventTail};
 use dawn_protocol::ServerMessage;
 use dawn_sector::aoi::{AoiMessage, AoiSink, Observer};
 use dawn_sector::aoi_frame::{deliver_sector_sessions, AoiFrame, AoiSessionCallbacks};
 use dawn_sector::node::{
     ClientRequestAdmissionError, JumpOutcome, RuntimeCommandDispatch, SimulationNode,
 };
-use dawn_storage::{EventStore, FileJournal};
+use dawn_storage::FileJournal;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 
@@ -63,6 +63,7 @@ pub(crate) struct SectorNodeRuntime {
     sessions: Vec<ws_server::PlayerSession>,
     aoi_frame: AoiFrame,
     outbound_replication: OutboundLogPublisher<PeerReplicationTransport>,
+    public_event_tail: PublicEventTail,
 }
 
 impl SectorNodeRuntime {
@@ -72,17 +73,19 @@ impl SectorNodeRuntime {
         aoi_cell_size: f64,
         peer_ws: HashMap<SectorId, SocketAddr>,
         repl_transport: PeerReplicationTransport,
-        event_store: &impl EventStore,
+        public_event_tail: PublicEventTail,
     ) -> Self {
+        let outbound_replication = OutboundLogPublisher::with_next_public_event_index(
+            repl_transport,
+            public_event_tail.next_index(),
+        );
         Self {
             sector_id,
             peer_ws,
             sessions: Vec::new(),
             aoi_frame: AoiFrame::new(aoi_cell_size),
-            outbound_replication: OutboundLogPublisher::from_store_tail(
-                repl_transport,
-                event_store,
-            ),
+            outbound_replication,
+            public_event_tail,
             host,
         }
     }
@@ -126,18 +129,21 @@ impl SectorNodeRuntime {
         self.sessions.push(sess);
     }
 
-    pub(crate) fn run_frame(&mut self, event_store: &mut impl EventStore) -> anyhow::Result<()> {
+    pub(crate) fn run_frame(&mut self) -> anyhow::Result<()> {
         let (lock_commands, pending_jumps, pending_loadout_refreshes) =
             self.collect_player_commands()?;
         self.propose_player_jumps(pending_jumps)?;
 
         let outbound_replication = &mut self.outbound_replication;
+        let public_event_tail = &mut self.public_event_tail;
         let output = self
             .host
             .run_frame_with_output(
                 dawn_sector::transition::FrameInput::lock_only(&lock_commands),
                 |node, _, events| {
-                    event_store.append_batch(events.to_vec());
+                    public_event_tail
+                        .append_committed(events)
+                        .expect("public event cursor overflow");
                     outbound_replication.publish_events(node.sector_id(), events);
                 },
             )
@@ -158,6 +164,14 @@ impl SectorNodeRuntime {
         let jumped_ships = self.jumped_ships(&output.events);
         self.deliver_frames(&output.events, &output.completed_warps, &jumped_ships);
         Ok(())
+    }
+
+    pub(crate) fn public_event_tail(&self) -> &PublicEventTail {
+        &self.public_event_tail
+    }
+
+    pub(crate) fn public_event_next_index(&self) -> dawn_storage::PublicEventIndex {
+        self.public_event_tail.next_index()
     }
 
     fn collect_player_commands(

@@ -279,7 +279,7 @@ Step 8: Build one logical durable transition
 Step 8.5: Make the transition durable under the selected ADR-0049 profile
          #271 owns physical framing, commit marker, fsync/quorum evidence, torn-write
          handling, and independent retention mechanics.
-         A public EventStore append alone is NOT the semantic Tick commit boundary.
+         A public-event projection update alone is NOT the semantic Tick commit boundary.
          Under ReplicatedDurable, remote quorum copies may be durable-staged here;
          staged bytes are not yet proof of remote reducer application/promotability.
 
@@ -319,14 +319,14 @@ TransitOp::Commit  -> current destination imports at entry_pos, appends
 
 This describes the **current implementation baseline** preserved by ADR-0014.
 `RuntimeFrameHost` now places the resulting Sector mutation under the same
-prepare/durable/live-apply contract, while #276 replaces EventStore-scan
+prepare/durable/live-apply contract, while #276 replaces public-event-scan
 retry/receipt authority with a durable Saga. The relative rule that committed
 consensus input is handled before the ordinary simulation Tick can remain unless
 a later ADR changes it.
 
 ### Commit means ADR-0049 durable transition, not public-event append
 
-The old statement **"EventStore append completion = Commit" is superseded**.
+The old statement **"public-event append completion = Commit" is superseded**.
 A Tick can change position, capacitor, countdowns, queues, routing/flight state, and
 logical Tick without a public event, so public-event append cannot represent the whole
 commit.
@@ -439,7 +439,7 @@ runtime effects are not part of the local simulation-compute benchmark. A future
 quorum if that profile is used for acknowledgement.
 
 Until every production runtime is wired to the durable Tick adapter, benchmarks that stop
-after `EventStore::append_batch()` are only **legacy implementation proxies**. They must not
+after the durable journal append are only **legacy implementation proxies**. They must not
 be interpreted as the semantic commit boundary or numeric recovery RTO.
 
 ### Running the benchmark

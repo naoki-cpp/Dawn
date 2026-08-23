@@ -20,8 +20,9 @@ fn rewrite(&self, index: u64, event: Event) -> Result<()>;
 ```
 
 Protects INV-001: committed public `DomainEvent`s are append-only facts and must not
-be edited/replaced in place. ADR-0017's current hot/cold archival implementation
-moves/retains immutable event segments rather than rewriting their contents.
+be edited/replaced in place. `FileJournal` compaction moves complete immutable
+transition prefixes, including `JournalStream::PublicEvent` records, to an
+append-only archive rather than rewriting their contents.
 
 ADR-0049 introduces a **separate authoritative recovery-delta/checkpoint stream**.
 Checkpoint-governed retirement/compaction of covered recovery deltas is not a

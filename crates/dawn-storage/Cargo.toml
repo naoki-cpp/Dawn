@@ -2,7 +2,7 @@
 name    = "dawn-storage"
 version = "0.1.0"
 edition = "2021"
-description = "Append-only event storage and replay support for Dawn."
+description = "Atomic durable transition journal storage for Dawn."
 repository.workspace = true
 publish.workspace     = true
 

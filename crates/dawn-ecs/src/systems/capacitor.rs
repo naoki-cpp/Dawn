@@ -15,7 +15,7 @@
 //! # Contract
 //!
 //! - Pure computation: no I/O, no global state.
-//! - Returned events must be appended to the EventStore by the caller.
+//! - Returned events must be included in the durable transition journal by the caller.
 //! - After forced deactivation, `apply_fitting()` must be called by the caller
 //!   so that `ShipStatsComp` reflects the new module state.
 

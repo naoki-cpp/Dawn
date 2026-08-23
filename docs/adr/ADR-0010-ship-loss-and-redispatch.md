@@ -94,7 +94,8 @@ pub struct ShipDispatched {
 }
 ```
 
-`EscapePodEjected` と `ShipDispatched` は DomainEvent であり EventStore に追記される。
+`EscapePodEjected` と `ShipDispatched` は DomainEvent であり DurableJournal の
+`JournalStream::PublicEvent` に追記される。
 State は Event から完全に Replay 可能（INV-002）。
 
 ### 将来実装（フルフェーズ版）
@@ -194,7 +195,7 @@ playtest-guide.md §2「プレイテスト前の前提条件」に反する。
 
 ### dawn-simulation
 
-- [ ] `node.rs`: ShipDestroyed 時に `EscapePodEjected` を EventStore に Append
+- [ ] `node.rs`: ShipDestroyed 時に `EscapePodEjected` を DurableJournal の PublicEvent に Append
 - [ ] `node.rs`: `pending_dispatches: Vec<PendingDispatch>` フィールド追加
 - [ ] `node.rs`: `process_dispatches()` メソッド — 期限到達で `ShipDispatched` Append + 新艦 Spawn
 - [ ] `node.rs`: ship_owners / player_ships の死亡時クリーンアップ

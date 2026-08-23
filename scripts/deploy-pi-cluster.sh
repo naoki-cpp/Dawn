@@ -292,9 +292,9 @@ control_addr = "0.0.0.0:7900"
 bulk_addr    = "0.0.0.0:7910"
 npc_ships  = 0
 pop_cap    = 50
-event_log_path           = "data/node-0/events.log"
+recovery_journal_path    = "data/node-0/recovery.log"
 snapshot_path             = "data/node-0/snapshot.bin"
-cold_path                 = "data/node-0/cold.log"
+recovery_cold_path        = "data/node-0/recovery.cold.log"
 checkpoint_interval_ticks = 600
 
 [[peers]]
@@ -323,9 +323,9 @@ control_addr = "0.0.0.0:7901"
 bulk_addr    = "0.0.0.0:7911"
 npc_ships  = 0
 pop_cap    = 50
-event_log_path           = "data/node-1/events.log"
+recovery_journal_path    = "data/node-1/recovery.log"
 snapshot_path             = "data/node-1/snapshot.bin"
-cold_path                 = "data/node-1/cold.log"
+recovery_cold_path        = "data/node-1/recovery.cold.log"
 checkpoint_interval_ticks = 600
 
 [[peers]]
@@ -354,9 +354,9 @@ control_addr = "0.0.0.0:7902"
 bulk_addr    = "0.0.0.0:7912"
 npc_ships  = 0
 pop_cap    = 50
-event_log_path           = "data/node-2/events.log"
+recovery_journal_path    = "data/node-2/recovery.log"
 snapshot_path             = "data/node-2/snapshot.bin"
-cold_path                 = "data/node-2/cold.log"
+recovery_cold_path        = "data/node-2/recovery.cold.log"
 checkpoint_interval_ticks = 600
 
 [[peers]]

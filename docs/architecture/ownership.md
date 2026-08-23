@@ -73,7 +73,7 @@ Multiple Sectors must never actively own the same Ship simultaneously.
 [does not exist]
 ```
 
-While in Transit, the source may retain a frozen recovery copy until destination completion/Ack semantics allow cleanup. That copy is not an active second owner. ADR-0014 defines the behavioral consensus invariant; #276 implements the durable handoff Saga under ADR-0049 instead of legacy EventStore-scan persistence.
+While in Transit, the source may retain a frozen recovery copy until destination completion/Ack semantics allow cleanup. That copy is not an active second owner. ADR-0014 defines the behavioral consensus invariant; #276 implements the durable handoff Saga under ADR-0049 instead of legacy public-event-scan persistence.
 
 ### Operations forbidden during Transit
 
@@ -142,8 +142,8 @@ The Actor model lives in `dawn-actor` (ADR-0002).
 Today the concrete `SimulationNode` remains the composition façade used by
 `SectorRuntimeDriver` and production adapters, but its mutable state is split
 into explicit owners. The SQLite adapter is held by a separate persistence
-boundary rather than by `StationState`, and the node no longer owns an
-`EventStore`. The derived AoI consumers use the read-only
+boundary rather than by `StationState`, and the node no longer owns persistence.
+The runtime owns the durable journal and its public stream. Derived AoI consumers use the read-only
 `dawn_sector::view::SectorView` boundary. Stop and the full Tick now expose
 #272 prepare -> durable -> live-apply APIs, including a bounded ship-level Tick
 write set; #278 now supplies the shared durable frame and explicit health gate.

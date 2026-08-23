@@ -16,7 +16,7 @@
 //!
 //! - 純粋計算: I/O なし、グローバル状態なし。
 //! - Lock System が先に実行されていること（LockComp が最新状態であること）。
-//! - 返り値の events を EventStore に Append するのは呼び出し元の責務。
+//! - 返り値の events を durable transition journal に含めるのは呼び出し元の責務。
 //! - `destroyed` に含まれる ShipId は呼び出し元が ECS から削除すること。
 
 use crate::{

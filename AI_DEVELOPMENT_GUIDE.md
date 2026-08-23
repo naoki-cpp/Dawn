@@ -264,12 +264,14 @@ workspace DAG and relevant ADR first.
   `dawn-core` + serde + postcard -- no transport/runtime dependency, so
   `dawn-client-gdext` can depend on it directly (ADR-0041, ADR-0042).
 - `dawn-ecs`: components and systems. No event store or network ownership.
-- `dawn-storage`: public-fact storage plus the fallible/versioned atomic
-  journal mechanics required by ADR-0049. It owns append/recovery evidence;
+- `dawn-storage`: fallible/versioned atomic journal mechanics required by
+  ADR-0049. Its streams store recovery deltas, public facts, and reliable
+  effects under one transition boundary. It owns append/recovery evidence;
   Sector state and runtime orchestration consume that boundary but do not
   define a second journal implementation.
 - `dawn-distributed`: one distributed-systems boundary containing Raft,
-  versioned peer lifecycle/transport, replication, and anti-entropy. Its
+  versioned peer lifecycle/transport, replication, anti-entropy, and the
+  bounded rebuildable `PublicEventTail` read model. Its
   modules keep policy direction explicit: Raft and replication adapt the shared
   peer transport, while the transport knows no domain message semantics. It
   carries #278 ownership fencing and #284 recovery ranges without redefining
@@ -287,7 +289,9 @@ workspace DAG and relevant ADR first.
   #272 removes persistence ownership from the pure engine; #275 splits state
   owners. Depends on `dawn-protocol` today to build typed wire messages it hands to
   `dawn-actor` (e.g. `PlayerLoadoutWire`).
-- `dawn-actor`: client/server protocol and connection boundary.
+- `dawn-actor`: low-level WebSocket client transport and connection boundary
+  used by `dawn-server`; it owns no protocol schema, Sector state, or runtime
+  policy.
 - `dawn-server`: production/local server composition, runnable simulation
   modes, and demos. #278 now shares runtime orchestration so durability
   profile, repository reconciliation, ack, retry, and effect policy have one
@@ -295,8 +299,6 @@ workspace DAG and relevant ADR first.
   Depends on `dawn-market` to route Market-domain requests and bridge commands
   before they reach the owning `SimulationNode` (ADR-0034 §4, roadmap.md §12
   9D-4/5).
-- `dawn-actor`: low-level WebSocket client transport used by `dawn-server`;
-  it owns no Sector or runtime policy.
 
 ## Change Workflow
 
@@ -431,4 +433,4 @@ this guide.
 
 ---
 
-Last updated: 2026-08-11 / Covers ADR-0001 through ADR-0052
+Last updated: 2026-08-23 / Covers ADR-0001 through ADR-0055

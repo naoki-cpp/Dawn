@@ -72,7 +72,7 @@ observer失敗 : 自船を解決できない admission / resume / handoff は明
 `AoiFrame::rebuild` は各 runtime の共通 Runtime Tick 出力を受けた後、`SimulationNode` の権威ある絶対位置から
 `CellGrid` を再構築する。この方針を採る理由は次の通りである。
 
-- CellGrid は配信専用の派生状態であり、snapshot や EventStore に含めない。
+- CellGrid は配信専用の派生状態であり、snapshot や DurableJournal に含めない。
 - 移動、spawn、destroy、warp、Sector handoff の更新漏れを runtime ごとに管理する必要がない。
 - recovery 後も通常時と同じ `rebuild` を通るため、配信再開前に必ず権威状態と一致する。
 - bucket と近傍列挙を ShipId 順に整列するため、挿入履歴に依存せず決定的である。
@@ -99,7 +99,9 @@ runtime adapter に残すのは Sector routing、Redirect、session retention、
 
 ### 設計上の制約
 
-- **配信レイヤーの関心事であり権威ある状態に触れない**。AoI は EventStore append 後のフィルタである。
+- **配信レイヤーの関心事であり権威ある状態に触れない**。AoI はdurable commitと
+  live applyが成功したframe outputをobserverごとに絞る。`PublicEventTail`の保持や
+  catch-upは担当しない。
 - **セルbucketは派生・非永続**。復旧後は権威ある位置から再構築してから session をseedする。
 - **Sector 内に閉じる**。Sector 越えは引き続き Raft と Redirect/resume が担当する。
 - **27セル規則を全runtimeで共有する**。runtime独自のvisible-set policyを禁止する。

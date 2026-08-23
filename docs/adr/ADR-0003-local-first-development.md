@@ -8,6 +8,11 @@ deciders: [human, ai-agent]
 
 # ADR-0003 — Local-First Development（段階的分散化）
 
+> **現行実装注記（2026-08-23）:** 以下の初期移行表は当時の段階計画として保持する。
+> 現在の永続化境界は `DurableJournal` であり、コミット済み公開事実はその
+> `JournalStream::PublicEvent` から `PublicEventTail` を再構築する。旧`EventStore` traitと
+> `FileEventStore`/`InMemoryEventStore`実装は#336で削除済みである。
+
 ## コンテキスト
 
 分散シミュレーション基盤を構築するにあたり、  
