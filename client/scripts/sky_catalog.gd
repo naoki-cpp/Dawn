@@ -1,9 +1,9 @@
-## A small, explicit bright-star layer for the procedural sky.
+## A small, explicit bright-star layer for the starfield (ADR-0054).
 ##
 ## The diffuse Milky Way remains a deliberately stylized approximation. These
 ## stars are the opposite: their directions, colors, and visual magnitudes are
-## seeded from the brightest naked-eye stars so the sky has stable landmarks
-## instead of only hash noise. Coordinates use the shader's equatorial frame.
+## taken from the brightest naked-eye stars so the sky has stable landmarks
+## instead of only generated noise. Coordinates use the equatorial frame.
 class_name SkyCatalog
 extends RefCounted
 
@@ -29,29 +29,17 @@ static func _direction(ra_hours: float, dec_degrees: float) -> Vector3:
 	return Vector3(cos_dec * cos(ra), sin(dec), cos_dec * sin(ra)).normalized()
 
 
-static func directions() -> PackedVector3Array:
-	var result := PackedVector3Array()
+## The catalogue as star records for the ADR-0054 starfield. Magnitudes stay
+## raw here: Starfield.flux_for_magnitude() owns the single magnitude-to-flux
+## conversion, so the named stars and the statistical field cannot drift onto
+## two different brightness scales.
+static func entries() -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
 	for star: Dictionary in _STARS:
-		result.append(_direction(star.ra, star.dec))
-	while result.size() < 16:
-		result.append(Vector3.ZERO)
-	return result
-
-
-static func colors() -> PackedVector3Array:
-	var result := PackedVector3Array()
-	for star: Dictionary in _STARS:
-		result.append(star.color)
-	while result.size() < 16:
-		result.append(Vector3.ZERO)
-	return result
-
-
-static func brightness() -> PackedFloat32Array:
-	var result := PackedFloat32Array()
-	for star: Dictionary in _STARS:
-		# Relative visual flux, normalized around a zero-magnitude star.
-		result.append(pow(10.0, -0.4 * float(star.magnitude)) * 0.12)
-	while result.size() < 16:
-		result.append(0.0)
+		var color: Vector3 = star.color
+		result.append({
+			"direction": _direction(star.ra, star.dec),
+			"color": Color(color.x, color.y, color.z),
+			"magnitude": float(star.magnitude),
+		})
 	return result

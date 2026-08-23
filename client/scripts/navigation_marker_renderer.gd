@@ -46,7 +46,8 @@ static func clear_children(root: Node) -> void:
 
 
 ## Returns a linear-light RGB colour for a blackbody spectral type [0..1].
-## Mirrors spectral_color() in space_sky.gdshader. Used by both star marker
+## The single owner of the spectral-type colour table (Ballesteros 2012).
+## ADR-0054 removed the shader's duplicate. Used by star marker
 ## materials and main.gd's sun-direction shader update.
 static func spectral_color(t: float) -> Color:
 	var r: float; var g: float; var b: float

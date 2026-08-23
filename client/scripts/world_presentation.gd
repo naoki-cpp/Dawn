@@ -9,7 +9,7 @@ class_name WorldPresentation
 extends RefCounted
 
 const NavigationMarkerRendererScript = preload("res://scripts/navigation_marker_renderer.gd")
-const SkyCatalogScript = preload("res://scripts/sky_catalog.gd")
+const StarfieldScript = preload("res://scripts/starfield.gd")
 
 const NAV_MARKER_CLAMP_DISTANCE : float = 30_000.0
 const DISTANT_BODY_LABEL_OFFSET : float = 800.0
@@ -21,6 +21,22 @@ const WARP_TUNNEL_FOV_BOOST : float = 7.0
 const SUN_MIN_RENDER_ANGULAR_RADIUS : float = 0.0001
 const SUN_DIRECTION_EPSILON : float = 1.0
 const SUN_FAR_DIRECTION : Vector3 = Vector3(0.62, 0.31, 0.72)
+## Resolution of the baked background panorama (ADR-0055). The nebula is
+## low-frequency, so this is far above what it can resolve; the star layer is
+## separate geometry and is unaffected by it.
+const NEBULA_PANORAMA_SIZE : Vector2i = Vector2i(2048, 1024)
+## RenderingServer.sky_bake_panorama() reads the sky the renderer has already
+## processed. Two consequences: the bake cannot happen in the frame the Sky is
+## created, and a shader uniform set this frame is not visible to it either --
+## which is why arming and baking are separate steps below.
+const NEBULA_BAKE_ARM_FRAME : int = 2
+const NEBULA_BAKE_FRAME : int = 5
+## Aerial perspective: distant objects wash toward the background colour, which
+## is a depth cue no amount of star tuning provides. Distances are the ones
+## EVE's Tr2PPFogEffect uses (2 km / 120 km), in server metres, converted with
+## the same render scale every other transform uses.
+const FOG_BEGIN_METRES : float = 2_000.0
+const FOG_END_METRES : float = 120_000.0
 
 var _world: RefCounted = null
 var _camera: Camera3D = null
@@ -28,6 +44,11 @@ var _warp_tunnel: ColorRect = null
 var _gates_root: Node3D = null
 var _bodies_root: Node3D = null
 var _sky_mat: ShaderMaterial = null
+var _starfield_root: Node3D = null
+var _starfield_mat: ShaderMaterial = null
+var _sky: Sky = null
+var _nebula_bake_frames: int = 0
+var _nebula_bake_done: bool = false
 var _directional_light: DirectionalLight3D = null
 var _player_material: StandardMaterial3D = null
 var _tactical_overlay: Node3D = null
@@ -67,6 +88,8 @@ func _render_scale() -> float:
 
 func refresh(delta: float, player_ship_id: int, ships: Dictionary, bodies: Array) -> void:
 	_maybe_rebase_origin(player_ship_id, ships)
+	_update_starfield()
+	_maybe_bake_nebula()
 	_update_position_markers(_bodies_root, "nav_pos", player_ship_id, ships)
 	_update_position_markers(_gates_root, "nav_pos", player_ship_id, ships)
 	_update_sun_direction(player_ship_id, ships, bodies)
@@ -429,18 +452,17 @@ func _setup_space_environment(parent: Node) -> void:
 	var sky_mat := ShaderMaterial.new()
 	sky_mat.shader = shader
 	_sky_mat = sky_mat
-	sky_mat.set_shader_parameter("star_threshold", 0.960)
-	sky_mat.set_shader_parameter("star_brightness", 3.5)
-	sky_mat.set_shader_parameter("nebula_strength", 0.26)
-	sky_mat.set_shader_parameter("milkyway_strength", 0.12)
-	sky_mat.set_shader_parameter("milkyway_core_color", Color(0.52, 0.62, 0.92))
-	sky_mat.set_shader_parameter("milkyway_outer_color", Color(0.72, 0.68, 0.58))
-	sky_mat.set_shader_parameter("ambient_color", Color(0.004, 0.003, 0.010))
-	sky_mat.set_shader_parameter("catalog_directions", SkyCatalogScript.directions())
-	sky_mat.set_shader_parameter("catalog_colors", SkyCatalogScript.colors())
-	sky_mat.set_shader_parameter("catalog_brightness", SkyCatalogScript.brightness())
+	sky_mat.set_shader_parameter("nebula_strength", 0.72)
+	sky_mat.set_shader_parameter("milkyway_strength", 0.16)
+	sky_mat.set_shader_parameter("milkyway_core_color", Color(0.94, 0.56, 0.28))
+	sky_mat.set_shader_parameter("milkyway_outer_color", Color(0.48, 0.20, 0.08))
+	sky_mat.set_shader_parameter("nebula_primary_color", Color(1.00, 0.16, 0.05))
+	sky_mat.set_shader_parameter("nebula_secondary_color", Color(0.72, 0.24, 0.08))
+	sky_mat.set_shader_parameter("nebula_highlight_color", Color(1.00, 0.46, 0.16))
+	sky_mat.set_shader_parameter("ambient_color", Color(0.006, 0.002, 0.001))
 
 	var sky := Sky.new()
+	_sky = sky
 	sky.sky_material = sky_mat
 	sky.process_mode = Sky.PROCESS_MODE_REALTIME
 	sky.radiance_size = Sky.RADIANCE_SIZE_256
@@ -451,19 +473,45 @@ func _setup_space_environment(parent: Node) -> void:
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
 	env.ambient_light_energy = 0.03
 	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
-	env.tonemap_exposure = 1.0
+	env.tonemap_exposure = 1.1
 	env.tonemap_white = 6.0
 	env.glow_enabled = true
 	env.glow_normalized = false
-	env.glow_intensity = 0.8
-	env.glow_bloom = 0.10
+	env.glow_intensity = 0.9
+	env.glow_bloom = 0.14
 	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_SOFTLIGHT
-	env.glow_hdr_threshold = 2.0
+	env.glow_hdr_threshold = 1.8
 	env.glow_hdr_scale = 1.0
+
+	## Depth fog whose colour comes mostly from the sky, so the haze on a distant
+	## object matches the nebula behind it. This is what EVE builds by hand in
+	## Tr2PPFogEffect (nebulaInfluence 0.5 over three distance bands); Godot
+	## exposes the same idea as fog_aerial_perspective over one curve.
+	var scale: float = _render_scale()
+	env.fog_enabled = true
+	env.fog_mode = Environment.FOG_MODE_DEPTH
+	env.fog_depth_begin = FOG_BEGIN_METRES * scale
+	env.fog_depth_end = FOG_END_METRES * scale
+	## Below 1.0 the haze builds early, matching EVE's mid band carrying a third
+	## of the blend well before the far distance.
+	env.fog_depth_curve = 0.6
+	env.fog_aerial_perspective = 0.8
+	env.fog_light_color = Color(0.42, 0.20, 0.12)
+	env.fog_light_energy = 1.0
+	## Measured against a test sphere held at constant angular size: 0.35 shifts
+	## it by only 8% at 120 km, which does not read as distance at all. 0.7
+	## shifts it about 27% and carries the background's warm tint with it.
+	env.fog_density = 0.7
+	env.fog_sun_scatter = 0.0
+	## The sky already IS the background. Fogging it would wash the nebula into
+	## itself and flatten the very depth this is meant to create.
+	env.fog_sky_affect = 0.0
 
 	var world_env := WorldEnvironment.new()
 	world_env.environment = env
 	parent.add_child(world_env)
+
+	_setup_starfield(parent)
 
 
 func _build_player_material() -> void:
@@ -488,3 +536,102 @@ func _clear_player_material(ship: Node3D) -> void:
 	var hull: MeshInstance3D = ship.get_node_or_null("Hull") as MeshInstance3D
 	if hull != null:
 		hull.set_surface_override_material(0, null)
+
+
+## Builds the ADR-0054 star layer: the named catalogue plus the seeded
+## statistical field, packed into one MultiMesh of billboard sprites.
+func _setup_starfield(parent: Node) -> void:
+	var shader := load("res://shaders/star_sprite.gdshader") as Shader
+	if shader == null:
+		push_warning("[WorldPresentation] star_sprite.gdshader not found")
+		return
+
+	var stars: Array[Dictionary] = StarfieldScript.catalog_stars()
+	stars.append_array(StarfieldScript.generate(
+		StarfieldScript.DEFAULT_SEED, StarfieldScript.DEFAULT_COUNT))
+
+	var material := ShaderMaterial.new()
+	material.shader = shader
+	material.set_shader_parameter(
+		"point_spread_pixels", StarfieldScript.POINT_SPREAD_PIXELS)
+	material.set_shader_parameter(
+		"core_sharpness", StarfieldScript.POINT_SHARPNESS)
+	_starfield_mat = material
+
+	var instance := MultiMeshInstance3D.new()
+	instance.multimesh = StarfieldScript.build_multimesh(stars)
+	instance.material_override = material
+	instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	## The shell surrounds the camera and so is never off screen. Stating the
+	## bound explicitly keeps the renderer from culling it against the instance
+	## bounds it would otherwise derive.
+	instance.custom_aabb = AABB(
+		Vector3.ONE * -StarfieldScript.SHELL_RADIUS,
+		Vector3.ONE * (StarfieldScript.SHELL_RADIUS * 2.0))
+
+	## Stars sit at infinity: the root follows the camera's translation but never
+	## its rotation, so the field cannot parallax. Dawn's ships cross AU, and any
+	## finite star distance would streak past them (ADR-0054 §2).
+	_starfield_root = Node3D.new()
+	_starfield_root.name = "Starfield"
+	_starfield_root.add_child(instance)
+	parent.add_child(_starfield_root)
+
+
+## Keeps the star shell centred on the camera so the field reads as infinitely
+## distant, and keeps the sprite shader's pixel footprint honest across
+## window resizes. Called every frame from refresh().
+func _update_starfield() -> void:
+	if _starfield_root == null or _camera == null:
+		return
+	_starfield_root.global_position = _camera.global_position
+	if _starfield_mat == null:
+		return
+	var viewport: Viewport = _camera.get_viewport()
+	if viewport != null:
+		_starfield_mat.set_shader_parameter(
+			"viewport_pixels", viewport.get_visible_rect().size)
+
+
+## Generates the nebula and Milky Way once into an equirectangular panorama and
+## switches the sky over to sampling it (ADR-0055). They are direction-only
+## functions, so one texture fetch replaces roughly 280 hash evaluations per
+## pixel. Godot bakes the same Sky the environment already uses, which also
+## feeds ambient light and reflections, so the background, the ambient and the
+## ship reflections keep agreeing with each other.
+##
+## Runs in two steps because a uniform written this frame is not yet visible to
+## the bake. Arming `bake_pass` and baking in one call captures the presentation
+## vignette into the texture, and the runtime then applies it a second time.
+func _maybe_bake_nebula() -> void:
+	if _nebula_bake_done or _sky == null or _sky_mat == null:
+		return
+	_nebula_bake_frames += 1
+
+	if _nebula_bake_frames == NEBULA_BAKE_ARM_FRAME:
+		## The local star moves with the ship. Baking it would paint it onto the
+		## background permanently, so if it is already lit, stay procedural.
+		var sun_active: Variant = _sky_mat.get_shader_parameter("sun_active")
+		if sun_active != null and (sun_active as float) > 0.0:
+			_nebula_bake_done = true
+			push_warning(
+				"[WorldPresentation] star already lit; keeping the procedural sky")
+			return
+		_sky_mat.set_shader_parameter("bake_pass", true)
+		return
+
+	if _nebula_bake_frames < NEBULA_BAKE_FRAME:
+		return
+
+	_nebula_bake_done = true
+	var panorama: Image = RenderingServer.sky_bake_panorama(
+		_sky.get_rid(), 1.0, false, NEBULA_PANORAMA_SIZE)
+	_sky_mat.set_shader_parameter("bake_pass", false)
+
+	## Headless and dummy renderers return nothing here. That is not an error:
+	## the procedural path stays in the shader precisely so this can fail.
+	if panorama == null or panorama.is_empty():
+		return
+	_sky_mat.set_shader_parameter(
+		"nebula_panorama", ImageTexture.create_from_image(panorama))
+	_sky_mat.set_shader_parameter("use_baked_nebula", true)

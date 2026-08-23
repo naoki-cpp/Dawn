@@ -86,6 +86,8 @@ When adding a new ADR, register it here too (the `/new-adr` skill does both).
 | ADR | Title | Status |
 |---|---|---|
 | [ADR-0013](ADR-0013-tactical-overlay.md) | タクティカルオーバーレイ（射程リング） | Accepted |
+| [ADR-0054](ADR-0054-starfield-sprite-geometry.md) | Starfield as CPU-generated sprite geometry | Accepted |
+| [ADR-0055](ADR-0055-nebula-background-representation.md) | Nebula background — bake the procedural sky, then light distance with it | Accepted |
 
 ### Phase 10 additions
 

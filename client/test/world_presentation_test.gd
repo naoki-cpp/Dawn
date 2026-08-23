@@ -6,6 +6,7 @@
 extends GdUnitTestSuite
 
 const WorldPresentationScript = preload("res://scripts/world_presentation.gd")
+const StarfieldScript = preload("res://scripts/starfield.gd")
 
 func _position(x: float, y: float, z: float) -> PackedFloat64Array:
 	return PackedFloat64Array([x, y, z])
@@ -70,6 +71,171 @@ func test_render_scale_is_queried_from_world_space_authority() -> void:
 	presentation._world = world
 
 	assert_float(presentation._render_scale()).is_equal_approx(0.25, 0.0001)
+
+
+func test_space_background_uses_a_warm_nebula_palette() -> void:
+	var presentation := WorldPresentationScript.new()
+	var root: Node3D = auto_free(Node3D.new()) as Node3D
+	add_child(root)
+	presentation._world = FakeWorld.new()
+	presentation._setup_space_environment(root)
+
+	var world_environment: WorldEnvironment = root.get_child(0) as WorldEnvironment
+	var sky_material: ShaderMaterial = world_environment.environment.sky.sky_material as ShaderMaterial
+	var primary: Color = sky_material.get_shader_parameter("nebula_primary_color") as Color
+	var secondary: Color = sky_material.get_shader_parameter("nebula_secondary_color") as Color
+	var highlight: Color = sky_material.get_shader_parameter("nebula_highlight_color") as Color
+
+	assert_float(sky_material.get_shader_parameter("nebula_strength") as float) \
+		.is_equal_approx(0.72, 0.0001)
+	assert_float(primary.r).is_equal_approx(1.00, 0.0001)
+	assert_float(primary.g).is_equal_approx(0.16, 0.0001)
+	assert_float(secondary.r).is_equal_approx(0.72, 0.0001)
+	assert_float(secondary.g).is_equal_approx(0.24, 0.0001)
+	assert_float(highlight.g).is_equal_approx(0.46, 0.0001)
+
+
+func test_starfield_is_built_and_pinned_to_the_camera() -> void:
+	var presentation := WorldPresentationScript.new()
+	var root: Node3D = auto_free(Node3D.new()) as Node3D
+	add_child(root)
+	var camera: Camera3D = auto_free(Camera3D.new()) as Camera3D
+	root.add_child(camera)
+	presentation._camera = camera
+	presentation._setup_starfield(root)
+
+	var starfield: Node3D = root.get_node("Starfield") as Node3D
+	var instance: MultiMeshInstance3D = starfield.get_child(0) as MultiMeshInstance3D
+	assert_int(instance.multimesh.instance_count).is_greater(1000)
+
+	# Stars are at infinity: the shell tracks where the camera is but never how
+	# it is turned, so the field cannot parallax as the ship crosses AU.
+	camera.global_position = Vector3(1200.0, -340.0, 90.0)
+	camera.rotate_y(0.8)
+	presentation._update_starfield()
+
+	assert_vector(starfield.global_position).is_equal_approx(
+		Vector3(1200.0, -340.0, 90.0), Vector3.ONE * 0.001)
+	assert_vector(starfield.global_basis.get_euler()).is_equal_approx(
+		Vector3.ZERO, Vector3.ONE * 0.001)
+
+
+func test_nebula_bake_is_deferred_and_degrades_to_the_procedural_sky() -> void:
+	var presentation := WorldPresentationScript.new()
+	var root: Node3D = auto_free(Node3D.new()) as Node3D
+	add_child(root)
+	presentation._world = FakeWorld.new()
+	presentation._setup_space_environment(root)
+	var sky_material: ShaderMaterial = presentation._sky_mat
+
+	# RenderingServer.sky_bake_panorama() reads a sky the renderer has already
+	# processed, so the bake cannot run in the frame the Sky is created.
+	presentation._maybe_bake_nebula()
+	assert_bool(presentation._nebula_bake_done).is_false()
+	assert_object(sky_material.get_shader_parameter("nebula_panorama")).is_null()
+
+	for _tick: int in range(WorldPresentationScript.NEBULA_BAKE_FRAME + 2):
+		presentation._maybe_bake_nebula()
+	assert_bool(presentation._nebula_bake_done).is_true()
+
+	# The headless dummy renderer returns no image. That is a supported outcome:
+	# the shader keeps its procedural path so the sky is never left blank.
+	var baked: Variant = sky_material.get_shader_parameter("use_baked_nebula")
+	if sky_material.get_shader_parameter("nebula_panorama") == null:
+		assert_bool(baked == true).is_false()
+
+
+func test_nebula_bake_refuses_to_paint_the_local_star_into_the_background() -> void:
+	var presentation := WorldPresentationScript.new()
+	var root: Node3D = auto_free(Node3D.new()) as Node3D
+	add_child(root)
+	presentation._world = FakeWorld.new()
+	presentation._setup_space_environment(root)
+
+	# The star moves with the ship, so a background baked while it is lit would
+	# carry a painted sun forever.
+	presentation._sky_mat.set_shader_parameter("sun_active", 1.0)
+	for _tick: int in range(WorldPresentationScript.NEBULA_BAKE_FRAME + 2):
+		presentation._maybe_bake_nebula()
+
+	assert_bool(presentation._nebula_bake_done).is_true()
+	assert_object(presentation._sky_mat.get_shader_parameter("nebula_panorama")).is_null()
+
+
+func test_distant_objects_wash_toward_the_background_but_close_combat_does_not() -> void:
+	var presentation := WorldPresentationScript.new()
+	var world := FakeWorld.new()
+	world.render_scale_value = 0.1
+	presentation._world = world
+	var root: Node3D = auto_free(Node3D.new()) as Node3D
+	add_child(root)
+	presentation._setup_space_environment(root)
+	var environment: Environment = (root.get_child(0) as WorldEnvironment).environment
+
+	assert_bool(environment.fog_enabled).is_true()
+	assert_int(environment.fog_mode).is_equal(Environment.FOG_MODE_DEPTH)
+
+	# Aerial perspective takes the haze colour from the sky, which is what ties a
+	# distant object to the nebula behind it rather than to a flat constant.
+	assert_float(environment.fog_aerial_perspective).is_greater(0.5)
+	# Fogging the sky would wash the background into itself.
+	assert_float(environment.fog_sky_affect).is_equal_approx(0.0, 0.0001)
+
+	# Combat happens within a few km. Haze must start well beyond that, or every
+	# engagement would be fought through fog.
+	var combat_range_metres: float = 500.0
+	assert_float(environment.fog_depth_begin) 		.is_greater(combat_range_metres * world.render_scale_value)
+	assert_float(environment.fog_depth_end).is_greater(environment.fog_depth_begin)
+
+
+func test_starfield_opts_out_of_fog() -> void:
+	# The sprite shell sits at SHELL_RADIUS, hundreds of times past the fog's end
+	# distance, so without an explicit opt-out every star renders as fog colour.
+	# Godot exposes no way to read a shader's render_mode, so this checks the
+	# source; the alternative is no coverage of a whole-sky failure.
+	var shader: Shader = load("res://shaders/star_sprite.gdshader") as Shader
+	assert_str(shader.code).contains("fog_disabled")
+	assert_float(StarfieldScript.SHELL_RADIUS).is_greater(
+		WorldPresentationScript.FOG_END_METRES)
+
+
+func test_sky_material_only_sets_uniforms_the_shader_declares() -> void:
+	var presentation := WorldPresentationScript.new()
+	var root: Node3D = auto_free(Node3D.new()) as Node3D
+	add_child(root)
+	presentation._world = FakeWorld.new()
+	presentation._setup_space_environment(root)
+
+	var world_environment: WorldEnvironment = root.get_child(0) as WorldEnvironment
+	var sky_material: ShaderMaterial = world_environment.environment.sky.sky_material as ShaderMaterial
+	var declared: Array[String] = []
+	for uniform: Dictionary in sky_material.shader.get_shader_uniform_list():
+		declared.append(uniform["name"] as String)
+
+	# set_shader_parameter() accepts unknown names silently, so a uniform that
+	# is renamed or dropped in the shader would otherwise take a presentation
+	# setting with it and report nothing. An empty list also catches a shader
+	# that failed to parse at all.
+	for uniform_name: String in [
+		"nebula_strength",
+		"milkyway_strength",
+		"milkyway_core_color",
+		"milkyway_outer_color",
+		"nebula_primary_color",
+		"nebula_secondary_color",
+		"nebula_highlight_color",
+		"ambient_color",
+		"nebula_panorama",
+		"use_baked_nebula",
+		"bake_pass",
+		"sun_direction",
+		"sun_active",
+		"sun_color",
+		"sun_angular_radius",
+		"sun_flare_right",
+		"sun_flare_up",
+	]:
+		assert_bool(declared.has(uniform_name)) 			.override_failure_message("sky shader declares no uniform " + uniform_name) 			.is_true()
 
 
 func test_render_scale_authority_controls_spawned_navigation_geometry() -> void:
