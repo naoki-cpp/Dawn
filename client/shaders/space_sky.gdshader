@@ -4,9 +4,18 @@
 // No external textures required.
 //
 // Astronomical references used:
-//   Star colors     : Blackbody radiation RGB by spectral type (Ballesteros 2012)
+//   Star layer      : NOT here. ADR-0054 moved the stars to sprite geometry
+//                      (client/scripts/starfield.gd + star_sprite.gdshader);
+//                      this file draws the nebula, Milky Way and local star.
+//   Star colors     : owned by NavigationMarkerRenderer.spectral_color()
+//                      (blackbody RGB by spectral type, Ballesteros 2012)
 //   Star distribution: Kroupa IMF — M:K:G:F:A:B:O ≈ 75:12:7:3:2:0.6:0.00003%
-//                      Visible-sky weighting shifts toward A/F/G (dim M's invisible)
+//                      A magnitude-limited (naked-eye) sample instead runs
+//                      B:A:F:G:K:M ~= 9:22:14:14:31:9, with O effectively absent
+//   Star rendering  : point sources only. Diffraction spikes come from the
+//                      vanes holding a telescope's secondary mirror, so an
+//                      eye or a ship camera never sees them; the wide halo
+//                      around a bright star is left to Environment.glow
 //   Milky Way tilt  : Galactic plane ~63° from celestial equator
 //   Galactic center : Sagittarius direction, ~8 kpc from Sun, dense bulge
 //   Spiral arms     : Logarithmic spiral pitch angle ~12.5° (Reid et al. 2014)
@@ -20,18 +29,23 @@ shader_type sky;
 
 // ── Uniforms ─────────────────────────────────────────────────────────────────
 
-uniform float star_threshold    : hint_range(0.90, 0.999) = 0.955;
-uniform float star_brightness   : hint_range(0.5,  8.0)   = 1.5;
 uniform float nebula_strength   : hint_range(0.0,  1.0)   = 0.50;
 uniform float milkyway_strength : hint_range(0.0,  1.0)   = 0.20;
 uniform vec3  ambient_color     : source_color             = vec3(0.002, 0.002, 0.006);
+// Baked background (ADR-0055). The nebula and Milky Way are direction-only
+// functions, so they are generated once into an equirectangular panorama and
+// sampled from then on: one texture fetch replaces ~280 hash evaluations per
+// pixel. The local star is NOT baked -- it moves with the ship.
+uniform sampler2D nebula_panorama : filter_linear, repeat_enable;
+uniform bool  use_baked_nebula = false;
+// True only while generating that panorama: drops the presentation vignette
+// so it is applied once at runtime rather than burned into the texture.
+uniform bool  bake_pass = false;
 uniform vec3  milkyway_core_color : source_color         = vec3(0.52, 0.62, 0.92);
 uniform vec3  milkyway_outer_color : source_color        = vec3(0.72, 0.68, 0.58);
-// Bright-star landmarks are supplied from SkyCatalog. Zero directions are
-// unused slots, allowing the shader to keep a fixed loop on all renderers.
-uniform vec3  catalog_directions[16];
-uniform vec3  catalog_colors[16] : source_color;
-uniform float catalog_brightness[16];
+uniform vec3  nebula_primary_color : source_color       = vec3(1.00, 0.11, 0.08);
+uniform vec3  nebula_secondary_color : source_color     = vec3(0.55, 0.18, 0.06);
+uniform vec3  nebula_highlight_color : source_color     = vec3(1.00, 0.38, 0.12);
 
 // ── Local star (ADR-0025) ─────────────────────────────────────────────────────
 // sun_direction: normalised world-space direction from ship toward the star.
@@ -51,26 +65,43 @@ uniform vec3  sun_flare_up : source_color = vec3(0.0, 1.0, 0.0);
 // ── Hash / Noise ──────────────────────────────────────────────────────────────
 // Note: PI and TAU are Godot 4 built-in shader constants.
 
-float hash1(vec3 p) {
-	p  = fract(p * vec3(443.8975, 397.2973, 491.1871));
-	p += dot(p.zxy, p.yxz + 19.19);
-	return fract(p.x * p.y * p.z);
+// Integer lattice hash. The previous construction -- multiply by a large
+// irrational and take fract() -- loses its entropy as the input grows, because
+// the spacing between representable 32-bit floats grows with magnitude. At a
+// cell index near 800, index * 443.8975 lands around 3.5e5 where that spacing
+// is 0.0625, so fract() kept only a handful of bits: measured over the finest
+// star layer it produced ~5.6k distinct values for 353k cells, and the deep fbm
+// octaves (whose coordinates pass 1600) collapsed to ~2.9k values across 2.9M
+// lattice points. Mixing the integer coordinates has no magnitude dependence
+// and measures flat (chi-square/dof ~1.0, neighbour correlation ~2e-4).
+//
+// One output per call, which is all a noise lattice consumes. A three-output
+// mix such as PCG3D costs about twice as much, and fbm reaches this ~280 times
+// per pixel, which measured as a 1.7x whole-shader regression.
+float hash_lattice(ivec3 c) {
+	uvec3 v = uvec3(c);
+	uint h = v.x * 73856093u ^ v.y * 19349663u ^ v.z * 83492791u;
+	h ^= h >> 13u;
+	h *= 0x5bd1e995u;
+	h ^= h >> 15u;
+	return float(h) * (1.0 / 4294967296.0);
 }
 
 float snoise(vec3 p) {
 	vec3 i = floor(p);
-	vec3 f = fract(p);
+	vec3 f = p - i;
 	vec3 u = f * f * (3.0 - 2.0 * f);
-	float a = hash1(i);
-	float b = hash1(i + vec3(1,0,0));
-	float c = hash1(i + vec3(0,1,0));
-	float d = hash1(i + vec3(1,1,0));
-	float e = hash1(i + vec3(0,0,1));
-	float g = hash1(i + vec3(1,0,1));
-	float h = hash1(i + vec3(0,1,1));
-	float k = hash1(i + vec3(1,1,1));
-	return mix(mix(mix(a,b,u.x), mix(c,d,u.x), u.y),
-	           mix(mix(e,g,u.x), mix(h,k,u.x), u.y), u.z);
+	ivec3 c = ivec3(i);
+	float a = hash_lattice(c);
+	float b = hash_lattice(c + ivec3(1, 0, 0));
+	float d = hash_lattice(c + ivec3(0, 1, 0));
+	float e = hash_lattice(c + ivec3(1, 1, 0));
+	float g = hash_lattice(c + ivec3(0, 0, 1));
+	float k = hash_lattice(c + ivec3(1, 0, 1));
+	float m = hash_lattice(c + ivec3(0, 1, 1));
+	float n = hash_lattice(c + ivec3(1, 1, 1));
+	return mix(mix(mix(a, b, u.x), mix(d, e, u.x), u.y),
+	           mix(mix(g, k, u.x), mix(m, n, u.x), u.y), u.z);
 }
 
 float fbm(vec3 p) {
@@ -141,45 +172,6 @@ float milkyway_density(vec3 gal) {
 	return disk * (0.4 + 0.4 * arms + 0.2 * clump) + bulge * (1.0 - lat);
 }
 
-// ── Spectral type color table ─────────────────────────────────────────────────
-//
-// Based on blackbody radiation approximations (Ballesteros 2012, EPJP).
-// Colors are for linear light, pre-tonemapping.
-//
-//   O  > 30,000 K  : blue-violet
-//   B  10-30,000 K : blue-white
-//   A   7,500-10,000 K : white
-//   F   6,000- 7,500 K : yellow-white
-//   G   5,200- 6,000 K : yellow   (Sun)
-//   K   3,700- 5,200 K : orange
-//   M   2,400- 3,700 K : red-orange
-
-vec3 spectral_color(float t) {
-	// t in [0, 1]: 0 = hottest (O), 1 = coolest (M)
-	if (t < 0.10) {
-		// O type — blue-violet
-		return mix(vec3(0.55, 0.65, 1.00), vec3(0.65, 0.76, 1.00), t / 0.10);
-	} else if (t < 0.25) {
-		// B type — blue-white
-		return mix(vec3(0.65, 0.76, 1.00), vec3(0.88, 0.93, 1.00), (t - 0.10) / 0.15);
-	} else if (t < 0.40) {
-		// A type — white
-		return mix(vec3(0.88, 0.93, 1.00), vec3(1.00, 0.99, 0.94), (t - 0.25) / 0.15);
-	} else if (t < 0.55) {
-		// F type — yellow-white
-		return mix(vec3(1.00, 0.99, 0.94), vec3(1.00, 0.95, 0.82), (t - 0.40) / 0.15);
-	} else if (t < 0.68) {
-		// G type — yellow  (Sun ≈ t=0.60)
-		return mix(vec3(1.00, 0.95, 0.82), vec3(1.00, 0.85, 0.58), (t - 0.55) / 0.13);
-	} else if (t < 0.83) {
-		// K type — orange
-		return mix(vec3(1.00, 0.85, 0.58), vec3(1.00, 0.64, 0.32), (t - 0.68) / 0.15);
-	} else {
-		// M type — red-orange
-		return mix(vec3(1.00, 0.64, 0.32), vec3(1.00, 0.40, 0.18), (t - 0.83) / 0.17);
-	}
-}
-
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 // Build a tangent frame around the local star. The sky shader has no
@@ -217,143 +209,81 @@ vec3 sun_surface_color(vec2 disc_uv, vec3 base_sun_color, float disc_radius) {
 	return base_sun_color * photosphere * limb_darkening;
 }
 
+// Equirectangular layout of RenderingServer.sky_bake_panorama(), measured
+// rather than assumed: u=0 is -Z, u=0.25 is -X, u=0.5 is +Z, u=0.75 is +X,
+// and v runs from +Y at 0 to -Y at 1. Getting the u sign wrong samples a
+// different part of the sky, which silently misaligns the painted band with
+// the starfield's galactic clustering. Negative u relies on repeat_enable,
+// which also keeps the seam filtering correctly.
+vec2 panorama_uv(vec3 dir) {
+	return vec2(atan(-dir.x, -dir.z) / TAU, acos(clamp(dir.y, -1.0, 1.0)) / PI);
+}
+
 void sky() {
 	vec3 dir = normalize(EYEDIR);
-	vec3 col = ambient_color;
+	vec3 col;
+	if (use_baked_nebula) {
+		col = texture(nebula_panorama, panorama_uv(dir)).rgb;
+	} else {
+		col = ambient_color;
 
-	// Convert to galactic frame for Milky Way / nebula calculations.
-	vec3 gal = to_galactic(dir);
-	float gal_lat = abs(gal.y);   // 0 = in the plane, 1 = toward pole
+		// Convert to galactic frame for Milky Way / nebula calculations.
+		vec3 gal = to_galactic(dir);
+		float gal_lat = abs(gal.y);   // 0 = in the plane, 1 = toward pole
 
-	// ── Milky Way ────────────────────────────────────────────────────────
-	float mw  = milkyway_density(gal);
-	// Core color: warm blue-white (hot young O/B stars + scattered blue starlight)
-	vec3 mw_core  = milkyway_core_color;
-	// Outer disk: slightly warmer (older K/G stars dominate by count)
-	vec3 mw_outer = milkyway_outer_color;
-	float mw_mix  = smoothstep(0.0, 1.5, mw);
-	vec3 mw_col   = mix(mw_outer, mw_core, mw_mix);
-	col += mw_col * mw * milkyway_strength;
+		// ── Milky Way ────────────────────────────────────────────────────────
+		float mw  = milkyway_density(gal);
+		// Core color: warm blue-white (hot young O/B stars + scattered blue starlight)
+		vec3 mw_core  = milkyway_core_color;
+		// Outer disk: slightly warmer (older K/G stars dominate by count)
+		vec3 mw_outer = milkyway_outer_color;
+		float mw_mix  = smoothstep(0.0, 1.5, mw);
+		vec3 mw_col   = mix(mw_outer, mw_core, mw_mix);
+		col += mw_col * mw * milkyway_strength;
 
-	// ── Emission nebulae ──────────────────────────────────────────────────
-	//
-	// Real nebulae are concentrated near the galactic plane.
-	// Plane concentration factor: drops off with galactic latitude.
-	float plane_weight = exp(-gal_lat * 3.5);
+		// ── Emission nebulae ──────────────────────────────────────────────────
+		//
+		// Real nebulae are concentrated near the galactic plane.
+		// Plane concentration factor: drops off with galactic latitude.
+		float plane_weight = exp(-gal_lat * 2.2);
 
-	// Three FBM regions at different scales + offsets.
-	// Spectral line colors (wavelength → linear RGB approximation):
-	//   Hα  656.3 nm : (1.00, 0.11, 0.08)
-	//   OIII 500.7 nm : (0.14, 0.82, 0.70)
-	//   SII  671.6 nm : (0.87, 0.06, 0.05)
-	float n1 = fbm(dir * 1.70 + vec3( 0.5,  0.3,  0.7));
-	float n2 = fbm(dir * 2.10 + vec3( 2.1, -1.4,  0.8));
-	float n3 = fbm(dir * 1.50 + vec3(-1.2,  0.6,  2.4));
+		// A broad, low-frequency dust layer keeps the background visually rich
+		// across the whole frame instead of confining all colour to a razor-thin
+		// Milky Way stripe. It is presentation-only and has no gameplay meaning.
+		float broad_cloud_noise = fbm(dir * 0.95 + vec3(-0.8, 1.4, 2.1));
+		float broad_cloud = pow(max(0.0, broad_cloud_noise - 0.27), 1.45)
+			* plane_weight;
+		float cloud_highlight = pow(max(0.0, broad_cloud_noise - 0.48), 2.0)
+			* plane_weight;
+		col += nebula_secondary_color * broad_cloud * nebula_strength * 0.95;
+		col += nebula_highlight_color * cloud_highlight * nebula_strength * 0.55;
 
-	float neb1 = pow(max(0.0, n1 - 0.36), 2.2) * nebula_strength * plane_weight;
-	float neb2 = pow(max(0.0, n2 - 0.40), 2.0) * nebula_strength * plane_weight * 0.75;
-	float neb3 = pow(max(0.0, n3 - 0.43), 2.5) * nebula_strength * plane_weight * 0.55;
+		// Three FBM regions at different scales + offsets.
+		// Spectral line colors (wavelength → linear RGB approximation):
+		//   Hα  656.3 nm : (1.00, 0.11, 0.08)
+		//   OIII 500.7 nm : (0.14, 0.82, 0.70)
+		//   SII  671.6 nm : (0.87, 0.06, 0.05)
+		float n1 = fbm(dir * 1.70 + vec3( 0.5,  0.3,  0.7));
+		float n2 = fbm(dir * 2.10 + vec3( 2.1, -1.4,  0.8));
+		float n3 = fbm(dir * 1.50 + vec3(-1.2,  0.6,  2.4));
 
-	col += vec3(1.00, 0.11, 0.08) * neb1;   // Hα red
-	col += vec3(0.14, 0.82, 0.70) * neb2;   // OIII teal
-	col += vec3(0.87, 0.06, 0.05) * neb3;   // SII deep red
+		float neb1 = pow(max(0.0, n1 - 0.36), 2.2) * nebula_strength * plane_weight;
+		float neb2 = pow(max(0.0, n2 - 0.40), 2.0) * nebula_strength * plane_weight * 0.75;
+		float neb3 = pow(max(0.0, n3 - 0.43), 2.5) * nebula_strength * plane_weight * 0.55;
 
-	// Dust absorption (dark lanes inside dense regions)
-	float dust      = fbm(dir * 3.5 + vec3(0.0, 1.0, 0.3));
-	float dust_mask = smoothstep(0.52, 0.72, dust) * max(neb1, neb2) * 0.50;
-	col            *= 1.0 - dust_mask;
+		col += nebula_primary_color * neb1;
+		col += nebula_secondary_color * neb2;
+		col += nebula_highlight_color * neb3;
 
-	// ── Stars ─────────────────────────────────────────────────────────────
-	//
-	// Equirectangular (spherical UV) grid — no column artifacts.
-	// Galactic-plane density bonus: more stars near the Milky Way band.
-	float eq_u = atan(dir.z, dir.x) / TAU;
-	float eq_v = asin(clamp(dir.y, -1.0, 1.0)) / PI;
-	vec2  eq   = vec2(eq_u, eq_v);
-
-	// Milky Way density raises the local star count.
-	float mw_density_bonus = mw * 0.018;
-
-	float scales[6];
-	scales[0] =  80.0;
-	scales[1] = 150.0;
-	scales[2] = 260.0;
-	scales[3] = 400.0;
-	scales[4] = 580.0;
-	scales[5] = 800.0;
-
-	float thresh_offset[6];
-	thresh_offset[0] =  0.000;
-	thresh_offset[1] = -0.012;
-	thresh_offset[2] = -0.020;
-	thresh_offset[3] = -0.026;
-	thresh_offset[4] = -0.030;
-	thresh_offset[5] = -0.034;
-
-	for (int i = 0; i < 6; i++) {
-		vec2  p       = eq * scales[i];
-		vec2  pi      = floor(p);
-		vec2  pf      = fract(p);
-		float layer_z = float(i) * 17.3;
-		float h       = hash1(vec3(pi, layer_z));
-
-		// Milky Way plane gets more stars (lower effective threshold).
-		float thr = star_threshold + thresh_offset[i] - mw_density_bonus;
-
-		if (h > thr) {
-			float t   = (h - thr) / (1.0 - thr);
-			float bri = pow(t, 1.3) * star_brightness;
-			bri      *= 1.0 - float(i) * 0.10;
-
-			vec2  offset = pf - 0.5;
-			float d      = length(offset);
-			float glow   = exp(-d * 60.0) * bri;
-
-			// Star temperature from a second independent hash.
-			// Distribution weighted toward visible types (A/F/G dominate naked-eye view).
-			// Real IMF: M=75%, K=12%, G=7%, F=3%, A=2%, B=0.6%, O=0.00003%
-			// But bright stars (visible) skew toward hotter types.
-			float raw_temp = hash1(vec3(pi + vec2(73.1, 21.9), layer_z + 0.5));
-			// Remap: 0-0.40 → A/B/O (hot, 40%); 0.40-0.65 → F/G (25%); 0.65-1.0 → K/M (35%)
-			float temp;
-			if (raw_temp < 0.40) {
-				temp = raw_temp * 0.55;           // maps to O-A range (0 - 0.40)
-			} else if (raw_temp < 0.65) {
-				temp = 0.40 + (raw_temp - 0.40) * 0.60;  // F-G range (0.40 - 0.55)
-			} else {
-				temp = 0.55 + (raw_temp - 0.65) * 1.29;  // K-M range (0.55 - 1.0)
-			}
-
-			vec3 star_col = spectral_color(temp);
-			col += glow * star_col;
-
-			// Only the very brightest stars (top 15%) get diffraction spikes.
-			// Bloom is intentionally tight — Godot post-process glow handles
-			// the wider soft halo so we avoid double-blooming.
-			if (t > 0.85 && i < 3) {
-				// Tight bloom: sharp halo, not a large disc.
-				float bloom   = exp(-d * 22.0) * bri * 0.12;
-				col          += star_col * bloom;
-				// Short diffraction spikes (telescope cross pattern).
-				float spike_x = exp(-abs(offset.x) * 130.0) * exp(-abs(offset.y) * 6.0);
-				float spike_y = exp(-abs(offset.y) * 130.0) * exp(-abs(offset.x) * 6.0);
-				col          += star_col * (spike_x + spike_y) * bri * 0.055;
-			}
-		}
-	}
-
-	// Explicit bright-star landmarks sit above the diffuse statistical layer.
-	// The angular kernel is intentionally sub-pixel at normal FOVs and blooms
-	// naturally through Environment.glow, so these do not become oversized dots.
-	for (int i = 0; i < 16; i++) {
-		vec3 catalog_dir = catalog_directions[i];
-		float slot_active = step(0.001, length(catalog_dir));
-		float separation = 1.0 - dot(dir, normalize(catalog_dir + vec3(0.000001)));
-		float point = exp(-separation * 250000.0) * catalog_brightness[i] * slot_active;
-		col += catalog_colors[i] * point;
+		// Dust absorption (dark lanes inside dense regions)
+		float dust      = fbm(dir * 3.5 + vec3(0.0, 1.0, 0.3));
+		float dust_mask = smoothstep(0.52, 0.72, dust) * max(neb1, neb2) * 0.50;
+		col            *= 1.0 - dust_mask;
 	}
 
 	// ── Local star disc + corona (ADR-0025) ──────────────────────────────
+	// Always live: the star's direction changes as the ship moves, so it can
+	// never be part of a baked, direction-only background.
 	if (sun_active > 0.5) {
 		vec3 sun_dir = normalize(sun_direction);
 		float cos_angle = dot(dir, sun_dir);
@@ -416,6 +346,14 @@ void sky() {
 		col += sun_color * (inner_corona + outer_corona + scattered_glow);
 		col += flare_color * (horizontal_flare + central_glint);
 
+	}
+
+	// The reference look falls into a darker brown-black floor while keeping
+	// the starfield readable. This is a presentation gradient over world
+	// direction, not a physical horizon or a change to world lighting.
+	if (!bake_pass) {
+		float lower_vignette = smoothstep(-0.86, 0.12, dir.y);
+		col *= mix(0.62, 1.0, lower_vignette);
 	}
 
 	col = max(col, vec3(0.0));
