@@ -36,6 +36,7 @@ def main() -> int:
         "dawn-consensus",
         "dawn-peer-transport",
         "dawn-replication",
+        "dawn-actor",
     }
     for package in sorted(forbidden_packages & packages.keys()):
         errors.append(f"obsolete package is still in the workspace: {package}")
@@ -51,6 +52,8 @@ def main() -> int:
         }
         for required in {"simulate", "sector-node"} - binary_names:
             errors.append(f"dawn-server is missing required binary: {required}")
+        if not any("lib" in target["kind"] for target in server["targets"]):
+            errors.append("dawn-server is missing the shared client transport library")
 
     for required in {"dawn-protocol", "dawn-storage", "dawn-distributed"}:
         if required not in packages:
@@ -71,22 +74,15 @@ def main() -> int:
 
     forbidden_edges = {
         "dawn-core": graph.get("dawn-core", set()),
-        "dawn-protocol": {"dawn-sector", "dawn-server", "dawn-actor"},
-        "dawn-client-core": {"dawn-sector", "dawn-server", "dawn-actor"},
+        "dawn-protocol": {"dawn-sector", "dawn-server"},
+        "dawn-client-core": {"dawn-sector", "dawn-server"},
         "dawn-client-gdext": {
             "dawn-sector",
             "dawn-server",
-            "dawn-actor",
             "dawn-simulation",
             "dawn-sector-node",
         },
         "dawn-market": {"dawn-sector", "dawn-server", "dawn-simulation"},
-        "dawn-actor": {
-            "dawn-sector",
-            "dawn-server",
-            "dawn-simulation",
-            "dawn-sector-node",
-        },
         "dawn-sector": {
             "dawn-server",
             "dawn-simulation",
@@ -104,7 +100,6 @@ def main() -> int:
         "dawn-distributed": {
             "dawn-sector",
             "dawn-server",
-            "dawn-actor",
             "dawn-client-core",
             "dawn-client-gdext",
             "dawn-protocol",

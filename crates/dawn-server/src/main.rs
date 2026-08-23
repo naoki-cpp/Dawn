@@ -17,9 +17,9 @@ mod runtime_frame;
 mod sector_runtime_driver;
 mod serve;
 
-// Client transport (WsServer) is shared via dawn-actor; bring the module into
-// crate scope so existing `crate::ws_server` paths keep resolving.
-use dawn_actor::ws_server;
+// Client transport is shared by both server binaries through the package
+// library, so the serve modules use one WebSocket implementation.
+use dawn_server::ws_server;
 
 #[cfg(test)]
 fn test_catalog() -> std::sync::Arc<dawn_sector::game_data::GameDataCatalog> {

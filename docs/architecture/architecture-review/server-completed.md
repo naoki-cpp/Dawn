@@ -4,7 +4,7 @@ audience : AI Agent / Human Developer
 update   : /architecture-review が issue を解消済みへ移動するたびに追記
 related  : docs/architecture/architecture-review/server.md（構造評価）,
            docs/architecture/architecture-review/server-pending.md（未完項目）
-date     : 2026-08-23
+date     : 2026-08-24
 ---
 
 # Architecture Review — Dawn Codebase（完了済みログ）
@@ -16,6 +16,15 @@ date     : 2026-08-23
 ---
 
 ## 改善ロードマップ > 完了済み
+
+### 2026-08-24: `dawn-actor` absorption (#338)
+
+`ClientConnection`、in-process transport、WebSocket framing、Hello/resume
+handshake、`PlayerSession`を`dawn-server` libraryへ移し、`simulate`と
+`sector-node`が同じ実装を利用するようにした。wire schema generatorは
+`dawn-protocol`へ移し、workspaceから`dawn-actor`とその依存を削除した。
+postcard framing、admission/session lifecycle、双方のserver entry pointの
+回帰テストを含むworkspace test、format、clippyを確認済み。
 
 ### 2026-08-23: Legacy EventStore persistence retirement (#336)
 

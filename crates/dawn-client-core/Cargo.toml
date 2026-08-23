@@ -7,7 +7,7 @@ repository.workspace = true
 publish.workspace     = true
 
 # dawn-client-core must not depend on Godot/GDExtension, dawn-sector, or
-# dawn-actor at runtime -- it is a pure Rust library shared between the
+# dawn-server at runtime -- it is a pure Rust library shared between the
 # (future) GDExtension binding and its own test suite. See ADR-0039.
 #
 # ADR-0042: the dawn-sector "server contract test" (proving the real

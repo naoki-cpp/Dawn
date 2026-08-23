@@ -99,10 +99,9 @@ See [ADR-0003](../adr/ADR-0003-local-first-development.md), [ADR-0027](../adr/AD
 | `dawn-ecs` | library | ECS World wrapper. Component / System definitions |
 | `dawn-storage` | library | Fallible atomic `DurableJournal` mechanics. One transition batch stores ADR-0049 recovery records, committed public facts, and reliable effects; there is no second public EventLog |
 | `dawn-distributed` | library | Raft, replication, shared versioned peer transport, and the bounded rebuildable `PublicEventTail` read model. Raft and replication remain separate modules over one transport boundary; opaque domain payloads keep the transport independent of policy (ADR-0027, ADR-0050, #280, #336) |
-| `dawn-actor` | library | Client transport boundary (`ClientConnection` trait) |
 | `dawn-market` | library | Player-to-player Market: pure bid/ask, Currency, escrow, and durable `SettlementIntent` outbox policy. `MarketDb` is the SQLite adapter that atomically persists orders, balances, stable settlement IDs, and delivery state. Depends only on `dawn-core` + thiserror + rusqlite -- no transport/runtime dependency, same DAG position as `dawn-protocol` (ADR-0034 §4/§5/§6, #279). It never imports Sector bridge commands; `dawn-server` translates intents and routes them to the owning Sector |
 | `dawn-sector` | library | Per-Sector game logic plus the shared durable runtime frame. `SimulationNode` composes explicit Simulation/Player/Station/Transit/Topology/GameData/FrameOutput owners and a separate Persistence adapter; `run_durable_runtime_frame` owns the prepare -> durable append -> live-apply -> reconciliation -> output boundary with injected consensus, health, and durability-policy adapters. `aoi_frame::deliver_sector_sessions` owns the common rebuild -> session delivery -> stale-player cleanup loop; adapters inject only transport callbacks. AoI consumers read through the storage-free `SectorView` boundary while the owner split preserves ADR-0049 recovery semantics |
-| `dawn-server` | package with binaries | Single server composition boundary. `runtime_frame::RuntimeFrameHost` owns one Sector's authoritative node, journal, consensus adapter, health, and durability policy. `simulate` owns local benchmarks/demos/playtest modes; `sector-node` owns the production peer-connected process. Both select adapters around the same Host frame and neither defines a second Tick ordering (ADR-0051) |
+| `dawn-server` | library + package with binaries | Single server composition boundary. The library owns the shared `ClientConnection`/WebSocket framing, handshake, admission session, and in-process transport seams. `runtime_frame::RuntimeFrameHost` owns one Sector's authoritative node, journal, consensus adapter, health, and durability policy. `simulate` owns local benchmarks/demos/playtest modes; `sector-node` owns the production peer-connected process. Both select adapters around the same Host frame and neither defines a second Tick ordering (ADR-0051, #338) |
 
 ### Dependency DAG
 
@@ -116,7 +115,6 @@ dawn-core
   +-- dawn-distributed
   |   +-- Raft and replication policies
   |   \-- shared versioned peer transport
-  +-- dawn-actor
   +-- dawn-market
   +-- dawn-sector
   \-- dawn-server
@@ -124,8 +122,9 @@ dawn-core
       \-- sector-node
 ~~~
 
-dawn-client-gdext also depends directly on dawn-protocol. dawn-actor and the
-current dawn-sector runtime package consume the same protocol authority.
+dawn-client-gdext also depends directly on dawn-protocol. The server-owned
+client transport and the current dawn-sector runtime package consume the same
+protocol authority.
 dawn-distributed consumes dawn-storage for recovery-range adapters; the
 physical peer transport itself remains policy-agnostic. dawn-server is the only
 composition root and depends on the runtime-facing packages above.
@@ -248,7 +247,9 @@ Godot client
     ^ Command
 ```
 
-See ADR-0005 (trait) / ADR-0007 (WebSocket session) for detailed design.
+The implementation lives in `dawn-server::client_connection` and
+`dawn-server::ws_server`; see ADR-0005 (trait) / ADR-0007 (WebSocket session)
+for the historical design decisions.
 
 ---
 

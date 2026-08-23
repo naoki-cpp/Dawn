@@ -196,7 +196,7 @@ source. After changing `ServerFact`, `ClientRequest`, `MarketCommandWire`, or a
 referenced type, run:
 
 ```bash
-cargo run -p dawn-actor --example gen_wire_schema
+cargo run -p dawn-protocol --example gen_wire_schema
 ```
 
 Commit the regenerated `.schema.json` files with the code change. Do not edit

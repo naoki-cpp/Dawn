@@ -7,7 +7,6 @@
 
 use super::client_admission::ClientAdmission;
 use crate::runtime_frame::{OwnedRaftRuntimeConsensus, RuntimeFrameHost, RuntimeFrameHostError};
-use dawn_actor::ws_server;
 use dawn_core::{DomainEvent, PlayerId, SectorId, ShipId};
 use dawn_distributed::{OutboundLogPublisher, PeerReplicationTransport, PublicEventTail};
 use dawn_protocol::ServerMessage;
@@ -16,6 +15,7 @@ use dawn_sector::aoi_frame::{deliver_sector_sessions, AoiFrame, AoiSessionCallba
 use dawn_sector::node::{
     ClientRequestAdmissionError, JumpOutcome, RuntimeCommandDispatch, SimulationNode,
 };
+use dawn_server::ws_server;
 use dawn_storage::FileJournal;
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -328,7 +328,7 @@ fn send_redirect(session: &mut ws_server::PlayerSession, ws_addr: SocketAddr) {
 }
 
 /// Adapts a `ws_server::PlayerSession` to `AoiSink` (orphan-rule workaround:
-/// the trait lives in dawn-sector, the type in dawn-actor, so the impl has to
+/// the trait lives in dawn-sector, the type in dawn-server, so the impl has to
 /// live here where both are foreign).
 struct SessionSink<'a>(&'a mut ws_server::PlayerSession);
 

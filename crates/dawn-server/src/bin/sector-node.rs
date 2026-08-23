@@ -25,7 +25,6 @@ mod runtime;
 #[path = "../runtime_frame.rs"]
 mod runtime_frame;
 
-use dawn_actor::ws_server;
 use dawn_core::{NodeId, SectorBounds, SectorId};
 use dawn_distributed::{
     CatchUpConfig, CatchUpEvent, CatchUpManager, CatchUpStep, CatchUpTransport,
@@ -42,6 +41,7 @@ use dawn_sector::persistence::{
     recovery::apply_tail, CheckpointConfig, CheckpointScheduler, StateSnapshot,
 };
 use dawn_sector::{galaxy::Galaxy, game_data::GameDataCatalog};
+use dawn_server::ws_server;
 use dawn_storage::{DurableJournal, FileJournal, JournalIndex, PublicEventIndex};
 use runtime_frame::{OwnedRaftRuntimeConsensus, RuntimeFrameHost, RuntimeFramePolicy};
 use std::collections::HashMap;

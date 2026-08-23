@@ -4,7 +4,6 @@
 //! promotion, while `dawn-sector::client_admission` owns the authoritative
 //! begin/commit/abort lifecycle and every rollback decision.
 
-use dawn_actor::ws_server;
 use dawn_core::SectorId;
 use dawn_sector::client_admission::{
     ClientAdmissionAttempt, ClientAdmissionIntent, ClientAdmissionRefusal, CommittedClientAdmission,
@@ -13,6 +12,7 @@ use dawn_sector::client_admission_resolution::{
     resolve_client_admission, ClientAdmissionResolution,
 };
 use dawn_sector::node::SimulationNode;
+use dawn_server::ws_server;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 

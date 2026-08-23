@@ -31,7 +31,7 @@ cargo llvm-cov --workspace --summary-only -- --skip wire_schema_doc_is_up_to_dat
 
 - Binary entry points and process wiring: `dawn-simulation/src/main.rs`,
   `serve/{runtime,single,cluster,aoi_delivery}.rs`, `dawn-sector-node/src/
-  {main,runtime,config,data_loader}.rs`, `dawn-actor/src/ws_server.rs`,
+  {main,runtime,config,data_loader}.rs`, `dawn-server/src/ws_server.rs`,
   `bench.rs`. These are covered by manual/hardware verification (8D-5) per
   `docs/architecture/architecture-review/server.md` — unit tests here would
   mock away everything they actually do.
@@ -44,7 +44,7 @@ situations manual testing never exercises —
 
 1. **Event replay** (`node/apply_event.rs` and anything INV-002-critical):
    a broken replay arm corrupts state only after a server restart.
-2. **Wire conversion** (`dawn-actor/src/protocol.rs`): a broken
+2. **Wire conversion** (`dawn-protocol/src/`): a broken
    serialization/parse arm only surfaces as a client-side symptom, often a
    silently-dropped message.
 3. Any logic-bearing file with **no test module at all** (a `mod tests`

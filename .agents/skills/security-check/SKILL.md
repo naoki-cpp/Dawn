@@ -81,8 +81,8 @@ Compare the result against the entry-point table in
 `docs/architecture/security-review.md`. **A new entry point that isn't in
 the doc is itself a finding** (undocumented attack surface), independent of
 whether its code is safe. Baseline-era layout, for orientation only:
-network I/O lived in `dawn-actor` (`ws_server.rs`, `protocol/`), dispatch in
-`dawn-sector`'s node modules.
+network I/O lives in `dawn-server` (`ws_server.rs`), protocol in
+`dawn-protocol`.
 
 The trust rule: anything a handler reads from a client command value is
 untrusted; anything the server computed itself (registry lookups, constants,

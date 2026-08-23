@@ -48,7 +48,7 @@ Violating code (dawn-core/src/position.rs):
 
 Correct approach:
   dawn-core holds only data definitions.
-  Network logic belongs in dawn-distributed, dawn-actor, or dawn-server.
+  Network logic belongs in dawn-distributed or dawn-server.
 ```
 
 ## Pattern 4: "Aligning" Tick with wall-clock time as an optimization

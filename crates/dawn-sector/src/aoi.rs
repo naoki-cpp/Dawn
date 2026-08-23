@@ -204,8 +204,8 @@ impl AoiMessage {
 /// Per-session delivery destination for one Area-of-Interest frame. Two real
 /// adapters justify this seam: the in-process serve loop's `PlayerSession`
 /// and the standalone sector-node binary's `PlayerSession` — both wrap the
-/// same `dawn-actor` connection type, but `dawn-sector` cannot name it
-/// directly without depending on `dawn-actor` (see AI_DEVELOPMENT_GUIDE.md
+/// same `dawn-server` connection type, but `dawn-sector` cannot name it
+/// directly without depending on `dawn-server` (see AI_DEVELOPMENT_GUIDE.md
 /// crate boundaries). Callers wrap their session in a local newtype that
 /// implements this trait (orphan-rule friendly: the wrapper type is local to
 /// the calling crate even though the trait lives here).
