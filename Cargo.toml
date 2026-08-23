@@ -6,7 +6,6 @@ members = [
     "crates/dawn-client-gdext",
     "crates/dawn-ecs",
     "crates/dawn-storage",
-    "crates/dawn-actor",
     "crates/dawn-distributed",
     "crates/dawn-market",
     "crates/dawn-sector",

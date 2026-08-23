@@ -4,7 +4,7 @@
 //! server), and [`dawn_protocol::market_command_wire_json_schema`]
 //! (Market client -> server).
 //!
-//! Run with `cargo run -p dawn-actor --example gen_wire_schema` after
+//! Run with `cargo run -p dawn-protocol --example gen_wire_schema` after
 //! changing any of those types (or any type they reference). The
 //! `wire_schema_doc_is_up_to_date` test in `dawn-protocol/src/lib.rs` fails the
 //! build if a file is stale, so CI catches a forgotten regeneration.

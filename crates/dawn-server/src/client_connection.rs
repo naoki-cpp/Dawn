@@ -28,7 +28,7 @@
 //! requests remain `dawn_protocol::MarketCommandWire` and never enter
 //! `SimulationNode::apply_client_request`.
 
-pub use dawn_core::ClientRequest;
+use dawn_core::ClientRequest;
 use dawn_protocol::{MarketCommandWire, ServerFact};
 use tokio::sync::mpsc;
 
@@ -77,7 +77,7 @@ pub trait ClientConnection: Send + 'static {
 /// ## Usage
 ///
 /// ```rust
-/// use dawn_actor::client_connection::{InProcessConnection, InProcessClientEndpoint};
+/// use dawn_server::client_connection::{InProcessConnection, InProcessClientEndpoint};
 ///
 /// let (server_side, client_side) = InProcessConnection::pair();
 /// // server_side → drive from the serve loop (drain commands, send events)

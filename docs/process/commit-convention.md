@@ -47,7 +47,7 @@ Identifies the primary area changed.  Choose the most specific scope that applie
 | `dawn-distributed` | `crates/dawn-distributed/` |
 | `dawn-distributed` | `crates/dawn-distributed/` |
 | `dawn-sector` | `crates/dawn-sector/` |
-| `dawn-actor` | `crates/dawn-actor/` |
+| `dawn-server` | `crates/dawn-server/` (server composition and client transport) |
 | `dawn-server` | `crates/dawn-server/` |
 | `godot` | `client/` (GDScript, scenes, assets) |
 | `docs` | `docs/` |

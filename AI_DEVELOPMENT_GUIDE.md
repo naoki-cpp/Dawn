@@ -225,7 +225,7 @@ when deleting a deprecated one — they cover every public-event pipeline touchp
 are generated into `docs/architecture/wire-protocol.schema.json` /
 `wire-protocol-commands.schema.json` (see `docs/architecture/wire-protocol.md`).
 After changing either enum (or a type either references), regenerate with
-`cargo run -p dawn-actor --example gen_wire_schema` and commit both updated
+`cargo run -p dawn-protocol --example gen_wire_schema` and commit both updated
 `.schema.json` files in the same PR — `cargo test -p dawn-protocol`
 (`wire_schema_doc_is_up_to_date`) fails
 otherwise (`wire_schema_doc_is_up_to_date`). Never hand-edit the `.schema.json` files. `dawn-core` keeps `schemars`
@@ -288,12 +288,10 @@ workspace DAG and relevant ADR first.
 - `dawn-sector`: current Sector game logic and broad `SimulationNode` composition.
   #272 removes persistence ownership from the pure engine; #275 splits state
   owners. Depends on `dawn-protocol` today to build typed wire messages it hands to
-  `dawn-actor` (e.g. `PlayerLoadoutWire`).
-- `dawn-actor`: low-level WebSocket client transport and connection boundary
-  used by `dawn-server`; it owns no protocol schema, Sector state, or runtime
-  policy.
+  `dawn-server` (e.g. `PlayerLoadoutWire`).
 - `dawn-server`: production/local server composition, runnable simulation
-  modes, and demos. #278 now shares runtime orchestration so durability
+  modes, demos, and the shared WebSocket client transport/session boundary.
+  #278 now shares runtime orchestration so durability
   profile, repository reconciliation, ack, retry, and effect policy have one
   implementation.
   Depends on `dawn-market` to route Market-domain requests and bridge commands
@@ -433,4 +431,4 @@ this guide.
 
 ---
 
-Last updated: 2026-08-23 / Covers ADR-0001 through ADR-0055
+Last updated: 2026-08-24 / Covers ADR-0001 through ADR-0055

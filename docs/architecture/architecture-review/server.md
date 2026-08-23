@@ -5,7 +5,7 @@ update   : 大規模リファクタ実施後 / 新クレート追加時 / archit
 related  : AI_DEVELOPMENT_GUIDE.md「Crate Boundaries」, docs/architecture/architecture.md,
            docs/architecture/architecture-review/server-completed.md（完了済みログ）,
            docs/architecture/architecture-review/server-pending.md（未完項目・issue一覧）
-date     : 2026-08-23（#336反映。全Rustクレートの再計測は2026-08-20）
+date     : 2026-08-24（#338反映。全Rustクレートの再計測は2026-08-20）
 ---
 
 # Architecture Review — Dawn Codebase（現行構造評価）
@@ -20,6 +20,10 @@ in-process driverは`RuntimeFrameHost`へ統合された。一方、`repositorie
 独立した変更理由を抱え、分割triggerが発火している。Transit handoffは今回、root入口を11行へ
 縮小し、lifecycle / materializationをprivate moduleへ分離した。今回の再計測では、
 共有ランタイムとTransit deepeningを反映しつつ、実装行数と責務混在を分けて再評価した。
+
+2026-08-24の#338で、残っていた`dawn-actor`のClientConnection/WebSocket transportを
+`dawn-server` libraryへ吸収した。`simulate`と`sector-node`は同じlibrary targetの
+handshake/session/framing実装を使い、`dawn-protocol`はschemaと生成例だけを所有する。
 
 2026-07-30の調査では、行数よりも**同じ状態・projection・authorityの二重所有**を優先課題とした。
 Transitについては、Raftの回復判断を`transit::handoff`に残し、Shipの状態変更を`node::transit`

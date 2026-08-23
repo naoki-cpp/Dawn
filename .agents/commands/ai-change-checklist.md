@@ -47,16 +47,16 @@ Minimum bar either way:
 
 ## Extra checks when the wire protocol changes
 
-If the change touches `EventJson` or `ClientCommandJson` in
-`crates/dawn-actor/src/protocol.rs` (or a type either references —
+If the change touches `ServerFact` or `ClientRequest` in
+`crates/dawn-protocol/src/` (or a type either references —
 `PosJson`, `VelJson`, `WarpTargetJson`):
 
 ```
 [ ] Regenerated both schema files:
-    cargo run -p dawn-actor --example gen_wire_schema
+    cargo run -p dawn-protocol --example gen_wire_schema
 [ ] Committed the updated docs/architecture/wire-protocol.schema.json and
     wire-protocol-commands.schema.json in the same PR as the code change
-[ ] cargo test -p dawn-actor passes (wire_schema_doc_is_up_to_date catches
+[ ] cargo test -p dawn-protocol passes (wire_schema_doc_is_up_to_date catches
     a forgotten regeneration)
 [ ] If the set of "type" values or a documented quirk changed (e.g. a new
     command, a field becoming required), updated the prose in
@@ -97,8 +97,8 @@ If the change touches `EventJson` or `ClientCommandJson` in
 [ ] PR adds a new client-facing command, a new SQL call site, or a new
     `*_owned` handler: run /security-check before opening the PR
 [ ] PR adds a new logic-bearing .rs file, or adds match arms to event
-    replay (node/apply_event.rs) or wire conversion (dawn-actor/src/
-    protocol.rs): the new arms have direct tests, not just incidental
+    replay (node/apply_event.rs) or wire conversion (dawn-protocol/src/): the
+    new arms have direct tests, not just incidental
     coverage through other tests. These two files' failure modes only
     surface on restart / at the client, so gaps stay invisible to manual
     testing (see /coverage-audit for the full periodic audit)

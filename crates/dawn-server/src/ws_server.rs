@@ -27,8 +27,8 @@
 //! Client → Server:  ClientMessage::Market(..)      (binary, postcard)
 //! ```
 
-use crate::{ClientConnection, ClientRequest};
-use dawn_core::{PlayerId, ShipId};
+use crate::client_connection::{ClientConnection, ConnectionError};
+use dawn_core::{ClientRequest, PlayerId, ShipId};
 use dawn_protocol::{
     ClientMessage, InitialStateWire, MarketCommandWire, PlayerLoadoutWire, ResumeTicket,
     ServerFact, ServerMessage,
@@ -47,10 +47,10 @@ use tokio::{
 use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 
 /// Postcard-encode a [`ServerMessage`] and wrap it as a binary WS frame.
-fn server_message_frame(msg: &ServerMessage) -> Result<Message, crate::ConnectionError> {
+fn server_message_frame(msg: &ServerMessage) -> Result<Message, ConnectionError> {
     msg.encode()
         .map(|bytes| Message::Binary(bytes.into()))
-        .map_err(|error| crate::ConnectionError::Encoding(error.to_string()))
+        .map_err(|error| ConnectionError::Encoding(error.to_string()))
 }
 
 // ── WsClientConnection ────────────────────────────────────────────────────────
@@ -84,11 +84,11 @@ impl WsClientConnection {
 }
 
 impl ClientConnection for WsClientConnection {
-    fn send_facts(&self, facts: &[ServerFact]) -> Result<(), crate::ConnectionError> {
+    fn send_facts(&self, facts: &[ServerFact]) -> Result<(), ConnectionError> {
         for fact in facts {
             self.event_tx
                 .send(server_message_frame(&ServerMessage::Fact(fact.clone()))?)
-                .map_err(|_| crate::ConnectionError::Disconnected)?;
+                .map_err(|_| ConnectionError::Disconnected)?;
         }
         Ok(())
     }

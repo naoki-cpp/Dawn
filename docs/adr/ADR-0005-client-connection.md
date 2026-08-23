@@ -12,8 +12,13 @@ deciders: [human, ai-agent]
 > `GrpcConnection`（tonic）に差し替える計画だったが、ADR-0007 で **WebSocket + JSON を
 > 維持**する決定に変わった。本番実装は `WsClientConnection`（`ws_server.rs`）であり、
 > `GrpcConnection`/tonic は実装されない（gRPC は Phase 9 以降に再検討）。
-> trait 抽象（`ClientConnection` の 2 方向）と「dawn-actor に置く」判断は有効。
+> trait 抽象（`ClientConnection` の 2 方向）は引き続き有効。
 > 以下本文中の `GrpcConnection`/「Phase 5 = 本物のネットワーク」は歴史的記述として残す。
+>
+> **2026-08-24 amendment (#338)**: `dawn-actor` への配置判断はADR-0051により
+> supersedeされた。現在のtrait、in-process実装、WebSocket transport/sessionは
+> `dawn-server` libraryが所有し、wire schemaは`dawn-protocol`が所有する。以下の
+> `dawn-actor`パスは当時の決定を示す歴史的記述として残す。
 
 ## 状況
 

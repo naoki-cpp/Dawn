@@ -28,7 +28,7 @@ Run `cargo test -p dawn-protocol wire_schema_doc_is_up_to_date` to check the two
 generated schema files (`docs/architecture/wire-protocol.schema.json` /
 `wire-protocol-commands.schema.json`) against `ServerFact` / `ClientRequest`
 in `crates/dawn-protocol/src/`. If it fails,
-regenerate with `cargo run -p dawn-actor --example gen_wire_schema` and
+regenerate with `cargo run -p dawn-protocol --example gen_wire_schema` and
 commit the updated files — do not hand-edit them.
 
 The schema files are machine-checked; the prose in

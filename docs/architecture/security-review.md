@@ -63,7 +63,7 @@ SQLite INTEGER境界を検証する。ownership・入力値・queue/snapshot上�
 
 | 経路 | ファイル | 内容 |
 |---|---|---|
-| WebSocketフレーム受信 | `crates/dawn-actor/src/ws_server.rs` | postcardバイナリフレーム（ADR-0042） |
+| WebSocketフレーム受信 | `crates/dawn-server/src/ws_server.rs` | postcardバイナリフレーム（ADR-0042） |
 | コマンドデコード | `crates/dawn-protocol/src/client_request.rs` + `dawn-core/src/commands.rs` | typed `ClientRequest` |
 | Marketデコード | `crates/dawn-protocol/src/market.rs` | `MarketCommandWire`（Sector commandとは別queue） |
 | Hello/resumeハンドシェイク | `crates/dawn-protocol/src/hello_resume.rs` | セッション識別（resume identity） |
@@ -133,7 +133,7 @@ matching結果は`MarketDb`が計算し、client supplied balance/trade result�
 
 ### SEC-1（low・トリガー付き保留）: WebSocketサイズ上限が暗黙値
 
-`crates/dawn-actor/src/ws_server.rs`（~245行）: `accept_async(stream)`が`WebSocketConfig`を
+`crates/dawn-server/src/ws_server.rs`（359行）: `accept_async(stream)`が`WebSocketConfig`を
 明示せず呼ばれており、`max_message_size`/`max_frame_size`がtokio-tungsteniteのライブラリ
 既定値（現行ピン留めバージョンで64MiB/16MiB）任せになっている。
 

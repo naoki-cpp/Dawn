@@ -46,9 +46,9 @@ impl std::error::Error for MissingObserverShip {}
 /// Wire shape for an absolute (f64, ADR-0029) position. The one seam this
 /// file's three position-carrying messages (celestial body, jump gate, ship)
 /// go through, instead of each authoring the same literal. Kept local to
-/// `dawn-sector` rather than reusing `dawn-actor`'s `PosWire` -- `dawn-actor`
-/// sits one layer up in the crate DAG (CONTEXT.md Runtime Boundaries) and
-/// `dawn-sector` must not depend on it.
+/// `dawn-sector` rather than reusing a server-transport wire type -- the
+/// server sits one layer up in the crate DAG (CONTEXT.md Runtime Boundaries)
+/// and `dawn-sector` must not depend on it.
 fn abs_pos_json(p: AbsolutePosition) -> AbsPosWire {
     AbsPosWire {
         x: p[0],

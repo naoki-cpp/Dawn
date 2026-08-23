@@ -254,10 +254,10 @@ fn commit_test_runtime_frame(node: &mut SimulationNode) {
 #[cfg(test)]
 mod serve_pipeline_tests {
     use super::*;
-    use dawn_actor::{ClientConnection, InProcessConnection};
     use dawn_core::{ClientRequest, DomainEvent, NodeId, Position, SectorBounds, SectorId};
     use dawn_protocol::{project_domain_event, ServerFact};
     use dawn_sector::node;
+    use dawn_server::client_connection::{ClientConnection, InProcessConnection};
 
     fn build_test_node(
         id: NodeId,

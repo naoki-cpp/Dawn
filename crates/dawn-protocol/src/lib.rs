@@ -548,7 +548,7 @@ mod tests {
             .replace("\r\n", "\n");
         assert_eq!(
             current, checked_in,
-            "{path} is stale -- regenerate with `cargo run -p dawn-actor --example gen_wire_schema`"
+            "{path} is stale -- regenerate with `cargo run -p dawn-protocol --example gen_wire_schema`"
         );
     }
 }

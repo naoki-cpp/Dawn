@@ -9,6 +9,10 @@ related : ADR-0026 (Sector owns gameplay rather than runtime composition), ADR-0
 
 # ADR-0051: One Server Composition Boundary for Production and Local Runs
 
+> Amendment (#338): the shared client transport is now owned by `dawn-server`.
+> `dawn-actor` has been deleted; both server binaries use the library's single
+> WebSocket framing, handshake, and connection boundary.
+
 ## Context
 
 The workspace currently has two executable packages that assemble the same
@@ -43,11 +47,11 @@ Sector domain/runtime library and continues to own authoritative state
 transitions; `dawn-server` only selects concrete transports, journals,
 repositories, and deployment configuration.
 
-`dawn-actor` remains temporarily as the low-level client transport library.
-Its WebSocket boundary has a clear one-way dependency from server adapters,
-and moving it at the same time would combine a naming migration with a
-transport API migration. A later consolidation may rename or absorb it only
-after the transport API has an independent owner.
+The client transport is part of the `dawn-server` library. It owns the shared
+`ClientConnection`, `WsServer`, handshake, and `PlayerSession` implementation;
+the `dawn-protocol` crate remains the schema owner and has no transport
+dependency. This keeps both server binaries on one transport implementation
+without adding a compatibility facade.
 
 The resulting executable boundary is:
 
@@ -89,4 +93,6 @@ server composition root.
       one-Sector frame owner used by single serve, cluster serve, the production
       `sector-node`, and the runtime driver. Keep network delivery and
       cross-Sector routing outside the Host.
+- [x] Absorb the shared client transport into the `dawn-server` library, move
+      the schema generator to `dawn-protocol`, and delete `dawn-actor` (#338).
 - [x] Verify both binaries with workspace format, test, and clippy checks.

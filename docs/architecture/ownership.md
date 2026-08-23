@@ -135,7 +135,9 @@ Public `DomainEvent` replay by itself is not the failover reconstruction authori
 
 ## 4. Actor / runtime ownership
 
-The Actor model lives in `dawn-actor` (ADR-0002).
+The Actor model is implemented by the server composition boundary (ADR-0002).
+The client transport and its connection/session seams are owned by
+`dawn-server`; the old `dawn-actor` crate was absorbed by #338.
 
 ### Current baseline
 

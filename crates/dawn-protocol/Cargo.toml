@@ -2,14 +2,14 @@
 name    = "dawn-protocol"
 version = "0.1.0"
 edition = "2021"
-description = "Client<->server wire schema (ServerMessage/ClientMessage), shared by dawn-actor (server) and dawn-client-gdext (client). No transport/runtime dependencies (ADR-0041/ADR-0042)."
+description = "Client<->server wire schema (ServerMessage/ClientMessage), shared by dawn-server and dawn-client-gdext. No transport/runtime dependencies (ADR-0041/ADR-0042)."
 repository.workspace = true
 publish.workspace     = true
 
 # dawn-protocol is a leaf schema crate: dawn-core + serde (+ postcard, a pure
 # codec with no transport/runtime deps of its own) only. Anything that would
 # drag in a transport/runtime dependency (tokio, tungstenite, an async
-# executor) belongs in dawn-actor instead, since dawn-client-gdext (a Godot
+# executor) belongs in dawn-server instead, since dawn-client-gdext (a Godot
 # GDExtension cdylib) depends on this crate directly and must not inherit a
 # server-side WebSocket stack it never uses (ADR-0041).
 [dependencies]
