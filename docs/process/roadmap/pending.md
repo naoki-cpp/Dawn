@@ -46,6 +46,8 @@ related  : ./README.md, ./deferred.md, ../roadmap.md, ../roadmap-history.md
 | 4 | モジュール発動フィードバックの拡充 | TODO |
 | 6 | Bloom・トーンマッピング等の調整 | TODO |
 | 7 | 視覚エフェクトのフレームレート回帰確認 | 1〜6後 |
+| 8 | 星野をスプライトgeometryへ移行 | [ADR-0054](../../adr/ADR-0054-starfield-sprite-geometry.md) 承認待ち |
+| 9 | ネビュラ背景を起動時ベイクへ | [ADR-0055](../../adr/ADR-0055-nebula-background-representation.md) accepted・実装済み（sky パス 42.4ms→19.0ms） |
 
 ## 9. 継続的に開発するシステム
 

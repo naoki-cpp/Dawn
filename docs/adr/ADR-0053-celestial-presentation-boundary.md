@@ -4,7 +4,7 @@ title   : Physically grounded celestial presentation boundary
 status  : accepted
 date    : 2026-08-13
 deciders: [human, ai-agent]
-related : ADR-0025 (celestial bodies and sun direction), ADR-0029 (true-scale coordinates), ADR-0044 (absolute f64 authority)
+related : ADR-0025 (celestial bodies and sun direction), ADR-0029 (true-scale coordinates), ADR-0044 (absolute f64 authority), ADR-0054 (amends §3 — the star layer moves out of the sky shader), ADR-0055 (amends §3 — the nebula representation is under review)
 ---
 
 # ADR-0053 - Physically grounded celestial presentation boundary
