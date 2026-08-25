@@ -11,6 +11,11 @@ related : ADR-0007（マルチプレイヤー対応設計・WebSocket+JSON採用
 
 # ADR-0042 — クライアント⇔サーバー ワイヤプロトコルを WebSocket + postcard バイナリへ移行
 
+> Amendment (#339, 2026-08-24): `PlayerLoadoutWire` and client policy now share
+> canonical `dawn_core::ModuleKind` directly. The old client mirror and
+> `Unknown` fallback were removed because unknown postcard discriminants fail
+> during protocol decoding before reaching client policy.
+
 ## 背景
 
 ADR-0007（Phase 5）は「gRPC への移行を行わず WebSocket + JSON を維持する。gRPC は

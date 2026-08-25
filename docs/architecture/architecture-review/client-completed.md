@@ -17,6 +17,16 @@ date     : 2026-08-10
 
 ## 解消済み issue の詳細
 
+### 2026-08-24 — #339 canonical ModuleKind boundary
+
+`dawn-client-core`の`ModuleKind` mirrorと`Unknown` fallbackを削除し、
+`ModuleRow.kind`は`dawn_core::ModuleKind`を直接保持するようにした。
+`dawn-client-gdext`のPlayerLoadout conversionはwire値をそのまま渡し、
+Godot-facing kind stringはcanonical variantへの`Option` parseで検証する。
+全variantのconversion、exact spelling、invalid string rejection、unknown postcard
+discriminant rejectionをRust testsで固定した。既存のloadout range/activation/HUD/capacitor
+policyは変更していない。
+
 | ID | 内容 | 解消内容 |
 |---|---|---|
 | C-1 | `main.gd` god object（13以上の異種責務） | 補助 module を抽出して orchestration 層へ縮小。 |

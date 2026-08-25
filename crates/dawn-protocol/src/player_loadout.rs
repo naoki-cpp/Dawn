@@ -6,9 +6,8 @@
 //! `dawn-sector`'s `player_loadout_projection.rs` used to hand-assemble via
 //! `serde_json::json!`, and what `dawn-client-core`'s `PlayerLoadoutMsg`/
 //! `ModuleRow`/`ItemRow`/`SlotCapacity`/`OwnedShipRow` already expect to
-//! parse (that crate keeps its own decoupled, forward-compatible mirror --
-//! e.g. a `Unknown` fallback for `ModuleKind` -- so this crate's types stay
-//! the exact current schema without needing that tolerance).
+//! parse. Module kinds use the canonical `dawn_core::ModuleKind` directly, so
+//! an unknown postcard discriminant fails protocol decoding.
 
 use crate::ItemWire;
 use dawn_core::{ModuleKind, StatDelta};

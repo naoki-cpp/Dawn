@@ -318,9 +318,8 @@ fn client_i64(value: u64, field: &'static str) -> Result<i64, ClientStateError> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        ModuleKind, ModuleRow, PositionInput, ShipInput, StatDelta, StationInput, SystemNameInput,
-    };
+    use crate::{ModuleRow, PositionInput, ShipInput, StatDelta, StationInput, SystemNameInput};
+    use dawn_core::ModuleKind;
 
     fn ship(ship_id: i64, is_player: bool) -> ShipRegistration {
         ShipRegistration {

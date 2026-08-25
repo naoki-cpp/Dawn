@@ -231,7 +231,7 @@ func _module_fixture(
 	module_id: int,
 	slot: String,
 	active: bool,
-	kind: String = "",
+	kind: String = "Propulsion",
 	index: int = 0
 ) -> ModuleRow:
 	return ModuleRow.test_fixture(
@@ -964,7 +964,7 @@ func test_drag_within_fitted_reorders_two_modules_of_the_same_slot_kind() -> voi
 	_main._hud_surface.build(auto_free(Node.new()), hud, auto_free(Label.new()))
 
 	var mid_1: ModuleRow = _module_fixture(1, "Mid", false)
-	var mid_2: ModuleRow = _module_fixture(2, "Mid", false, "", 1)
+	var mid_2: ModuleRow = _module_fixture(2, "Mid", false, "Propulsion", 1)
 	_set_loadout_modules([mid_1, mid_2])
 	_main._hud_surface.set_player_fitting(_main._loadout.modules(), [])
 	## inventory_panel_row_at() (used by the reorder branch) short-circuits

@@ -5,7 +5,7 @@ update   : クライアント側で大規模リファクタ実施後 / architect
 related  : docs/architecture/architecture-review/server.md（サーバー側）,
            docs/architecture/architecture-review/client-completed.md（完了済みログ）,
            docs/architecture/architecture-review/client-pending.md（未完項目）
-date     : 2026-08-20（HUD Read Model deepening後に再計測）
+date     : 2026-08-24（#339 ModuleKind canonicalization後に再計測）
 ---
 
 # Architecture Review — Dawn Client（現行構造評価）
@@ -44,6 +44,10 @@ panel Dictionary、`ModuleRow`/`ShipHealth`のclone/equality workaround、GDScri
 unit formatterを削除した。
 review修正後のGDExtension境界、追加したClientState回帰test、明示targetを使うGdUnit fixtureは、
 固定Rust 1.97.1でformat、client-core/gdext test、clippyを検証した。
+#339では、PlayerLoadoutの`ModuleKind`を`dawn_core::ModuleKind`へ一本化した。
+`dawn-client-gdext`はwire値をそのままclient-coreへ渡し、Godotのkind stringは
+canonical variantへの明示的な`Option` parseに失敗した場合はrange policyへ到達しない。
+これにより、loadout policyとpostcard protocol decodeに同じenumのstrictなvariant集合を使う。
 
 | 観点 | 評価 | 現在の判断 |
 |---|---|---|
@@ -87,20 +91,20 @@ navigation map cacheはSector内でwrite-onceに近いpresentation cacheとし�
 | `client/scripts/hud_manager.gd` | 859 | 🟡 C-9。typed refsとpanel build/updateが同一責務。独立変更理由が分かれるまで保留 |
 | `client/scripts/ship_controller.gd` | 448 | 🟢 motion adapterとvisual effectの一つのShip presentation boundary |
 | `client/scripts/connection.gd` | 313 | 🟢 WebSocket接続・reconnect・typed outcome受け渡し・ClientAction transport seam |
-| `client/scripts/world_presentation.gd` | 490 | 🟢 marker・floating-origin・celestial lighting presentation |
+| `client/scripts/world_presentation.gd` | 637 | 🟢 marker・floating-origin・celestial lighting presentation |
 | `client/scripts/market_surface.gd` | 270 | 🟢 Market panel surface |
-| `client/scripts/hud_surface.gd` | 163 | 🟢 typed snapshot paint・HUD reference ownership |
-| `client/scripts/navigation_marker_renderer.gd` | 286 | 🟢 navigation marker・planet surface・EVE-style bracket rendering |
-| `client/scripts/sky_catalog.gd` | 57 | 🟢 fixed bright-star landmark data |
+| `client/scripts/hud_surface.gd` | 157 | 🟢 typed snapshot paint・HUD reference ownership |
+| `client/scripts/navigation_marker_renderer.gd` | 287 | 🟢 navigation marker・planet surface・EVE-style bracket rendering |
+| `client/scripts/sky_catalog.gd` | 45 | 🟢 fixed bright-star landmark data |
 | `client/scripts/camera_controller.gd` | 145 | 🟢 camera orbit input |
-| `client/scripts/ship_picking.gd` | 117 | 🟢 screen-space picking |
+| `client/scripts/ship_picking.gd` | 135 | 🟢 screen-space picking |
 | `client/scripts/world_interaction.gd` | 125 | 🟢 Godot key/hit-test normalizationとClientInteraction adapter |
 | `client/scripts/tactical_overlay.gd` | 93 | 🟢 tactical overlay |
 | `client/scripts/inventory_row.gd` | 22 | 🟢 rendered Panelとtyped Station Inventory policy rowの対 |
-| `client/scripts/hud_hit_test.gd` | 80 | 🟢 HUD hit-test geometry |
+| `client/scripts/hud_hit_test.gd` | 79 | 🟢 HUD hit-test geometry |
 | `client/scripts/billboard_ring.gd` | 65 | 🟢 selection/lock ring visual |
 | `client/scripts/billboard_bracket.gd` | 67 | 🟢 fixed-size navigation bracket visual |
-| `client/scripts/warp_tunnel_effect.gd` | 10 | 🟢 warp tunnel visual |
+| `client/scripts/warp_tunnel_effect.gd` | 17 | 🟢 warp tunnel visual |
 
 ### Rust/GDExtension boundary（client crates、C-16関連と500行以上）
 
@@ -110,12 +114,12 @@ navigation map cacheはSector内でwrite-onceに近いpresentation cacheとし�
 | `crates/dawn-client-gdext/src/inbound_delivery.rs` | 627 | 🟢 canonical message match、wire→`ClientFact`変換、state commit、effect抽出、final handler delivery |
 | `crates/dawn-client-gdext/src/server_message_gd.rs` | 65 | 🟢 thin Godot decoder / outcome seam。runtime deliveryは`inbound_delivery.rs`へ一度だけ委譲 |
 | `crates/dawn-client-gdext/src/server_message_fixture.rs` | 195 | 🟢 debug-only typed GdUnit fixture construction。production deliveryから分離 |
-| `crates/dawn-client-core/src/client_state.rs` | 842 | 🟢 ClientFactからWorldSessionEffectへの純粋なstate policy |
+| `crates/dawn-client-core/src/client_state.rs` | 841 | 🟢 ClientFactからWorldSessionEffectへの純粋なstate policy |
 | `crates/dawn-client-core/src/client_action.rs` | 584 | 🟢 engine-independent selection/input policy・typed ClientAction |
-| `crates/dawn-client-core/src/hud.rs` | 528 | 🟢 engine-independent HUD read model・formatting・change decisions |
+| `crates/dawn-client-core/src/hud.rs` | 553 | 🟢 engine-independent HUD read model・formatting・change decisions |
 | `crates/dawn-client-core/src/station_inventory.rs` | 758 | 🟢 engine-independent Station Inventory policy・typed request construction |
 | `crates/dawn-client-core/src/motion.rs` | 680 | 🟢 client motion/prediction kernel・tests |
-| `crates/dawn-client-gdext/src/client_command_gd.rs` | 564 | 🟢 typed request builder・入力検証・encode結果のGDExtension boundary |
+| `crates/dawn-client-gdext/src/client_command_gd.rs` | 572 | 🟢 typed request builder・入力検証・encode結果のGDExtension boundary |
 | `crates/dawn-client-gdext/src/client_action_gd.rs` | 280 | 🟢 ClientAction/ClientInteractionの薄いGodot adapter |
 
 ## Issue登録簿

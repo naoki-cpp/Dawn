@@ -328,7 +328,9 @@ impl ClientMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dawn_core::{ApproachTarget, EntityId, ModuleId, NodeId, Position, ShipId, SlotKind};
+    use dawn_core::{
+        ApproachTarget, EntityId, ModuleId, ModuleKind, NodeId, Position, ShipId, SlotKind,
+    };
 
     fn ship_id(counter: u64) -> ShipId {
         ShipId(EntityId::new(NodeId(0), counter))
@@ -350,6 +352,21 @@ mod tests {
     #[derive(Serialize)]
     enum LegacyClientCommand {
         MoveCommand { target: LegacyPosition },
+    }
+
+    #[allow(dead_code)]
+    #[derive(Serialize)]
+    enum UnknownModuleKind {
+        Weapon,
+        ShieldBooster,
+        ArmorRepairer,
+        Propulsion,
+        Sensor,
+        Rig,
+        Tackle,
+        RemoteShieldBooster,
+        RemoteArmorRepairer,
+        FutureModuleKind,
     }
 
     #[derive(Serialize)]
@@ -399,6 +416,14 @@ mod tests {
             error.rejection().code,
             ClientRequestRejectionCode::UnsupportedProtocol
         );
+    }
+
+    #[test]
+    fn unknown_module_kind_discriminant_fails_protocol_type_decode() {
+        let bytes = postcard::to_stdvec(&UnknownModuleKind::FutureModuleKind)
+            .expect("encode future module kind fixture");
+
+        assert!(postcard::from_bytes::<ModuleKind>(&bytes).is_err());
     }
 
     #[test]
