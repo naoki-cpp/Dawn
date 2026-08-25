@@ -366,9 +366,8 @@ fn active_module_signature(modules: &[ModuleRow]) -> Vec<(u32, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        CelestialBodyInput, ModuleKind, NavigationInput, PositionInput, ShipInput, StationInput,
-    };
+    use crate::{CelestialBodyInput, NavigationInput, PositionInput, ShipInput, StationInput};
+    use dawn_core::ModuleKind;
 
     fn player_state() -> WorldSessionState {
         let mut state = WorldSessionState::default();

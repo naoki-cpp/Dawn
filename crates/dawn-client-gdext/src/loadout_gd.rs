@@ -8,24 +8,6 @@ use crate::module_activation_intent_gd::ModuleActivationIntent;
 use crate::module_row_gd::{parse_kind, ModuleRow};
 use crate::owned_ship_row_gd::OwnedShipRow;
 
-fn wire_module_kind(kind: dawn_core::ModuleKind) -> dawn_client_core::ModuleKind {
-    match kind {
-        dawn_core::ModuleKind::Weapon => dawn_client_core::ModuleKind::Weapon,
-        dawn_core::ModuleKind::ShieldBooster => dawn_client_core::ModuleKind::ShieldBooster,
-        dawn_core::ModuleKind::ArmorRepairer => dawn_client_core::ModuleKind::ArmorRepairer,
-        dawn_core::ModuleKind::Propulsion => dawn_client_core::ModuleKind::Propulsion,
-        dawn_core::ModuleKind::Sensor => dawn_client_core::ModuleKind::Sensor,
-        dawn_core::ModuleKind::Rig => dawn_client_core::ModuleKind::Rig,
-        dawn_core::ModuleKind::Tackle => dawn_client_core::ModuleKind::Tackle,
-        dawn_core::ModuleKind::RemoteShieldBooster => {
-            dawn_client_core::ModuleKind::RemoteShieldBooster
-        }
-        dawn_core::ModuleKind::RemoteArmorRepairer => {
-            dawn_client_core::ModuleKind::RemoteArmorRepairer
-        }
-    }
-}
-
 pub(crate) fn wire_to_loadout_msg(wire: dawn_protocol::PlayerLoadoutWire) -> PlayerLoadoutMsg {
     PlayerLoadoutMsg {
         tick: wire.tick,
@@ -65,7 +47,7 @@ fn wire_to_module_row(row: dawn_protocol::ModuleRowWire) -> dawn_client_core::Mo
         index: row.index,
         module_id: row.module_id,
         name: row.name,
-        kind: wire_module_kind(row.kind),
+        kind: row.kind,
         is_active: row.is_active,
         is_active_module: row.is_active_module,
         cap_cost_per_cycle: row.cap_cost_per_cycle as f64,
@@ -290,8 +272,11 @@ impl PlayerLoadout {
         let Ok(module_id) = u32::try_from(module_id) else {
             return -1.0;
         };
+        let Some(kind) = parse_kind(&kind.to_string()) else {
+            return -1.0;
+        };
         loadout
-            .effective_range_for_activation(parse_kind(&kind.to_string()), module_id)
+            .effective_range_for_activation(kind, module_id)
             .unwrap_or(-1.0)
     }
 
@@ -344,7 +329,9 @@ impl PlayerLoadout {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dawn_core::{FitModuleCommand, NodeId, Position, SectorBounds, SectorId, SlotKind};
+    use dawn_core::{
+        FitModuleCommand, ModuleKind, NodeId, Position, SectorBounds, SectorId, SlotKind,
+    };
     use dawn_sector::node::SimulationNode;
 
     fn test_node() -> SimulationNode {
@@ -398,5 +385,55 @@ mod tests {
             .find(|row| row.module_id == module_id.0)
             .unwrap();
         let _ = row.stat_delta.weapon_range_add;
+    }
+
+    #[test]
+    fn player_loadout_conversion_preserves_every_module_kind() {
+        let kinds = [
+            ModuleKind::Weapon,
+            ModuleKind::ShieldBooster,
+            ModuleKind::ArmorRepairer,
+            ModuleKind::Propulsion,
+            ModuleKind::Sensor,
+            ModuleKind::Rig,
+            ModuleKind::Tackle,
+            ModuleKind::RemoteShieldBooster,
+            ModuleKind::RemoteArmorRepairer,
+        ];
+        let wire = dawn_protocol::PlayerLoadoutWire {
+            tick: 1,
+            modules: kinds
+                .into_iter()
+                .enumerate()
+                .map(|(index, kind)| dawn_protocol::ModuleRowWire {
+                    slot: "High".to_owned(),
+                    index: index as u32,
+                    module_id: index as u32 + 1,
+                    name: "Test Module".to_owned(),
+                    kind,
+                    is_active: false,
+                    is_active_module: true,
+                    cap_cost_per_cycle: 0.0,
+                    cycle_time_ticks: 10,
+                    stat_delta: dawn_core::StatDelta::ZERO,
+                })
+                .collect(),
+            inventory: Vec::new(),
+            station_inventory: Vec::new(),
+            docked_station_id: None,
+            docked_station_name: None,
+            slot_capacity: dawn_protocol::SlotCapacityWire {
+                high: 0,
+                mid: 0,
+                low: 0,
+                rig: 0,
+            },
+            active_ship_id: None,
+            owned_ships: Vec::new(),
+        };
+
+        let loadout = wire_to_loadout_msg(wire);
+        let converted: Vec<_> = loadout.modules.iter().map(|row| row.kind).collect();
+        assert_eq!(converted, kinds);
     }
 }

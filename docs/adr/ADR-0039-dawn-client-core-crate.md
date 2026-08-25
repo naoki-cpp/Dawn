@@ -11,6 +11,10 @@ related : ADR-0004（クライアント技術選定・GDExtension既定路線）
 
 # ADR-0039 — dawn-client-core クレート新設（Phase 1: Loadout モジュール）
 
+> Amendment (#339, 2026-08-24): `ModuleRow.kind` now uses the canonical
+> `dawn_core::ModuleKind`. The migration-era client mirror and its fictional
+> `Unknown` fallback were removed; invalid Godot strings now fail explicitly.
+
 ## 背景
 
 `/improve-codebase-architecture` によるクライアント側の deletion test で、
@@ -112,3 +116,6 @@ Phase 10 を待たず、**GDExtensionなしで着手できる部分**（純粋Ru
 - [x] `cargo fmt --all -- --check` / `cargo test --workspace` /
       `cargo clippy --workspace -- -D warnings` 全件通過
 - [x] GDScript側（`player_loadout.gd`等）は変更なし・GdUnit4は現状維持
+- [x] `ModuleKind` mirror / `Unknown` fallback を削除し、`dawn_core::ModuleKind`
+      を client-core / GDExtension で直接使用。Godot kind stringsは明示的な
+      `Option` parseで検証する。

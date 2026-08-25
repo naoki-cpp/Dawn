@@ -1,6 +1,8 @@
 use serde::Deserialize;
 
-use crate::{ItemRow, ModuleKind, ModuleRow};
+use dawn_core::ModuleKind;
+
+use crate::{ItemRow, ModuleRow};
 
 /// One row of `PlayerLoadout`'s `owned_ships` array (ADR-0037's full owned-ship
 /// roster, active or not). Mirrors

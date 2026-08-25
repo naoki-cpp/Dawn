@@ -123,7 +123,7 @@ func test_player_loadout_commits_before_calling_the_final_world_handler() -> voi
 
 func test_module_activation_commits_before_calling_the_final_world_handler() -> void:
 	var state := _state()
-	var module := ModuleRow.test_fixture("Mid", 0, 7, "", "", false, true, 0.0, 10)
+	var module := ModuleRow.test_fixture("Mid", 0, 7, "", "Propulsion", false, true, 0.0, 10)
 	assert_bool((state[1] as PlayerLoadout).test_fixture(
 		0, [module], -1, "", 11, []
 	)).is_true()
@@ -135,7 +135,7 @@ func test_module_activation_commits_before_calling_the_final_world_handler() -> 
 
 func test_module_deactivation_commits_before_calling_the_final_world_handler() -> void:
 	var state := _state()
-	var module := ModuleRow.test_fixture("Mid", 0, 7, "", "", true, true, 0.0, 10)
+	var module := ModuleRow.test_fixture("Mid", 0, 7, "", "Propulsion", true, true, 0.0, 10)
 	assert_bool((state[1] as PlayerLoadout).test_fixture(
 		0, [module], -1, "", 11, []
 	)).is_true()

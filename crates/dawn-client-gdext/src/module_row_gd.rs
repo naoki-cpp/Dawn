@@ -1,4 +1,5 @@
-use dawn_client_core::{ModuleKind, ModuleRow as CoreModuleRow, StatDelta};
+use dawn_client_core::{ModuleRow as CoreModuleRow, StatDelta};
+use dawn_core::ModuleKind;
 use godot::prelude::*;
 
 /// `ModuleKind`'s wire-string name, exactly matching what the server sends
@@ -16,27 +17,24 @@ pub(crate) fn kind_str(kind: ModuleKind) -> &'static str {
         ModuleKind::Tackle => "Tackle",
         ModuleKind::RemoteShieldBooster => "RemoteShieldBooster",
         ModuleKind::RemoteArmorRepairer => "RemoteArmorRepairer",
-        ModuleKind::Unknown => "",
     }
 }
 
 /// Reverse of `kind_str` -- parses a wire-string kind name passed into
 /// `PlayerLoadout.effective_range_for_activation` back into a [`ModuleKind`].
-/// Any unrecognized string
-/// maps to `Unknown`, matching the old GDScript's permissive `_range_family()`
-/// default.
-pub(crate) fn parse_kind(kind: &str) -> ModuleKind {
+/// Unrecognized strings are rejected instead of becoming a fictional kind.
+pub(crate) fn parse_kind(kind: &str) -> Option<ModuleKind> {
     match kind {
-        "Weapon" => ModuleKind::Weapon,
-        "ShieldBooster" => ModuleKind::ShieldBooster,
-        "ArmorRepairer" => ModuleKind::ArmorRepairer,
-        "Propulsion" => ModuleKind::Propulsion,
-        "Sensor" => ModuleKind::Sensor,
-        "Rig" => ModuleKind::Rig,
-        "Tackle" => ModuleKind::Tackle,
-        "RemoteShieldBooster" => ModuleKind::RemoteShieldBooster,
-        "RemoteArmorRepairer" => ModuleKind::RemoteArmorRepairer,
-        _ => ModuleKind::Unknown,
+        "Weapon" => Some(ModuleKind::Weapon),
+        "ShieldBooster" => Some(ModuleKind::ShieldBooster),
+        "ArmorRepairer" => Some(ModuleKind::ArmorRepairer),
+        "Propulsion" => Some(ModuleKind::Propulsion),
+        "Sensor" => Some(ModuleKind::Sensor),
+        "Rig" => Some(ModuleKind::Rig),
+        "Tackle" => Some(ModuleKind::Tackle),
+        "RemoteShieldBooster" => Some(ModuleKind::RemoteShieldBooster),
+        "RemoteArmorRepairer" => Some(ModuleKind::RemoteArmorRepairer),
+        _ => None,
     }
 }
 
@@ -149,17 +147,18 @@ impl ModuleRow {
         is_active_module: bool,
         cap_cost_per_cycle: f64,
         cycle_time_ticks: i64,
-    ) -> Gd<ModuleRow> {
+    ) -> Option<Gd<ModuleRow>> {
         let index = u32::try_from(index).expect("fixture index must fit u32");
         let module_id = u32::try_from(module_id).expect("fixture module ID must fit u32");
         let cycle_time_ticks =
             u32::try_from(cycle_time_ticks).expect("fixture cycle time must fit u32");
-        Self::wrap(CoreModuleRow {
+        let kind = parse_kind(&kind.to_string())?;
+        Some(Self::wrap(CoreModuleRow {
             slot: slot.to_string(),
             index,
             module_id,
             name: name.to_string(),
-            kind: parse_kind(&kind.to_string()),
+            kind,
             is_active,
             is_active_module,
             cap_cost_per_cycle,
@@ -167,6 +166,37 @@ impl ModuleRow {
             stat_delta: StatDelta::ZERO,
             cycle_remaining: 0,
             forced_reason: String::new(),
-        })
+        }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn godot_kind_strings_preserve_protocol_spelling() {
+        let kinds = [
+            (ModuleKind::Weapon, "Weapon"),
+            (ModuleKind::ShieldBooster, "ShieldBooster"),
+            (ModuleKind::ArmorRepairer, "ArmorRepairer"),
+            (ModuleKind::Propulsion, "Propulsion"),
+            (ModuleKind::Sensor, "Sensor"),
+            (ModuleKind::Rig, "Rig"),
+            (ModuleKind::Tackle, "Tackle"),
+            (ModuleKind::RemoteShieldBooster, "RemoteShieldBooster"),
+            (ModuleKind::RemoteArmorRepairer, "RemoteArmorRepairer"),
+        ];
+
+        for (kind, spelling) in kinds {
+            assert_eq!(kind_str(kind), spelling);
+            assert_eq!(parse_kind(spelling), Some(kind));
+        }
+    }
+
+    #[test]
+    fn invalid_godot_kind_strings_are_rejected() {
+        assert_eq!(parse_kind("SomeFutureModuleKind"), None);
+        assert_eq!(parse_kind(""), None);
     }
 }

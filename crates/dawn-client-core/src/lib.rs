@@ -50,7 +50,7 @@ pub use client_action::{
 };
 pub use client_rules::ClientRules;
 pub use client_state::{ClientFact, ClientState, ClientStateError, ShipLeaveReason};
-pub use dawn_core::StatDelta;
+pub use dawn_core::{ModuleKind, StatDelta};
 pub use hud::{
     HudChangeSet, HudFrame, HudReadModel, HudSceneFacts, HudShipStatusPanel, HudSnapshot,
     HudStatsPanel, HudStatusPanel, HudTargetPanel,
@@ -60,7 +60,7 @@ pub use loadout::{
     simulate_modules_capacitor_ticks, ActivationIntent, OwnedShipRow, PlayerLoadoutMsg,
     SlotCapacity,
 };
-pub use module_row::{ModuleKind, ModuleRow};
+pub use module_row::ModuleRow;
 pub use motion::{MotionInput, MotionPredictor, MotionProfile, MotionState};
 pub use ship_motion::{MotionCommand, MotionDispatch, MotionFrame, ShipMotion};
 pub use station_inventory::{

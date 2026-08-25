@@ -14,6 +14,12 @@ func test_empty_state_preserves_explicit_scalar_sentinels() -> void:
 	assert_float(loadout.weapon_falloff_range()).is_equal_approx(0.0, 0.0001)
 
 
+func test_module_fixture_rejects_an_invalid_kind() -> void:
+	var module := ModuleRow.test_fixture(
+		"High", 0, 42, "Future Module", "SomeFutureModuleKind", false, true, 0.0, 5)
+	assert_object(module).is_null()
+
+
 func test_owned_ships_cross_the_boundary_as_typed_rows() -> void:
 	var loadout := PlayerLoadout.new()
 	var modules: Array[ModuleRow] = []

@@ -1,24 +1,6 @@
 use serde::Deserialize;
 
-/// Wire-format mirror of `dawn_core::fitting::ModuleKind`'s `Debug` string
-/// representation (`crates/dawn-sector/src/node/player_loadout_projection.rs`
-/// serializes `kind` via `format!("{:?}", slot.def.kind)`). `Unknown` absorbs
-/// any variant added server-side before this enum catches up, instead of
-/// failing the whole payload to parse.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-pub enum ModuleKind {
-    Weapon,
-    ShieldBooster,
-    ArmorRepairer,
-    Propulsion,
-    Sensor,
-    Rig,
-    Tackle,
-    RemoteShieldBooster,
-    RemoteArmorRepairer,
-    #[serde(other)]
-    Unknown,
-}
+use dawn_core::ModuleKind;
 
 /// One row of `PlayerLoadout`'s `modules` array (a fitted module slot).
 /// Mirrors the shape `player_loadout_projection.rs::build_player_loadout_json`
@@ -55,12 +37,6 @@ pub struct ModuleRow {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn module_kind_falls_back_to_unknown_for_an_unrecognized_variant_name() {
-        let kind: ModuleKind = serde_json::from_str("\"SomeFutureModuleKind\"").unwrap();
-        assert_eq!(kind, ModuleKind::Unknown);
-    }
 
     #[test]
     fn module_row_parses_the_wire_shape() {
