@@ -727,7 +727,9 @@ retry use explicit operation IDs.
   durability-policy, and reconciliation ports; production, single-sector serve,
   clustered serve, and the in-memory `SectorRuntimeDriver` use the same
   prepare -> durable -> live-apply -> reconcile -> output ordering under #278.
-- [ ] Implement Transit durable Saga under #276.
+- [x] Implement Transit durable `TransitAttemptId` Saga under #276, including
+  checkpointed outgoing attempts, incoming receipts, bounded retry/backoff,
+  terminal/quarantine state, and compaction-independent recovery.
 - [x] Implement the unified runtime durability-profile/quorum/fencing and
   reconciliation policy boundary under #278. #280 still owns remote receipt and
   catch-up transport, so production remains explicitly `LocalDurable`.

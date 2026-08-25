@@ -4,7 +4,7 @@ audience : AI Agent / Human Developer
 update   : /architecture-review で issue を起票・状態更新するたびに更新
 related  : docs/architecture/architecture-review/server.md（構造評価）,
            docs/architecture/architecture-review/server-completed.md（完了済みログ）
-date     : 2026-08-23
+date     : 2026-08-25
 ---
 
 # Architecture Review — Dawn Codebase（未完項目）
@@ -16,6 +16,8 @@ date     : 2026-08-23
 ### R-2（保留）: client `main.gd`追加分割
 
 live state、interaction、presentationは分離済み。残るscene lifecycle / node generation / network send / HUD assemblyは凝集している。
+**根本原因:** 残る処理はscene-tree構築とsession lifecycleを共有し、独立した変更境界をまだ持たないため。
+**判断: Defer。** pass-through surfaceを増やさず、下記triggerが発火するまで現在のcomposition rootを維持する。
 **再評価:** scene-tree構成を自動検証できるようになるか、独立した変更理由が再び混在する場合。
 
 ### R-3（保留・warp trigger）: `node/`系ファイルの再肥大
@@ -26,22 +28,21 @@ live state、interaction、presentationは分離済み。残るscene lifecycle /
 `command_flight.rs` / `command_module.rs` / `command_loadout.rs` / `command_station.rs` へ
 移した。wire shape、domain result、event semantics は変更していない（ADR-0047 amendment）。
 
-`node/warp.rs` は1203行だが実装は573行で、geometry kernelとstate machineが凝集している。
+`node/warp.rs`は1281行だがproduction実装は592行で、geometry kernelとstate machineが凝集している。
 **判断: Defer。** テストを除く実装が約700行を超え、かつ独立した変更理由が混在する、または
 module間のdriftが実害になるまで分割しない。行数だけでは発火させない。
 
-### R-6（Fix候補）: `RuntimeFrameHost`のFrameInput境界
+### R-6（#343・Fix）: production `RuntimeNodeMutation` bridgeの撤去
 
-`RuntimeFrameHost`はproduction / single-sector / cluster / in-processのフレーム実行を一つに
-集約できたが、admission、Market、jump fallback、fixture spawnの入口は現在も
-`with_node_mut` / `RuntimeNodeMutation`によるclosure-scoped mutation bridgeである。
-**根本原因:** runtime frameへ入力を渡すtypedな`FrameInput` surfaceがまだなく、composition adapterが
-`SimulationNode`のmutation APIを直接選んでいるため。
-**判断: Fix。** live production mutationをprepare→durable→applyへ入れるtyped inputと、commit後の
-typed outputへ移し、closure bridgeはbootstrap/fixture専用に縮小する。frame外のmutationが増える、
-またはack前のmutation順序を検証できない実装が現れたらこの作業を優先する。
+`FrameInput`はlock commandとMarket settlementをprepare→durable→applyへ運ぶようになった。一方、
+認証済みplayer requestのcollection、jump fallback、admission、checkpointは、現在も
+`with_node_mut` / `with_state_mut` / `RuntimeNodeMutation`の汎用closure surfaceを利用する。
+**根本原因:** frame-scoped command inputとpost-commit followupは一部familyまでしか拡張されず、
+composition adapterの都合をtyped host operationへ閉じ切れていないため。
+**判断: Fix。** player commandとjump stateをtyped frame input/outputへ移し、admissionとcheckpointは
+各durability boundaryを表すnarrow methodへ置換する。bootstrap/fixtureだけをphase-gatedな明示APIとして残す。
 
-### R-7（Fix候補）: `SectorRepository`のbounded-context分割
+### R-7（#344・Fix）: `SectorRepository`のbounded-context分割
 
 `node/repositories.rs`は2104行で、Admission、Identity/ResumeTicket、Station projectionのschema、
 typed codec、allocator、transaction boundary、全ての回帰testsを一つのfileに保持している。
@@ -51,14 +52,35 @@ typed codec、allocator、transaction boundary、全ての回帰testsを一つ�
 維持したまま、admission、identity、station projectionの実装とtestsをmoduleへ分ける。
 別SQLite connectionを導入したり、Station authorityをSQLiteへ戻したりはしない。
 
+### R-8（#345・Fix）: Market SQLの全状態reload/rewrite
+
+`MarketDb::execute`は1 commandごとに全order・全Currency balance・全settlementを読み込み、
+`orders`と`currency`を全削除して再挿入する。read APIも全aggregateをhydrateしてから絞り込む。
+**根本原因:** #279でpure `MarketState`とSQLを分離した際、repositoryがpure aggregate全体の
+serialization adapterとして実装され、commandごとのbounded working setを表す契約がないため。
+**判断: Fix。** indexed queryで必要なbook/player/outboxだけを読み、pure policyへbounded working setを
+渡してtransitionのwrite setだけを同一transactionで永続化する。price-time、escrow、settlement、
+Currency gameplay semanticsは変更しない。
+
+### R-9（#346・Fix）: FileJournalのbounded-memory streaming
+
+`FileJournal::compact`はhot file全体を`Vec<u8>`へ読み、`read_from`も全suffixを
+`Vec<JournalRecord>`へ構築してからiteratorを返す。
+**根本原因:** #271ではcrash safetyとformat correctnessを先に固定し、scan callbackとcompactionを
+whole-file materializationで実装したため、APIのstreaming shapeとmemory behaviorが一致していない。
+**判断: Fix。** owning `BufReader` iteratorと`Seek` + bounded copyへ置換し、global index、checksum、
+torn-tail repair、archive retry、alias guard、post-rename poisonを維持する。
+
 ## 一覧
 
 | 項目 | 状態 |
 |---|---|
 | R-2 | 保留・trigger付き |
 | R-3 | commands slice・transit deepening 完了、warpはtrigger付きで保留 |
-| R-6 | Fix候補・FrameInput境界 |
-| R-7 | Fix候補・repository bounded-context分割 |
+| R-6 | #343・Fix・production mutation bridge |
+| R-7 | #344・Fix・repository bounded-context分割 |
+| R-8 | #345・Fix・Market bounded working set |
+| R-9 | #346・Fix・FileJournal bounded-memory streaming |
 採らない方針: CRDT/LWW、protobuf、薄いadapterだけの追加crate、行数削減目的の網羅match・domain型の破壊、初回LAN検証でのTLS/認証。
 
 ADR-0051で、薄いadapterのためではなく二重のcomposition rootを統合する

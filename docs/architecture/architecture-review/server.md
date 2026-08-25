@@ -5,7 +5,7 @@ update   : 大規模リファクタ実施後 / 新クレート追加時 / archit
 related  : AI_DEVELOPMENT_GUIDE.md「Crate Boundaries」, docs/architecture/architecture.md,
            docs/architecture/architecture-review/server-completed.md（完了済みログ）,
            docs/architecture/architecture-review/server-pending.md（未完項目・issue一覧）
-date     : 2026-08-24（#338反映。全Rustクレートの再計測は2026-08-20）
+date     : 2026-08-25（issue #338 / PR #340反映。全Rustクレート再計測、R-6〜R-9更新）
 ---
 
 # Architecture Review — Dawn Codebase（現行構造評価）
@@ -17,11 +17,12 @@ date     : 2026-08-24（#338反映。全Rustクレートの再計測は2026-08-2
 
 **総合: B+。** crate DAGとdeep module境界は健全で、production / single-sector / cluster /
 in-process driverは`RuntimeFrameHost`へ統合された。一方、`repositories.rs`（2104行）は複数の
-独立した変更理由を抱え、分割triggerが発火している。Transit handoffは今回、root入口を11行へ
-縮小し、lifecycle / materializationをprivate moduleへ分離した。今回の再計測では、
-共有ランタイムとTransit deepeningを反映しつつ、実装行数と責務混在を分けて再評価した。
+独立した変更理由を抱え、分割triggerが発火している。さらに、production mutation bridge、
+Marketの全状態reload/rewrite、FileJournalのwhole-hot-log materializationを、正しさを維持したまま
+縮めるFix項目としてR-6〜R-9へ整理した。今回の再計測では、実装行数と責務混在、正しさと
+スケーラビリティを分けて再評価した。
 
-2026-08-24の#338で、残っていた`dawn-actor`のClientConnection/WebSocket transportを
+2026-08-24にissue #338をPR #340で完了し、残っていた`dawn-actor`のClientConnection/WebSocket transportを
 `dawn-server` libraryへ吸収した。`simulate`と`sector-node`は同じlibrary targetの
 handshake/session/framing実装を使い、`dawn-protocol`はschemaと生成例だけを所有する。
 
@@ -31,11 +32,11 @@ Transitについては、Raftの回復判断を`transit::handoff`に残し、Shi
 
 | 観点 | 評価 | 現在の判断 |
 |---|---|---|
-| クレート構成 | A− | `dawn-server` が `simulate` と production `sector-node` の唯一のcomposition boundary。`dawn-core` / `dawn-sector` / `dawn-protocol` / client 2 crateへの依存方向も維持 |
-| ファイルサイズ | B+ | `repositories.rs` はAdmission / Identity / Station projectionを一つのSQLite境界に実装しているためR-7へ記録。Transitはroot入口とlifecycle / materializationへ分離済み。旧public-event reverse reducerは削除済み |
+| クレート構成 | A | #340で一時的な`dawn-actor`を削除し、`dawn-server`が`simulate`とproduction `sector-node`の唯一のcomposition boundaryになった。10 crateのDAGに逆依存なし |
+| ファイルサイズ | B+ | `repositories.rs`はAdmission / Identity / Station projectionを一つのSQLite境界に実装しているためR-7/#344へ記録。大きいTick/Transit/Journal kernelはtests込みで凝集している |
 | 型設計 | A− | domain固有のResult/Outcomeを維持。dispatcher都合で共通型へ潰さない（ADR-0047） |
 | 重複 | A− | Station runtime apply、SectorMap projectionを解消。Transit policy/state mutationも分離し、live専用materializationへ集約 |
-| 永続化 | A− | checkpoint + contiguous RecoveryDeltaを唯一のSector復旧境界とし、public-event tailとは独立したcursorをcheckpoint/catch-upへ渡す |
+| 永続化 | B+ | checkpoint + contiguous RecoveryDeltaの正しさは維持。一方、Marketの全状態rewrite（R-8/#345）とFileJournalの全hot suffix materialization（R-9/#346）は規模に比例するためFix |
 | Rust固有 | A− | 網羅matchとexhaustive destructuringを変更検出器として利用 |
 | AI開発誘発 | A− | `RuntimeFrameHost`の薄いadapter統合は完了。残るclosure-scoped mutation bridgeと大きなrepository入口は、責務とtriggerを明記してから分割する |
 
@@ -49,8 +50,10 @@ Transitについては、Raftの回復判断を`transit::handoff`に残し、Shi
 - canonical NodeState checkpoint/delta capture/restore
 
 Open:
-1. **R-6** `RuntimeFrameHost`のFrameInput境界（Fix候補）
-2. **R-7** `SectorRepository`のbounded-context分割（Fix候補）
+1. **R-6 / #343** production `RuntimeNodeMutation` bridgeの撤去（Fix）
+2. **R-7 / #344** `SectorRepository`のbounded-context分割（Fix）
+3. **R-8 / #345** Market SQLの全状態reload/rewrite撤去（Fix）
+4. **R-9 / #346** FileJournal read/compactionのbounded-memory streaming（Fix）
 
 Resolved in #336: the legacy EventStore/FileEventStore path is deleted. The
 DurableJournal is the sole persistent source of committed public facts, and
@@ -72,7 +75,7 @@ run only after the required projection completes.
 `ClientCommand`外側matchと`StationDispatchCommand`、domain固有の戻り値、process model固有の薄いadapterは
 意図的に維持する。
 
-## ファイルサイズ（2026-08-20再計測、500行以上）
+## ファイルサイズ（2026-08-25再計測、500行以上）
 
 | ファイル | 行数 | 判定 |
 |---|---:|---|
@@ -83,10 +86,10 @@ run only after the required projection completes.
 | `crates/dawn-sector/src/node/transit/tests.rs` | 880 | 🟢 Transit lifecycle・materialization・checkpoint recovery・cross-Sector統合tests |
 | `crates/dawn-sector/src/node/tick.rs` | 1696 | 🟢 authoritative tick orderとprepare→durable→applyのkernel・tests。単一の順序機械なので分割しない |
 | `crates/dawn-sector/src/node/commands.rs` | 1382 | 🟢 外側のfamily選択・runtime command collection・follow-up射影・統合tests。policyは専用moduleへ分離済み |
-| `crates/dawn-storage/src/file_journal.rs` | 1367 | 🟢 versioned journal framing・compaction・corruption recoveryの一つのstorage kernel・tests |
+| `crates/dawn-storage/src/file_journal.rs` | 1367 | 🟡 versioned journal kernelとして凝集。ただしread/compactionがhot suffix全体をmaterializeするためR-9/#346でFix |
 | `crates/dawn-sector/src/persistence/snapshot.rs` | 1246 | 🟢 checkpoint envelope・atomic publication・platform adapter・tests。単一のsnapshot publication boundary |
-| `crates/dawn-sector/src/node/warp.rs` | 1281 | 🟡 warp state machine・geometry kernel・tests。実装573行のためR-3の再評価trigger待ち |
-| `crates/dawn-sector/src/node/mod.rs` | 1071 | 🟢 node composition・identity/accessor・population/repository boundary。座標helperはR-4で分離済み |
+| `crates/dawn-sector/src/node/warp.rs` | 1281 | 🟡 warp state machine・geometry kernel・tests。production実装592行のためR-3の再評価trigger待ち |
+| `crates/dawn-sector/src/node/mod.rs` | 1070 | 🟢 node composition・identity/accessor・population/repository boundary。座標helperはR-4で分離済み |
 | `crates/dawn-distributed/src/catch_up.rs` | 1115 | 🟢 catch-up / snapshot-tail policy・tests |
 | `crates/dawn-market/src/order_book.rs` | 1044 | 🟢 pure order/matching/SettlementIntent policy。SQLは`repository.rs`へ分離済み（#279） |
 | `crates/dawn-sector/src/transit.rs` | 830 | 🟢 runtime consensus / durable transition policy。Ship handoff state mutationとは分離済み |
@@ -108,19 +111,21 @@ run only after the required projection completes.
 | `crates/dawn-server/src/serve/cluster.rs` | 671 | 🟢 clustered serve composition・admission/jump tests |
 | `crates/dawn-sector/src/node/approach.rs` | 631 | 🟢 approach steering state machine・tests |
 | `crates/dawn-sector/src/node/ship_cargo.rs` | 681 | 🟢 ship cargo ownership/bridge boundary・tests |
-| `crates/dawn-market/src/repository.rs` | 623 | 🟡 SQLite order/Currency/outbox persistence。bounded-memory streamingはfollow-up |
+| `crates/dawn-market/src/repository.rs` | 623 | 🟡 SQLite order/Currency/outbox persistenceとして凝集。ただし毎commandの全状態reload/rewriteはR-8/#345でFix |
 | `crates/dawn-distributed/src/state.rs` | 594 | 🟢 Raft state transition/persistence boundary・tests |
 | `crates/dawn-ecs/src/systems/combat.rs` | 584 | 🟢 combat system・tests |
 | `crates/dawn-server/src/bin/sector-node.rs` | 601 | 🟢 production node bootstrap/config・public tail rebuild wiring |
 | `crates/dawn-sector/src/transition.rs` | 737 | 🟢 durable transition preparation / output boundary |
-| `crates/dawn-protocol/src/lib.rs` | 554 | 🟢 wire envelope/schema exports・tests |
+| `crates/dawn-protocol/src/lib.rs` | 579 | 🟢 wire envelope/schema exports・tests |
 | `crates/dawn-server/src/sector_runtime_driver.rs` | 547 | 🟢 in-process Sector actor/runtime adapter・tests |
 | `crates/dawn-server/src/serve/single.rs` | 545 | 🟢 single-sector serve composition・admission tests |
 | `crates/dawn-sector/src/node/serialization.rs` | 542 | 🟢 observer-scoped state projection |
 | `crates/dawn-sector/src/node/player_loadout_projection.rs` | 535 | 🟢 PlayerLoadout wire projection |
-| `crates/dawn-server/src/runtime_frame.rs` | 960 | 🟢 shared one-Sector frame host・policy injection・output boundary・tests |
-| `crates/dawn-sector/src/node/station_operation_execution.rs` | 519 | 🟢 accepted station-operation effects |
+| `crates/dawn-server/src/runtime_frame.rs` | 960 | 🟡 shared one-Sector frame hostは凝集。productionの汎用mutable closure surfaceはR-6/#343でtyped化 |
+| `crates/dawn-sector/src/node/station_operation_execution.rs` | 520 | 🟢 accepted station-operation effects |
 | `crates/dawn-server/src/bench.rs` | 535 | 🟢 benchmark scenarios |
+| `crates/dawn-sector/src/persistence/recovery.rs` | 505 | 🟢 checkpoint後のjournal tail検証・RecoveryDelta適用・repository reconciliationとtests |
+| `crates/dawn-server/src/bin/sector-node/runtime.rs` | 504 | 🟢 production command collection・frame stepping・replication/AoI deliveryの一つのprocess adapter |
 | `crates/dawn-sector/src/node/station_lifecycle.rs` | 428 | 🟢 station operation validation/planning |
 
 全体の再計測ではテストコードが行数の大きな割合を占めるファイルが多かった。総行数だけでは

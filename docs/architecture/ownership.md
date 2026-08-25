@@ -11,7 +11,7 @@ related  : entity-model.md, event-catalog.md, recovery-contract.md, ../adr/ADR-0
 > |---|---|---|
 > | §1-2 | Ship ownership, basic state transitions | Implemented |
 > | §2 Sector Transit / §3 Node failure | Cross-Sector move exclusion, Raft failover | Implemented baseline; Transit recovery persistence implemented under ADR-0049/#276 |
-> | §4 Actor ownership | Data isolation between Actors | Implemented baseline; storage ownership migrates under #272 |
+> | §4 Actor ownership | Data isolation between Actors | Implemented through #272/#275/#278; runtime owns durability and the Sector engine exposes prepared transitions |
 > | §5 ID generation | NodeId + monotonic counter | Implemented |
 > | §7-8 | Player ownership / active-ship routing | Implemented behavior; recovery persistence implemented under #284/#275 |
 >
@@ -87,12 +87,12 @@ The complete freeze set is specified by ADR-0014 and is persisted by the #276 Sa
 
 ### Ownership-check responsibility
 
-| Operation type | Responsible party | Current / target implementation |
+| Operation type | Responsible party | Current implementation |
 |---|---|---|
-| Sector-local mutation | The Sector engine | `SimulationNode` today; storage-independent engine under #272 |
-| Crossing Sector boundary | Consensus + Transit lifecycle | `dawn-distributed` Raft + current handoff seam; durable Saga under #276 |
+| Sector-local mutation | The Sector engine | `SimulationNode` prepares bounded transitions without owning the journal (#272) |
+| Crossing Sector boundary | Consensus + Transit lifecycle | `dawn-distributed` Raft + durable `TransitAttemptId` Saga (#276) |
 | Exact restart/failover reconstruction | Recovery layer | ADR-0049 checkpoint + authoritative recovery tail |
-| Read (reference only) | No mutation check | read-only Sector view after #272 |
+| Read (reference only) | No mutation check | read-only `SectorView` boundary (#272) |
 
 ---
 
@@ -174,7 +174,7 @@ and repository ownership is explicitly marked as an adapter, separate from the
 Station owner. This keeps the repository replaceable without creating a second
 hidden Station cache or moving persistence authority into the ECS state.
 
-### Target boundary (#272 / #275)
+### Current boundary (#272 / #275)
 
 The authoritative pure Sector engine owns domain state, while the runtime/application layer owns persistence and external effects:
 

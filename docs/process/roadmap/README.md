@@ -26,7 +26,10 @@ related  : ./pending.md, ./completed.md, ./deferred.md, ../roadmap.md, ../roadma
 - 9A（Scrap Metal）、9B（Station / Ship操作）、9D（Market / Currency）は実装済み。
 - 9C（プレイヤー設置インフラ）は設計未着手。新規ADRが必要。
 - 9E-1 は手順準備済み、人間によるプレイテストと結果記録が未完了。
-- Phase 10 はGDExtension・wire移行・MotionPredictor基盤まで実装済み。Client-Side Predictionの残作業とGodotプレイテストが残る。
+- Phase 10 はGDExtension・wire移行・`ShipMotion`によるClient-Side Prediction /
+  reconciliationまで実装済み。Godotエディタでの手動プレイテストのみ残る。
+- Phase 11 は天体表示、ワープ演出、Filmic/Bloom、星野geometry、
+  起動時ネビュラベイクまで実装済み。船モデルと戦闘フィードバックが残る。
 
 ### 次の1件
 

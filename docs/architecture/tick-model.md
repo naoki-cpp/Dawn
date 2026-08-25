@@ -13,15 +13,12 @@ delta locally, and only then publishes outputs. The historical target wording
 in the following ADR note is retained for context; the implementation note
 after it is the current production status.
 
-> **ADR-0049 recovery amendment (2026-08-07):** The detailed system order and game
-> mechanics in this document remain normative. What changes is the **mutation and
-> durability boundary** around them. In the target #272 architecture, the logical
-> effects of Steps 1–7 are prepared without exposing mutations to the committed live
-> world, then one ADR-0049 recovery transition is made durable, then the prepared
-> result is applied locally, projections are caught up, and only then are public/
-> reliable effects published. The current `SimulationNode` still performs parts of
-> the old mutate-then-append pipeline; those current call shapes are migration debt,
-> not a competing commit contract.
+> **ADR-0049 recovery amendment (2026-08-07, implemented by #272/#278):** The
+> detailed system order and game mechanics in this document remain normative.
+> Steps 1–7 are evaluated against a bounded working image without exposing them
+> as committed live state; one ADR-0049 recovery transition is then made durable,
+> the same result is applied locally, projections are reconciled, and only then
+> are public/reliable effects published.
 
 The production node and local runtime adapters now use the prepared Tick
 transition described below: they durably append the RecoveryDelta before
@@ -30,8 +27,8 @@ publish their public/reliable outputs only after that hook succeeds. The legacy
 mutation calls inside `SimulationNode` remain implementation details, not an
 alternative production commit contract.
 
-The #272 migration now exposes both the logical counter seam and a complete
-Tick seam. `SimulationNode::prepare_tick_state_transition` executes the legacy
+The #272 implementation exposes both the logical counter seam and a complete
+Tick seam. `SimulationNode::prepare_tick_state_transition` executes the existing
 systems against a ship-level write-set image, restores the live state, and
 returns the complete post-tick ship image, node routing/maps, queues, public
 events, and recovery context. `RuntimeFrameHost` delegates to
@@ -108,9 +105,9 @@ Tick's authoritative transition order. See §8 for details.
 **This system order and the ADR-0049 commit boundary must not change without an ADR.**
 
 The step descriptions below preserve the existing gameplay mechanics. Pseudocode such as
-`&mut world` describes the logical mutation each system computes. Under #272 these mutations
-must be accumulated in a bounded prepared state/write set (or equivalent) until the durable
-boundary in Step 8.5; current code may still mutate live structures earlier during migration.
+`&mut world` describes the logical mutation each system computes. The #272 implementation
+evaluates those mutations against a bounded write-set image, restores the committed live
+state, and applies the resulting RecoveryDelta only after the durable boundary in Step 8.5.
 
 A committed distributed input such as a Raft Transit operation is applied as authoritative
 input at the appropriate pre-Tick boundary, but any resulting Sector state/public output must
@@ -120,8 +117,8 @@ durable Saga without changing the following simulation ordering.
 ```
 Step 1: Prepare the Tick counter increment
          prepared_tick = current_tick + 1
-         Target architecture: committed current_tick becomes prepared_tick only after
-         the durable transition succeeds and local live apply occurs.
+         committed current_tick becomes prepared_tick only after the durable
+         transition succeeds and local live apply occurs.
 
 Step 2: Process the command queue
          MoveCommand              -> updates ThrustComp.direction (is_braking = false)
@@ -131,8 +128,8 @@ Step 2: Process the command queue
          DeactivateModuleCommand  -> FittedSlot.is_active = false / apply_fitting()
          JumpCommand              -> after can_propose_jump() validation, creates/continues
                                     the reliable Transit proposal obligation required by
-                                    ADR-0014 / ADR-0049; current code may propose directly,
-                                    #276 owns the final Saga representation
+                                    ADR-0014 / ADR-0049 through #276's durable
+                                    TransitAttemptId Saga
          ApproachCommand          -> attaches ApproachComp (semi-automatic approach to a
                                     target Ship/Jump Gate; cleared by Move/Stop/other
                                     flight modes; ADR-0015)
@@ -183,13 +180,13 @@ Step 2.6: Warp System (after Keep at Range, before Movement, ADR-0022 / ADR-0025
              Gate target: within activation_radius x 0.8 (ADR-0022)
              Body target: within body.radius x 1.5 (ADR-0025 BODY_WARP_ARRIVAL_FACTOR)
            If unreachable (e.g. target disappears), removes WarpComp and brakes.
-           Gate targets with auto_jump = true currently feed pending_auto_jumps on arrival
-           (ADR-0023).
+           Gate targets with auto_jump = true feed pending_auto_jumps on arrival
+           (ADR-0023). That queue is included in the Tick RecoveryDelta.
          -> Warping ships skip Step 3 Movement (warp speed is not clamped there).
            Emits VelocityChanged where the current public-event policy requires it.
-         -> ADR-0049: an auto_jump arrival cannot rely only on pending_auto_jumps.
-           The same durable transition must create replayable/idempotent continuation state;
-           #276 may represent that continuation as a Transit Saga attempt.
+         -> After the Tick commits, the runtime drains the recovered queue, revalidates
+           range/tackle, and proposes #276's durable Transit Saga request. A rejected
+           one-shot trigger is deliberately drained without creating an attempt.
 
 Step 3: Movement System (ECS batch processing; skips warping ships)
          MovementSystem::run(&mut world, tick)
@@ -224,6 +221,9 @@ Step 5: Lock System
          Must run after Movement (lock decisions need final positions).
          Lock countdown/state final values are RecoveryDelta authority, including
          eventless countdown Ticks.
+         -> SimulationNode::clear_docked_lock_targets(tick) then tears down locks
+           held by or targeting docked Ships and emits the corresponding LockLost
+           facts before range gating and combat.
 
 Step 5.5: Range Gate System (ADR-0035)
          SimulationNode::process_range_gate(tick)
@@ -299,9 +299,9 @@ Step 10: Publish committed outputs / application state
 Step 11: Runtime/consensus pacing after local commit
          raft.tick()
          -> advances election-timeout / heartbeat timers by 1 logical Tick
-         -> current runtime may drain completed-warp presentation outputs
-         -> Transit/reliable proposal work follows ADR-0014/ADR-0049 and migrates to
-            #276 Saga semantics where applicable
+         -> drains completed-warp presentation outputs
+         -> drains committed pending_auto_jumps, revalidates them, and proposes
+            #276 Transit Saga requests through the consensus adapter
 ```
 
 ### Current committed-Raft input path (legacy Step 7.5 label)
@@ -312,17 +312,19 @@ Transit pipeline that the shared durable runtime frame exposes:
 
 ```
 TransitOp::Request -> current owner marks InTransit, appends SectorTransitRequested,
-                      exports handoff, proposes Commit
-TransitOp::Commit  -> current destination imports at entry_pos, appends
-                      SectorTransitCompleted / JumpGateUsed / StarSystemChanged as relevant
+                      allocates TransitAttemptId, stores the outgoing Saga attempt,
+                      exports handoff, and proposes Commit
+TransitOp::Commit  -> destination idempotently imports at entry_pos, stores an
+                      incoming receipt, appends SectorTransitCompleted /
+                      JumpGateUsed / StarSystemChanged as relevant, and proposes Ack
+TransitOp::Ack     -> source completes the keyed attempt and removes its frozen copy
 ```
 
-This describes the **current implementation baseline** preserved by ADR-0014.
-`RuntimeFrameHost` now places the resulting Sector mutation under the same
-prepare/durable/live-apply contract, while #276 replaces public-event-scan
-retry/receipt authority with a durable Saga. The relative rule that committed
-consensus input is handled before the ordinary simulation Tick can remain unless
-a later ADR changes it.
+This is the current ADR-0014/#276 implementation. `RuntimeFrameHost` places the
+resulting Sector mutation under the same prepare/durable/live-apply contract;
+public Transit events are audit/projection facts and are not scanned for retry
+or receipt authority. Committed consensus input is handled before the ordinary
+simulation Tick unless a later ADR changes that order.
 
 ### Commit means ADR-0049 durable transition, not public-event append
 
@@ -426,7 +428,7 @@ the exact last committed authoritative transition, not from public-event-tail in
 
 ### Measurement boundaries
 
-The target authoritative Tick latency for the #272 architecture is:
+The authoritative Tick latency boundary is:
 
 ```
 Start: immediately before Tick preparation
@@ -438,9 +440,9 @@ runtime effects are not part of the local simulation-compute benchmark. A future
 `ReplicatedDurable` production SLA must separately account for its synchronous durability
 quorum if that profile is used for acknowledgement.
 
-Until every production runtime is wired to the durable Tick adapter, benchmarks that stop
-after the durable journal append are only **legacy implementation proxies**. They must not
-be interpreted as the semantic commit boundary or numeric recovery RTO.
+Compute-only system benchmarks remain useful diagnostics, but they do not measure
+the authoritative commit boundary unless they include durable append and successful
+local apply/reconciliation. They must not be interpreted as a numeric recovery RTO.
 
 ### Running the benchmark
 
@@ -494,7 +496,7 @@ This is current implementation topology, not a permanent storage/API constraint:
 - #275 splits heterogeneous `SimulationNode` state authority into explicit
   Simulation/Player/Station/Transit/Topology/GameData/FrameOutput owners plus a
   separate Persistence adapter;
-- #276 replaces current Transit scan/retry state with a durable Saga;
+- #276 provides the durable Transit Saga and removes public-event-scan retry authority;
 - #280 provides the shared control/bulk replication and snapshot transport
   wiring while preserving the Tick/recovery ordering defined here; #278 owns
   production quorum-policy activation.

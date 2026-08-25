@@ -158,7 +158,9 @@ CRDT ライブラリ・LWW レジスタは作らない。現行の `ReplicationB
 
 - ゴシップの具体プロトコル（push/pull/push-pull、fanout、周期）— dawn-distributed 実装時に決める。
 - ワイヤ形式（postcard 再利用か dawn-proto か）— 別途（dawn-proto の要否は未決・本 ADR とは独立）。
-- InstallSnapshot RPC の実装 — ADR-0017 圧縮と対の Raft 側ギャップ。別タスク。
+- スナップショット転送の具体プロトコルは本ADRで決めない。現在は
+  `CatchUpManager` が retained public tail のギャップを検出し、スナップショット
+  fallback後に `ReplicaSet::install_snapshot` から suffix catch-up を再開する。
 - 非権威ソフト状態への将来的な局所 CRDT 採用 — 要件が生じた時に個別 ADR。
 
 ---
@@ -174,7 +176,10 @@ CRDT ライブラリ・LWW レジスタは作らない。現行の `ReplicationB
       最終一貫性（単一所有のため競合解決 CRDT は不要）」へ更新（2026-06-15）
 - [x] （8D-2b）log index アンチエントロピー（`iter_from` 再利用）+ 重複/overlap/gap 判定テスト
 - [x] （8D-2c）TCP gossip 配布（4-byte length prefix + postcard / LAN plaintext）+ 受信テスト
-- [ ] （8D 後続）遅れた複製がスナップショット転送で追いつくテスト（ADR-0017 / InstallSnapshot 連携）
+- [x] （8D 後続）retained public tail より遅れた複製が
+      `CatchUpManager` のスナップショット fallback を使い、
+      `ReplicaSet::install_snapshot` 後に snapshot index から catch-up を再開するテスト
+      （`compacted_gap_falls_back_to_snapshot_then_resumes_at_snapshot_index`）
 
 ---
 

@@ -32,9 +32,17 @@ related  : ./README.md, ../roadmap-history.md, ../../adr/
 - 10-2/10-4: `InitialState` / `PlayerLoadout` / `AoiEnter` 固定型移行とpostcard WebSocket移行の段階2を完了（ADR-0042）。`register_ship`のJSON往復排除（#178）、`connection.gd`のdead text-frame fallback削除（#179）。
 - 10-6: 絶対座標・floating origin・client motionの再評価と `ShipMotion` への統合完了。Godot editorでの実機確認は pending に残す。
 - Godotの自動テストは通過。実行DLL生成と手動プレイテストは [pending.md](./pending.md) に残す。
+
+### Phase 11 の表示基盤
+
 - Phase 11 celestial presentation: topology-derived fresh spawn, physical body radii,
   synchronized star lighting, deterministic planet surfaces, and bright-star sky
   landmarks (ADR-0053).
+- 11-3: ワープ突入・離脱のトンネル演出、方向フロー、FOV緩和を実装。
+- 11-6: Filmic tonemapping、HDR glow / Bloom、星光に連動した環境調整を実装。
+- 11-8: 星野をCPU生成のスプライトgeometryへ移行（ADR-0054）。
+- 11-9: ネビュラとMilky Wayを起動時にパノラマへベイクする表現へ移行
+  （ADR-0055、sky パス 42.4ms→19.0ms）。
 
 ## 記録先
 
