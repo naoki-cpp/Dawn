@@ -219,7 +219,8 @@ AoI introduces **no new domain events**. It's implemented by filtering `DomainEv
 
 ## 4. Command List
 
-Commands are defined in `dawn-core/src/commands.rs`. Clients send them to the server as the single typed `ClientRequest` enum.
+Commands are defined in `dawn-core/src/commands.rs`. The table below lists the
+single typed `ClientRequest` enum accepted from clients.
 
 | Command | Description | Resulting Event(s) | Status |
 |---|---|---|---|
@@ -237,10 +238,9 @@ Commands are defined in `dawn-core/src/commands.rs`. Clients send them to the se
 | `TransferCargo` | Move the entire stack of an item (`Module` or `ScrapMetal`) between a docked ship's own cargo and the caller's inventory at that station, in either direction (`direction: ToStation\|ToShip`); whole-stack only (ADR-0034 9B) | — public event may be empty; authoritative cargo/Station delta is still durable | ✅ implemented |
 | `ActivateModuleCommand` | Turn on an Active Module | `ModuleActivated` | ✅ implemented |
 | `DeactivateModuleCommand` | Turn off an Active Module | `ModuleDeactivated` | ✅ implemented |
-| `AttackCommand` | Designate an attack target | `WeaponFired` | ⬜ type + WsServer JSON parser only; not wired into combat |
+| `AttackCommand` | Designate an attack target | `WeaponFired` | ⬜ typed core/protocol/GDExt encoder implemented, but `SimulationNode::apply_client_request` rejects it as `UnsupportedRequest`; not wired into combat |
 | `StopCommand` | Decelerate to zero velocity using acceleration | — (no public event required; RecoveryDelta records authority) | ✅ implemented |
 | `ApproachCommand` | Semi-automatic approach to a target (Ship / Jump Gate); cancelled by Move/Stop (ADR-0015) | — (no public event required) | ✅ implemented |
-| `TransitCommand` | Request a Sector Transit (via Raft, ADR-0014) | `SectorTransitRequested` / `Completed` | ✅ implemented; persistence model migrating under #276 |
 | `JumpCommand` | Move to another Sector via a Jump Gate (via Raft, ADR-0009). In range: proposed directly. Out of range: auto-warps toward the gate first (auto-warp-then-jump, ADR-0023). Too close to warp: auto-approaches instead. The 3-way decision is owned by `SimulationNode::apply_jump_with_fallback` (`dawn-sector::node::jump`), called identically from both `dawn-server` binaries | `JumpGateUsed` (+ `StarSystemChanged` if star system changes) | ✅ implemented |
 | `WarpCommand` | Warp within the same Sector to a Jump Gate, celestial body (star/planet), or station (`WarpTarget::Gate` / `Body` / `Station`; align → warping, two phases; station arrival is inside its docking radius; ADR-0022 / ADR-0025) | — / `VelocityChanged` as applicable; exact Warp state is RecoveryDelta | ✅ implemented |
 | `OrbitCommand` | Orbit a target (Ship / Jump Gate) at a given radius (defaults to weapon range; cancelled by Move/Stop/other helm modes; ADR-0031) | — (no public event required; movement facts may appear separately) | ✅ implemented |
@@ -250,6 +250,18 @@ Commands are defined in `dawn-core/src/commands.rs`. Clients send them to the se
 > **ADR-0037 (2026-07-07):** `MoveCommand`/`StopCommand`/`ApproachCommand`/`WarpCommand`/`OrbitCommand`/`KeepAtRangeCommand`/`JumpCommand`/`LockOnCommand`/`ActivateModuleCommand`/`DeactivateModuleCommand`/`UndockCommand` no longer carry a `ship_id` field — the server resolves them against the caller's active ship (`PlayerState.active_ship`), so there is no wire-representable way to name a ship the player isn't flying. `FitModuleCommand`/`UnfitModuleCommand`/`DockCommand`/`BuildPackagedShipCommand`/`DisassembleShipCommand` are unaffected (station inventory-management, any owned ship). See `docs/architecture/ownership.md` §7.
 >
 > **ADR-0049 amendment:** the absence of a public event does not make `active_ship` intentionally lossy. `SelectActiveShip`/`Disembark` successful routing changes belong to PlayerState checkpoint/RecoveryDelta recovery under #284/#275.
+
+---
+
+### Internal Transit command
+
+`TransitCommand { ship_id, to }` is an internal Sector policy input, not a
+variant of `ClientRequest`. A player enters the Transit pipeline through
+`ClientRequest::Jump`; after Raft commits the corresponding
+`TransitOp::Request`, `prepare_transit_commit` folds this internal command into
+the lifecycle policy that freezes the source ship and persists the outgoing
+`TransitAttemptId` Saga. That durable Saga is the retry and receipt authority
+for `Request -> Commit -> Ack` (#276).
 
 ---
 
@@ -289,6 +301,47 @@ Ship generated within a Sector.
 
 ---
 
+### `ClientAdmissionIdentityReserved`
+
+A fresh client admission durably consumed its player and ship identities before
+materializing the Ship.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `player_id` | `PlayerId` | ✓ | reserved Player identity |
+| `ship_id` | `ShipId` | ✓ | reserved, never-reused Ship identity |
+| `tick` | `Tick` | ✓ | Tick at which the reservation fact was recorded |
+
+The repository reservation row and allocation watermarks are the admission
+protocol authority; this event is the append-only public audit fact.
+
+---
+
+### `ClientAdmissionCommitted`
+
+Atomic public fact for a successful fresh admission and its starter state.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `player_id` | `PlayerId` | ✓ | admitted Player |
+| `ship_id` | `ShipId` | ✓ | materialized starter Ship |
+| `resume_ticket` | `ResumeTicket` | ✓ | opaque identity used by reconnect/resume |
+| `sector_id` | `SectorId` | ✓ | Sector that admitted the Player |
+| `initial_position` | `AbsolutePosition` | ✓ | authoritative Sector-frame spawn point |
+| `ship_type_id` | `ShipTypeId` | ✓ | starter Ship type |
+| `fitting` | `FittingSnapshot` | ✓ | fitting at materialization |
+| `inventory` | `BTreeMap<ItemId, u64>` | ✓ | starter Ship cargo stacks |
+| `starter_station_id` | `StationId` | ✓ | Station receiving the starter grant |
+| `starter_item_id` | `ItemId` | ✓ | granted Station item |
+| `starter_item_count` | `u64` | ✓ | granted quantity |
+| `tick` | `Tick` | ✓ | local admission-commit Tick |
+
+Exact Ship/Player state and the Station projection are committed by the same
+RecoveryDelta and reconciled repository protocol; the public event is not a
+second admission authority.
+
+---
+
 ### `VelocityChanged`
 
 Ship velocity changed. `MovementSystem` runs the physics and emits this only when velocity differs from the previous Tick.
@@ -304,6 +357,81 @@ Ship velocity changed. `MovementSystem` runs the physics and emits this only whe
 **Public consumers:** supported motion projections may apply `VelocityChanged` in order and integrate `position += velocity` according to their own contract. The Sector engine does not reverse-apply this event during recovery.
 
 **ADR-0049 exact recovery note:** position is not merely a throwaway derived value. Exact final position/velocity/anchor/flight state at each committed recovery position is covered by RecoveryDelta/checkpoint, including Ticks with no `VelocityChanged`. Historical Tick rerun or velocity-event integration is not the exact operational recovery authority.
+
+---
+
+### `AnchorRebased`
+
+The Ship changed coordinate anchor without changing its absolute position.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `ship_id` | `ShipId` | ✓ | Ship whose coordinate representation changed |
+| `anchor` | `AnchorId` | ✓ | new coordinate anchor |
+| `offset` | `Position` | ✓ | new f64 position offset relative to `anchor` |
+| `tick` | `Tick` | ✓ | rebase Tick |
+
+Exact anchor and offset remain checkpoint/RecoveryDelta authority.
+
+---
+
+### `ShipDocked`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `ship_id` | `ShipId` | ✓ | Ship that docked |
+| `station_id` | `StationId` | ✓ | Station entered |
+| `tick` | `Tick` | ✓ | docking Tick |
+
+---
+
+### `ShipUndocked`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `ship_id` | `ShipId` | ✓ | Ship that undocked |
+| `station_id` | `StationId` | ✓ | Station exited |
+| `tick` | `Tick` | ✓ | undocking Tick |
+
+---
+
+### `PackagedShipBuilt`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `ship_id` | `ShipId` | ✓ | active Ship through which the player invoked the Station operation |
+| `player_id` | `PlayerId` | ✓ | owner receiving the packaged Ship |
+| `station_id` | `StationId` | ✓ | Station where construction occurred |
+| `ship_type_id` | `ShipTypeId` | ✓ | built packaged Ship type |
+| `scrap_cost` | `u64` | ✓ | Scrap Metal consumed |
+| `tick` | `Tick` | ✓ | construction Tick |
+
+---
+
+### `ShipDisassembled`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `ship_id` | `ShipId` | ✓ | live Ship converted into a packaged Ship |
+| `player_id` | `PlayerId` | ✓ | Ship owner |
+| `station_id` | `StationId` | ✓ | Station receiving the packaged Ship |
+| `ship_type_id` | `ShipTypeId` | ✓ | disassembled Ship type |
+| `tick` | `Tick` | ✓ | disassembly Tick |
+
+---
+
+### `ShipAssembled`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `ship_id` | `ShipId` | ✓ | freshly allocated live Ship |
+| `player_id` | `PlayerId` | ✓ | new Ship owner |
+| `station_id` | `StationId` | ✓ | Station where the Ship was assembled and remains docked |
+| `ship_type_id` | `ShipTypeId` | ✓ | assembled Ship type |
+| `tick` | `Tick` | ✓ | assembly Tick |
+
+Assembly does not implicitly select the new Ship as `active_ship`. Exact entity,
+ownership, docking, and inventory changes are RecoveryDelta authority.
 
 ---
 
@@ -478,11 +606,16 @@ A durable public transfer request. On the source, current behavior keeps ownersh
 | `ship_id` | `ShipId` | ✓ | Ship transiting |
 | `from` | `SectorId` | ✓ | source Sector |
 | `to` | `SectorId` | ✓ | destination Sector |
-| `tick` | `Tick` | ✓ | source request Tick; part of the current attempt identity |
+| `request_tick` | `Tick` | ✓ | source-local request nonce retained in the public fact |
+| `gate_id` | `Option<JumpGateId>` |  | Gate route; `None` for non-Gate Transit |
+| `entry_pos` | `AbsolutePosition` | ✓ | authoritative destination entry point |
+| `tick` | `Tick` | ✓ | Tick local to the Sector transition that emitted this record |
 
 **Public consumers:** an audit/projection may record the requested route. Exact Transit state, freeze, retry, and ownership are RecoveryDelta/Saga authority; no Sector reverse reducer consumes this event.
 
-**Migration:** exact Transit recovery/retry authority is moving to ADR-0049 RecoveryDelta plus #276's durable Saga; this public event does not have to remain the durable attempt repository.
+**Current authority:** exact Transit recovery/retry state is held by ADR-0049
+RecoveryDelta plus #276's durable `TransitAttemptId` Saga. This public event is
+an audit/projection fact, not the attempt repository.
 
 ---
 

@@ -54,7 +54,7 @@ state is recovered through the ADR-0049 checkpoint and RecoveryDelta
 representation. `SimulationNode` has no public-event reverse reducer, and genesis
 public-event replay is not an operational recovery contract.
 
-### Current scope (Phase 10 client integration / Phase 9 economy validation)
+### Current scope (Phase 11 presentation / Phase 10 manual validation / Phase 9 economy validation)
 
 ```text
 Runtime          : multi-process (`dawn-server --bin sector-node` or
@@ -77,10 +77,8 @@ See [ADR-0003](../adr/ADR-0003-local-first-development.md), [ADR-0027](../adr/AD
 ### Future scope (direction only, not implemented)
 
 - TLS / QUIC (8E+)
-- #280 transport migration is implemented: versioned peer identity handshake,
-  separate control/bulk channels, recovery ranges, snapshots, repository bytes,
-  and durability envelopes; deployment-specific benchmark/RTO remains
-- deployment-specific recovery benchmark and RTO selection after #280
+- deployment-specific recovery benchmark and numeric RTO selection on top of
+  #280's implemented peer transport
 
 **Do not implement code ahead of the current phase or redefine a contract owned by another refactor issue.**
 
@@ -288,7 +286,7 @@ Solution: each client receives Events only for entities within its own
 CQRS/public projections are distinct from exact recovery.
 
 ```text
-Write side (target architecture):
+Write side (current durable architecture):
   Input -> Prepare -> Durable Recovery Transition -> Live Apply -> DomainEvents
 
 Read/projection side:
@@ -380,8 +378,8 @@ than the retained tail base must use snapshot catch-up.
 - #271 owns physical journal/commit/compaction mechanics;
 - #276 ensures Transit Saga/retry authority survives checkpoint/compaction;
 - #280 transports the selected checkpoint/tail representation and cannot promote a staged-but-unapplied replica;
-- numeric RTO remains deployment-specific until the #280 peer transport and
-  reference recovery benchmark are selected.
+- numeric RTO remains deployment-specific until a reference recovery benchmark
+  and deployment policy are selected.
 
 See [ADR-0017](../adr/ADR-0017-snapshot-compaction.md), [ADR-0049](../adr/ADR-0049-sector-recovery-state-delta-wal.md), and [recovery-contract.md](./recovery-contract.md).
 
@@ -396,7 +394,8 @@ See [ADR-0017](../adr/ADR-0017-snapshot-compaction.md), [ADR-0049](../adr/ADR-00
 | Ship is the only entity (includes Fitting / Combat / Capacitor) | MVP scope limit | [AI_DEVELOPMENT_GUIDE.md "Project North Star"](../../AI_DEVELOPMENT_GUIDE.md) |
 | Exact recovery model is state-delta + versioned checkpoint | #284 accepted architecture decision | [ADR-0049](../adr/ADR-0049-sector-recovery-state-delta-wal.md) |
 
-> §3's crate table/DAG describes the current implementation topology; #272/#280 are explicitly chartered to change portions of that implementation while preserving the contracts named here.
+> §3's crate table/DAG describes the current implementation topology after
+> #272's prepared-transition boundary and #280's shared peer transport landed.
 
 ---
 

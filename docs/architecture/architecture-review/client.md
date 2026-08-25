@@ -5,7 +5,7 @@ update   : クライアント側で大規模リファクタ実施後 / architect
 related  : docs/architecture/architecture-review/server.md（サーバー側）,
            docs/architecture/architecture-review/client-completed.md（完了済みログ）,
            docs/architecture/architecture-review/client-pending.md（未完項目）
-date     : 2026-08-24（#339 ModuleKind canonicalization後に再計測）
+date     : 2026-08-25（issue #200 / PR #342反映。19 GDScriptとclient Rust境界を再計測）
 ---
 
 # Architecture Review — Dawn Client（現行構造評価）
@@ -20,6 +20,9 @@ interaction、presentation、HUD、wire adapterの所有者は分離済みで、
 判断しない。C-16では、thin Godot decode/outcome seam、canonical inbound delivery、debug fixtureを
 `server_message_gd.rs`、`inbound_delivery.rs`、`server_message_fixture.rs`へ分離し、world messageは
 必要なstate commit後に`main.gd`の最終handlerへ一度だけ到達する構造へ整理した。
+今回、`world_presentation.gd`が637行へ増え、floating origin、navigation LOD、space environment、
+warp/player effectという独立したvisual lifecycleが同じcoordinatorへ集まり始めたためC-20で監視する。
+`starfield.gd`（250行）は統計的star generationとMultiMesh packingが凝集したdeep moduleである。
 
 issue #238で復号済みwire型をGodot `Dictionary`へ投影してRustへ戻す経路を削除し、
 #248で旧client adapterを削除した。#251ではtick、lock、dock、system、loadout、module、
@@ -48,15 +51,17 @@ review修正後のGDExtension境界、追加したClientState回帰test、明示
 `dawn-client-gdext`はwire値をそのままclient-coreへ渡し、Godotのkind stringは
 canonical variantへの明示的な`Option` parseに失敗した場合はrange policyへ到達しない。
 これにより、loadout policyとpostcard protocol decodeに同じenumのstrictなvariant集合を使う。
+#200も実装済みで、render scaleは`WorldSpace::render_scale()`、warp guidanceは
+`dawn_core::MIN_WARP_DISTANCE`を読む`ClientRules`が唯一のauthorityになった。
 
 | 観点 | 評価 | 現在の判断 |
 |---|---|---|
-| ファイル分割 | B+ | 19スクリプトへの分割は維持。`main.gd` 967行と`hud_manager.gd` 859行は監視帯、Rust message adapterはC-16でthin seam / delivery / fixtureへ責務分離済み |
+| ファイル分割 | B+ | 19スクリプトへの分割は維持。`main.gd` 967行、`hud_manager.gd` 859行、`world_presentation.gd` 637行をtrigger付きで監視。Rust message adapterはC-16で責務分離済み |
 | `main.gd`責務 | A− | scene lifecycle、node generation、event dispatch、network send、HUD assemblyに限定 |
 | 型境界 | A | wire decode → `ClientFact` → Rust state commit → typed presentationと、input fact → `ClientAction` → typed request/local effectの単一経路。Dictionary再入力なし |
-| 重複 | A− | shadow state、JSON往復、adapter内domain policy、二段event dispatchは解消。残るauthority重複は#200 |
+| 重複 | A | shadow state、JSON往復、adapter内domain policy、二段event dispatchを解消。#200と#342によりrender/warp ruleと`ModuleKind`も単一authority化 |
 | デッドコード | A | `ClientOutcome` mirrorと旧`ServerEventOutcome`互換classを削除 |
-| テスト可能性 | A | pure Rust `ClientState` transition test + typed outcome fixtureを使うGdUnit4。scene-tree/実WebSocket E2Eのみ手動領域 |
+| テスト可能性 | A | pure Rust transition tests + typed outcome fixtureを使うGdUnit4 220 cases。scene-tree/実WebSocket E2Eのみ手動領域 |
 
 2026-08-19: Station Inventoryのクリック/ドロップ方針と既存`ClientRequest`構築は
 `dawn-client-core::StationInventoryInteraction`へ移し、GDExtensionはtyped row/actionの
@@ -81,7 +86,7 @@ canonical variantへの明示的な`Option` parseに失敗した場合はrange p
 
 navigation map cacheはSector内でwrite-onceに近いpresentation cacheとして許容し、毎frameのRust→Godot再構築は行わない。
 
-## ファイルサイズ（2026-08-20再計測）
+## ファイルサイズ（2026-08-25再計測）
 
 ### GDScript（`client/scripts/`）
 
@@ -91,11 +96,12 @@ navigation map cacheはSector内でwrite-onceに近いpresentation cacheとし�
 | `client/scripts/hud_manager.gd` | 859 | 🟡 C-9。typed refsとpanel build/updateが同一責務。独立変更理由が分かれるまで保留 |
 | `client/scripts/ship_controller.gd` | 448 | 🟢 motion adapterとvisual effectの一つのShip presentation boundary |
 | `client/scripts/connection.gd` | 313 | 🟢 WebSocket接続・reconnect・typed outcome受け渡し・ClientAction transport seam |
-| `client/scripts/world_presentation.gd` | 637 | 🟢 marker・floating-origin・celestial lighting presentation |
+| `client/scripts/world_presentation.gd` | 637 | 🟡 C-20。session visual coordinatorとして有効だが、origin/marker/environment/warp/player effectの独立変更理由を監視 |
 | `client/scripts/market_surface.gd` | 270 | 🟢 Market panel surface |
 | `client/scripts/hud_surface.gd` | 157 | 🟢 typed snapshot paint・HUD reference ownership |
 | `client/scripts/navigation_marker_renderer.gd` | 287 | 🟢 navigation marker・planet surface・EVE-style bracket rendering |
 | `client/scripts/sky_catalog.gd` | 45 | 🟢 fixed bright-star landmark data |
+| `client/scripts/starfield.gd` | 250 | 🟢 deterministic star distribution・spectral flux・MultiMesh packingの一つのrender-data kernel |
 | `client/scripts/camera_controller.gd` | 145 | 🟢 camera orbit input |
 | `client/scripts/ship_picking.gd` | 135 | 🟢 screen-space picking |
 | `client/scripts/world_interaction.gd` | 125 | 🟢 Godot key/hit-test normalizationとClientInteraction adapter |
@@ -128,7 +134,7 @@ navigation map cacheはSector内でwrite-onceに近いpresentation cacheとし�
 |---|---:|---|---|
 | C-1〜C-8 | — | god object、同型ロジック、scene refs、typed rows、各deep module抽出 | 解消済み |
 | C-9 | — | `hud_manager.gd` watch帯 | 再観測・保留 |
-| C-10 | #200 | render scale / warp thresholdのauthority重複 | P2 |
+| C-10 | #200 | render scale / warp thresholdのauthority重複 | 解消済み（2026-07-30、2026-08-25再確認） |
 | C-11 | #201 | `PlayerLoadout`のDictionary再投影 | 解消済み |
 | C-12 | #202 | selection read API二重化 | 解消済み |
 | C-13 | #238 | server outcomeのtyped stateをDictionary経由でRustへ戻す二重変換 | 解消済み |
@@ -138,5 +144,6 @@ navigation map cacheはSector内でwrite-onceに近いpresentation cacheとし�
 | C-17 | — | ClientIntentのpredicate/accessor ladder、GDScript input policy、network send分岐の重複 | 解消済み |
 | C-18 | — | Station Inventory interaction policy / string action tag ladder | 解消済み |
 | C-19 | — | HUD frame Dictionary / GDScript dirty tracking workaround | 解消済み（2026-08-20、`HudReadModel`） |
+| C-20 | — | `WorldPresentation`への独立visual lifecycle集積 | 再観測・trigger付き保留 |
 
 `main.gd`の機械的な`.tscn`分割、raw `InputEvent`のdeep module流入、typed recordのDictionary回帰は行わない。

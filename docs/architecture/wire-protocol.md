@@ -55,6 +55,12 @@ bookkeeping facts have no public-protocol placeholder and are dropped at that
 boundary. The protocol catalog can therefore evolve for client needs without
 making every durable event public.
 
+The exact variants projected to `None` are `ShipFitted`, `WeaponFired`,
+`SectorTransitRequested`, `SectorTransitCompleted`, `SectorTransitAborted`,
+`TackleApplied`, `TackleReleased`, `AnchorRebased`, `PackagedShipBuilt`,
+`ShipDisassembled`, `ClientAdmissionIdentityReserved`, and
+`ClientAdmissionCommitted`.
+
 The Sector-side `AoiSink` accepts the narrower `AoiMessage` delivery enum, not
 the full `ServerMessage` envelope. It contains only AOI enter/leave, public
 `ServerFact`, motion correction, and position snap messages; the runtime

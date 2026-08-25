@@ -18,7 +18,7 @@ related  : ./README.md, ./deferred.md, ../roadmap.md, ../roadmap-history.md
 | 優先度 | ID | タスク | 状態 |
 |---|---|---|---|
 | NOW | 9E-1 | 経済ループの人間プレイテストと結果記録 | 手順済み・実施待ち |
-| NEXT | 10-3 | Client-Side PredictionをRust側へ実装 | `ShipMotion`のcommand/frame境界、server-space `f64`座標、single position writerを実装済み。Godot playtestは10-5へ |
+| NEXT | 10-5 | GodotエディタでPrediction / dock / warpを手動確認 | 自動テスト済み・手動確認待ち |
 
 ### 3.2 Phase 9 の残作業
 
@@ -33,7 +33,6 @@ related  : ./README.md, ./deferred.md, ../roadmap.md, ../roadmap-history.md
 
 | ID | タスク | 状態 |
 |---|---|---|
-| 10-3 | Client-Side Predictionとreconciliation | `ShipMotion`のcommand/frame境界とreconciliationを実装済み。Godot playtestは10-5へ |
 | 10-5 | Godot editorでのPrediction / dock / warpプレイテスト | 自動テスト済み・手動確認待ち |
 
 ### 3.4 Phase 11 のTODO
@@ -42,12 +41,8 @@ related  : ./README.md, ./deferred.md, ../roadmap.md, ../roadmap-history.md
 |---|---|---|
 | 1 | 船種ごとのglTF 3Dモデル | TODO・調達方針が必要 |
 | 2 | 発射・被弾・爆発のパーティクル | TODO |
-| 3 | ワープ突入・離脱エフェクト | TODO・優先度高 |
 | 4 | モジュール発動フィードバックの拡充 | TODO |
-| 6 | Bloom・トーンマッピング等の調整 | TODO |
-| 7 | 視覚エフェクトのフレームレート回帰確認 | 1〜6後 |
-| 8 | 星野をスプライトgeometryへ移行 | [ADR-0054](../../adr/ADR-0054-starfield-sprite-geometry.md) 承認待ち |
-| 9 | ネビュラ背景を起動時ベイクへ | [ADR-0055](../../adr/ADR-0055-nebula-background-representation.md) accepted・実装済み（sky パス 42.4ms→19.0ms） |
+| 7 | 視覚エフェクトのフレームレート回帰確認 | 1・2・4完了後 |
 
 ## 9. 継続的に開発するシステム
 

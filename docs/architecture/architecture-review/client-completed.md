@@ -4,7 +4,7 @@ audience : AI Agent / Human Developer
 update   : /architecture-review が issue を解消済みへ移動するたびに追記
 related  : docs/architecture/architecture-review/client.md（構造評価）,
            docs/architecture/architecture-review/client-pending.md（未完項目）
-date     : 2026-08-10
+date     : 2026-08-25
 ---
 
 # Architecture Review — Dawn Client（完了済みログ）
@@ -16,6 +16,15 @@ date     : 2026-08-10
 ---
 
 ## 解消済み issue の詳細
+
+### 2026-07-30（2026-08-25再確認） — C-10 / #200 render scale・warp threshold authority
+
+Godot側の`WORLD_SCALE`と`MIN_WARP_DISTANCE`の手動同期を撤去した。
+render scaleは`dawn-client-core::WorldSpace::render_scale()`をGDExtension経由で問い合わせ、
+`WorldPresentation`とnavigation geometryが同じ値を使う。warp guidanceは
+`dawn_core::MIN_WARP_DISTANCE`を読む`dawn-client-core::ClientRules`へ統一した。
+authorityを変更するとclient-visible behaviorも追従するRust/GdUnit regression testsがあり、
+2026-08-25の再計測ではGdUnit test functionは21 files・220 casesだった。
 
 ### 2026-08-24 — #339 canonical ModuleKind boundary
 
