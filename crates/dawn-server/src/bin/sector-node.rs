@@ -283,10 +283,8 @@ async fn main() -> anyhow::Result<()> {
         // normally on the next tick either way, and the next scheduled
         // checkpoint will retry.
         let public_event_next_index = runtime.public_event_next_index();
-        match runtime.with_state_mut(|node, journal| {
-            checkpoints.maybe_checkpoint(node, journal, public_event_next_index)
-        }) {
-            Ok(Ok(Some(snapshot))) => {
+        match runtime.checkpoint(&mut checkpoints, public_event_next_index) {
+            Ok(Some(snapshot)) => {
                 println!(
                     "[Node] checkpoint at tick {} (covered_recovery_index={})",
                     snapshot.tick.value(),
@@ -300,12 +298,9 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
             }
-            Ok(Ok(None)) => {}
-            Ok(Err(error)) => {
-                eprintln!("[Node] checkpoint failed, will retry next interval: {error}")
-            }
+            Ok(None) => {}
             Err(error) => {
-                return Err(anyhow::anyhow!("checkpoint mutation unavailable: {error}"));
+                eprintln!("[Node] checkpoint failed, will retry next interval: {error}")
             }
         }
 

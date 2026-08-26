@@ -5,18 +5,22 @@ use super::{
     build_serve_node, client_request_rejection, load_serve_dependencies, market::MarketRuntime,
     AoiDelivery, DuelMetrics, AOI_CELL_SIZE, P4_TICK_MS, TIDI_BUDGET,
 };
-use crate::runtime_frame::{RuntimeClientAdmissionError, RuntimeFrameHost, RuntimeFramePolicy};
+use crate::runtime_frame::{
+    RuntimeClientAdmissionError, RuntimeClientAdmissionHost, RuntimeFrameHost, RuntimeFramePolicy,
+};
 use crate::ws_server;
 use dawn_core::{DomainEvent, NodeId, Position, SectorBounds, SectorId, ShipId};
 use dawn_protocol::ServerMessage;
 use dawn_sector::client_admission::{
     ClientAdmissionAttempt, ClientAdmissionIntent, ClientAdmissionRefusal, CommittedClientAdmission,
 };
-use dawn_sector::client_admission_resolution::{
-    resolve_client_admission, ClientAdmissionResolution,
-};
+#[cfg(test)]
+use dawn_sector::client_admission_resolution::resolve_client_admission;
+use dawn_sector::client_admission_resolution::ClientAdmissionResolution;
 use dawn_sector::dilation;
-use dawn_sector::node::{RuntimeCommandDispatch, SimulationNode};
+#[cfg(test)]
+use dawn_sector::node::SimulationNode;
+use dawn_sector::node::{JumpOutcome, RuntimeCommandDispatch};
 use dawn_sector::transit::LocalRuntimeConsensus;
 use dawn_storage::InMemoryJournal;
 use tokio::sync::mpsc;
@@ -214,50 +218,17 @@ pub(crate) async fn run_phase4_server(
             .expect("in-memory single-sector runtime must remain writable");
         let mut all_new_events = Vec::new();
 
-        let mut lock_commands: Vec<dawn_core::LockOnCommand> = Vec::new();
-        let mut pending_loadout_refreshes = Vec::new();
         for sess in sessions.iter_mut() {
             while let Some(market_command) = sess.try_recv_market_command() {
                 let snapshot = market.handle_single(sess.player_id, market_command, host.node());
                 sess.send_message(&ServerMessage::MarketSnapshot(snapshot));
             }
         }
-        for dispatch in host
-            .collect_runtime_commands(
-                &mut sessions,
-                &mut lock_commands,
-                |session| session.player_id,
-                ws_server::PlayerSession::try_recv_request,
-            )
-            .expect("in-memory single-sector runtime must remain writable")
-        {
-            match dispatch {
-                RuntimeCommandDispatch::Jump {
-                    ship_id, command, ..
-                } => {
-                    eprintln!(
-                        "[Server] JumpCommand ignored (ship #{} gate #{}): \
-                         --serve runs a single-sector node without Raft",
-                        ship_id.raw(),
-                        command.gate_id.0
-                    );
-                }
-                RuntimeCommandDispatch::RefreshPlayerLoadout {
-                    session_index,
-                    player_id,
-                } => pending_loadout_refreshes.push((session_index, player_id)),
-                RuntimeCommandDispatch::Rejected {
-                    session_index,
-                    error,
-                } => {
-                    if let Some(session) = sessions.get_mut(session_index) {
-                        session.send_message(&ServerMessage::ClientRequestRejected(
-                            client_request_rejection(error),
-                        ));
-                    }
-                }
-            }
-        }
+        let authenticated_requests = dawn_sector::node::collect_authenticated_requests(
+            &mut sessions,
+            |session| session.player_id,
+            ws_server::PlayerSession::try_recv_request,
+        );
 
         // Drain still-pending Market settlements against the live node once
         // per tick, right before the frame that will carry them (issue
@@ -273,16 +244,60 @@ pub(crate) async fn run_phase4_server(
 
         let output = host
             .run_frame(dawn_sector::transition::FrameInput {
-                lock_commands: &lock_commands,
+                lock_commands: &[],
+                authenticated_requests: &authenticated_requests,
                 market_settlements: &market_settlements,
                 acknowledged_settlements: &decided_settlements,
             })
             .expect("in-memory single-sector runtime must accept durable Tick");
         let tick_result = output.tick_result;
-        for (session_index, player_id) in pending_loadout_refreshes {
-            if let Some(loadout) = host.node().build_player_loadout_json_for_player(player_id) {
-                if let Some(session) = sessions.get_mut(session_index) {
-                    session.send_message(&ServerMessage::PlayerLoadout(loadout));
+        for dispatch in &tick_result.runtime_command_dispatches {
+            match *dispatch {
+                RuntimeCommandDispatch::Jump {
+                    ship_id,
+                    command,
+                    outcome,
+                    ..
+                } => match outcome {
+                    JumpOutcome::NeedsTransitProposal { .. } => eprintln!(
+                        "[Server] JumpCommand cannot hand off ship #{} gate #{}: \
+                         --serve runs a single-sector node without Raft",
+                        ship_id.raw(),
+                        command.gate_id.0
+                    ),
+                    JumpOutcome::WarpFallbackStarted => println!(
+                        "[Server] Jump: ship #{} out of range - auto-warp to gate #{} started",
+                        ship_id.raw(),
+                        command.gate_id.0
+                    ),
+                    JumpOutcome::ApproachFallbackStarted => println!(
+                        "[Server] Jump: ship #{} too close to warp - approaching gate #{} instead",
+                        ship_id.raw(),
+                        command.gate_id.0
+                    ),
+                    JumpOutcome::Rejected => {}
+                },
+                RuntimeCommandDispatch::RefreshPlayerLoadout {
+                    session_index,
+                    player_id,
+                } => {
+                    if let Some(loadout) =
+                        host.node().build_player_loadout_json_for_player(player_id)
+                    {
+                        if let Some(session) = sessions.get_mut(session_index) {
+                            session.send_message(&ServerMessage::PlayerLoadout(loadout));
+                        }
+                    }
+                }
+                RuntimeCommandDispatch::Rejected {
+                    session_index,
+                    error,
+                } => {
+                    if let Some(session) = sessions.get_mut(session_index) {
+                        session.send_message(&ServerMessage::ClientRequestRejected(
+                            client_request_rejection(error),
+                        ));
+                    }
                 }
             }
         }
@@ -384,13 +399,13 @@ fn log_single_refusal(addr: std::net::SocketAddr, refusal: ClientAdmissionRefusa
     }
 }
 
-fn drain_single_admission_completions(
-    node: &mut SimulationNode,
+fn drain_single_admission_completions<H: RuntimeClientAdmissionHost>(
+    host: &mut H,
     completion_rx: &mut mpsc::UnboundedReceiver<HandshakeCompletion>,
 ) -> Vec<(ws_server::PlayerSession, CommittedClientAdmission)> {
     let mut ready = Vec::new();
     while let Ok((attempt, result)) = completion_rx.try_recv() {
-        if let Some(completed) = finish_single_admission(node, attempt, result) {
+        if let Some(completed) = finish_single_admission(host, attempt, result) {
             ready.push(completed);
         }
     }
@@ -404,24 +419,27 @@ impl RuntimeFrameHost<InMemoryJournal, LocalRuntimeConsensus> {
         &mut self,
         completion_rx: &mut mpsc::UnboundedReceiver<HandshakeCompletion>,
     ) -> Vec<(ws_server::PlayerSession, CommittedClientAdmission)> {
-        self.with_node_mut(|node| drain_single_admission_completions(node, completion_rx))
-            .expect("in-memory single-sector runtime must remain writable")
+        drain_single_admission_completions(self, completion_rx)
     }
 }
 
-fn finish_single_admission<T>(
-    node: &mut SimulationNode,
+fn finish_single_admission<T, H: RuntimeClientAdmissionHost>(
+    host: &mut H,
     attempt: ClientAdmissionAttempt,
     result: Result<T, String>,
 ) -> Option<(T, CommittedClientAdmission)> {
-    match resolve_client_admission(node, attempt, result) {
-        ClientAdmissionResolution::Committed { value, admission } => Some((value, admission)),
-        ClientAdmissionResolution::Aborted { error } => {
+    match host.resolve_client_admission(attempt, result) {
+        Ok(ClientAdmissionResolution::Committed { value, admission }) => Some((value, admission)),
+        Ok(ClientAdmissionResolution::Aborted { error }) => {
             eprintln!("[Server] handshake failed: {error}");
             None
         }
-        ClientAdmissionResolution::CommitRejected { error } => {
+        Ok(ClientAdmissionResolution::CommitRejected { error }) => {
             eprintln!("[Server] {error}");
+            None
+        }
+        Err(error) => {
+            eprintln!("[Server] admission host unavailable: {error}");
             None
         }
     }
@@ -474,7 +492,7 @@ mod tests {
             .expect("fresh attempt");
 
         assert_eq!(
-            finish_single_admission::<()>(
+            finish_single_admission::<(), _>(
                 &mut node,
                 attempt,
                 Err("client disconnected".to_string()),
@@ -532,7 +550,7 @@ mod tests {
             .expect("resume attempt");
 
         assert_eq!(
-            finish_single_admission::<()>(
+            finish_single_admission::<(), _>(
                 &mut node,
                 attempt,
                 Err("client disconnected".to_string()),

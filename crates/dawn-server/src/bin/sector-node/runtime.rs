@@ -7,7 +7,7 @@
 
 use super::client_admission::ClientAdmission;
 use crate::runtime_frame::{OwnedRaftRuntimeConsensus, RuntimeFrameHost, RuntimeFrameHostError};
-use dawn_core::{DomainEvent, PlayerId, SectorId, ShipId};
+use dawn_core::{DomainEvent, SectorId, ShipId};
 use dawn_distributed::{OutboundLogPublisher, PeerReplicationTransport, PublicEventTail};
 use dawn_protocol::ServerMessage;
 use dawn_sector::aoi::{AoiMessage, AoiSink, Observer};
@@ -20,14 +20,6 @@ use dawn_storage::FileJournal;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 
-type PendingPlayerJump = (usize, ShipId, dawn_core::JumpCommand);
-type PendingPlayerLoadoutRefresh = (usize, PlayerId);
-type CollectedPlayerCommands = (
-    Vec<dawn_core::LockOnCommand>,
-    Vec<PendingPlayerJump>,
-    Vec<PendingPlayerLoadoutRefresh>,
-);
-
 impl RuntimeFrameHost<FileJournal, OwnedRaftRuntimeConsensus> {
     /// Advance production client-handshake admission against the owned node.
     fn advance_handshakes(
@@ -36,7 +28,11 @@ impl RuntimeFrameHost<FileJournal, OwnedRaftRuntimeConsensus> {
         sector_id: SectorId,
         aoi_cell_size: f64,
     ) -> Result<(), RuntimeFrameHostError> {
-        self.with_node_mut(|node| admission.advance_handshakes(node, sector_id, aoi_cell_size))
+        if self.phase() == crate::runtime_frame::RuntimeFramePhase::Fenced {
+            return Err(RuntimeFrameHostError::Fenced);
+        }
+        admission.advance_handshakes(self, sector_id, aoi_cell_size);
+        Ok(())
     }
 }
 
@@ -101,13 +97,6 @@ impl SectorNodeRuntime {
             .advance_handshakes(admission, sector_id, aoi_cell_size)
     }
 
-    pub(crate) fn with_state_mut<R>(
-        &mut self,
-        operation: impl FnOnce(&mut SimulationNode, &mut FileJournal) -> R,
-    ) -> Result<R, RuntimeFrameHostError> {
-        self.host.with_state_mut(operation)
-    }
-
     pub(crate) fn promote_ready_session(&mut self, sess: ws_server::PlayerSession) {
         println!(
             "[Node] {:?} joined with ship #{}",
@@ -130,16 +119,23 @@ impl SectorNodeRuntime {
     }
 
     pub(crate) fn run_frame(&mut self) -> anyhow::Result<()> {
-        let (lock_commands, pending_jumps, pending_loadout_refreshes) =
-            self.collect_player_commands()?;
-        self.propose_player_jumps(pending_jumps)?;
+        let authenticated_requests = dawn_sector::node::collect_authenticated_requests(
+            &mut self.sessions,
+            |session| session.player_id,
+            ws_server::PlayerSession::try_recv_request,
+        );
 
         let outbound_replication = &mut self.outbound_replication;
         let public_event_tail = &mut self.public_event_tail;
         let output = self
             .host
             .run_frame_with_output(
-                dawn_sector::transition::FrameInput::lock_only(&lock_commands),
+                dawn_sector::transition::FrameInput {
+                    lock_commands: &[],
+                    authenticated_requests: &authenticated_requests,
+                    market_settlements: &[],
+                    acknowledged_settlements: &[],
+                },
                 |node, _, events| {
                     public_event_tail
                         .append_committed(events)
@@ -149,17 +145,7 @@ impl SectorNodeRuntime {
             )
             .map_err(|error| anyhow::anyhow!("authoritative recovery tick failed: {error}"))?;
 
-        for (session_index, player_id) in pending_loadout_refreshes {
-            if let Some(loadout) = self
-                .host
-                .node()
-                .build_player_loadout_json_for_player(player_id)
-            {
-                if let Some(session) = self.sessions.get_mut(session_index) {
-                    session.send_message(&ServerMessage::PlayerLoadout(loadout));
-                }
-            }
-        }
+        self.handle_command_dispatches(&output.tick_result.runtime_command_dispatches)?;
         self.log_auto_jumps(&output.pending_auto_jumps);
         let jumped_ships = self.jumped_ships(&output.events);
         self.deliver_frames(&output.events, &output.completed_warps, &jumped_ships);
@@ -174,29 +160,71 @@ impl SectorNodeRuntime {
         self.public_event_tail.next_index()
     }
 
-    fn collect_player_commands(
+    pub(crate) fn checkpoint(
         &mut self,
-    ) -> Result<CollectedPlayerCommands, RuntimeFrameHostError> {
-        let mut lock_commands = Vec::new();
-        let mut pending_jumps = Vec::new();
-        let mut pending_loadout_refreshes = Vec::new();
+        scheduler: &mut dawn_sector::persistence::CheckpointScheduler,
+        public_event_next_index: dawn_storage::PublicEventIndex,
+    ) -> std::io::Result<Option<dawn_sector::persistence::StateSnapshot>> {
+        self.host.checkpoint(scheduler, public_event_next_index)
+    }
 
-        for dispatch in self.host.collect_runtime_commands(
-            &mut self.sessions,
-            &mut lock_commands,
-            |session| session.player_id,
-            ws_server::PlayerSession::try_recv_request,
-        )? {
-            match dispatch {
+    fn handle_command_dispatches(
+        &mut self,
+        dispatches: &[RuntimeCommandDispatch],
+    ) -> anyhow::Result<()> {
+        for dispatch in dispatches {
+            match *dispatch {
                 RuntimeCommandDispatch::Jump {
                     session_index,
                     ship_id,
                     command,
-                } => pending_jumps.push((session_index, ship_id, command)),
+                    outcome,
+                } => {
+                    let Some(session) = self.sessions.get(session_index) else {
+                        continue;
+                    };
+                    if ship_id != session.ship_id {
+                        continue;
+                    }
+                    match outcome {
+                        JumpOutcome::NeedsTransitProposal { to } => {
+                            self.host
+                                .propose_transit_request(ship_id, to, Some(command.gate_id))
+                                .map_err(|error| anyhow::anyhow!("jump proposal failed: {error}"))?;
+                            println!(
+                                "[Node] Jump proposed: ship #{} gate #{} (-> S{})",
+                                ship_id.raw(),
+                                command.gate_id.0,
+                                to.0
+                            );
+                        }
+                        JumpOutcome::WarpFallbackStarted => println!(
+                            "[Node] Jump: ship #{} out of range - auto-warp to gate #{} started",
+                            ship_id.raw(),
+                            command.gate_id.0
+                        ),
+                        JumpOutcome::ApproachFallbackStarted => println!(
+                            "[Node] Jump: ship #{} too close to warp - approaching gate #{} instead",
+                            ship_id.raw(),
+                            command.gate_id.0
+                        ),
+                        JumpOutcome::Rejected => {}
+                    }
+                }
                 RuntimeCommandDispatch::RefreshPlayerLoadout {
                     session_index,
                     player_id,
-                } => pending_loadout_refreshes.push((session_index, player_id)),
+                } => {
+                    if let Some(loadout) = self
+                        .host
+                        .node()
+                        .build_player_loadout_json_for_player(player_id)
+                    {
+                        if let Some(session) = self.sessions.get_mut(session_index) {
+                            session.send_message(&ServerMessage::PlayerLoadout(loadout));
+                        }
+                    }
+                }
                 RuntimeCommandDispatch::Rejected {
                     session_index,
                     error,
@@ -207,48 +235,6 @@ impl SectorNodeRuntime {
                         ));
                     }
                 }
-            }
-        }
-
-        Ok((lock_commands, pending_jumps, pending_loadout_refreshes))
-    }
-
-    fn propose_player_jumps(
-        &mut self,
-        pending_jumps: Vec<(usize, ShipId, dawn_core::JumpCommand)>,
-    ) -> Result<(), RuntimeFrameHostError> {
-        for (idx, ship_id, j) in pending_jumps {
-            let Some(sess) = self.sessions.get(idx) else {
-                continue;
-            };
-            if ship_id != sess.ship_id {
-                continue;
-            }
-            let outcome = self.host.propose_jump(ship_id, j.gate_id)?;
-            match outcome {
-                JumpOutcome::NeedsTransitProposal { to } => {
-                    println!(
-                        "[Node] Jump proposed: ship #{} gate #{} (-> S{})",
-                        ship_id.raw(),
-                        j.gate_id.0,
-                        to.0
-                    );
-                }
-                JumpOutcome::WarpFallbackStarted => {
-                    println!(
-                        "[Node] Jump: ship #{} out of range - auto-warp to gate #{} started",
-                        ship_id.raw(),
-                        j.gate_id.0
-                    );
-                }
-                JumpOutcome::ApproachFallbackStarted => {
-                    println!(
-                        "[Node] Jump: ship #{} too close to warp - approaching gate #{} instead",
-                        ship_id.raw(),
-                        j.gate_id.0
-                    );
-                }
-                JumpOutcome::Rejected => {}
             }
         }
         Ok(())

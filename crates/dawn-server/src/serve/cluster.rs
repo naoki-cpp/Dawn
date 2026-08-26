@@ -6,8 +6,8 @@ use super::{
     runtime, AoiDelivery, AOI_CELL_SIZE, P4_TICK_MS,
 };
 use crate::runtime_frame::{
-    OwnedRaftRuntimeConsensus, RuntimeClientAdmissionError, RuntimeFrameHost, RuntimeFramePolicy,
-    RuntimeNodeMutation, RuntimeNodeView,
+    OwnedRaftRuntimeConsensus, RuntimeClientAdmissionError, RuntimeClientAdmissionHost,
+    RuntimeFrameHost, RuntimeFramePolicy, RuntimeNodeView,
 };
 use crate::{cluster, ws_server};
 use dawn_core::{DomainEvent, NodeId, PlayerId, SectorBounds, SectorId, ShipId};
@@ -15,10 +15,12 @@ use dawn_protocol::ServerMessage;
 use dawn_sector::client_admission::{
     ClientAdmissionAttempt, ClientAdmissionIntent, ClientAdmissionRefusal, CommittedClientAdmission,
 };
-use dawn_sector::client_admission_resolution::{
-    resolve_client_admission, ClientAdmissionResolution,
-};
-use dawn_sector::node::{JumpOutcome, RuntimeCommandDispatch, SimulationNode};
+#[cfg(test)]
+use dawn_sector::client_admission_resolution::resolve_client_admission;
+use dawn_sector::client_admission_resolution::ClientAdmissionResolution;
+#[cfg(test)]
+use dawn_sector::node::SimulationNode;
+use dawn_sector::node::{JumpOutcome, RuntimeCommandDispatch};
 use dawn_storage::InMemoryJournal;
 use std::collections::HashMap;
 use tokio::sync::mpsc;
@@ -208,9 +210,6 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
             });
         }
 
-        let mut lock_commands: Vec<Vec<dawn_core::LockOnCommand>> = vec![Vec::new(); SECTORS];
-        let mut pending_loadout_refreshes = Vec::new();
-
         for sess in sessions.iter_mut() {
             let sector = *player_sector.get(&sess.player_id).unwrap_or(&0);
             while let Some(market_command) = sess.try_recv_market_command() {
@@ -218,74 +217,17 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                     market.handle_cluster(sess.player_id, market_command, sector, &hosts);
                 sess.send_message(&ServerMessage::MarketSnapshot(snapshot));
             }
-            let dispatches = hosts[sector]
-                .collect_runtime_commands(
-                    std::slice::from_mut(sess),
-                    &mut lock_commands[sector],
-                    |session| session.player_id,
-                    ws_server::PlayerSession::try_recv_request,
-                )
-                .expect("in-memory clustered runtime must remain writable");
-            for dispatch in dispatches {
-                match dispatch {
-                    RuntimeCommandDispatch::Jump {
-                        ship_id, command, ..
-                    } => {
-                        if ship_id != sess.ship_id {
-                            continue;
-                        }
-                        match hosts[sector]
-                            .propose_jump(ship_id, command.gate_id)
-                            .expect("in-memory clustered runtime must remain writable")
-                        {
-                            JumpOutcome::NeedsTransitProposal { to } => {
-                                println!(
-                                    "  [Server] Jump proposed: ship #{} gate #{} (S{} → S{})",
-                                    ship_id.raw(),
-                                    command.gate_id.0,
-                                    sector,
-                                    to.0
-                                );
-                            }
-                            JumpOutcome::WarpFallbackStarted => {
-                                println!(
-                            "  [Server] Jump: ship #{} out of range — auto-warp to gate #{} started",
-                            ship_id.raw(),
-                            command.gate_id.0
-                        );
-                            }
-                            JumpOutcome::ApproachFallbackStarted => {
-                                // Too close to warp (< MIN_WARP_DISTANCE) but still outside
-                                // activation_radius -- without this, a ship in that band
-                                // could never jump: in_range fails, and apply_warp_command
-                                // also fails its own can_propose_warp distance check, so
-                                // the command was silently dropped every tick the ship sat
-                                // there. Approach closes the rest of the gap sublight.
-                                println!(
-                            "  [Server] Jump: ship #{} too close to warp — approaching gate #{} instead",
-                            ship_id.raw(),
-                            command.gate_id.0
-                        );
-                            }
-                            JumpOutcome::Rejected => {
-                                eprintln!(
-                                    "[Server] JumpCommand rejected (ship #{} gate #{})",
-                                    ship_id.raw(),
-                                    command.gate_id.0
-                                );
-                            }
-                        }
-                    }
-                    RuntimeCommandDispatch::RefreshPlayerLoadout { player_id, .. } => {
-                        pending_loadout_refreshes.push((player_id, sector));
-                    }
-                    RuntimeCommandDispatch::Rejected { error, .. } => {
-                        sess.send_message(&ServerMessage::ClientRequestRejected(
-                            client_request_rejection(error),
-                        ));
-                    }
-                }
-            }
+        }
+
+        let requests = dawn_sector::node::collect_authenticated_requests(
+            &mut sessions,
+            |session| session.player_id,
+            ws_server::PlayerSession::try_recv_request,
+        );
+        let mut requests_by_sector: Vec<Vec<_>> = (0..SECTORS).map(|_| Vec::new()).collect();
+        for request in requests {
+            let sector = *player_sector.get(&request.player_id).unwrap_or(&0);
+            requests_by_sector[sector].push(request);
         }
 
         let tick_results = runtime::run_cluster_runtime_tick(
@@ -298,21 +240,16 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                 market: &mut market,
                 decided_settlements: &mut decided_settlements,
             },
-            &lock_commands,
+            &requests_by_sector,
         );
 
-        for (player_id, sector) in pending_loadout_refreshes {
-            if let Some(loadout) = hosts[sector]
-                .node()
-                .build_player_loadout_json_for_player(player_id)
-            {
-                if let Some(session) = sessions
-                    .iter_mut()
-                    .find(|session| session.player_id == player_id)
-                {
-                    session.send_message(&ServerMessage::PlayerLoadout(loadout));
-                }
-            }
+        for (sector, output) in tick_results.iter().enumerate() {
+            handle_cluster_command_dispatches(
+                &mut hosts[sector],
+                &mut sessions,
+                sector,
+                &output.tick_result.runtime_command_dispatches,
+            );
         }
 
         for sess in &sessions {
@@ -360,6 +297,79 @@ fn log_cluster_refusal(addr: std::net::SocketAddr, refusal: ClientAdmissionRefus
     }
 }
 
+fn handle_cluster_command_dispatches(
+    host: &mut RuntimeFrameHost<InMemoryJournal, OwnedRaftRuntimeConsensus>,
+    sessions: &mut [ws_server::PlayerSession],
+    sector: usize,
+    dispatches: &[RuntimeCommandDispatch],
+) {
+    for dispatch in dispatches {
+        match *dispatch {
+            RuntimeCommandDispatch::Jump {
+                session_index,
+                ship_id,
+                command,
+                outcome,
+            } => {
+                let Some(session) = sessions.get(session_index) else {
+                    continue;
+                };
+                if session.ship_id != ship_id {
+                    continue;
+                }
+                match outcome {
+                    JumpOutcome::NeedsTransitProposal { to } => {
+                        host.propose_transit_request(ship_id, to, Some(command.gate_id))
+                            .expect("in-memory clustered runtime must remain writable");
+                        println!(
+                            "  [Server] Jump proposed: ship #{} gate #{} (S{} -> S{})",
+                            ship_id.raw(),
+                            command.gate_id.0,
+                            sector,
+                            to.0
+                        );
+                    }
+                    JumpOutcome::WarpFallbackStarted => println!(
+                        "  [Server] Jump: ship #{} out of range - auto-warp to gate #{} started",
+                        ship_id.raw(),
+                        command.gate_id.0
+                    ),
+                    JumpOutcome::ApproachFallbackStarted => println!(
+                        "  [Server] Jump: ship #{} too close to warp - approaching gate #{} instead",
+                        ship_id.raw(),
+                        command.gate_id.0
+                    ),
+                    JumpOutcome::Rejected => eprintln!(
+                        "[Server] JumpCommand rejected (ship #{} gate #{})",
+                        ship_id.raw(),
+                        command.gate_id.0
+                    ),
+                }
+            }
+            RuntimeCommandDispatch::RefreshPlayerLoadout {
+                session_index,
+                player_id,
+            } => {
+                if let Some(loadout) = host.node().build_player_loadout_json_for_player(player_id) {
+                    if let Some(session) = sessions.get_mut(session_index) {
+                        session.send_message(&ServerMessage::PlayerLoadout(loadout));
+                    }
+                }
+            }
+            RuntimeCommandDispatch::Rejected {
+                session_index,
+                error,
+            } => {
+                if let Some(session) = sessions.get_mut(session_index) {
+                    session.send_message(&ServerMessage::ClientRequestRejected(
+                        client_request_rejection(error),
+                    ));
+                }
+            }
+        }
+    }
+}
+
 fn find_resume_sector<N: RuntimeNodeView>(
     nodes: &[N],
     resume_ticket: dawn_core::ResumeTicket,
@@ -377,37 +387,38 @@ fn find_resume_sector<N: RuntimeNodeView>(
     }
 }
 
-fn drain_cluster_admission_completions<N: RuntimeNodeMutation>(
-    nodes: &mut [N],
+fn drain_cluster_admission_completions<H: RuntimeClientAdmissionHost>(
+    nodes: &mut [H],
     player_sector: &mut HashMap<PlayerId, usize>,
     ship_player: &mut HashMap<ShipId, PlayerId>,
     completion_rx: &mut mpsc::UnboundedReceiver<HandshakeCompletion>,
 ) -> Vec<(usize, ws_server::PlayerSession, CommittedClientAdmission)> {
     let mut ready = Vec::new();
     while let Ok((sector, attempt, result)) = completion_rx.try_recv() {
-        match nodes[sector].with_runtime_node_mut(|node| {
-            finish_cluster_admission(node, sector, player_sector, ship_player, attempt, result)
-        }) {
-            Ok(Some((session, committed))) => ready.push((sector, session, committed)),
-            Ok(None) => {}
-            Err(error) => {
-                eprintln!("[Server] Sector {sector} discarded a completed handshake: {error}")
-            }
+        if let Some((session, committed)) = finish_cluster_admission(
+            &mut nodes[sector],
+            sector,
+            player_sector,
+            ship_player,
+            attempt,
+            result,
+        ) {
+            ready.push((sector, session, committed));
         }
     }
     ready
 }
 
-fn finish_cluster_admission<T>(
-    node: &mut SimulationNode,
+fn finish_cluster_admission<T, H: RuntimeClientAdmissionHost>(
+    host: &mut H,
     sector: usize,
     player_sector: &mut HashMap<PlayerId, usize>,
     ship_player: &mut HashMap<ShipId, PlayerId>,
     attempt: ClientAdmissionAttempt,
     result: Result<T, String>,
 ) -> Option<(T, CommittedClientAdmission)> {
-    match resolve_client_admission(node, attempt, result) {
-        ClientAdmissionResolution::Committed { value, admission } => {
+    match host.resolve_client_admission(attempt, result) {
+        Ok(ClientAdmissionResolution::Committed { value, admission }) => {
             player_sector.retain(|player_id, _| *player_id != admission.player_id);
             ship_player.retain(|ship_id, player_id| {
                 *ship_id != admission.ship_id && *player_id != admission.player_id
@@ -416,12 +427,16 @@ fn finish_cluster_admission<T>(
             ship_player.insert(admission.ship_id, admission.player_id);
             Some((value, admission))
         }
-        ClientAdmissionResolution::Aborted { error } => {
+        Ok(ClientAdmissionResolution::Aborted { error }) => {
             eprintln!("[Server] handshake failed: {error}");
             None
         }
-        ClientAdmissionResolution::CommitRejected { error } => {
+        Ok(ClientAdmissionResolution::CommitRejected { error }) => {
             eprintln!("[Server] {error}");
+            None
+        }
+        Err(error) => {
+            eprintln!("[Server] admission host unavailable: {error}");
             None
         }
     }
@@ -496,7 +511,7 @@ mod tests {
         let mut ship_player = HashMap::new();
 
         assert_eq!(
-            finish_cluster_admission::<()>(
+            finish_cluster_admission::<(), _>(
                 &mut node,
                 0,
                 &mut player_sector,
@@ -652,7 +667,7 @@ mod tests {
         let mut ship_player = HashMap::new();
 
         assert_eq!(
-            finish_cluster_admission::<()>(
+            finish_cluster_admission::<(), _>(
                 &mut node,
                 0,
                 &mut player_sector,

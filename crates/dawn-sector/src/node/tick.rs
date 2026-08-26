@@ -253,6 +253,41 @@ impl SimulationNode {
         // committed apply.
         self.retire_acknowledged_settlements(input.acknowledged_settlements);
 
+        let mut lock_commands = input.lock_commands.to_vec();
+        let mut runtime_command_dispatches = Vec::new();
+        for authenticated in input.authenticated_requests {
+            match self.apply_client_request(
+                authenticated.player_id,
+                authenticated.request.clone(),
+                &mut lock_commands,
+            ) {
+                Ok(Some(crate::node::ClientCommandFollowup::Jump { ship_id, command })) => {
+                    let outcome = self.apply_jump_with_fallback(ship_id, command.gate_id);
+                    runtime_command_dispatches.push(crate::node::RuntimeCommandDispatch::Jump {
+                        session_index: authenticated.session_index,
+                        ship_id,
+                        command,
+                        outcome,
+                    });
+                }
+                Ok(Some(crate::node::ClientCommandFollowup::RefreshPlayerLoadout {
+                    player_id,
+                })) => runtime_command_dispatches.push(
+                    crate::node::RuntimeCommandDispatch::RefreshPlayerLoadout {
+                        session_index: authenticated.session_index,
+                        player_id,
+                    },
+                ),
+                Ok(None) => {}
+                Err(error) => {
+                    runtime_command_dispatches.push(crate::node::RuntimeCommandDispatch::Rejected {
+                        session_index: authenticated.session_index,
+                        error,
+                    })
+                }
+            }
+        }
+
         let settlement_outcomes: Vec<crate::transition::MarketSettlementOutcome> = input
             .market_settlements
             .iter()
@@ -262,15 +297,15 @@ impl SimulationNode {
             })
             .collect();
 
-        let result = self.tick_with_lock_commands_mode(input.lock_commands, false, false);
+        let mut result = self.tick_with_lock_commands_mode(&lock_commands, false, false);
         let deferred_events = self
             .frame_outputs
             .pending_events
             .split_off(before_pending_event_count);
-        let mut result = result;
         result.events.extend(deferred_events);
         result.events_emitted = result.events.len();
         result.market_settlement_outcomes = settlement_outcomes;
+        result.runtime_command_dispatches = runtime_command_dispatches;
         let after_states = self.capture_tick_write_set();
         // Keep the complete post-tick ship image. Commands are admitted before
         // this preparation starts, so a diff against `before_states` would
@@ -956,6 +991,7 @@ impl SimulationNode {
             events: all_events,
             cap_depletions: cap.refitted.clone(),
             market_settlement_outcomes: Vec::new(),
+            runtime_command_dispatches: Vec::new(),
         }
     }
 }
@@ -1037,6 +1073,7 @@ mod tests {
         let market_settlements = [settlement];
         let input = crate::transition::FrameInput {
             lock_commands: &[],
+            authenticated_requests: &[],
             market_settlements: &market_settlements,
             acknowledged_settlements: &[],
         };
@@ -1163,6 +1200,7 @@ mod tests {
             &mut journal,
             crate::transition::FrameInput {
                 lock_commands: &[],
+                authenticated_requests: &[],
                 market_settlements: &settlements,
                 acknowledged_settlements: &[],
             },
