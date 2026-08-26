@@ -550,6 +550,7 @@ mod tests {
         host.run_frame_with_output(
             dawn_sector::transition::FrameInput {
                 lock_commands: &[],
+                authenticated_requests: &[],
                 market_settlements: &[input],
                 acknowledged_settlements: &[],
             },
@@ -581,14 +582,12 @@ mod tests {
         let mut db = MarketDb::open_in_memory().unwrap();
         let seller = PlayerId(1);
         let (mut host, seller_ship) = host_with_docked_ship(seller);
-        host.with_node_mut(|node| {
-            node.credit_item_owned(CreditItemCommand {
-                player_id: seller,
-                ship_id: seller_ship,
-                item_id: ItemId::ScrapMetal,
-                quantity: 5,
-                settlement_id: SEED_SETTLEMENT_ID,
-            })
+        host.test_credit_item(CreditItemCommand {
+            player_id: seller,
+            ship_id: seller_ship,
+            item_id: ItemId::ScrapMetal,
+            quantity: 5,
+            settlement_id: SEED_SETTLEMENT_ID,
         })
         .expect("in-memory market test host must remain writable");
         let _ = host
@@ -607,6 +606,7 @@ mod tests {
             .run_frame_with_output(
                 dawn_sector::transition::FrameInput {
                     lock_commands: &[],
+                    authenticated_requests: &[],
                     market_settlements: &inputs,
                     acknowledged_settlements: &[],
                 },
@@ -633,6 +633,7 @@ mod tests {
         // mutation is already durable (issue #315).
         host.run_frame(dawn_sector::transition::FrameInput {
             lock_commands: &[],
+            authenticated_requests: &[],
             market_settlements: &[],
             acknowledged_settlements: &acknowledgement.decided_settlement_ids,
         })
@@ -653,14 +654,12 @@ mod tests {
         let seller = PlayerId(1);
         let buyer = PlayerId(2);
         let (mut host, seller_ship) = host_with_docked_ship(seller);
-        host.with_node_mut(|node| {
-            node.credit_item_owned(CreditItemCommand {
-                player_id: seller,
-                ship_id: seller_ship,
-                item_id: ItemId::ScrapMetal,
-                quantity: 2,
-                settlement_id: SEED_SETTLEMENT_ID,
-            })
+        host.test_credit_item(CreditItemCommand {
+            player_id: seller,
+            ship_id: seller_ship,
+            item_id: ItemId::ScrapMetal,
+            quantity: 2,
+            settlement_id: SEED_SETTLEMENT_ID,
         })
         .expect("in-memory market test host must remain writable");
         let _ = host
@@ -744,6 +743,7 @@ mod tests {
             .run_frame_with_output(
                 dawn_sector::transition::FrameInput {
                     lock_commands: &[],
+                    authenticated_requests: &[],
                     market_settlements: &inputs,
                     acknowledged_settlements: &[],
                 },

@@ -476,18 +476,18 @@ The Host phase is also the capability boundary for every typed mutation entry:
 
 | Host phase | Allowed capabilities |
 |---|---|
-| `Bootstrapping` | Read-only inspection, normal pre-frame input bridges, and startup/demo/test fixture population. |
-| `Running` | Read-only inspection and bounded runtime bridges for admission, ownership adoption, command collection, Transit/Jump proposal, output drain, and checkpoint access. Fixture population is closed. |
-| `Fenced` | Read-only diagnosis and the explicit recovery transition only. Every live mutation bridge returns `RuntimeFrameHostError::Fenced` before touching node or journal state. |
+| `Bootstrapping` | Read-only inspection, typed frame-input preparation, and startup/demo/test fixture population. |
+| `Running` | Read-only inspection and narrow typed admission/checkpoint operations; authenticated commands enter `FrameInput`. Fixture population is closed. |
+| `Fenced` | Read-only diagnosis and the explicit recovery transition only. Every live operation returns `RuntimeFrameHostError::Fenced` before touching node or journal state. |
 
 `SectorRuntimeHandle::spawn_ship` is therefore a deterministic fixture API, not
 a general actor mutation command: callers must provision those fixtures before
 the actor's first `Tick`, and a later request returns `FixtureSpawnError::BootstrapClosed`.
-Admission, Market settlement, and jump-fallback proposal paths currently use
-bounded Host bridges before the frame. These live mutations are being migrated
-to durable `FrameInput` commands in follow-up slices, so the bridges are explicit
-rather than being mistaken for a second production Tick path. A fenced Host must
-not use any of those bridges as an alternate write path.
+Admission and jump-fallback proposal paths use bounded typed Host methods at
+their respective protocol boundaries; the authenticated client requests and
+Market settlement inputs enter the shared durable `FrameInput` path. These
+methods do not provide an alternate production Tick path, and a fenced Host must
+reject them before touching node or journal state.
 
 This is current implementation topology, not a permanent storage/API constraint:
 

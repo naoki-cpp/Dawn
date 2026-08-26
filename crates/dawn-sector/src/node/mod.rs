@@ -62,7 +62,7 @@ pub use crate::transit::TickTransitionError;
 pub use crate::transition::StationProjectionMutation;
 pub use command_module::ModuleActivationRejection;
 pub use commands::{
-    collect_runtime_commands, ClientCommandFollowup, ClientRequestAdmissionError,
+    collect_authenticated_requests, ClientCommandFollowup, ClientRequestAdmissionError,
     RuntimeCommandDispatch,
 };
 pub use jump::JumpOutcome;
@@ -169,6 +169,9 @@ pub struct TickResult {
     /// Outcome of each `FrameInput::market_settlements` entry admitted this
     /// tick, in input order (issue #315).
     pub market_settlement_outcomes: Vec<crate::transition::MarketSettlementOutcome>,
+    /// Typed results for authenticated requests admitted by the enclosing
+    /// durable runtime frame. Ordinary direct `tick()` calls leave this empty.
+    pub runtime_command_dispatches: Vec<RuntimeCommandDispatch>,
 }
 
 /// Test-facing snapshot of one fitted module's identity and activation state.

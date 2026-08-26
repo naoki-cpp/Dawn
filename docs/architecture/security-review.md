@@ -6,10 +6,17 @@ related  : .agents/skills/security-check/SKILL.md,
            .agents/skills/security-check/references/owasp-map.md,
            .agents/skills/security-check/references/baseline.md（初回レビューの凍結記録）,
            docs/architecture/security-review-completed.md（解消済みfindingの作業ログ）
-date     : 2026-08-22
+date     : 2026-08-26
 ---
 
 # Security Review — Dawn Server（OWASP観点）
+
+2026-08-26 command-path update: Issue #343 moved authenticated requests into
+the prepare -> durable commit -> live apply frame boundary. Session identity
+and output-routing indexes remain server-derived, `ClientRequest::validate()`
+and ownership checks still run before speculative mutation, and the existing
+bounded per-session queues are unchanged. No new security finding was
+introduced.
 
 2026-08-22 SQL-only update: the production Station projection added an
 idempotency range column, a fixed-schema migration, and transactional ordered

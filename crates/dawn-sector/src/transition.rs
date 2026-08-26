@@ -6,8 +6,9 @@
 //! apply the same recovery delta.
 
 use dawn_core::{
-    ApproachTarget, CreditItemCommand, DomainEvent, JumpGateId, LockOnCommand, PlayerId,
-    RemoveItemCommand, ReturnItemCommand, SectorId, ShipId, StationId, Tick, Velocity, WarpTarget,
+    ApproachTarget, ClientRequest, CreditItemCommand, DomainEvent, JumpGateId, LockOnCommand,
+    PlayerId, RemoveItemCommand, ReturnItemCommand, SectorId, ShipId, StationId, Tick, Velocity,
+    WarpTarget,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -94,6 +95,10 @@ pub struct MarketSettlementOutcome {
 #[derive(Debug, Clone, Copy)]
 pub struct FrameInput<'a> {
     pub lock_commands: &'a [LockOnCommand],
+    /// Requests read from authenticated sessions for this frame. They are
+    /// admitted during speculative preparation and become visible only after
+    /// the enclosing transition is durable and applied.
+    pub authenticated_requests: &'a [AuthenticatedClientRequest],
     pub market_settlements: &'a [MarketSettlementInput],
     /// Settlement identities the Market ledger has durably acknowledged (or
     /// rejected) since the last frame. Retiring them from the Sector's
@@ -114,10 +119,21 @@ impl<'a> FrameInput<'a> {
     pub fn lock_only(lock_commands: &'a [LockOnCommand]) -> Self {
         Self {
             lock_commands,
+            authenticated_requests: &[],
             market_settlements: &[],
             acknowledged_settlements: &[],
         }
     }
+}
+
+/// One client request paired with the server-authenticated identity and the
+/// serving adapter's session index. The index is output routing metadata, not
+/// authoritative state.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AuthenticatedClientRequest {
+    pub session_index: usize,
+    pub player_id: PlayerId,
+    pub request: ClientRequest,
 }
 
 /// Version of the recovery-delta payload produced by this module.

@@ -4,7 +4,7 @@ audience : AI Agent / Human Developer
 update   : /architecture-review が issue を解消済みへ移動するたびに追記
 related  : docs/architecture/architecture-review/server.md（構造評価）,
            docs/architecture/architecture-review/server-pending.md（未完項目）
-date     : 2026-08-24
+date     : 2026-08-26
 ---
 
 # Architecture Review — Dawn Codebase（完了済みログ）
@@ -16,6 +16,17 @@ date     : 2026-08-24
 ---
 
 ## 改善ロードマップ > 完了済み
+
+### 2026-08-26: production runtime mutation bridge removal (#343)
+
+Authenticated client requests now travel through the shared `FrameInput` and
+return typed `RuntimeCommandDispatch` values from the committed
+`RuntimeTickOutput`. The same prepare -> durable append -> live apply ->
+reconcile boundary is used by production, single-sector, clustered, and
+in-process adapters. Admission and checkpoint operations use narrow typed host
+methods, while bootstrap/fixture mutation is phase-gated. Regression tests cover
+durable-append and reconciliation failures: the host fences and emits neither
+dispatches nor post-commit output/acknowledgement.
 
 ### 2026-08-24: `dawn-actor` absorption (#338)
 

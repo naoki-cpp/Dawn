@@ -7,15 +7,21 @@
 // different subset of the shared host helpers.
 #![allow(dead_code)]
 
+#[cfg(test)]
+use dawn_core::CreditItemCommand;
 use dawn_core::{
-    DomainEvent, JumpGateId, LockOnCommand, PlayerId, Position, SectorId, ShipId, ShipTypeId,
-    Velocity,
+    DomainEvent, JumpGateId, PlayerId, Position, SectorId, ShipId, ShipTypeId, Velocity,
 };
 use dawn_distributed::RaftActorHandle;
 use dawn_sector::client_admission::{
     ClientAdmissionAttempt, ClientAdmissionIntent, ClientAdmissionRefusal,
 };
-use dawn_sector::node::{JumpOutcome, RuntimeCommandDispatch, SimulationNode};
+use dawn_sector::client_admission_resolution::{
+    resolve_client_admission, ClientAdmissionResolution,
+};
+use dawn_sector::node::SimulationNode;
+use dawn_sector::persistence::checkpoint::CheckpointJournal;
+use dawn_sector::persistence::{CheckpointScheduler, StateSnapshot};
 use dawn_sector::transit::{
     reconcile_runtime_repositories, run_durable_runtime_frame, DurableRuntimeTickContext,
     LocalRuntimeDurabilityPolicy, RuntimeConsensus, RuntimeDurabilityPolicy,
@@ -180,8 +186,8 @@ impl From<dawn_sector::transit::TickTransitionError> for RuntimeFrameHostError {
 ///
 /// The host is intentionally one-Sector wide. A cluster coordinator may own
 /// several hosts, but it must use typed outputs and handoff operations rather
-/// than retaining a mutable borrow across frame boundaries. Transitional
-/// mutation bridges are closure-scoped and do not expose the owned state.
+/// than retaining a mutable borrow across frame boundaries. Admission and
+/// checkpoint access are narrow typed operations guarded by the host phase.
 pub(crate) struct RuntimeFrameHost<J, C, P = LocalRuntimeDurabilityPolicy> {
     node: SimulationNode,
     journal: J,
@@ -195,19 +201,44 @@ pub(crate) trait RuntimeNodeView {
     fn runtime_node(&self) -> &SimulationNode;
 }
 
-pub(crate) trait RuntimeNodeMutation: RuntimeNodeView {
-    fn with_runtime_node_mut<R>(
+/// Narrow admission port used by the socket adapter. Admission owns a durable
+/// protocol repository, while this port owns the Sector-specific validation
+/// and materialisation calls without exposing arbitrary node mutation.
+pub(crate) trait RuntimeClientAdmissionHost {
+    fn default_player_spawn_position(&self) -> Position;
+    fn begin_client_admission(
         &mut self,
-        operation: impl FnOnce(&mut SimulationNode) -> R,
-    ) -> Result<R, RuntimeFrameHostError>;
+        intent: ClientAdmissionIntent,
+        aoi_cell_size: f64,
+    ) -> Result<ClientAdmissionAttempt, RuntimeClientAdmissionError>;
+    fn resolve_client_admission<T>(
+        &mut self,
+        attempt: ClientAdmissionAttempt,
+        result: Result<T, String>,
+    ) -> Result<ClientAdmissionResolution<T, String>, RuntimeFrameHostError>;
 }
 
-impl RuntimeNodeMutation for SimulationNode {
-    fn with_runtime_node_mut<R>(
+#[cfg(test)]
+impl RuntimeClientAdmissionHost for SimulationNode {
+    fn default_player_spawn_position(&self) -> Position {
+        SimulationNode::default_player_spawn_position(self)
+    }
+
+    fn begin_client_admission(
         &mut self,
-        operation: impl FnOnce(&mut SimulationNode) -> R,
-    ) -> Result<R, RuntimeFrameHostError> {
-        Ok(operation(self))
+        intent: ClientAdmissionIntent,
+        aoi_cell_size: f64,
+    ) -> Result<ClientAdmissionAttempt, RuntimeClientAdmissionError> {
+        SimulationNode::begin_client_admission(self, intent, aoi_cell_size)
+            .map_err(RuntimeClientAdmissionError::Refused)
+    }
+
+    fn resolve_client_admission<T>(
+        &mut self,
+        attempt: ClientAdmissionAttempt,
+        result: Result<T, String>,
+    ) -> Result<ClientAdmissionResolution<T, String>, RuntimeFrameHostError> {
+        Ok(resolve_client_admission(self, attempt, result))
     }
 }
 
@@ -228,17 +259,30 @@ where
     }
 }
 
-impl<J, C, P> RuntimeNodeMutation for RuntimeFrameHost<J, C, P>
+impl<J, C, P> RuntimeClientAdmissionHost for RuntimeFrameHost<J, C, P>
 where
     J: DurableJournal,
     C: RuntimeConsensus,
     P: RuntimeDurabilityPolicy,
 {
-    fn with_runtime_node_mut<R>(
+    fn default_player_spawn_position(&self) -> Position {
+        self.node.default_player_spawn_position()
+    }
+
+    fn begin_client_admission(
         &mut self,
-        operation: impl FnOnce(&mut SimulationNode) -> R,
-    ) -> Result<R, RuntimeFrameHostError> {
-        self.with_node_mut(operation)
+        intent: ClientAdmissionIntent,
+        aoi_cell_size: f64,
+    ) -> Result<ClientAdmissionAttempt, RuntimeClientAdmissionError> {
+        RuntimeFrameHost::begin_client_admission(self, intent, aoi_cell_size)
+    }
+
+    fn resolve_client_admission<T>(
+        &mut self,
+        attempt: ClientAdmissionAttempt,
+        result: Result<T, String>,
+    ) -> Result<ClientAdmissionResolution<T, String>, RuntimeFrameHostError> {
+        RuntimeFrameHost::resolve_client_admission(self, attempt, result)
     }
 }
 
@@ -266,29 +310,6 @@ where
 
     pub(crate) fn node(&self) -> &SimulationNode {
         &self.node
-    }
-
-    /// Run one bounded composition operation against the owned node.
-    ///
-    /// This is intentionally a closure rather than a returned mutable
-    /// reference, so callers cannot retain the authoritative state while a
-    /// frame is running. Runtime mutations are being migrated into FrameInput
-    /// in follow-up slices; current admission and Market adapters use this
-    /// narrow bridge until then.
-    pub(crate) fn with_node_mut<R>(
-        &mut self,
-        operation: impl FnOnce(&mut SimulationNode) -> R,
-    ) -> Result<R, RuntimeFrameHostError> {
-        self.ensure_mutation_available()?;
-        Ok(operation(&mut self.node))
-    }
-
-    pub(crate) fn with_state_mut<R>(
-        &mut self,
-        operation: impl FnOnce(&mut SimulationNode, &mut J) -> R,
-    ) -> Result<R, RuntimeFrameHostError> {
-        self.ensure_mutation_available()?;
-        Ok(operation(&mut self.node, &mut self.journal))
     }
 
     pub(crate) fn phase(&self) -> RuntimeFramePhase {
@@ -335,7 +356,8 @@ where
     pub(crate) fn drain_pending_events(
         &mut self,
     ) -> Result<Vec<DomainEvent>, RuntimeFrameHostError> {
-        self.with_node_mut(SimulationNode::drain_pending_events)
+        self.ensure_mutation_available()?;
+        Ok(self.node.drain_pending_events())
     }
 
     /// Seed initial NPC frigates into the Sector.
@@ -381,6 +403,15 @@ where
             .map_err(RuntimeClientAdmissionError::Refused)
     }
 
+    pub(crate) fn resolve_client_admission<T>(
+        &mut self,
+        attempt: ClientAdmissionAttempt,
+        result: Result<T, String>,
+    ) -> Result<ClientAdmissionResolution<T, String>, RuntimeFrameHostError> {
+        self.ensure_mutation_available()?;
+        Ok(resolve_client_admission(&mut self.node, attempt, result))
+    }
+
     /// Adopt a ship that just jumped into this Sector under `player_id`'s
     /// ownership. Returns `false` if the ship is not (yet) present in this
     /// Sector's ECS.
@@ -389,7 +420,8 @@ where
         ship_id: ShipId,
         player_id: PlayerId,
     ) -> Result<bool, RuntimeFrameHostError> {
-        self.with_node_mut(|node| node.adopt_player_ship(ship_id, player_id))
+        self.ensure_mutation_available()?;
+        Ok(self.node.adopt_player_ship(ship_id, player_id))
     }
 
     /// Spawn a ship outside the tick pipeline, for deterministic fixture
@@ -406,27 +438,14 @@ where
         Ok(self.node.spawn_ship(ship_type_id, position, velocity))
     }
 
-    /// Admit requests through the Sector's single typed request seam.
-    pub(crate) fn collect_runtime_commands<S, Player, Request>(
+    /// Seed inventory for a runtime fixture before the first frame.
+    #[cfg(test)]
+    pub(crate) fn test_credit_item(
         &mut self,
-        sessions: &mut [S],
-        lock_commands: &mut Vec<LockOnCommand>,
-        player: Player,
-        request: Request,
-    ) -> Result<Vec<RuntimeCommandDispatch>, RuntimeFrameHostError>
-    where
-        Player: Fn(&S) -> dawn_core::PlayerId,
-        Request: FnMut(&mut S) -> Option<dawn_core::ClientRequest>,
-    {
-        self.with_node_mut(|node| {
-            dawn_sector::node::collect_runtime_commands(
-                node,
-                sessions,
-                lock_commands,
-                player,
-                request,
-            )
-        })
+        command: CreditItemCommand,
+    ) -> Result<bool, RuntimeFrameHostError> {
+        self.ensure_bootstrapping()?;
+        Ok(self.node.credit_item_owned(command))
     }
 
     /// Propose a validated cross-Sector request through the owned consensus
@@ -446,20 +465,20 @@ where
         Ok(())
     }
 
-    /// Apply jump fallback rules and submit any resulting transit proposal
-    /// through the owned consensus adapter.
-    pub(crate) fn propose_jump(
+    /// Take and publish a checkpoint through the explicit node/journal
+    /// boundary. The scheduler never receives a closure that can mutate an
+    /// arbitrary runtime state.
+    pub(crate) fn checkpoint(
         &mut self,
-        ship_id: ShipId,
-        gate_id: JumpGateId,
-    ) -> Result<JumpOutcome, RuntimeFrameHostError> {
-        self.ensure_mutation_available()?;
-        Ok(dawn_sector::transit::propose_jump_with_consensus(
-            &mut self.node,
-            &mut self.consensus,
-            ship_id,
-            gate_id,
-        ))
+        scheduler: &mut CheckpointScheduler,
+        public_event_next_index: dawn_storage::PublicEventIndex,
+    ) -> Result<Option<StateSnapshot>, std::io::Error>
+    where
+        J: CheckpointJournal,
+    {
+        self.ensure_mutation_available()
+            .map_err(std::io::Error::other)?;
+        scheduler.maybe_checkpoint(&mut self.node, &mut self.journal, public_event_next_index)
     }
 
     /// Run exactly one authoritative frame for this Sector.
@@ -484,6 +503,41 @@ where
     where
         F: FnOnce(&SimulationNode, &dawn_sector::node::TickResult, &[DomainEvent]),
     {
+        self.run_frame_with_reconcile(input, reconcile_runtime_repositories, after_commit)
+    }
+
+    #[cfg(test)]
+    fn run_frame_with_reconciliation<R, F>(
+        &mut self,
+        input: dawn_sector::transition::FrameInput<'_>,
+        reconcile: R,
+        after_commit: F,
+    ) -> Result<RuntimeTickOutput, RuntimeFrameHostError>
+    where
+        R: FnOnce(
+            &mut SimulationNode,
+            &dawn_sector::node::TickResult,
+            &[DomainEvent],
+        ) -> Result<(), dawn_sector::transit::RuntimeReconciliationError>,
+        F: FnOnce(&SimulationNode, &dawn_sector::node::TickResult, &[DomainEvent]),
+    {
+        self.run_frame_with_reconcile(input, reconcile, after_commit)
+    }
+
+    fn run_frame_with_reconcile<R, F>(
+        &mut self,
+        input: dawn_sector::transition::FrameInput<'_>,
+        reconcile: R,
+        after_commit: F,
+    ) -> Result<RuntimeTickOutput, RuntimeFrameHostError>
+    where
+        R: FnOnce(
+            &mut SimulationNode,
+            &dawn_sector::node::TickResult,
+            &[DomainEvent],
+        ) -> Result<(), dawn_sector::transit::RuntimeReconciliationError>,
+        F: FnOnce(&SimulationNode, &dawn_sector::node::TickResult, &[DomainEvent]),
+    {
         if self.phase == RuntimeFramePhase::Fenced {
             // The shared runtime health gate returns the durable recovery error
             // and keeps the failure visible to the caller.
@@ -505,7 +559,7 @@ where
                 durability: self.policy.durability,
                 profile: self.policy.profile,
             },
-            reconcile_runtime_repositories,
+            reconcile,
             after_commit,
         )
         .map_err(RuntimeFrameHostError::Tick);
@@ -533,7 +587,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dawn_core::{NodeId, SectorBounds, SectorId};
+    use dawn_core::{ClientRequest, NodeId, SectorBounds, SectorId};
     use dawn_sector::{
         galaxy::Galaxy,
         game_data::{GameDataCatalog, PRODUCTION_MODULES_PATH, PRODUCTION_SHIP_TYPES_PATH},
@@ -663,13 +717,7 @@ mod tests {
         assert_eq!(host.node().ship_count(), 0);
 
         let resolution = host
-            .with_node_mut(|node| {
-                dawn_sector::client_admission_resolution::resolve_client_admission(
-                    node,
-                    attempt,
-                    Ok::<(), ()>(()),
-                )
-            })
+            .resolve_client_admission(attempt, Ok::<(), String>(()))
             .expect("healthy running hosts should resolve admission attempts");
 
         assert_eq!(host.phase(), RuntimeFramePhase::Running);
@@ -820,20 +868,6 @@ mod tests {
         assert_eq!(host.phase(), RuntimeFramePhase::Fenced);
         assert!(host.health().is_fenced());
 
-        let mut mutation_called = false;
-        assert!(matches!(
-            host.with_node_mut(|_| mutation_called = true),
-            Err(RuntimeFrameHostError::Fenced)
-        ));
-        assert!(!mutation_called);
-
-        let mut state_mutation_called = false;
-        assert!(matches!(
-            host.with_state_mut(|_, _| state_mutation_called = true),
-            Err(RuntimeFrameHostError::Fenced)
-        ));
-        assert!(!state_mutation_called);
-
         assert!(matches!(
             host.begin_client_admission(
                 ClientAdmissionIntent::Fresh {
@@ -870,23 +904,8 @@ mod tests {
             Err(RuntimeFrameHostError::Fenced)
         ));
 
-        let mut sessions: [(); 0] = [];
-        let mut lock_commands = Vec::new();
-        assert!(matches!(
-            host.collect_runtime_commands(
-                &mut sessions,
-                &mut lock_commands,
-                |_| PlayerId(0),
-                |_| None,
-            ),
-            Err(RuntimeFrameHostError::Fenced)
-        ));
         assert!(matches!(
             host.propose_transit_request(ship_id, SectorId(1), None),
-            Err(RuntimeFrameHostError::Fenced)
-        ));
-        assert!(matches!(
-            host.propose_jump(ship_id, JumpGateId(0)),
             Err(RuntimeFrameHostError::Fenced)
         ));
 
@@ -896,6 +915,214 @@ mod tests {
             host.default_player_spawn_position(),
             diagnostic_spawn_position
         );
+    }
+
+    #[test]
+    fn fenced_host_rejects_generic_admission_port_without_mutation() {
+        let mut host = host_with_journal(FailingJournal, RuntimeFramePolicy::local_durable(0));
+        let attempt = RuntimeClientAdmissionHost::begin_client_admission(
+            &mut host,
+            ClientAdmissionIntent::Fresh {
+                spawn_position: Position::ORIGIN,
+            },
+            1_000.0,
+        )
+        .expect("admission attempt should be reservable before fencing");
+        let result = host.run_frame(dawn_sector::transition::FrameInput::lock_only(&[]));
+        assert!(matches!(
+            result,
+            Err(RuntimeFrameHostError::Tick(
+                dawn_sector::transit::TickTransitionError::Durable(_)
+            ))
+        ));
+
+        let ship_count = host.node().ship_count();
+        let pending_events = host.node().pending_events().to_vec();
+        assert!(matches!(
+            RuntimeClientAdmissionHost::begin_client_admission(
+                &mut host,
+                ClientAdmissionIntent::Fresh {
+                    spawn_position: Position::ORIGIN,
+                },
+                1_000.0,
+            ),
+            Err(RuntimeClientAdmissionError::Host(
+                RuntimeFrameHostError::Fenced
+            ))
+        ));
+        assert!(matches!(
+            RuntimeClientAdmissionHost::resolve_client_admission::<()>(
+                &mut host,
+                attempt,
+                Err("client disconnected".to_owned()),
+            ),
+            Err(RuntimeFrameHostError::Fenced)
+        ));
+        assert_eq!(host.node().ship_count(), ship_count);
+        assert_eq!(host.node().pending_events(), pending_events.as_slice());
+    }
+
+    #[test]
+    fn authenticated_dispatches_are_not_exposed_when_durable_append_fails() {
+        let mut host = host_with_journal(FailingJournal, RuntimeFramePolicy::local_durable(0));
+        let (player_id, _ship_id) = host
+            .spawn_bot_ship(Position::ORIGIN)
+            .expect("bot fixture should be available during bootstrap");
+        let requests = [dawn_sector::transition::AuthenticatedClientRequest {
+            session_index: 4,
+            player_id,
+            request: ClientRequest::Jump {
+                gate: JumpGateId(0),
+            },
+        }];
+        let output_seen = Arc::new(AtomicBool::new(false));
+
+        let result = host.run_frame_with_output(
+            dawn_sector::transition::FrameInput {
+                lock_commands: &[],
+                authenticated_requests: &requests,
+                market_settlements: &[],
+                acknowledged_settlements: &[],
+            },
+            {
+                let output_seen = Arc::clone(&output_seen);
+                move |_, _, _| {
+                    output_seen.store(true, Ordering::SeqCst);
+                }
+            },
+        );
+
+        assert!(matches!(
+            result,
+            Err(RuntimeFrameHostError::Tick(
+                dawn_sector::transit::TickTransitionError::Durable(_)
+            ))
+        ));
+        assert!(!output_seen.load(Ordering::SeqCst));
+        assert_eq!(host.node().current_tick().value(), 0);
+        assert_eq!(host.node().ship_count(), 1);
+        assert_eq!(host.phase(), RuntimeFramePhase::Fenced);
+        assert!(host.health().is_fenced());
+    }
+
+    #[test]
+    fn committed_frame_exposes_jump_refresh_and_rejection_dispatches() {
+        let mut host = host();
+        let (player_id, ship_id) = host
+            .spawn_bot_ship(Position::ORIGIN)
+            .expect("bot fixture should be available during bootstrap");
+        let requests = [
+            dawn_sector::transition::AuthenticatedClientRequest {
+                session_index: 2,
+                player_id,
+                request: ClientRequest::SelectActiveShip { ship: ship_id },
+            },
+            dawn_sector::transition::AuthenticatedClientRequest {
+                session_index: 2,
+                player_id,
+                request: ClientRequest::Jump {
+                    gate: JumpGateId(0),
+                },
+            },
+            dawn_sector::transition::AuthenticatedClientRequest {
+                session_index: 2,
+                player_id,
+                request: ClientRequest::Attack {
+                    target: dawn_core::ShipId::new(NodeId(0), 999),
+                },
+            },
+        ];
+
+        let output = host
+            .run_frame(dawn_sector::transition::FrameInput {
+                lock_commands: &[],
+                authenticated_requests: &requests,
+                market_settlements: &[],
+                acknowledged_settlements: &[],
+            })
+            .expect("authenticated requests should be returned after commit");
+
+        assert_eq!(output.tick_result.runtime_command_dispatches.len(), 3);
+        assert!(matches!(
+            output.tick_result.runtime_command_dispatches[0],
+            dawn_sector::node::RuntimeCommandDispatch::RefreshPlayerLoadout {
+                session_index: 2,
+                player_id: id,
+            } if id == player_id
+        ));
+        assert!(matches!(
+            output.tick_result.runtime_command_dispatches[1],
+            dawn_sector::node::RuntimeCommandDispatch::Jump {
+                session_index: 2,
+                ship_id: id,
+                ..
+            } if id == ship_id
+        ));
+        assert!(matches!(
+            output.tick_result.runtime_command_dispatches[2],
+            dawn_sector::node::RuntimeCommandDispatch::Rejected {
+                session_index: 2,
+                error: dawn_sector::node::ClientRequestAdmissionError::UnsupportedRequest {
+                    request: "Attack"
+                },
+            }
+        ));
+    }
+
+    #[test]
+    fn reconciliation_failure_fences_after_durable_apply_without_output_or_ack() {
+        let mut host = host();
+        let (player_id, _) = host
+            .spawn_bot_ship(Position::ORIGIN)
+            .expect("bot fixture should be available during bootstrap");
+        let journal_records_before = host.journal.records().len();
+        let requests = [dawn_sector::transition::AuthenticatedClientRequest {
+            session_index: 7,
+            player_id,
+            request: ClientRequest::Attack {
+                target: dawn_core::ShipId::new(NodeId(0), 999),
+            },
+        }];
+        let output_seen = Arc::new(AtomicBool::new(false));
+
+        let result = host.run_frame_with_reconciliation(
+            dawn_sector::transition::FrameInput {
+                lock_commands: &[],
+                authenticated_requests: &requests,
+                market_settlements: &[],
+                acknowledged_settlements: &[],
+            },
+            |_, _, _| {
+                Err(
+                    dawn_sector::transit::RuntimeReconciliationError::Repository {
+                        reason: "injected reconciliation failure".to_owned(),
+                    },
+                )
+            },
+            {
+                let output_seen = Arc::clone(&output_seen);
+                move |_, _, _| {
+                    output_seen.store(true, Ordering::SeqCst);
+                }
+            },
+        );
+
+        assert!(matches!(
+            result,
+            Err(RuntimeFrameHostError::Tick(
+                dawn_sector::transit::TickTransitionError::Reconciliation(
+                    dawn_sector::transit::RuntimeReconciliationError::Repository { .. }
+                )
+            ))
+        ));
+        assert!(!output_seen.load(Ordering::SeqCst));
+        assert!(
+            host.journal.records().len() > journal_records_before,
+            "the committed transition must be durable even when reconciliation fails"
+        );
+        assert_eq!(host.node().current_tick().value(), 1);
+        assert_eq!(host.phase(), RuntimeFramePhase::Fenced);
+        assert!(host.health().is_fenced());
     }
 
     struct RecordingJournal {

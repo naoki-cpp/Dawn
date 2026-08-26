@@ -29,7 +29,7 @@ pub(crate) struct ClusterRuntimeTickContext<'a> {
 
 pub(crate) fn run_cluster_runtime_tick(
     ctx: ClusterRuntimeTickContext<'_>,
-    lock_commands: &[Vec<dawn_core::LockOnCommand>],
+    authenticated_requests: &[Vec<dawn_sector::transition::AuthenticatedClientRequest>],
 ) -> Vec<transit::RuntimeTickOutput> {
     // Drain Market settlements per host before running any frame: a
     // settlement's destination ship lives in exactly one Sector, so each
@@ -51,13 +51,14 @@ pub(crate) fn run_cluster_runtime_tick(
     let tick_outputs: Vec<_> = ctx
         .hosts
         .iter_mut()
-        .zip(lock_commands)
+        .zip(authenticated_requests)
         .zip(&market_settlements)
         .zip(&*ctx.decided_settlements)
         .map(
-            |(((host, lock_commands), market_settlements), acknowledged_settlements)| {
+            |(((host, authenticated_requests), market_settlements), acknowledged_settlements)| {
                 host.run_frame(dawn_sector::transition::FrameInput {
-                    lock_commands,
+                    lock_commands: &[],
+                    authenticated_requests,
                     market_settlements,
                     acknowledged_settlements,
                 })

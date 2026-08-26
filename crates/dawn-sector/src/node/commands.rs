@@ -14,7 +14,7 @@ use dawn_core::{
     UnfitModuleCommand, WarpCommand,
 };
 
-use super::SimulationNode;
+use super::{jump::JumpOutcome, SimulationNode};
 
 /// What request application hands back to a serving adapter.
 #[derive(Debug, Clone)]
@@ -39,14 +39,18 @@ pub enum ClientRequestAdmissionError {
     UnsupportedRequest { request: &'static str },
 }
 
-/// Result of admitting a request during one runtime frame.
+/// Result of admitting a request during one runtime frame. These values are
+/// returned from the durable frame output; they are never sent before the
+/// transition has committed.
 #[derive(Debug, Clone, Copy)]
 pub enum RuntimeCommandDispatch {
-    /// A jump needs consensus submission after all requests are collected.
+    /// A jump needs consensus submission after the frame commits. Fallback
+    /// steering, when any, has already been included in the frame write set.
     Jump {
         session_index: usize,
         ship_id: ShipId,
         command: JumpCommand,
+        outcome: JumpOutcome,
     },
     /// The adapter must refresh the player's typed loadout projection.
     RefreshPlayerLoadout {
@@ -68,53 +72,37 @@ fn refresh_loadout(player_id: PlayerId) -> Option<ClientCommandFollowup> {
     Some(ClientCommandFollowup::RefreshPlayerLoadout { player_id })
 }
 
-/// Collect and admit all queued Sector requests for one runtime frame.
+/// Collect queued requests without touching authoritative Sector state.
 ///
-/// This function intentionally stops draining a session after its first Jump
-/// request, matching the existing consensus handoff behavior. Other requests
-/// are applied immediately to the node's prepared command state and their
-/// adapter-visible followups are returned without knowing anything about
-/// WebSockets or a particular deployment.
-pub fn collect_runtime_commands<S, Player, Request>(
-    node: &mut SimulationNode,
+/// The first Jump request still ends that session's batch, matching the
+/// existing consensus handoff behavior. Admission and command policy run
+/// later, inside the durable frame preparation boundary.
+pub fn collect_authenticated_requests<S, Player, Request>(
     sessions: &mut [S],
-    lock_commands: &mut Vec<LockOnCommand>,
     player: Player,
     mut request: Request,
-) -> Vec<RuntimeCommandDispatch>
+) -> Vec<crate::transition::AuthenticatedClientRequest>
 where
     Player: Fn(&S) -> PlayerId,
     Request: FnMut(&mut S) -> Option<ClientRequest>,
 {
-    let mut dispatches = Vec::new();
+    let mut requests = Vec::new();
 
     for (session_index, session) in sessions.iter_mut().enumerate() {
         while let Some(client_request) = request(session) {
-            match node.apply_client_request(player(session), client_request, lock_commands) {
-                Ok(Some(ClientCommandFollowup::Jump { ship_id, command })) => {
-                    dispatches.push(RuntimeCommandDispatch::Jump {
-                        session_index,
-                        ship_id,
-                        command,
-                    });
-                    break;
-                }
-                Ok(Some(ClientCommandFollowup::RefreshPlayerLoadout { player_id })) => {
-                    dispatches.push(RuntimeCommandDispatch::RefreshPlayerLoadout {
-                        session_index,
-                        player_id,
-                    });
-                }
-                Ok(None) => {}
-                Err(error) => dispatches.push(RuntimeCommandDispatch::Rejected {
-                    session_index,
-                    error,
-                }),
+            let is_jump = matches!(client_request, ClientRequest::Jump { .. });
+            requests.push(crate::transition::AuthenticatedClientRequest {
+                session_index,
+                player_id: player(session),
+                request: client_request,
+            });
+            if is_jump {
+                break;
             }
         }
     }
 
-    dispatches
+    requests
 }
 
 impl SimulationNode {
@@ -1348,7 +1336,7 @@ mod tests {
 
         let mut node = node_with_catalog();
         let player_id = node.next_player_id();
-        let ship_id = node.spawn_player_ship_at_pub(player_id, Position::ORIGIN);
+        let _ship_id = node.spawn_player_ship_at_pub(player_id, Position::ORIGIN);
         let mut sessions = [FakeSession {
             player_id,
             requests: VecDeque::from([
@@ -1358,25 +1346,21 @@ mod tests {
                 ClientRequest::Stop,
             ]),
         }];
-        let mut locks = Vec::new();
-
-        let dispatches = collect_runtime_commands(
-            &mut node,
+        let requests = collect_authenticated_requests(
             &mut sessions,
-            &mut locks,
             |session| session.player_id,
             |session| session.requests.pop_front(),
         );
 
         assert!(matches!(
-            dispatches.as_slice(),
-            [RuntimeCommandDispatch::Jump {
+            requests.as_slice(),
+            [crate::transition::AuthenticatedClientRequest {
                 session_index: 0,
-                ship_id: id,
-                ..
-            }] if *id == ship_id
+                player_id: id,
+                request: ClientRequest::Jump { .. },
+            }] if *id == player_id
         ));
         assert_eq!(sessions[0].requests.len(), 1);
-        assert!(locks.is_empty());
+        assert_eq!(node.ship_count(), 1);
     }
 }

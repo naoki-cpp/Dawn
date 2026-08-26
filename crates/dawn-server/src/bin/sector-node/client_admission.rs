@@ -4,13 +4,15 @@
 //! promotion, while `dawn-sector::client_admission` owns the authoritative
 //! begin/commit/abort lifecycle and every rollback decision.
 
+use crate::runtime_frame::{RuntimeClientAdmissionError, RuntimeClientAdmissionHost};
 use dawn_core::SectorId;
 use dawn_sector::client_admission::{
     ClientAdmissionAttempt, ClientAdmissionIntent, ClientAdmissionRefusal, CommittedClientAdmission,
 };
-use dawn_sector::client_admission_resolution::{
-    resolve_client_admission, ClientAdmissionResolution,
-};
+#[cfg(test)]
+use dawn_sector::client_admission_resolution::resolve_client_admission;
+use dawn_sector::client_admission_resolution::ClientAdmissionResolution;
+#[cfg(test)]
 use dawn_sector::node::SimulationNode;
 use dawn_server::ws_server;
 use std::sync::Arc;
@@ -62,16 +64,16 @@ impl ClientAdmission {
         }
     }
 
-    pub(crate) fn advance_handshakes(
+    pub(crate) fn advance_handshakes<H: RuntimeClientAdmissionHost>(
         &mut self,
-        node: &mut SimulationNode,
+        host: &mut H,
         sector_id: SectorId,
         aoi_cell_size: f64,
     ) {
         // Socket tasks report only their outcome. The tick-loop thread resolves
         // the Sector-owned attempt so authoritative mutation stays single-owner.
         while let Ok((attempt, result)) = self.completion_rx.try_recv() {
-            if let Some((session, _committed)) = finish_admission(node, attempt, result) {
+            if let Some((session, _committed)) = finish_admission(host, attempt, result) {
                 let _ = self.ready_sess_tx.send(session);
             }
         }
@@ -82,20 +84,24 @@ impl ClientAdmission {
                     resume_ticket: resume,
                 },
                 None => ClientAdmissionIntent::Fresh {
-                    spawn_position: node.default_player_spawn_position(),
+                    spawn_position: host.default_player_spawn_position(),
                 },
             };
 
-            let mut attempt = match node.begin_client_admission(intent, aoi_cell_size) {
+            let mut attempt = match host.begin_client_admission(intent, aoi_cell_size) {
                 Ok(attempt) => attempt,
-                Err(ClientAdmissionRefusal::ResumeTicketInvalid) => {
+                Err(RuntimeClientAdmissionError::Refused(
+                    ClientAdmissionRefusal::ResumeTicketInvalid,
+                )) => {
                     eprintln!(
                         "[Node] resume refused from {}: invalid resume ticket for Sector {}",
                         request.peer_addr, sector_id.0
                     );
                     continue;
                 }
-                Err(ClientAdmissionRefusal::ResumeAlreadyPending { ship_id, .. }) => {
+                Err(RuntimeClientAdmissionError::Refused(
+                    ClientAdmissionRefusal::ResumeAlreadyPending { ship_id, .. },
+                )) => {
                     eprintln!(
                         "[Node] resume refused from {}: ship #{} already has an in-flight resume",
                         request.peer_addr,
@@ -103,7 +109,9 @@ impl ClientAdmission {
                     );
                     continue;
                 }
-                Err(ClientAdmissionRefusal::ResumeIdentityConflict { ship_id, .. }) => {
+                Err(RuntimeClientAdmissionError::Refused(
+                    ClientAdmissionRefusal::ResumeIdentityConflict { ship_id, .. },
+                )) => {
                     eprintln!(
                         "[Node] resume refused from {}: ship #{} conflicts with established ownership",
                         request.peer_addr,
@@ -111,16 +119,27 @@ impl ClientAdmission {
                     );
                     continue;
                 }
-                Err(ClientAdmissionRefusal::FreshAtPopulationCap) => {
+                Err(RuntimeClientAdmissionError::Refused(
+                    ClientAdmissionRefusal::FreshAtPopulationCap,
+                )) => {
                     eprintln!(
                         "[Node] connection from {} refused: at population cap",
                         request.peer_addr
                     );
                     continue;
                 }
-                Err(ClientAdmissionRefusal::MissingObserver(error)) => {
+                Err(RuntimeClientAdmissionError::Refused(
+                    ClientAdmissionRefusal::MissingObserver(error),
+                )) => {
                     eprintln!(
                         "[Node] handshake refused from {}: {error}",
+                        request.peer_addr
+                    );
+                    continue;
+                }
+                Err(RuntimeClientAdmissionError::Host(error)) => {
+                    eprintln!(
+                        "[Node] handshake unavailable from {}: {error}",
                         request.peer_addr
                     );
                     continue;
@@ -163,19 +182,23 @@ impl ClientAdmission {
     }
 }
 
-fn finish_admission<T>(
-    node: &mut SimulationNode,
+fn finish_admission<T, H: RuntimeClientAdmissionHost>(
+    host: &mut H,
     attempt: ClientAdmissionAttempt,
     result: Result<T, String>,
 ) -> Option<(T, CommittedClientAdmission)> {
-    match resolve_client_admission(node, attempt, result) {
-        ClientAdmissionResolution::Committed { value, admission } => Some((value, admission)),
-        ClientAdmissionResolution::Aborted { error } => {
+    match host.resolve_client_admission(attempt, result) {
+        Ok(ClientAdmissionResolution::Committed { value, admission }) => Some((value, admission)),
+        Ok(ClientAdmissionResolution::Aborted { error }) => {
             eprintln!("[Node] handshake failed: {error}");
             None
         }
-        ClientAdmissionResolution::CommitRejected { error } => {
+        Ok(ClientAdmissionResolution::CommitRejected { error }) => {
             eprintln!("[Node] {error}");
+            None
+        }
+        Err(error) => {
+            eprintln!("[Node] admission host unavailable: {error}");
             None
         }
     }
@@ -267,7 +290,7 @@ mod tests {
             .expect("fresh attempt");
 
         assert_eq!(
-            finish_admission::<()>(
+            finish_admission::<(), _>(
                 &mut node,
                 attempt,
                 Err("client disconnected while sending InitialState".to_string()),
@@ -365,7 +388,7 @@ mod tests {
             .expect("resume attempt");
 
         assert_eq!(
-            finish_admission::<()>(&mut node, attempt, Err("client disconnected".to_string()),),
+            finish_admission::<(), _>(&mut node, attempt, Err("client disconnected".to_string()),),
             None
         );
         assert_eq!(node.ship_count(), 1);

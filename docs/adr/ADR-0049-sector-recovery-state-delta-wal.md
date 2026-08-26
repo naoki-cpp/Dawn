@@ -9,6 +9,16 @@ related : ADR-0001 (Event Sourcing), ADR-0014 (Raft / Transit), ADR-0017 (snapsh
 
 # ADR-0049 - Exact Sector recovery with a versioned state-delta journal
 
+> **Implementation correction (2026-08-26, issue #343):** the production
+> `RuntimeNodeMutation` closure bridge has been removed. Authenticated client
+> requests are collected into `FrameInput` and their typed
+> `RuntimeCommandDispatch` values are exposed only through the successful
+> `RuntimeTickOutput`, after durable append, live apply, and required
+> reconciliation. Admission and checkpoint access use narrow typed host
+> methods; bootstrap/fixture mutation remains phase-gated. Regression coverage
+> verifies that durable-append or reconciliation failure fences the host and
+> invokes neither post-commit output nor command acknowledgement.
+
 > **Implementation correction (2026-08-22):** `TickRecoveryDelta` now carries
 > ordered Station mutations and `RECOVERY_DELTA_VERSION` is 4. The production
 > runtime applies the SQLite Station projection only after durable append and

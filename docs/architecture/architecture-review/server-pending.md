@@ -4,7 +4,7 @@ audience : AI Agent / Human Developer
 update   : /architecture-review で issue を起票・状態更新するたびに更新
 related  : docs/architecture/architecture-review/server.md（構造評価）,
            docs/architecture/architecture-review/server-completed.md（完了済みログ）
-date     : 2026-08-25
+date     : 2026-08-26
 ---
 
 # Architecture Review — Dawn Codebase（未完項目）
@@ -31,16 +31,6 @@ live state、interaction、presentationは分離済み。残るscene lifecycle /
 `node/warp.rs`は1281行だがproduction実装は592行で、geometry kernelとstate machineが凝集している。
 **判断: Defer。** テストを除く実装が約700行を超え、かつ独立した変更理由が混在する、または
 module間のdriftが実害になるまで分割しない。行数だけでは発火させない。
-
-### R-6（#343・Fix）: production `RuntimeNodeMutation` bridgeの撤去
-
-`FrameInput`はlock commandとMarket settlementをprepare→durable→applyへ運ぶようになった。一方、
-認証済みplayer requestのcollection、jump fallback、admission、checkpointは、現在も
-`with_node_mut` / `with_state_mut` / `RuntimeNodeMutation`の汎用closure surfaceを利用する。
-**根本原因:** frame-scoped command inputとpost-commit followupは一部familyまでしか拡張されず、
-composition adapterの都合をtyped host operationへ閉じ切れていないため。
-**判断: Fix。** player commandとjump stateをtyped frame input/outputへ移し、admissionとcheckpointは
-各durability boundaryを表すnarrow methodへ置換する。bootstrap/fixtureだけをphase-gatedな明示APIとして残す。
 
 ### R-7（#344・Fix）: `SectorRepository`のbounded-context分割
 
@@ -77,7 +67,6 @@ torn-tail repair、archive retry、alias guard、post-rename poisonを維持す�
 |---|---|
 | R-2 | 保留・trigger付き |
 | R-3 | commands slice・transit deepening 完了、warpはtrigger付きで保留 |
-| R-6 | #343・Fix・production mutation bridge |
 | R-7 | #344・Fix・repository bounded-context分割 |
 | R-8 | #345・Fix・Market bounded working set |
 | R-9 | #346・Fix・FileJournal bounded-memory streaming |
