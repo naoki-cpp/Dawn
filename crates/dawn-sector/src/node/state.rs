@@ -259,11 +259,14 @@ impl PersistenceBoundary {
         player_ids: impl IntoIterator<Item = PlayerId>,
     ) -> rusqlite::Result<()> {
         self.repositories
+            .identities()
             .observe_materialized_identities(ship_ids, player_ids)
     }
 
     pub(super) fn reconcile_admission_identity_watermarks(&self) -> rusqlite::Result<()> {
-        self.repositories.reconcile_admission_identity_watermarks()
+        self.repositories
+            .identities()
+            .reconcile_admission_identity_watermarks()
     }
 
     pub(super) fn record_client_ownership_with_pending(
@@ -273,12 +276,14 @@ impl PersistenceBoundary {
         resume_ticket: ResumeTicket,
         pending_resume_ticket: Option<ResumeTicket>,
     ) -> rusqlite::Result<()> {
-        self.repositories.record_client_ownership_with_pending(
-            ship_id,
-            player_id,
-            resume_ticket,
-            pending_resume_ticket,
-        )
+        self.repositories
+            .identities()
+            .record_client_ownership_with_pending(
+                ship_id,
+                player_id,
+                resume_ticket,
+                pending_resume_ticket,
+            )
     }
 
     pub(super) fn reserve_fresh_admission_identity(
@@ -288,6 +293,7 @@ impl PersistenceBoundary {
         resume_ticket: ResumeTicket,
     ) -> rusqlite::Result<(PlayerId, ShipId)> {
         self.repositories
+            .identities()
             .reserve_fresh_admission_identity(node_id, spawn_position, resume_ticket)
     }
 
@@ -298,6 +304,7 @@ impl PersistenceBoundary {
         resume_ticket: ResumeTicket,
     ) -> rusqlite::Result<()> {
         self.repositories
+            .identities()
             .record_client_ownership(ship_id, player_id, resume_ticket)
     }
 
@@ -308,7 +315,7 @@ impl PersistenceBoundary {
         presented_ticket: ResumeTicket,
         proposed_next_ticket: ResumeTicket,
     ) -> rusqlite::Result<Option<ResumeTicket>> {
-        self.repositories.stage_client_resume_ticket(
+        self.repositories.identities().stage_client_resume_ticket(
             ship_id,
             player_id,
             presented_ticket,

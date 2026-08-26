@@ -239,7 +239,7 @@ Market は固定価格やアルゴリズム式（AMM/Bonding curve）で価格�
 - [x] dawn-sector: Station（NPC提供の最小実装）
 - [x] dawn-sector: Dock/Undock + Station 利用可否判定（`can_use` は docked 状態を見る）
 - [x] dawn-sector: Station inventory（`PackagedShip` / `ScrapMetal` の最小保管先）
-- [x] dawn-sector: Station inventory storage seam（ADR-0038 で SQLite projection として実装済み、`node/repositories.rs` の `StationInventoryRepository`）
+- [x] dawn-sector: Station inventory storage seam（ADR-0038 で SQLite projection として実装済み、`node/repositories/station_inventory.rs` の `StationInventoryRepository`）
 - [x] dawn-sector: Assemble コマンド・バリデーション（入力は Station inventory 上の `PackagedShip`、**docked 中のみ**、Assemble 後の艤装は既存 Fit 経路で行う。`node/station_materialization.rs::assemble_ship_owned`）
 - [x] dawn-sector: Disassemble コマンド・バリデーション（無傷・未艤装チェック、出力は Station inventory 上の `PackagedShip`、**docked 中のみ**）
 - [x] dawn-sector: Packaged Ship 建造（Scrap Metal 消費、入出力とも Station inventory、**docked 中のみ**。MVP コストは `1 Scrap Metal / 1 hull` の固定値）

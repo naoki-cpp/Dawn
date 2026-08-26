@@ -17,6 +17,16 @@ date     : 2026-08-26
 
 ## 改善ロードマップ > 完了済み
 
+### 2026-08-26: SectorRepository bounded-context split (#344)
+
+`SectorRepository` remains the single SQLite connection owner and
+`SectorTransaction` remains the explicit cross-view transaction boundary.
+Connection/schema setup, shared codecs, and view construction stay in the
+root; prepared admission/grant finalization, identity/ResumeTicket/allocator
+reconciliation, and Station inventory projection/cursor logic now live in
+private bounded-context modules with their regression tests. No schema,
+authority, gameplay, or external repository behavior changed.
+
 ### 2026-08-26: production runtime mutation bridge removal (#343)
 
 Authenticated client requests now travel through the shared `FrameInput` and

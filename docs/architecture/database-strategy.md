@@ -98,9 +98,10 @@ SQLiteファイルをnetwork filesystemへ置き、複数nodeから直接openす
 ### 2.4 Admission / identity protocol repositories
 
 `crates/dawn-sector/src/node/repositories.rs`の`SectorRepository`はnode-local SQLite connectionの
-atomic boundaryだが、呼び出し側には`AdmissionRepository`、`IdentityRepository`、
-`StationInventoryRepository`の明示的なviewだけを返す。catch-allの名前や汎用的なforwarding APIを
-使わない。複数viewをまたぐ処理だけが`SectorTransaction`を要求する。
+atomic boundary、schema初期化、shared codec、view/transaction生成だけを持つ。bounded-contextの実装は
+privateな`repositories/admission.rs`、`repositories/identity.rs`、`repositories/station_inventory.rs`へ分かれ、
+呼び出し側には`AdmissionRepository`、`IdentityRepository`、`StationInventoryRepository`の明示的なviewだけを返す。
+catch-allの名前や汎用的なforwarding APIを使わない。複数viewをまたぐ処理だけが`SectorTransaction`を要求する。
 
 このうち**prepared admission / identity / resume-ticket stateはStation projectionではない**。
 Ship materialization前のprepared rowはSector ECSに対応するRecoveryDeltaがまだ存在しないため、
@@ -262,7 +263,8 @@ PostgreSQLもSector recovery journalとのdistributed transactionを自動提供
 ## 10. Module / repository seam の方針
 
 Station inventoryは呼び出し側からSQLite実装を隠せるseamを維持する。#277の実装は
-`repositories.rs`に次の境界を固定する。
+`repositories/`配下のprivate viewに次のbounded-context境界を固定する。rootの
+`repositories.rs`はconnection、schema、shared codec、view生成、transaction生成だけを持つ。
 
 - `AdmissionRepository`: prepared fresh-admission rowsとticket lookup
 - `IdentityRepository`: ownership、current/pending ticket、allocatorの観測
