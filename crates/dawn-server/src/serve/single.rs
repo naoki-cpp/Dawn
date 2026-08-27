@@ -5,9 +5,6 @@ use super::{
     build_serve_node, client_request_rejection, load_serve_dependencies, market::MarketRuntime,
     AoiDelivery, DuelMetrics, AOI_CELL_SIZE, P4_TICK_MS, TIDI_BUDGET,
 };
-use crate::runtime_frame::{
-    RuntimeClientAdmissionError, RuntimeClientAdmissionHost, RuntimeFrameHost, RuntimeFramePolicy,
-};
 use crate::ws_server;
 use dawn_core::{DomainEvent, NodeId, Position, SectorBounds, SectorId, ShipId};
 use dawn_protocol::ServerMessage;
@@ -22,6 +19,9 @@ use dawn_sector::dilation;
 use dawn_sector::node::SimulationNode;
 use dawn_sector::node::{JumpOutcome, RuntimeCommandDispatch};
 use dawn_sector::transit::LocalRuntimeConsensus;
+use dawn_server::runtime_frame::{
+    RuntimeClientAdmissionError, RuntimeClientAdmissionHost, RuntimeFrameHost, RuntimeFramePolicy,
+};
 use dawn_storage::InMemoryJournal;
 use tokio::sync::mpsc;
 
@@ -140,7 +140,8 @@ pub(crate) async fn run_phase4_server(
         // Resolve socket outcomes on the tick-loop thread. A session is not
         // visible to AoI delivery or command routing until its Sector attempt
         // commits successfully.
-        for (sess, _committed) in host.drain_single_admission_completions(&mut completion_rx) {
+        for (sess, _committed) in drain_single_admission_completions(&mut host, &mut completion_rx)
+        {
             println!(
                 "  [Server] {} joined with ship #{}",
                 sess.player_id,
@@ -412,17 +413,6 @@ fn drain_single_admission_completions<H: RuntimeClientAdmissionHost>(
     ready
 }
 
-impl RuntimeFrameHost<InMemoryJournal, LocalRuntimeConsensus> {
-    /// Resolve async handshake outcomes against the owned node, promoting
-    /// each committed attempt to a ready session.
-    fn drain_single_admission_completions(
-        &mut self,
-        completion_rx: &mut mpsc::UnboundedReceiver<HandshakeCompletion>,
-    ) -> Vec<(ws_server::PlayerSession, CommittedClientAdmission)> {
-        drain_single_admission_completions(self, completion_rx)
-    }
-}
-
 fn finish_single_admission<T, H: RuntimeClientAdmissionHost>(
     host: &mut H,
     attempt: ClientAdmissionAttempt,
@@ -472,8 +462,12 @@ mod tests {
             .expect("fresh attempt");
 
         assert_eq!(
-            finish_single_admission(&mut node, attempt, Ok::<_, String>(()))
-                .map(|(value, _)| value),
+            finish_single_admission(
+                &mut crate::TestAdmissionHost(&mut node),
+                attempt,
+                Ok::<_, String>(()),
+            )
+            .map(|(value, _)| value),
             Some(())
         );
         assert_eq!(node.ship_count(), 1);
@@ -493,7 +487,7 @@ mod tests {
 
         assert_eq!(
             finish_single_admission::<(), _>(
-                &mut node,
+                &mut crate::TestAdmissionHost(&mut node),
                 attempt,
                 Err("client disconnected".to_string()),
             ),
@@ -518,7 +512,10 @@ mod tests {
             .send((attempt, Err("client disconnected".to_string())))
             .expect("completion receiver alive");
 
-        let ready = drain_single_admission_completions(&mut node, &mut completion_rx);
+        let ready = drain_single_admission_completions(
+            &mut crate::TestAdmissionHost(&mut node),
+            &mut completion_rx,
+        );
 
         assert!(ready.is_empty());
         assert_eq!(node.ship_count(), 0);
@@ -551,7 +548,7 @@ mod tests {
 
         assert_eq!(
             finish_single_admission::<(), _>(
-                &mut node,
+                &mut crate::TestAdmissionHost(&mut node),
                 attempt,
                 Err("client disconnected".to_string()),
             ),

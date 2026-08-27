@@ -6,7 +6,6 @@
 //! Redirect handling, and AoI delivery.
 
 use super::client_admission::ClientAdmission;
-use crate::runtime_frame::{OwnedRaftRuntimeConsensus, RuntimeFrameHost, RuntimeFrameHostError};
 use dawn_core::{DomainEvent, SectorId, ShipId};
 use dawn_distributed::{OutboundLogPublisher, PeerReplicationTransport, PublicEventTail};
 use dawn_protocol::ServerMessage;
@@ -15,26 +14,13 @@ use dawn_sector::aoi_frame::{deliver_sector_sessions, AoiFrame, AoiSessionCallba
 use dawn_sector::node::{
     ClientRequestAdmissionError, JumpOutcome, RuntimeCommandDispatch, SimulationNode,
 };
+use dawn_server::runtime_frame::{
+    OwnedRaftRuntimeConsensus, RuntimeFrameHost, RuntimeFrameHostError,
+};
 use dawn_server::ws_server;
 use dawn_storage::FileJournal;
 use std::collections::HashMap;
 use std::net::SocketAddr;
-
-impl RuntimeFrameHost<FileJournal, OwnedRaftRuntimeConsensus> {
-    /// Advance production client-handshake admission against the owned node.
-    fn advance_handshakes(
-        &mut self,
-        admission: &mut ClientAdmission,
-        sector_id: SectorId,
-        aoi_cell_size: f64,
-    ) -> Result<(), RuntimeFrameHostError> {
-        if self.phase() == crate::runtime_frame::RuntimeFramePhase::Fenced {
-            return Err(RuntimeFrameHostError::Fenced);
-        }
-        admission.advance_handshakes(self, sector_id, aoi_cell_size);
-        Ok(())
-    }
-}
 
 fn client_request_rejection(
     error: ClientRequestAdmissionError,
@@ -93,8 +79,11 @@ impl SectorNodeRuntime {
         sector_id: SectorId,
         aoi_cell_size: f64,
     ) -> Result<(), RuntimeFrameHostError> {
-        self.host
-            .advance_handshakes(admission, sector_id, aoi_cell_size)
+        if self.host.is_fenced() {
+            return Err(RuntimeFrameHostError::Fenced);
+        }
+        admission.advance_handshakes(&mut self.host, sector_id, aoi_cell_size);
+        Ok(())
     }
 
     pub(crate) fn promote_ready_session(&mut self, sess: ws_server::PlayerSession) {

@@ -5,10 +5,6 @@ use super::{
     build_serve_node, client_request_rejection, load_serve_dependencies, market::MarketRuntime,
     runtime, AoiDelivery, AOI_CELL_SIZE, P4_TICK_MS,
 };
-use crate::runtime_frame::{
-    OwnedRaftRuntimeConsensus, RuntimeClientAdmissionError, RuntimeClientAdmissionHost,
-    RuntimeFrameHost, RuntimeFramePolicy, RuntimeNodeView,
-};
 use crate::{cluster, ws_server};
 use dawn_core::{DomainEvent, NodeId, PlayerId, SectorBounds, SectorId, ShipId};
 use dawn_protocol::ServerMessage;
@@ -21,6 +17,10 @@ use dawn_sector::client_admission_resolution::ClientAdmissionResolution;
 #[cfg(test)]
 use dawn_sector::node::SimulationNode;
 use dawn_sector::node::{JumpOutcome, RuntimeCommandDispatch};
+use dawn_server::runtime_frame::{
+    OwnedRaftRuntimeConsensus, RuntimeClientAdmissionError, RuntimeClientAdmissionHost,
+    RuntimeFrameHost, RuntimeFramePolicy, RuntimeNodeView,
+};
 use dawn_storage::InMemoryJournal;
 use std::collections::HashMap;
 use tokio::sync::mpsc;
@@ -480,7 +480,7 @@ mod tests {
 
         assert_eq!(
             finish_cluster_admission(
-                &mut node,
+                &mut crate::TestAdmissionHost(&mut node),
                 0,
                 &mut player_sector,
                 &mut ship_player,
@@ -512,7 +512,7 @@ mod tests {
 
         assert_eq!(
             finish_cluster_admission::<(), _>(
-                &mut node,
+                &mut crate::TestAdmissionHost(&mut node),
                 0,
                 &mut player_sector,
                 &mut ship_player,
@@ -529,7 +529,7 @@ mod tests {
 
     #[test]
     fn cluster_adapter_drains_async_disconnect_completion() {
-        let mut nodes = vec![node()];
+        let mut nodes = [node()];
         let attempt = nodes[0]
             .begin_client_admission(
                 ClientAdmissionIntent::Fresh {
@@ -545,12 +545,15 @@ mod tests {
         let mut player_sector = HashMap::new();
         let mut ship_player = HashMap::new();
 
-        let ready = drain_cluster_admission_completions(
-            &mut nodes,
-            &mut player_sector,
-            &mut ship_player,
-            &mut completion_rx,
-        );
+        let ready = {
+            let mut hosts: Vec<_> = nodes.iter_mut().map(crate::TestAdmissionHost).collect();
+            drain_cluster_admission_completions(
+                &mut hosts,
+                &mut player_sector,
+                &mut ship_player,
+                &mut completion_rx,
+            )
+        };
 
         assert!(ready.is_empty());
         assert_eq!(nodes[0].ship_count(), 0);
@@ -589,7 +592,7 @@ mod tests {
 
         assert_eq!(
             finish_cluster_admission(
-                &mut nodes[sector],
+                &mut crate::TestAdmissionHost(&mut nodes[sector]),
                 sector,
                 &mut player_sector,
                 &mut ship_player,
@@ -668,7 +671,7 @@ mod tests {
 
         assert_eq!(
             finish_cluster_admission::<(), _>(
-                &mut node,
+                &mut crate::TestAdmissionHost(&mut node),
                 0,
                 &mut player_sector,
                 &mut ship_player,

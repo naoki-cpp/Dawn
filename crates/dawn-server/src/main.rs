@@ -13,13 +13,50 @@
 
 mod bench;
 mod cluster;
-mod runtime_frame;
 mod sector_runtime_driver;
 mod serve;
 
 // Client transport is shared by both server binaries through the package
 // library, so the serve modules use one WebSocket implementation.
 use dawn_server::ws_server;
+
+#[cfg(test)]
+struct TestAdmissionHost<'a>(&'a mut dawn_sector::node::SimulationNode);
+
+#[cfg(test)]
+impl dawn_server::runtime_frame::RuntimeClientAdmissionHost for TestAdmissionHost<'_> {
+    fn default_player_spawn_position(&self) -> dawn_core::Position {
+        self.0.default_player_spawn_position()
+    }
+
+    fn begin_client_admission(
+        &mut self,
+        intent: dawn_sector::client_admission::ClientAdmissionIntent,
+        aoi_cell_size: f64,
+    ) -> Result<
+        dawn_sector::client_admission::ClientAdmissionAttempt,
+        dawn_server::runtime_frame::RuntimeClientAdmissionError,
+    > {
+        self.0
+            .begin_client_admission(intent, aoi_cell_size)
+            .map_err(dawn_server::runtime_frame::RuntimeClientAdmissionError::Refused)
+    }
+
+    fn resolve_client_admission<T>(
+        &mut self,
+        attempt: dawn_sector::client_admission::ClientAdmissionAttempt,
+        result: Result<T, String>,
+    ) -> Result<
+        dawn_sector::client_admission_resolution::ClientAdmissionResolution<T, String>,
+        dawn_server::runtime_frame::RuntimeFrameHostError,
+    > {
+        Ok(
+            dawn_sector::client_admission_resolution::resolve_client_admission(
+                self.0, attempt, result,
+            ),
+        )
+    }
+}
 
 #[cfg(test)]
 fn test_catalog() -> std::sync::Arc<dawn_sector::game_data::GameDataCatalog> {
