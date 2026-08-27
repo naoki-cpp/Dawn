@@ -99,10 +99,10 @@ func _process(delta: float) -> void:
 ## flying. Owned-docked-ship commands (Fit/Unfit/Reorder/BuildPackagedShip/
 ## DisassembleShip/TransferCargo) still carry an explicit ship_id.
 ##
-## ADR-0041/ADR-0042/#273: every Sector send_* function constructs the one
-## typed Rust `ClientRequest` authority through a dedicated GDExtension method.
-## No Sector request is assembled through a Dictionary/JSON round-trip, and
-## acting active-ship identity is supplied only by the admitted server session.
+## ADR-0041/ADR-0042/#273: the remaining direct builders construct the one typed
+## Rust `ClientRequest` authority through a dedicated GDExtension method. Input
+## policy routes all other Sector requests through `send_action()` and station
+## inventory policy routes its requests through `send_station_inventory_action()`.
 ## Market remains a separate typed request envelope.
 func send_move_command(target: Vector3) -> void:
 	_send_request(_cmd.move_command(target.x, target.y, target.z))
@@ -121,9 +121,6 @@ func send_station_inventory_action(action: StationInventoryAction) -> void:
 	for index: int in action.request_count():
 		_send_request(action.request_result_at(index))
 
-func send_lock_on_command(target_id: int) -> void:
-	_send_request(_cmd.lock_on_command(target_id))
-
 ## Active モジュールをオンにする。p_target_ship_id は Weapon/Tackle など
 ## ターゲットを要求する種別のときだけ指定する（-1 = 指定なし、ADR-0035）。
 func send_activate_module(p_module_id: int, p_slot: String, p_target_ship_id: int = -1) -> void:
@@ -132,62 +129,6 @@ func send_activate_module(p_module_id: int, p_slot: String, p_target_ship_id: in
 ## Active モジュールをオフにする。
 func send_deactivate_module(p_module_id: int, p_slot: String) -> void:
 	_send_request(_cmd.deactivate_module_command(p_module_id, p_slot))
-
-## [S キー] 減速停止コマンド。サーバーが thrust を逆方向に掛けて速度ゼロまで減速する。
-func send_stop_command() -> void:
-	_send_request(_cmd.stop_command())
-
-## ジャンプゲート経由の Sector 移動を要求する（ADR-0009）。
-func send_jump_command(p_gate_id: int) -> void:
-	_send_request(_cmd.jump_command(p_gate_id))
-
-## [A キー] アプローチ（半自動操船）。選択した船へ自動接近する（ADR-0015）。
-func send_approach_command(p_target_id: int) -> void:
-	_send_request(_cmd.approach_command(p_target_id))
-
-## [A キー] ジャンプゲートへアプローチ（半自動操船）。射程内まで自動接近する（ADR-0015）。
-func send_approach_gate_command(p_gate_id: int) -> void:
-	_send_request(_cmd.approach_gate_command(p_gate_id))
-
-## [W key] Warp (short-range Fold) to a Jump Gate (ADR-0022/ADR-0025).
-func send_warp_command(p_gate_id: int) -> void:
-	_send_request(_cmd.warp_command(p_gate_id))
-
-## [W key] Warp (short-range Fold) to a celestial body (ADR-0025).
-func send_warp_to_body_command(p_body_id: int) -> void:
-	_send_request(_cmd.warp_to_body_command(p_body_id))
-
-## [W key] Warp (short-range Fold) to an NPC station.
-func send_warp_to_station_command(p_station_id: int) -> void:
-	_send_request(_cmd.warp_to_station_command(p_station_id))
-
-## [O key] Orbit a selected ship at its weapon range (server-side default, ADR-0031).
-func send_orbit_command(p_target_id: int) -> void:
-	_send_request(_cmd.orbit_command(p_target_id, -1.0))
-
-## [O key] Orbit a selected Jump Gate at its weapon range (server-side default, ADR-0031).
-func send_orbit_gate_command(p_gate_id: int) -> void:
-	_send_request(_cmd.orbit_gate_command(p_gate_id, -1.0))
-
-## [K key] Hold at least p_range_m metres from a selected ship; p_range_m <= 0
-## falls back to the server-side default (weapon range, ADR-0031).
-func send_keep_at_range_command(p_target_id: int, p_range_m: float = -1.0) -> void:
-	_send_request(_cmd.keep_at_range_command(p_target_id, p_range_m))
-
-## [K key] Hold at least p_range_m metres from a selected Jump Gate; p_range_m
-## <= 0 falls back to the server-side default (weapon range, ADR-0031).
-func send_keep_at_range_gate_command(p_gate_id: int, p_range_m: float = -1.0) -> void:
-	_send_request(_cmd.keep_at_range_gate_command(p_gate_id, p_range_m))
-
-func send_dock_command(p_station_id: int) -> void:
-	_send_request(_cmd.dock_command(p_station_id))
-
-func send_undock_command() -> void:
-	_send_request(_cmd.undock_command())
-
-## Leave the active ship while docked, without disassembling it (ADR-0037).
-func send_disembark_command() -> void:
-	_send_request(_cmd.disembark_command())
 
 ## Market requests use a separate wire envelope from Sector commands
 ## (ADR-0034). The server answers each request with MarketSnapshot.

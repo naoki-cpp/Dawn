@@ -246,3 +246,22 @@ typed build request. `Unfit All` returns an ordered list of independent
 semantics. Godot retains row rendering, hit testing, drag geometry, and scene
 effects. The old station-inventory string action tags and dedicated connection
 wrappers are removed only because this typed path replaces them completely.
+
+## 2026-08-27 amendment: retire ClientCommand side doors
+
+The typed `ClientAction` and `StationInventoryAction` paths are now the
+canonical transport entry points for Sector requests. The unused direct
+`ClientCommand` builders and matching `connection.gd` send wrappers for
+combat, navigation, docking, fitting, ship management, and cargo transfer
+are removed. This prevents callers from bypassing the engine-independent
+client policies and leaves the direct GDExtension builders only where Godot
+still supplies required data or a separate envelope:
+
+- camera-projected `Move`
+- module activation and deactivation
+- Market refresh, place, and cancel
+- the connection `Hello` handshake
+
+`request_result_from_request`, `ClientAction`, `StationInventoryAction`, and
+the Market typed envelope remain unchanged. No wire schema or server contract
+changes.

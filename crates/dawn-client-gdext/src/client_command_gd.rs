@@ -1,8 +1,5 @@
 use crate::item_identity_gd::ItemIdentity;
-use dawn_core::{
-    ApproachTarget, CelestialBodyId, ClientRequest, EntityId, ItemId, JumpGateId, ModuleId,
-    Position, ShipId, ShipTypeId, SlotKind, StationId, TransferDirection, WarpTarget,
-};
+use dawn_core::{ClientRequest, EntityId, ModuleId, Position, ShipId, SlotKind};
 use dawn_protocol::{
     ClientMessage, HelloMessage, ItemWire, MarketCommandWire, MarketOrderSide, ResumeTicket,
 };
@@ -97,32 +94,15 @@ fn market_result(command: Result<MarketCommandWire, RequestBuildError>) -> Gd<Cl
     }
 }
 
-fn optional_positive(value: f64, field: &str) -> Result<Option<f64>, RequestBuildError> {
-    if !value.is_finite() {
-        Err(RequestBuildError::new(
-            "non_finite_number",
-            format!("{field} must be finite"),
-        ))
-    } else if value > 0.0 {
-        Ok(Some(value))
-    } else {
-        Ok(None)
-    }
-}
-
 fn ship_id(value: i64, field: &str) -> Result<ShipId, RequestBuildError> {
     u64::try_from(value)
         .map(|value| ShipId(EntityId::from_raw(value)))
         .map_err(|_| RequestBuildError::new("invalid_id", format!("{field} must be non-negative")))
 }
 
-fn u32_id(value: i64, field: &str) -> Result<u32, RequestBuildError> {
-    u32::try_from(value)
-        .map_err(|_| RequestBuildError::new("invalid_id", format!("{field} must fit u32")))
-}
-
 fn nonzero_u32_id(value: i64, field: &str) -> Result<u32, RequestBuildError> {
-    let value = u32_id(value, field)?;
+    let value = u32::try_from(value)
+        .map_err(|_| RequestBuildError::new("invalid_id", format!("{field} must fit u32")))?;
     if value == 0 {
         Err(RequestBuildError::new(
             "zero_id",
@@ -184,24 +164,6 @@ impl ClientCommand {
     }
 
     #[func]
-    fn lock_on_command(&self, target_id: i64) -> Gd<ClientCommandResult> {
-        request_result((|| {
-            Ok(ClientRequest::LockOn {
-                target: ship_id(target_id, "target_id")?,
-            })
-        })())
-    }
-
-    #[func]
-    fn attack_command(&self, target_id: i64) -> Gd<ClientCommandResult> {
-        request_result((|| {
-            Ok(ClientRequest::Attack {
-                target: ship_id(target_id, "target_id")?,
-            })
-        })())
-    }
-
-    #[func]
     fn activate_module_command(
         &self,
         module_id: i64,
@@ -230,244 +192,6 @@ impl ClientCommand {
                 slot: slot_kind(&slot)?,
             })
         })())
-    }
-
-    #[func]
-    fn stop_command(&self) -> Gd<ClientCommandResult> {
-        request_result(Ok(ClientRequest::Stop))
-    }
-
-    #[func]
-    fn jump_command(&self, gate_id: i64) -> Gd<ClientCommandResult> {
-        request_result((|| {
-            Ok(ClientRequest::Jump {
-                gate: JumpGateId(u32_id(gate_id, "gate_id")?),
-            })
-        })())
-    }
-
-    #[func]
-    fn approach_command(&self, target_id: i64) -> Gd<ClientCommandResult> {
-        request_result((|| {
-            Ok(ClientRequest::Approach {
-                target: ApproachTarget::Ship(ship_id(target_id, "target_id")?),
-            })
-        })())
-    }
-
-    #[func]
-    fn approach_gate_command(&self, gate_id: i64) -> Gd<ClientCommandResult> {
-        request_result((|| {
-            Ok(ClientRequest::Approach {
-                target: ApproachTarget::Gate(JumpGateId(u32_id(gate_id, "gate_id")?)),
-            })
-        })())
-    }
-
-    #[func]
-    fn warp_command(&self, gate_id: i64) -> Gd<ClientCommandResult> {
-        request_result((|| {
-            Ok(ClientRequest::Warp {
-                target: WarpTarget::Gate(JumpGateId(u32_id(gate_id, "gate_id")?)),
-            })
-        })())
-    }
-
-    #[func]
-    fn warp_to_body_command(&self, body_id: i64) -> Gd<ClientCommandResult> {
-        request_result((|| {
-            Ok(ClientRequest::Warp {
-                target: WarpTarget::Body(CelestialBodyId(u32_id(body_id, "body_id")?)),
-            })
-        })())
-    }
-
-    #[func]
-    fn warp_to_station_command(&self, station_id: i64) -> Gd<ClientCommandResult> {
-        request_result((|| {
-            Ok(ClientRequest::Warp {
-                target: WarpTarget::Station(StationId(u32_id(station_id, "station_id")?)),
-            })
-        })())
-    }
-
-    #[func]
-    fn orbit_command(&self, target_id: i64, radius: f64) -> Gd<ClientCommandResult> {
-        request_result((|| {
-            Ok(ClientRequest::Orbit {
-                target: ApproachTarget::Ship(ship_id(target_id, "target_id")?),
-                radius: optional_positive(radius, "radius")?,
-            })
-        })())
-    }
-
-    #[func]
-    fn orbit_gate_command(&self, gate_id: i64, radius: f64) -> Gd<ClientCommandResult> {
-        request_result((|| {
-            Ok(ClientRequest::Orbit {
-                target: ApproachTarget::Gate(JumpGateId(u32_id(gate_id, "gate_id")?)),
-                radius: optional_positive(radius, "radius")?,
-            })
-        })())
-    }
-
-    #[func]
-    fn keep_at_range_command(&self, target_id: i64, range: f64) -> Gd<ClientCommandResult> {
-        request_result((|| {
-            Ok(ClientRequest::KeepAtRange {
-                target: ApproachTarget::Ship(ship_id(target_id, "target_id")?),
-                range: optional_positive(range, "range")?,
-            })
-        })())
-    }
-
-    #[func]
-    fn keep_at_range_gate_command(&self, gate_id: i64, range: f64) -> Gd<ClientCommandResult> {
-        request_result((|| {
-            Ok(ClientRequest::KeepAtRange {
-                target: ApproachTarget::Gate(JumpGateId(u32_id(gate_id, "gate_id")?)),
-                range: optional_positive(range, "range")?,
-            })
-        })())
-    }
-
-    #[func]
-    fn fit_module_command(&self, ship: i64, module: i64, slot: GString) -> Gd<ClientCommandResult> {
-        request_result((|| {
-            Ok(ClientRequest::FitModule {
-                ship: ship_id(ship, "ship_id")?,
-                module: ModuleId(nonzero_u32_id(module, "module_id")?),
-                slot: slot_kind(&slot)?,
-            })
-        })())
-    }
-
-    #[func]
-    fn unfit_module_command(
-        &self,
-        ship: i64,
-        module: i64,
-        slot: GString,
-    ) -> Gd<ClientCommandResult> {
-        request_result((|| {
-            Ok(ClientRequest::UnfitModule {
-                ship: ship_id(ship, "ship_id")?,
-                module: ModuleId(nonzero_u32_id(module, "module_id")?),
-                slot: slot_kind(&slot)?,
-            })
-        })())
-    }
-
-    #[func]
-    fn reorder_fitted_module_command(
-        &self,
-        ship: i64,
-        slot: GString,
-        from_index: i64,
-        to_index: i64,
-    ) -> Gd<ClientCommandResult> {
-        request_result((|| {
-            Ok(ClientRequest::ReorderFittedModule {
-                ship: ship_id(ship, "ship_id")?,
-                slot: slot_kind(&slot)?,
-                from_index: u32_id(from_index, "from_index")?,
-                to_index: u32_id(to_index, "to_index")?,
-            })
-        })())
-    }
-
-    #[func]
-    fn dock_command(&self, station: i64) -> Gd<ClientCommandResult> {
-        request_result((|| {
-            Ok(ClientRequest::Dock {
-                station: StationId(u32_id(station, "station_id")?),
-            })
-        })())
-    }
-
-    #[func]
-    fn undock_command(&self) -> Gd<ClientCommandResult> {
-        request_result(Ok(ClientRequest::Undock))
-    }
-
-    #[func]
-    fn build_packaged_ship_command(
-        &self,
-        ship: i64,
-        station: i64,
-        ship_type: i64,
-    ) -> Gd<ClientCommandResult> {
-        request_result((|| {
-            Ok(ClientRequest::BuildPackagedShip {
-                ship: ship_id(ship, "ship_id")?,
-                station: StationId(u32_id(station, "station_id")?),
-                ship_type: ShipTypeId(nonzero_u32_id(ship_type, "ship_type_id")?),
-            })
-        })())
-    }
-
-    #[func]
-    fn disassemble_ship_command(&self, ship: i64, station: i64) -> Gd<ClientCommandResult> {
-        request_result((|| {
-            Ok(ClientRequest::DisassembleShip {
-                ship: ship_id(ship, "ship_id")?,
-                station: StationId(u32_id(station, "station_id")?),
-            })
-        })())
-    }
-
-    #[func]
-    fn select_active_ship_command(&self, ship: i64) -> Gd<ClientCommandResult> {
-        request_result((|| {
-            Ok(ClientRequest::SelectActiveShip {
-                ship: ship_id(ship, "ship_id")?,
-            })
-        })())
-    }
-
-    #[func]
-    fn assemble_command(&self, station: i64, ship_type: i64) -> Gd<ClientCommandResult> {
-        request_result((|| {
-            Ok(ClientRequest::Assemble {
-                station: StationId(u32_id(station, "station_id")?),
-                ship_type: ShipTypeId(nonzero_u32_id(ship_type, "ship_type_id")?),
-            })
-        })())
-    }
-
-    #[func]
-    fn disembark_command(&self) -> Gd<ClientCommandResult> {
-        request_result(Ok(ClientRequest::Disembark))
-    }
-
-    #[func]
-    fn transfer_to_station_command(
-        &self,
-        ship: i64,
-        station: i64,
-        item_id: Gd<ItemIdentity>,
-    ) -> Gd<ClientCommandResult> {
-        self.transfer_command(
-            ship,
-            station,
-            item_id.bind().get(),
-            TransferDirection::ToStation,
-        )
-    }
-
-    #[func]
-    fn transfer_from_station_command(
-        &self,
-        ship: i64,
-        station: i64,
-        item_id: Gd<ItemIdentity>,
-    ) -> Gd<ClientCommandResult> {
-        self.transfer_command(
-            ship,
-            station,
-            item_id.bind().get(),
-            TransferDirection::ToShip,
-        )
     }
 
     #[func]
@@ -528,25 +252,6 @@ impl ClientCommand {
             Ok(bytes) => ClientCommandResult::success(bytes),
             Err(error) => ClientCommandResult::failure(error.code, error.message),
         }
-    }
-}
-
-impl ClientCommand {
-    fn transfer_command(
-        &self,
-        ship: i64,
-        station: i64,
-        item: ItemId,
-        direction: TransferDirection,
-    ) -> Gd<ClientCommandResult> {
-        request_result((|| {
-            Ok(ClientRequest::TransferCargo {
-                ship: ship_id(ship, "ship_id")?,
-                station: StationId(u32_id(station, "station_id")?),
-                item,
-                direction,
-            })
-        })())
     }
 }
 
