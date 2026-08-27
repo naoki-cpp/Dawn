@@ -9,6 +9,14 @@ related : ADR-0001 (Event Sourcing), ADR-0014 (Raft / Transit), ADR-0017 (snapsh
 
 # ADR-0049 - Exact Sector recovery with a versioned state-delta journal
 
+> **Implementation correction (2026-08-26, issue #344):** the #277 repository
+> boundary is now physically split into private admission, identity, and
+> Station projection modules. `SectorRepository` remains the sole SQLite
+> connection owner and `SectorTransaction` remains the one explicit
+> cross-view transaction boundary; the root only coordinates schema, shared
+> codecs, views, and transaction creation. This changes no authority, schema,
+> projection, or external repository behavior.
+
 > **Implementation correction (2026-08-26, issue #343):** the production
 > `RuntimeNodeMutation` closure bridge has been removed. Authenticated client
 > requests are collected into `FrameInput` and their typed

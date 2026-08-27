@@ -32,16 +32,6 @@ live state、interaction、presentationは分離済み。残るscene lifecycle /
 **判断: Defer。** テストを除く実装が約700行を超え、かつ独立した変更理由が混在する、または
 module間のdriftが実害になるまで分割しない。行数だけでは発火させない。
 
-### R-7（#344・Fix）: `SectorRepository`のbounded-context分割
-
-`node/repositories.rs`は2104行で、Admission、Identity/ResumeTicket、Station projectionのschema、
-typed codec、allocator、transaction boundary、全ての回帰testsを一つのfileに保持している。
-`SectorRepository`が一つのSQLite connectionとtransactionを所有する設計自体は正しいが、domainごとの
-変更理由が同じmoduleへ蓄積している。**根本原因:** shared connection boundaryと各repository viewの
-実装ファイル境界が一致していないため。**判断: Fix。** connection/transactionの薄い共通境界を
-維持したまま、admission、identity、station projectionの実装とtestsをmoduleへ分ける。
-別SQLite connectionを導入したり、Station authorityをSQLiteへ戻したりはしない。
-
 ### R-8（#345・Fix）: Market SQLの全状態reload/rewrite
 
 `MarketDb::execute`は1 commandごとに全order・全Currency balance・全settlementを読み込み、
@@ -67,7 +57,6 @@ torn-tail repair、archive retry、alias guard、post-rename poisonを維持す�
 |---|---|
 | R-2 | 保留・trigger付き |
 | R-3 | commands slice・transit deepening 完了、warpはtrigger付きで保留 |
-| R-7 | #344・Fix・repository bounded-context分割 |
 | R-8 | #345・Fix・Market bounded working set |
 | R-9 | #346・Fix・FileJournal bounded-memory streaming |
 採らない方針: CRDT/LWW、protobuf、薄いadapterだけの追加crate、行数削減目的の網羅match・domain型の破壊、初回LAN検証でのTLS/認証。

@@ -4,7 +4,7 @@
 //!
 //! The public admission facts remain useful audit output, but the durable
 //! reservation and resume-ticket state now goes through the explicit
-//! admission/identity repository views in `repositories.rs`.
+//! admission/identity repository views in `repositories/`.
 //!
 //! The target contract separates the authorities:
 //!

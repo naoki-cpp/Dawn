@@ -11,6 +11,12 @@ date     : 2026-08-26
 
 # Security Review — Dawn Server（OWASP観点）
 
+2026-08-26 SQL-boundary update: Issue #344 moved existing admission,
+identity, and Station projection queries into private bounded-context
+repository modules. The schema, single-connection transaction boundary,
+fixed SQL identifiers, and parameter binding are unchanged. No new input
+surface or security finding was introduced.
+
 2026-08-26 command-path update: Issue #343 moved authenticated requests into
 the prepare -> durable commit -> live apply frame boundary. Session identity
 and output-routing indexes remain server-derived, `ClientRequest::validate()`
@@ -83,10 +89,11 @@ SQLite INTEGER境界を検証する。ownership・入力値・queue/snapshot上�
 
 ## 検証済み・健全
 
-### A03 SQLインジェクション — `crates/dawn-sector/src/node/repositories.rs`
+### A03 SQLインジェクション — dawn-sector repository boundary
 
-Repository queryは`params![]`によるパラメータ化済み。テーブル/カラム名はクライアント入力から
-導出されない（`item_id_to_columns`は`ItemId` enumへの閉じたmatch）。詳細は
+Repository schema setup and bounded-context queries are `params![]`でパラメータ化済み。
+テーブル/カラム名はクライアント入力から導出されない（`item_id_to_columns`は`ItemId` enumへの
+閉じたmatch）。詳細は
 [baseline.md](../../.agents/skills/security-check/references/baseline.md)参照。
 
 2026-08-22のStation projection差分も、schema migrationを含めSQL文字列は固定で、

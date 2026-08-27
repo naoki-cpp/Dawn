@@ -5,7 +5,7 @@ update   : 大規模リファクタ実施後 / 新クレート追加時 / archit
 related  : AI_DEVELOPMENT_GUIDE.md「Crate Boundaries」, docs/architecture/architecture.md,
            docs/architecture/architecture-review/server-completed.md（完了済みログ）,
            docs/architecture/architecture-review/server-pending.md（未完項目・issue一覧）
-date     : 2026-08-26（issue #343反映。全Rustクレート再計測、R-7〜R-9更新）
+date     : 2026-08-26（issue #343/#344反映。全Rustクレート再計測、R-7〜R-9更新）
 ---
 
 # Architecture Review — Dawn Codebase（現行構造評価）
@@ -16,8 +16,8 @@ date     : 2026-08-26（issue #343反映。全Rustクレート再計測、R-7〜
 ## 現状評価
 
 **総合: B+。** crate DAGとdeep module境界は健全で、production / single-sector / cluster /
-in-process driverは`RuntimeFrameHost`へ統合された。一方、`repositories.rs`（2104行）は複数の
-独立した変更理由を抱え、分割triggerが発火している。さらに、
+in-process driverは`RuntimeFrameHost`へ統合された。`SectorRepository`は接続とschemaを所有する
+rootへ縮小され、bounded contextの実装はprivate child moduleへ分割された。さらに、
 Marketの全状態reload/rewrite、FileJournalのwhole-hot-log materializationを、正しさを維持したまま
 縮めるFix項目としてR-7〜R-9へ整理した。今回の再計測では、実装行数と責務混在、正しさと
 スケーラビリティを分けて再評価した。
@@ -33,12 +33,12 @@ Transitについては、Raftの回復判断を`transit::handoff`に残し、Shi
 | 観点 | 評価 | 現在の判断 |
 |---|---|---|
 | クレート構成 | A | #340で一時的な`dawn-actor`を削除し、`dawn-server`が`simulate`とproduction `sector-node`の唯一のcomposition boundaryになった。10 crateのDAGに逆依存なし |
-| ファイルサイズ | B+ | `repositories.rs`はAdmission / Identity / Station projectionを一つのSQLite境界に実装しているためR-7/#344へ記録。大きいTick/Transit/Journal kernelはtests込みで凝集している |
+| ファイルサイズ | A− | `SectorRepository` rootは接続・schema・transaction coordinationに限定し、Admission / Identity / Station projectionはprivate moduleへ分割済み。大きいTick/Transit/Journal kernelはtests込みで凝集している |
 | 型設計 | A− | domain固有のResult/Outcomeを維持。dispatcher都合で共通型へ潰さない（ADR-0047） |
 | 重複 | A− | Station runtime apply、SectorMap projectionを解消。Transit policy/state mutationも分離し、live専用materializationへ集約 |
 | 永続化 | B+ | checkpoint + contiguous RecoveryDeltaの正しさは維持。一方、Marketの全状態rewrite（R-8/#345）とFileJournalの全hot suffix materialization（R-9/#346）は規模に比例するためFix |
 | Rust固有 | A− | 網羅matchとexhaustive destructuringを変更検出器として利用 |
-| AI開発誘発 | A− | `RuntimeFrameHost`のtyped frame boundaryとnarrow host APIを確立。残る大きなrepository入口は責務とtriggerを明記してから分割する |
+| AI開発誘発 | A− | `RuntimeFrameHost`のtyped frame boundaryとnarrow host API、repositoryのbounded-context viewを確立。残る大きなkernelは責務とtriggerを明記している |
 
 ## 冗長性
 
@@ -50,9 +50,8 @@ Transitについては、Raftの回復判断を`transit::handoff`に残し、Shi
 - canonical NodeState checkpoint/delta capture/restore
 
 Open:
-1. **R-7 / #344** `SectorRepository`のbounded-context分割（Fix）
-2. **R-8 / #345** Market SQLの全状態reload/rewrite撤去（Fix）
-3. **R-9 / #346** FileJournal read/compactionのbounded-memory streaming（Fix）
+1. **R-8 / #345** Market SQLの全状態reload/rewrite撤去（Fix）
+2. **R-9 / #346** FileJournal read/compactionのbounded-memory streaming（Fix）
 
 Resolved in #336: the legacy EventStore/FileEventStore path is deleted. The
 DurableJournal is the sole persistent source of committed public facts, and
@@ -86,7 +85,9 @@ run only after the required projection completes.
 
 | ファイル | 行数 | 判定 |
 |---|---:|---|
-| `crates/dawn-sector/src/node/repositories.rs` | 2104 | 🔴 Admission / Identity / Station projectionのschema・codec・transaction・testsを一つの入口に集約。R-7でbounded-context分割をFix |
+| `crates/dawn-sector/src/node/repositories.rs` | 281 | 🟢 SQLite connection・schema初期化・shared codec・view/transaction生成だけを持つcomposition boundary。#344で分割済み |
+| `crates/dawn-sector/src/node/repositories/identity.rs` | 681 | 🟡 Identity / ResumeTicket / allocator / reconciliation。tests込みのprivate bounded-context owner |
+| `crates/dawn-sector/src/node/repositories/station_inventory.rs` | 645 | 🟡 Station projection / cursor / inventory read model。tests込みのprivate bounded-context owner |
 | `crates/dawn-sector/src/node/transit.rs` | 11 | 🟢 lifecycle / materializationを束ねる薄いprivate module root |
 | `crates/dawn-sector/src/node/transit/lifecycle.rs` | 512 | 🟢 source freeze / handoff snapshot / Ack cleanup。Saga policyとはprivate node state seamで接続 |
 | `crates/dawn-sector/src/node/transit/materialization.rs` | 134 | 🟢 live Commitのhandoff-to-ECS materialization kernel |
