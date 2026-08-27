@@ -9,8 +9,8 @@ func before_test() -> void:
 	_command = ClientCommand.new()
 
 
-func test_sector_builder_returns_typed_success_result() -> void:
-	var result: ClientCommandResult = _command.stop_command()
+func test_move_builder_returns_typed_success_result() -> void:
+	var result: ClientCommandResult = _command.move_command(1.0, 2.0, 3.0)
 
 	assert_bool(result.ok).is_true()
 	assert_bool(result.bytes.is_empty()).is_false()
@@ -18,20 +18,23 @@ func test_sector_builder_returns_typed_success_result() -> void:
 	assert_str(result.error_message).is_empty()
 
 
-func test_sector_builder_reports_invalid_input_without_a_byte_sentinel() -> void:
-	var result: ClientCommandResult = _command.lock_on_command(-1)
+func test_module_builders_return_typed_success_results() -> void:
+	var activate: ClientCommandResult = _command.activate_module_command(1, "High", -1)
+	var deactivate: ClientCommandResult = _command.deactivate_module_command(1, "High")
+
+	assert_bool(activate.ok).is_true()
+	assert_bool(activate.bytes.is_empty()).is_false()
+	assert_bool(deactivate.ok).is_true()
+	assert_bool(deactivate.bytes.is_empty()).is_false()
+
+
+func test_module_builder_reports_invalid_input_without_a_byte_sentinel() -> void:
+	var result: ClientCommandResult = _command.activate_module_command(1, "Invalid", -1)
 
 	assert_bool(result.ok).is_false()
 	assert_bool(result.bytes.is_empty()).is_true()
-	assert_str(result.error_code).is_equal("invalid_id")
+	assert_str(result.error_code).is_equal("invalid_slot_kind")
 	assert_bool(result.error_message.is_empty()).is_false()
-
-
-func test_station_warp_builder_returns_typed_success_result() -> void:
-	var result: ClientCommandResult = _command.warp_to_station_command(4)
-
-	assert_bool(result.ok).is_true()
-	assert_bool(result.bytes.is_empty()).is_false()
 
 
 func test_market_builders_are_dedicated_typed_methods() -> void:

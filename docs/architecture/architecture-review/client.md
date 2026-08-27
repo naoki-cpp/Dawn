@@ -125,7 +125,7 @@ navigation map cacheはSector内でwrite-onceに近いpresentation cacheとし�
 | `crates/dawn-client-core/src/hud.rs` | 553 | 🟢 engine-independent HUD read model・formatting・change decisions |
 | `crates/dawn-client-core/src/station_inventory.rs` | 758 | 🟢 engine-independent Station Inventory policy・typed request construction |
 | `crates/dawn-client-core/src/motion.rs` | 680 | 🟢 client motion/prediction kernel・tests |
-| `crates/dawn-client-gdext/src/client_command_gd.rs` | 572 | 🟢 typed request builder・入力検証・encode結果のGDExtension boundary |
+| `crates/dawn-client-gdext/src/client_command_gd.rs` | 279 | 🟢 remaining direct typed request builders・入力検証・encode結果のGDExtension boundary |
 | `crates/dawn-client-gdext/src/client_action_gd.rs` | 280 | 🟢 ClientAction/ClientInteractionの薄いGodot adapter |
 
 ## Issue登録簿
