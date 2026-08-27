@@ -22,8 +22,6 @@ mod client_admission;
 mod config;
 #[path = "sector-node/runtime.rs"]
 mod runtime;
-#[path = "../runtime_frame.rs"]
-mod runtime_frame;
 
 use dawn_core::{NodeId, SectorBounds, SectorId};
 use dawn_distributed::{
@@ -41,14 +39,52 @@ use dawn_sector::persistence::{
     recovery::apply_tail, CheckpointConfig, CheckpointScheduler, StateSnapshot,
 };
 use dawn_sector::{galaxy::Galaxy, game_data::GameDataCatalog};
+use dawn_server::runtime_frame::{OwnedRaftRuntimeConsensus, RuntimeFrameHost, RuntimeFramePolicy};
 use dawn_server::ws_server;
 use dawn_storage::{DurableJournal, FileJournal, JournalIndex, PublicEventIndex};
-use runtime_frame::{OwnedRaftRuntimeConsensus, RuntimeFrameHost, RuntimeFramePolicy};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::mpsc;
+
+#[cfg(test)]
+struct TestAdmissionHost<'a>(&'a mut SimulationNode);
+
+#[cfg(test)]
+impl dawn_server::runtime_frame::RuntimeClientAdmissionHost for TestAdmissionHost<'_> {
+    fn default_player_spawn_position(&self) -> dawn_core::Position {
+        self.0.default_player_spawn_position()
+    }
+
+    fn begin_client_admission(
+        &mut self,
+        intent: dawn_sector::client_admission::ClientAdmissionIntent,
+        aoi_cell_size: f64,
+    ) -> Result<
+        dawn_sector::client_admission::ClientAdmissionAttempt,
+        dawn_server::runtime_frame::RuntimeClientAdmissionError,
+    > {
+        self.0
+            .begin_client_admission(intent, aoi_cell_size)
+            .map_err(dawn_server::runtime_frame::RuntimeClientAdmissionError::Refused)
+    }
+
+    fn resolve_client_admission<T>(
+        &mut self,
+        attempt: dawn_sector::client_admission::ClientAdmissionAttempt,
+        result: Result<T, String>,
+    ) -> Result<
+        dawn_sector::client_admission_resolution::ClientAdmissionResolution<T, String>,
+        dawn_server::runtime_frame::RuntimeFrameHostError,
+    > {
+        Ok(
+            dawn_sector::client_admission_resolution::resolve_client_admission(
+                self.0, attempt, result,
+            ),
+        )
+    }
+}
 
 const AOI_CELL_SIZE: f64 = 30_000.0;
 const TICK_MS: u64 = 100;

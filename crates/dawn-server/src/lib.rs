@@ -16,4 +16,5 @@
 #![warn(missing_debug_implementations)]
 
 pub mod client_connection;
+pub mod runtime_frame;
 pub mod ws_server;

@@ -4,7 +4,6 @@
 //! promotion, while `dawn-sector::client_admission` owns the authoritative
 //! begin/commit/abort lifecycle and every rollback decision.
 
-use crate::runtime_frame::{RuntimeClientAdmissionError, RuntimeClientAdmissionHost};
 use dawn_core::SectorId;
 use dawn_sector::client_admission::{
     ClientAdmissionAttempt, ClientAdmissionIntent, ClientAdmissionRefusal, CommittedClientAdmission,
@@ -14,6 +13,7 @@ use dawn_sector::client_admission_resolution::resolve_client_admission;
 use dawn_sector::client_admission_resolution::ClientAdmissionResolution;
 #[cfg(test)]
 use dawn_sector::node::SimulationNode;
+use dawn_server::runtime_frame::{RuntimeClientAdmissionError, RuntimeClientAdmissionHost};
 use dawn_server::ws_server;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -271,7 +271,12 @@ mod tests {
             .expect("fresh attempt");
 
         assert_eq!(
-            finish_admission(&mut node, attempt, Ok::<_, String>(())).map(|(value, _)| value),
+            finish_admission(
+                &mut crate::TestAdmissionHost(&mut node),
+                attempt,
+                Ok::<_, String>(()),
+            )
+            .map(|(value, _)| value),
             Some(())
         );
         assert_eq!(node.ship_count(), 1);
@@ -291,7 +296,7 @@ mod tests {
 
         assert_eq!(
             finish_admission::<(), _>(
-                &mut node,
+                &mut crate::TestAdmissionHost(&mut node),
                 attempt,
                 Err("client disconnected while sending InitialState".to_string()),
             ),
@@ -357,7 +362,9 @@ mod tests {
             result.is_err(),
             "closed socket must fail the awaited handoff"
         );
-        assert!(finish_admission(&mut node, attempt, result).is_none());
+        assert!(
+            finish_admission(&mut crate::TestAdmissionHost(&mut node), attempt, result).is_none()
+        );
         assert_eq!(node.ship_count(), 0);
     }
 
@@ -388,7 +395,11 @@ mod tests {
             .expect("resume attempt");
 
         assert_eq!(
-            finish_admission::<(), _>(&mut node, attempt, Err("client disconnected".to_string()),),
+            finish_admission::<(), _>(
+                &mut crate::TestAdmissionHost(&mut node),
+                attempt,
+                Err("client disconnected".to_string()),
+            ),
             None
         );
         assert_eq!(node.ship_count(), 1);
@@ -424,7 +435,11 @@ mod tests {
             ready_sess_rx,
         };
 
-        admission.advance_handshakes(&mut node, SectorId(3), AOI_CELL_SIZE);
+        admission.advance_handshakes(
+            &mut crate::TestAdmissionHost(&mut node),
+            SectorId(3),
+            AOI_CELL_SIZE,
+        );
 
         assert_eq!(node.ship_count(), 0);
     }

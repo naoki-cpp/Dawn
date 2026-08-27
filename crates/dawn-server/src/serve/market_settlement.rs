@@ -324,9 +324,9 @@ fn owns_docked_ship(node: &SimulationNode, player_id: PlayerId, ship_id: ShipId)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runtime_frame::{RuntimeFrameHost, RuntimeFramePolicy};
     use dawn_core::{ClientRequest, DomainEvent, NodeId, SectorBounds, SectorId, StationId};
     use dawn_sector::transit::LocalRuntimeConsensus;
+    use dawn_server::runtime_frame::{RuntimeFrameHost, RuntimeFramePolicy};
     use dawn_storage::InMemoryJournal;
 
     /// Settlement identity used only to seed a fixture's starting cargo.
@@ -394,6 +394,31 @@ mod tests {
         ShipId,
     ) {
         let (node, ship_id) = node_with_docked_ship(player_id);
+        let host = RuntimeFrameHost::new(
+            node,
+            InMemoryJournal::new(),
+            LocalRuntimeConsensus,
+            RuntimeFramePolicy::local_durable(0),
+        );
+        (host, ship_id)
+    }
+
+    fn host_with_docked_ship_and_scrap(
+        player_id: PlayerId,
+        quantity: u64,
+    ) -> (
+        RuntimeFrameHost<InMemoryJournal, LocalRuntimeConsensus>,
+        ShipId,
+    ) {
+        let (mut node, ship_id) = node_with_docked_ship(player_id);
+        assert!(node.credit_item_owned(CreditItemCommand {
+            player_id,
+            ship_id,
+            item_id: ItemId::ScrapMetal,
+            quantity,
+            settlement_id: SEED_SETTLEMENT_ID,
+        }));
+        let _ = node.drain_pending_events();
         let host = RuntimeFrameHost::new(
             node,
             InMemoryJournal::new(),
@@ -581,18 +606,7 @@ mod tests {
         // applied synchronously outside of a tick boundary.
         let mut db = MarketDb::open_in_memory().unwrap();
         let seller = PlayerId(1);
-        let (mut host, seller_ship) = host_with_docked_ship(seller);
-        host.test_credit_item(CreditItemCommand {
-            player_id: seller,
-            ship_id: seller_ship,
-            item_id: ItemId::ScrapMetal,
-            quantity: 5,
-            settlement_id: SEED_SETTLEMENT_ID,
-        })
-        .expect("in-memory market test host must remain writable");
-        let _ = host
-            .drain_pending_events()
-            .expect("in-memory market test host must remain writable");
+        let (mut host, seller_ship) = host_with_docked_ship_and_scrap(seller, 5);
 
         MarketSettlement::place(&mut db, seller, order(seller_ship, OrderSide::Ask, 5));
         let queued = MarketSettlement::drain_pending_inputs(&mut db, host.node());
@@ -653,18 +667,7 @@ mod tests {
         let mut db = MarketDb::open_in_memory().unwrap();
         let seller = PlayerId(1);
         let buyer = PlayerId(2);
-        let (mut host, seller_ship) = host_with_docked_ship(seller);
-        host.test_credit_item(CreditItemCommand {
-            player_id: seller,
-            ship_id: seller_ship,
-            item_id: ItemId::ScrapMetal,
-            quantity: 2,
-            settlement_id: SEED_SETTLEMENT_ID,
-        })
-        .expect("in-memory market test host must remain writable");
-        let _ = host
-            .drain_pending_events()
-            .expect("in-memory market test host must remain writable");
+        let (mut host, seller_ship) = host_with_docked_ship_and_scrap(seller, 2);
 
         // The seller's Ask reserves cargo through the real drain/apply/ack
         // cycle, one tick's worth at a time.

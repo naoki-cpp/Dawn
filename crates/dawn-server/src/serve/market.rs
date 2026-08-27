@@ -17,8 +17,8 @@ use dawn_sector::node::SimulationNode;
 use super::market_settlement::{
     MarketSettlement, ParsedOrder, QueuedSettlement, SettlementAcknowledgement,
 };
-use crate::runtime_frame::RuntimeNodeView;
 use dawn_sector::transition::MarketSettlementOutcome;
+use dawn_server::runtime_frame::RuntimeNodeView;
 
 const MAX_MARKET_ORDERS: usize = 200;
 /// SQLite persists Market numeric fields as signed 64-bit INTEGER values.

@@ -6,12 +6,12 @@
 //! session loop, Sector routing, and the orphan-rule sink adapter for
 //! `ws_server::PlayerSession`.
 
-use crate::runtime_frame::RuntimeNodeView;
 use crate::ws_server;
 use dawn_core::{DomainEvent, PlayerId, ShipId};
 use dawn_sector::aoi::{AoiMessage, AoiSink, Observer};
 use dawn_sector::aoi_frame::{deliver_sector_sessions, AoiFrame, AoiSessionCallbacks};
 use dawn_sector::node::SimulationNode;
+use dawn_server::runtime_frame::RuntimeNodeView;
 use std::collections::{HashMap, HashSet};
 
 pub(crate) struct AoiDelivery {

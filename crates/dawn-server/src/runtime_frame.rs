@@ -3,12 +3,6 @@
 //! This module owns the mutable Sector state and the prepare -> durable ->
 //! live-apply boundary. Server entry points only collect deployment-specific
 //! inputs and consume the typed output returned by [`RuntimeFrameHost`].
-// The source is compiled into both executable roots; each root uses a
-// different subset of the shared host helpers.
-#![allow(dead_code)]
-
-#[cfg(test)]
-use dawn_core::CreditItemCommand;
 use dawn_core::{
     DomainEvent, JumpGateId, PlayerId, Position, SectorId, ShipId, ShipTypeId, Velocity,
 };
@@ -32,16 +26,14 @@ use std::fmt;
 use tokio::sync::mpsc;
 
 /// Owned Raft adapter used by a long-lived one-Sector Host.
-pub(crate) struct OwnedRaftRuntimeConsensus {
+pub struct OwnedRaftRuntimeConsensus {
     raft: RaftActorHandle,
     committed_rx: mpsc::UnboundedReceiver<Vec<u8>>,
 }
 
 impl OwnedRaftRuntimeConsensus {
-    pub(crate) fn new(
-        raft: RaftActorHandle,
-        committed_rx: mpsc::UnboundedReceiver<Vec<u8>>,
-    ) -> Self {
+    /// Bind a Raft actor to the committed-entry receiver owned by this host.
+    pub fn new(raft: RaftActorHandle, committed_rx: mpsc::UnboundedReceiver<Vec<u8>>) -> Self {
         Self { raft, committed_rx }
     }
 
@@ -52,6 +44,14 @@ impl OwnedRaftRuntimeConsensus {
            + 'static {
         let raft = self.raft.clone();
         async move { raft.role().await }
+    }
+}
+
+impl fmt::Debug for OwnedRaftRuntimeConsensus {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("OwnedRaftRuntimeConsensus")
+            .finish_non_exhaustive()
     }
 }
 
@@ -75,15 +75,16 @@ impl RuntimeConsensus for OwnedRaftRuntimeConsensus {
 
 /// Immutable policy selected by the server composition root for one Sector.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct RuntimeFramePolicy<P = LocalRuntimeDurabilityPolicy> {
-    pub(crate) owner_epoch: u64,
-    pub(crate) durability: DurabilityMode,
-    pub(crate) profile: RuntimeDurabilityProfile,
+pub struct RuntimeFramePolicy<P = LocalRuntimeDurabilityPolicy> {
+    owner_epoch: u64,
+    durability: DurabilityMode,
+    profile: RuntimeDurabilityProfile,
     durability_policy: P,
 }
 
 impl RuntimeFramePolicy<LocalRuntimeDurabilityPolicy> {
-    pub(crate) const fn local_durable(owner_epoch: u64) -> Self {
+    /// Select synchronized local durability for one owner epoch.
+    pub const fn local_durable(owner_epoch: u64) -> Self {
         Self::new(
             owner_epoch,
             DurabilityMode::Synced,
@@ -94,7 +95,7 @@ impl RuntimeFramePolicy<LocalRuntimeDurabilityPolicy> {
 }
 
 impl<P> RuntimeFramePolicy<P> {
-    pub(crate) const fn new(
+    const fn new(
         owner_epoch: u64,
         durability: DurabilityMode,
         profile: RuntimeDurabilityProfile,
@@ -110,7 +111,7 @@ impl<P> RuntimeFramePolicy<P> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum RuntimeFramePhase {
+enum RuntimeFramePhase {
     Bootstrapping,
     Running,
     Fenced,
@@ -118,9 +119,12 @@ pub(crate) enum RuntimeFramePhase {
 
 /// Errors that cross the runtime-host boundary.
 #[derive(Debug)]
-pub(crate) enum RuntimeFrameHostError {
+pub enum RuntimeFrameHostError {
+    /// A fixture or genesis mutation was attempted after frame processing began.
     BootstrapClosed,
+    /// The host rejected mutation after an authoritative frame failure.
     Fenced,
+    /// The durable runtime transition failed.
     Tick(dawn_sector::transit::TickTransitionError),
 }
 
@@ -153,8 +157,10 @@ impl std::error::Error for RuntimeFrameHostError {
 
 /// Failure to begin admission through a runtime-owned Sector.
 #[derive(Debug)]
-pub(crate) enum RuntimeClientAdmissionError {
+pub enum RuntimeClientAdmissionError {
+    /// The runtime host could not safely accept admission work.
     Host(RuntimeFrameHostError),
+    /// Sector admission policy refused the requested identity or ship.
     Refused(ClientAdmissionRefusal),
 }
 
@@ -188,7 +194,7 @@ impl From<dawn_sector::transit::TickTransitionError> for RuntimeFrameHostError {
 /// several hosts, but it must use typed outputs and handoff operations rather
 /// than retaining a mutable borrow across frame boundaries. Admission and
 /// checkpoint access are narrow typed operations guarded by the host phase.
-pub(crate) struct RuntimeFrameHost<J, C, P = LocalRuntimeDurabilityPolicy> {
+pub struct RuntimeFrameHost<J, C, P = LocalRuntimeDurabilityPolicy> {
     node: SimulationNode,
     journal: J,
     consensus: C,
@@ -197,49 +203,41 @@ pub(crate) struct RuntimeFrameHost<J, C, P = LocalRuntimeDurabilityPolicy> {
     phase: RuntimeFramePhase,
 }
 
-pub(crate) trait RuntimeNodeView {
+impl<J, C, P> fmt::Debug for RuntimeFrameHost<J, C, P> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RuntimeFrameHost")
+            .field("node_id", &self.node.node_id())
+            .field("sector_id", &self.node.sector_id())
+            .field("phase", &self.phase)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Read-only access required by server presentation and routing adapters.
+pub trait RuntimeNodeView {
+    /// Return the authoritative Sector node without exposing mutable access.
     fn runtime_node(&self) -> &SimulationNode;
 }
 
 /// Narrow admission port used by the socket adapter. Admission owns a durable
 /// protocol repository, while this port owns the Sector-specific validation
 /// and materialisation calls without exposing arbitrary node mutation.
-pub(crate) trait RuntimeClientAdmissionHost {
+pub trait RuntimeClientAdmissionHost {
+    /// Return the topology-derived spawn point for a fresh player.
     fn default_player_spawn_position(&self) -> Position;
+    /// Validate and reserve one client admission attempt.
     fn begin_client_admission(
         &mut self,
         intent: ClientAdmissionIntent,
         aoi_cell_size: f64,
     ) -> Result<ClientAdmissionAttempt, RuntimeClientAdmissionError>;
+    /// Commit or abort an admission after its asynchronous handoff completes.
     fn resolve_client_admission<T>(
         &mut self,
         attempt: ClientAdmissionAttempt,
         result: Result<T, String>,
     ) -> Result<ClientAdmissionResolution<T, String>, RuntimeFrameHostError>;
-}
-
-#[cfg(test)]
-impl RuntimeClientAdmissionHost for SimulationNode {
-    fn default_player_spawn_position(&self) -> Position {
-        SimulationNode::default_player_spawn_position(self)
-    }
-
-    fn begin_client_admission(
-        &mut self,
-        intent: ClientAdmissionIntent,
-        aoi_cell_size: f64,
-    ) -> Result<ClientAdmissionAttempt, RuntimeClientAdmissionError> {
-        SimulationNode::begin_client_admission(self, intent, aoi_cell_size)
-            .map_err(RuntimeClientAdmissionError::Refused)
-    }
-
-    fn resolve_client_admission<T>(
-        &mut self,
-        attempt: ClientAdmissionAttempt,
-        result: Result<T, String>,
-    ) -> Result<ClientAdmissionResolution<T, String>, RuntimeFrameHostError> {
-        Ok(resolve_client_admission(self, attempt, result))
-    }
 }
 
 impl RuntimeNodeView for SimulationNode {
@@ -292,7 +290,8 @@ where
     C: RuntimeConsensus,
     P: RuntimeDurabilityPolicy,
 {
-    pub(crate) fn new(
+    /// Assemble one Sector from its authoritative node and deployment adapters.
+    pub fn new(
         node: SimulationNode,
         journal: J,
         consensus: C,
@@ -308,21 +307,24 @@ where
         }
     }
 
-    pub(crate) fn node(&self) -> &SimulationNode {
+    /// Return the owned Sector node for read-only routing and presentation.
+    pub fn node(&self) -> &SimulationNode {
         &self.node
     }
 
-    pub(crate) fn phase(&self) -> RuntimeFramePhase {
+    #[cfg(test)]
+    fn phase(&self) -> RuntimeFramePhase {
         self.phase
     }
 
-    pub(crate) fn health(&self) -> &RuntimeHealth {
+    #[cfg(test)]
+    fn health(&self) -> &RuntimeHealth {
         &self.health
     }
 
-    pub(crate) fn mark_recovered(&mut self) {
-        self.health.mark_recovered();
-        self.phase = RuntimeFramePhase::Running;
+    /// Whether this host has fenced itself after a failed authoritative frame.
+    pub fn is_fenced(&self) -> bool {
+        self.phase == RuntimeFramePhase::Fenced
     }
 
     fn ensure_mutation_available(&self) -> Result<(), RuntimeFrameHostError> {
@@ -343,7 +345,8 @@ where
     }
 
     /// Create initial world state before this host starts processing frames.
-    pub(crate) fn bootstrap_ship(
+    #[cfg(test)]
+    fn bootstrap_ship(
         &mut self,
         ship_type_id: ShipTypeId,
         position: Position,
@@ -353,9 +356,8 @@ where
         Ok(self.node.spawn_ship(ship_type_id, position, velocity))
     }
 
-    pub(crate) fn drain_pending_events(
-        &mut self,
-    ) -> Result<Vec<DomainEvent>, RuntimeFrameHostError> {
+    /// Drain bootstrap events while respecting the host fencing gate.
+    pub fn drain_pending_events(&mut self) -> Result<Vec<DomainEvent>, RuntimeFrameHostError> {
         self.ensure_mutation_available()?;
         Ok(self.node.drain_pending_events())
     }
@@ -364,14 +366,14 @@ where
     ///
     /// Fixture/composition-root use only (initial server population), not a
     /// per-tick operation.
-    pub(crate) fn spawn_npc_frigates(&mut self, count: usize) -> Result<(), RuntimeFrameHostError> {
+    pub fn spawn_npc_frigates(&mut self, count: usize) -> Result<(), RuntimeFrameHostError> {
         self.ensure_bootstrapping()?;
         self.node.spawn_npc_frigates(count);
         Ok(())
     }
 
     /// Spawn a duel-mode Bot ship and its owning player identity.
-    pub(crate) fn spawn_bot_ship(
+    pub fn spawn_bot_ship(
         &mut self,
         position: Position,
     ) -> Result<(PlayerId, ShipId), RuntimeFrameHostError> {
@@ -380,7 +382,7 @@ where
     }
 
     /// The Sector's topology-derived default spawn point for a fresh player.
-    pub(crate) fn default_player_spawn_position(&self) -> Position {
+    pub fn default_player_spawn_position(&self) -> Position {
         self.node.default_player_spawn_position()
     }
 
@@ -391,7 +393,7 @@ where
     /// `dawn_sector::node::admission_provisional`), independent of the tick
     /// pipeline, so this narrow bridge is admission's typed entry point
     /// rather than a correctness gap.
-    pub(crate) fn begin_client_admission(
+    pub fn begin_client_admission(
         &mut self,
         intent: ClientAdmissionIntent,
         aoi_cell_size: f64,
@@ -403,7 +405,8 @@ where
             .map_err(RuntimeClientAdmissionError::Refused)
     }
 
-    pub(crate) fn resolve_client_admission<T>(
+    /// Commit or abort an admission after its asynchronous handoff completes.
+    pub fn resolve_client_admission<T>(
         &mut self,
         attempt: ClientAdmissionAttempt,
         result: Result<T, String>,
@@ -415,7 +418,7 @@ where
     /// Adopt a ship that just jumped into this Sector under `player_id`'s
     /// ownership. Returns `false` if the ship is not (yet) present in this
     /// Sector's ECS.
-    pub(crate) fn adopt_player_ship(
+    pub fn adopt_player_ship(
         &mut self,
         ship_id: ShipId,
         player_id: PlayerId,
@@ -428,7 +431,7 @@ where
     /// setup (test/demo actor callers of `SectorRuntimeDriver`). Production
     /// runtime mutations must enter through `run_frame` once a frame has
     /// started; this is not that path.
-    pub(crate) fn spawn_fixture_ship(
+    pub fn spawn_fixture_ship(
         &mut self,
         ship_type_id: ShipTypeId,
         position: Position,
@@ -438,19 +441,9 @@ where
         Ok(self.node.spawn_ship(ship_type_id, position, velocity))
     }
 
-    /// Seed inventory for a runtime fixture before the first frame.
-    #[cfg(test)]
-    pub(crate) fn test_credit_item(
-        &mut self,
-        command: CreditItemCommand,
-    ) -> Result<bool, RuntimeFrameHostError> {
-        self.ensure_bootstrapping()?;
-        Ok(self.node.credit_item_owned(command))
-    }
-
     /// Propose a validated cross-Sector request through the owned consensus
     /// adapter. Callers do the admission check; the Host owns the proposal.
-    pub(crate) fn propose_transit_request(
+    pub fn propose_transit_request(
         &mut self,
         ship_id: ShipId,
         to: SectorId,
@@ -468,7 +461,7 @@ where
     /// Take and publish a checkpoint through the explicit node/journal
     /// boundary. The scheduler never receives a closure that can mutate an
     /// arbitrary runtime state.
-    pub(crate) fn checkpoint(
+    pub fn checkpoint(
         &mut self,
         scheduler: &mut CheckpointScheduler,
         public_event_next_index: dawn_storage::PublicEventIndex,
@@ -482,7 +475,7 @@ where
     }
 
     /// Run exactly one authoritative frame for this Sector.
-    pub(crate) fn run_frame(
+    pub fn run_frame(
         &mut self,
         input: dawn_sector::transition::FrameInput<'_>,
     ) -> Result<RuntimeTickOutput, RuntimeFrameHostError> {
@@ -495,7 +488,7 @@ where
     /// clock, so publication cannot be mistaken for an acknowledged frame.
     /// `after_commit`'s `TickResult` carries `market_settlement_outcomes` for
     /// any settlement admitted through `input` (issue #315).
-    pub(crate) fn run_frame_with_output<F>(
+    pub fn run_frame_with_output<F>(
         &mut self,
         input: dawn_sector::transition::FrameInput<'_>,
         after_commit: F,
@@ -575,7 +568,8 @@ impl<J> RuntimeFrameHost<J, OwnedRaftRuntimeConsensus>
 where
     J: DurableJournal,
 {
-    pub(crate) fn raft_role(
+    /// Query the owned Raft actor without exposing its mailbox.
+    pub fn raft_role(
         &self,
     ) -> impl std::future::Future<Output = (dawn_distributed::Role, dawn_distributed::Term)>
            + Send

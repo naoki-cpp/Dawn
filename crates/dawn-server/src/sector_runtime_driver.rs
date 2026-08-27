@@ -26,7 +26,7 @@ use dawn_sector::node::SimulationNode;
 use dawn_storage::InMemoryJournal;
 use tokio::sync::{mpsc, oneshot};
 
-use crate::runtime_frame::{
+use dawn_server::runtime_frame::{
     OwnedRaftRuntimeConsensus, RuntimeFrameHost, RuntimeFrameHostError, RuntimeFramePolicy,
 };
 
