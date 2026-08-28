@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-use dawn_core::ModuleKind;
+use dawn_core::{ModuleId, ModuleKind};
 
 /// One row of `PlayerLoadout`'s `modules` array (a fitted module slot).
 /// Mirrors the shape `player_loadout_projection.rs::build_player_loadout_json`
@@ -9,7 +9,7 @@ use dawn_core::ModuleKind;
 pub struct ModuleRow {
     pub slot: String,
     pub index: u32,
-    pub module_id: u32,
+    pub module_id: ModuleId,
     pub name: String,
     pub kind: ModuleKind,
     pub is_active: bool,
@@ -71,7 +71,7 @@ mod tests {
             }
         }"#;
         let row: ModuleRow = serde_json::from_str(json).unwrap();
-        assert_eq!(row.module_id, 7);
+        assert_eq!(row.module_id, ModuleId(7));
         assert_eq!(row.kind, ModuleKind::Weapon);
         assert_eq!(row.stat_delta.weapon_range_add, 5000.0);
         // Client-only runtime fields are never read from the wire.

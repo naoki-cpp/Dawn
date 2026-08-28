@@ -22,6 +22,8 @@ use dawn_client_core::{
 };
 use godot::prelude::*;
 
+use crate::id_boundary::ship_id_to_godot;
+
 /// A Jump Gate's navigation record (`InitialState`'s gate list).
 #[derive(GodotClass)]
 #[class(init, base=RefCounted)]
@@ -41,7 +43,7 @@ pub struct GateRecord {
 impl GateRecord {
     pub(crate) fn wrap(gate: &CoreGate) -> Gd<Self> {
         Gd::from_init_fn(|_base| Self {
-            gate_id: gate.gate_id,
+            gate_id: i64::from(gate.gate_id.0),
             position: PackedFloat64Array::from(gate.position),
             activation_radius: gate.activation_radius,
             to_system_name: (&gate.to_system_name).into(),
@@ -69,7 +71,7 @@ pub struct StationRecord {
 impl StationRecord {
     pub(crate) fn wrap(station: &CoreStation) -> Gd<Self> {
         Gd::from_init_fn(|_base| Self {
-            station_id: station.station_id,
+            station_id: i64::from(station.station_id.0),
             name: (&station.name).into(),
             position: PackedFloat64Array::from(station.position),
             docking_radius: station.docking_radius,
@@ -101,7 +103,7 @@ pub struct CelestialBodyRecord {
 impl CelestialBodyRecord {
     pub(crate) fn wrap(body: &CoreCelestialBody) -> Gd<Self> {
         Gd::from_init_fn(|_base| Self {
-            body_id: body.body_id,
+            body_id: i64::from(body.body_id.0),
             kind: (&body.kind).into(),
             name: (&body.name).into(),
             position: PackedFloat64Array::from(body.position),
@@ -127,7 +129,7 @@ pub struct BuildableShipType {
 impl BuildableShipType {
     pub(crate) fn wrap(ship: &CoreBuildableShipType) -> Gd<Self> {
         Gd::from_init_fn(|_base| Self {
-            ship_type_id: ship.ship_type_id,
+            ship_type_id: i64::from(ship.ship_type_id.0),
             name: (&ship.name).into(),
         })
     }
@@ -161,9 +163,9 @@ pub struct ShipHealth {
 }
 
 impl ShipHealth {
-    pub(crate) fn wrap(ship_id: i64, health: HealthState) -> Gd<Self> {
+    pub(crate) fn wrap(ship_id: Option<dawn_core::ShipId>, health: HealthState) -> Gd<Self> {
         Gd::from_init_fn(|_base| Self {
-            ship_id,
+            ship_id: ship_id.map(ship_id_to_godot).unwrap_or(-1),
             shield: health.shield,
             armor: health.armor,
             hull: health.hull,

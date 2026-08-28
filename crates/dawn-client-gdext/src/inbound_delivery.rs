@@ -4,6 +4,7 @@
 //! world messages it converts to a typed client fact and commits state before
 //! invoking one final handler; presentation-only messages are delivered once.
 
+use crate::id_boundary::{ship_id_from_godot, ship_id_from_wire};
 use crate::loadout_gd::{wire_to_loadout_msg, PlayerLoadout};
 use crate::presentation_gd::{
     godot_i64, position_components, velocity_components, InitialStatePresentation, MarketSnapshot,
@@ -16,6 +17,9 @@ use dawn_client_core::{
     PositionInput, ShipInput, ShipLeaveReason, ShipRegistration, StationInput, SystemNameInput,
     WorldSessionEffect,
 };
+use dawn_core::{
+    CelestialBodyId, JumpGateId, ModuleId, ShipId, ShipTypeId, StarSystemId, StationId,
+};
 use dawn_protocol::{InitialStateWire, ServerFact, ServerMessage, ShipStateWire};
 use godot::prelude::*;
 
@@ -27,6 +31,7 @@ pub(crate) fn dispatch(
     mut loadout: Gd<PlayerLoadout>,
     connection_ship_id: i64,
 ) -> bool {
+    let connection_ship_id = ship_id_from_godot(connection_ship_id);
     match message {
         ServerMessage::Welcome {
             player_id,
@@ -62,8 +67,8 @@ pub(crate) fn dispatch(
                 &mut session,
                 &mut loadout,
                 ClientFact::ModuleActivation {
-                    ship_id: godot_i64(*ship_id),
-                    module_id: *module_id,
+                    ship_id: ship_id_from_wire(*ship_id),
+                    module_id: ModuleId(*module_id),
                     active: true,
                     forced_reason: String::new(),
                 },
@@ -86,8 +91,8 @@ pub(crate) fn dispatch(
                 &mut session,
                 &mut loadout,
                 ClientFact::ModuleActivation {
-                    ship_id: godot_i64(*ship_id),
-                    module_id: *module_id,
+                    ship_id: ship_id_from_wire(*ship_id),
+                    module_id: ModuleId(*module_id),
                     active: false,
                     forced_reason: reason.to_owned(),
                 },
@@ -119,6 +124,9 @@ pub(crate) fn dispatch(
             call_world(&mut world_target, "_on_player_fitting", vslice![])
         }
         ServerMessage::InitialState(state) => {
+            let Some(connection_ship_id) = connection_ship_id else {
+                return false;
+            };
             apply_fact(
                 &mut session,
                 &mut loadout,
@@ -131,6 +139,9 @@ pub(crate) fn dispatch(
             )
         }
         ServerMessage::AoiEnter(ship) => {
+            let Some(connection_ship_id) = connection_ship_id else {
+                return false;
+            };
             let effect = apply_fact(
                 &mut session,
                 &mut loadout,
@@ -151,7 +162,7 @@ pub(crate) fn dispatch(
                 &mut session,
                 &mut loadout,
                 ClientFact::ShipLeft {
-                    ship_id: godot_i64(*ship_id),
+                    ship_id: ship_id_from_wire(*ship_id),
                     reason: ShipLeaveReason::AreaOfInterest,
                 },
             );
@@ -214,18 +225,21 @@ fn dispatch_server_fact(
     session: &mut Gd<WorldSession>,
     loadout: &mut Gd<PlayerLoadout>,
     fact: &ServerFact,
-    connection_ship_id: i64,
+    connection_ship_id: Option<ShipId>,
     target: &mut Gd<Object>,
 ) -> bool {
     match fact {
         ServerFact::ShipSpawned {
             ship_id, position, ..
         } => {
+            let Some(connection_ship_id) = connection_ship_id else {
+                return false;
+            };
             let effect = apply_fact(
                 session,
                 loadout,
                 ClientFact::ShipSpawned {
-                    ship_id: godot_i64(*ship_id),
+                    ship_id: ship_id_from_wire(*ship_id),
                     connection_ship_id,
                 },
             );
@@ -268,7 +282,7 @@ fn dispatch_server_fact(
                 session,
                 loadout,
                 ClientFact::ShipLeft {
-                    ship_id: godot_i64(*ship_id),
+                    ship_id: ship_id_from_wire(*ship_id),
                     reason: ShipLeaveReason::Despawn,
                 },
             );
@@ -287,8 +301,8 @@ fn dispatch_server_fact(
                 session,
                 loadout,
                 ClientFact::Docked {
-                    ship_id: godot_i64(*ship_id),
-                    station_id: i64::from(*station_id),
+                    ship_id: ship_id_from_wire(*ship_id),
+                    station_id: StationId(*station_id),
                     tick: godot_i64(*tick),
                 },
             );
@@ -312,7 +326,7 @@ fn dispatch_server_fact(
                 session,
                 loadout,
                 ClientFact::Undocked {
-                    ship_id: godot_i64(*ship_id),
+                    ship_id: ship_id_from_wire(*ship_id),
                     tick: godot_i64(*tick),
                 },
             );
@@ -342,7 +356,7 @@ fn dispatch_server_fact(
                 session,
                 loadout,
                 ClientFact::HealthChanged {
-                    ship_id: godot_i64(*ship_id),
+                    ship_id: ship_id_from_wire(*ship_id),
                     shield: f64::from(*current_shield),
                     armor: f64::from(*current_armor),
                     hull: f64::from(*current_hull),
@@ -361,7 +375,7 @@ fn dispatch_server_fact(
                 session,
                 loadout,
                 ClientFact::HealthChanged {
-                    ship_id: godot_i64(*ship_id),
+                    ship_id: ship_id_from_wire(*ship_id),
                     shield: f64::from(*current_shield),
                     armor: f64::from(*current_armor),
                     hull: f64::from(*current_hull),
@@ -378,7 +392,7 @@ fn dispatch_server_fact(
                 session,
                 loadout,
                 ClientFact::ShipDestroyed {
-                    ship_id: godot_i64(*ship_id),
+                    ship_id: ship_id_from_wire(*ship_id),
                 },
             );
             let WorldSessionEffect::ShipDestroyed(outcome) = effect else {
@@ -399,8 +413,8 @@ fn dispatch_server_fact(
                 session,
                 loadout,
                 ClientFact::TargetLocked {
-                    locker_id: godot_i64(*locker_id),
-                    target_id: godot_i64(*target_id),
+                    locker_id: ship_id_from_wire(*locker_id),
+                    target_id: ship_id_from_wire(*target_id),
                 },
             );
             call_world(
@@ -422,8 +436,8 @@ fn dispatch_server_fact(
                 session,
                 loadout,
                 ClientFact::LockLost {
-                    locker_id: godot_i64(*locker_id),
-                    target_id: godot_i64(*target_id),
+                    locker_id: ship_id_from_wire(*locker_id),
+                    target_id: ship_id_from_wire(*target_id),
                 },
             );
             call_world(
@@ -465,8 +479,8 @@ fn dispatch_server_fact(
                 session,
                 loadout,
                 ClientFact::SystemChanged {
-                    ship_id: godot_i64(*ship_id),
-                    to_system: i64::from(*to_system),
+                    ship_id: ship_id_from_wire(*ship_id),
+                    to_system: StarSystemId(*to_system),
                 },
             );
             let name = system_effect(effect)
@@ -493,7 +507,7 @@ fn apply_fact(
         .expect("validated server facts must fit the client state")
 }
 
-fn initial_state_fact(state: &InitialStateWire, connection_ship_id: i64) -> ClientFact {
+fn initial_state_fact(state: &InitialStateWire, connection_ship_id: ShipId) -> ClientFact {
     ClientFact::InitialState {
         navigation: NavigationInput {
             system_name: state.system_name.clone(),
@@ -501,7 +515,7 @@ fn initial_state_fact(state: &InitialStateWire, connection_ship_id: i64) -> Clie
                 .systems
                 .iter()
                 .map(|system| SystemNameInput {
-                    id: i64::from(system.id),
+                    id: StarSystemId(system.id),
                     name: system.name.clone(),
                 })
                 .collect(),
@@ -509,7 +523,7 @@ fn initial_state_fact(state: &InitialStateWire, connection_ship_id: i64) -> Clie
                 .jump_gates
                 .iter()
                 .map(|gate| GateInput {
-                    gate_id: i64::from(gate.gate_id),
+                    gate_id: JumpGateId(gate.gate_id),
                     position: position_input(gate.position),
                     activation_radius: gate.activation_radius,
                     to_system_name: gate.to_system_name.clone(),
@@ -519,7 +533,7 @@ fn initial_state_fact(state: &InitialStateWire, connection_ship_id: i64) -> Clie
                 .stations
                 .iter()
                 .map(|station| StationInput {
-                    station_id: i64::from(station.station_id),
+                    station_id: StationId(station.station_id),
                     name: station.name.clone(),
                     position: position_input(station.position),
                     docking_radius: station.docking_radius,
@@ -529,7 +543,7 @@ fn initial_state_fact(state: &InitialStateWire, connection_ship_id: i64) -> Clie
                 .celestial_bodies
                 .iter()
                 .map(|body| CelestialBodyInput {
-                    id: i64::from(body.id),
+                    id: CelestialBodyId(body.id),
                     kind: format!("{:?}", body.kind),
                     name: body.name.clone(),
                     position: position_input(body.position),
@@ -541,7 +555,7 @@ fn initial_state_fact(state: &InitialStateWire, connection_ship_id: i64) -> Clie
                 .buildable_ship_types
                 .iter()
                 .map(|ship| BuildableShipTypeInput {
-                    ship_type_id: i64::from(ship.ship_type_id),
+                    ship_type_id: ShipTypeId(ship.ship_type_id),
                     name: ship.name.clone(),
                 })
                 .collect(),
@@ -553,7 +567,7 @@ fn initial_state_fact(state: &InitialStateWire, connection_ship_id: i64) -> Clie
 
 fn ship_registration(ship: &ShipStateWire) -> ShipRegistration {
     ShipRegistration {
-        ship_id: godot_i64(ship.ship_id),
+        ship_id: ship_id_from_wire(ship.ship_id),
         ship: ShipInput {
             is_player: ship.is_player,
             ship_type_name: ship.ship_type_name.clone(),
@@ -624,4 +638,15 @@ fn ensure_handler(target: &mut Gd<Object>, method: &str) -> bool {
         godot_warn!("typed ServerMessage dispatch target is missing method '{method}'");
     }
     exists
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn negative_godot_connection_ship_ids_are_rejected() {
+        assert_eq!(ship_id_from_godot(-1), None);
+        assert_eq!(ship_id_from_godot(-42), None);
+    }
 }

@@ -1,5 +1,6 @@
+use crate::id_boundary::ship_id_from_godot;
 use crate::item_identity_gd::ItemIdentity;
-use dawn_core::{ClientRequest, EntityId, ModuleId, Position, ShipId, SlotKind};
+use dawn_core::{ClientRequest, ModuleId, Position, ShipId, SlotKind};
 use dawn_protocol::{
     ClientMessage, HelloMessage, ItemWire, MarketCommandWire, MarketOrderSide, ResumeTicket,
 };
@@ -94,10 +95,10 @@ fn market_result(command: Result<MarketCommandWire, RequestBuildError>) -> Gd<Cl
     }
 }
 
-fn ship_id(value: i64, field: &str) -> Result<ShipId, RequestBuildError> {
-    u64::try_from(value)
-        .map(|value| ShipId(EntityId::from_raw(value)))
-        .map_err(|_| RequestBuildError::new("invalid_id", format!("{field} must be non-negative")))
+fn required_ship_id_from_godot(value: i64, field: &str) -> Result<ShipId, RequestBuildError> {
+    ship_id_from_godot(value).ok_or_else(|| {
+        RequestBuildError::new("invalid_id", format!("{field} must be non-negative"))
+    })
 }
 
 fn nonzero_u32_id(value: i64, field: &str) -> Result<u32, RequestBuildError> {
@@ -174,7 +175,10 @@ impl ClientCommand {
             let target = if target_ship_id < 0 {
                 None
             } else {
-                Some(ship_id(target_ship_id, "target_ship_id")?)
+                Some(required_ship_id_from_godot(
+                    target_ship_id,
+                    "target_ship_id",
+                )?)
             };
             Ok(ClientRequest::ActivateModule {
                 module: ModuleId(nonzero_u32_id(module_id, "module_id")?),
@@ -262,7 +266,8 @@ mod tests {
     #[test]
     fn invalid_sector_builder_returns_structured_error_not_empty_bytes() {
         let result = request_build_bytes(
-            ship_id(-1, "ship_id").map(|ship| ClientRequest::SelectActiveShip { ship }),
+            required_ship_id_from_godot(-1, "ship_id")
+                .map(|ship| ClientRequest::SelectActiveShip { ship }),
         );
         let error = result.expect_err("negative IDs must be rejected");
         assert_eq!(error.code, "invalid_id");

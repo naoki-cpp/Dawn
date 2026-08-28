@@ -14,6 +14,7 @@
 //!
 //! ```
 //! use dawn_client_core::PlayerLoadoutMsg;
+//! use dawn_core::{NodeId, ShipId};
 //!
 //! let json = r#"{
 //!     "tick": 42,
@@ -29,7 +30,7 @@
 //!
 //! let loadout: PlayerLoadoutMsg = serde_json::from_str(json).unwrap();
 //! assert!(!loadout.is_docked());
-//! assert_eq!(loadout.active_ship_id, Some(7));
+//! assert_eq!(loadout.active_ship_id, Some(ShipId::new(NodeId(0), 7)));
 //! ```
 
 mod client_action;

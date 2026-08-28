@@ -2,6 +2,8 @@
 
 use std::fmt;
 
+use dawn_core::{ModuleId, ShipId, StarSystemId, StationId};
+
 use crate::{
     NavigationInput, PlayerLoadoutMsg, ShipRegistration, WorldSessionEffect, WorldSessionState,
 };
@@ -21,57 +23,57 @@ pub enum ClientFact {
     InitialState {
         navigation: NavigationInput,
         ships: Vec<ShipRegistration>,
-        connection_ship_id: i64,
+        connection_ship_id: ShipId,
     },
     ShipEntered {
         ship: ShipRegistration,
-        connection_ship_id: i64,
+        connection_ship_id: ShipId,
     },
     ShipSpawned {
-        ship_id: i64,
-        connection_ship_id: i64,
+        ship_id: ShipId,
+        connection_ship_id: ShipId,
     },
     ShipLeft {
-        ship_id: i64,
+        ship_id: ShipId,
         reason: ShipLeaveReason,
     },
     ShipDestroyed {
-        ship_id: i64,
+        ship_id: ShipId,
     },
     HealthChanged {
-        ship_id: i64,
+        ship_id: ShipId,
         shield: f64,
         armor: f64,
         hull: f64,
     },
     TargetLocked {
-        locker_id: i64,
-        target_id: i64,
+        locker_id: ShipId,
+        target_id: ShipId,
     },
     LockLost {
-        locker_id: i64,
-        target_id: i64,
+        locker_id: ShipId,
+        target_id: ShipId,
     },
     Docked {
-        ship_id: i64,
-        station_id: i64,
+        ship_id: ShipId,
+        station_id: StationId,
         tick: i64,
     },
     Undocked {
-        ship_id: i64,
+        ship_id: ShipId,
         tick: i64,
     },
     SystemChanged {
-        ship_id: i64,
-        to_system: i64,
+        ship_id: ShipId,
+        to_system: StarSystemId,
     },
     Tick {
         tick: i64,
     },
     PlayerLoadout(PlayerLoadoutMsg),
     ModuleActivation {
-        ship_id: i64,
-        module_id: u32,
+        ship_id: ShipId,
+        module_id: ModuleId,
         active: bool,
         forced_reason: String,
     },
@@ -254,7 +256,7 @@ impl<'a> ClientState<'a> {
 
     fn reconcile_ship_registration(
         &mut self,
-        ship_id: i64,
+        ship_id: ShipId,
         registered: bool,
         became_player: bool,
     ) -> WorldSessionEffect {
@@ -264,39 +266,38 @@ impl<'a> ClientState<'a> {
                 became_player,
             };
         }
-        self.session.set_player_ship_id(ship_id);
+        self.session.set_player_ship_id(Some(ship_id));
         WorldSessionEffect::ShipRegistered {
             registered,
             became_player: true,
         }
     }
 
-    fn active_loadout_ship_id(&self) -> Option<i64> {
+    fn active_loadout_ship_id(&self) -> Option<dawn_core::ShipId> {
         self.loadout
             .as_ref()
             .and_then(|loadout| loadout.active_ship_id)
-            .and_then(|ship_id| i64::try_from(ship_id).ok())
     }
 
     fn replace_loadout(
         &mut self,
         loadout: PlayerLoadoutMsg,
     ) -> Result<WorldSessionEffect, ClientStateError> {
-        let active_ship_id = optional_i64(loadout.active_ship_id, "player_loadout.active_ship_id")?;
-        let docked_station_id = loadout.docked_station_id.map(i64::from);
+        let active_ship_id = loadout.active_ship_id;
+        let docked_station_id = loadout.docked_station_id;
         let docked_station_name = loadout.docked_station_name.clone();
         let tick = client_i64(loadout.tick, "player_loadout.tick")?;
 
         *self.loadout = Some(loadout);
 
-        let requested_ship_id = active_ship_id.unwrap_or(-1);
-        let active_changed = requested_ship_id != self.session.player_ship_id()
-            && (requested_ship_id < 0 || self.session.has_ship(requested_ship_id));
+        let active_changed = active_ship_id != self.session.player_ship_id()
+            && (active_ship_id.is_none()
+                || active_ship_id.is_some_and(|ship_id| self.session.has_ship(ship_id)));
         if active_changed {
-            self.session.set_player_ship_id(requested_ship_id);
+            self.session.set_player_ship_id(active_ship_id);
         }
         let dock_changed = self.session.apply_dock_fitting(
-            docked_station_id.unwrap_or(-1),
+            docked_station_id,
             docked_station_name.unwrap_or_default(),
             tick,
         );
@@ -307,10 +308,6 @@ impl<'a> ClientState<'a> {
     }
 }
 
-fn optional_i64(value: Option<u64>, field: &'static str) -> Result<Option<i64>, ClientStateError> {
-    value.map(|value| client_i64(value, field)).transpose()
-}
-
 fn client_i64(value: u64, field: &'static str) -> Result<i64, ClientStateError> {
     i64::try_from(value).map_err(|_| ClientStateError { field, value })
 }
@@ -319,14 +316,18 @@ fn client_i64(value: u64, field: &'static str) -> Result<i64, ClientStateError> 
 mod tests {
     use super::*;
     use crate::{ModuleRow, PositionInput, ShipInput, StatDelta, StationInput, SystemNameInput};
-    use dawn_core::ModuleKind;
+    use dawn_core::{ModuleId, ModuleKind, NodeId, ShipId, StarSystemId, StationId};
 
-    fn ship(ship_id: i64, is_player: bool) -> ShipRegistration {
+    fn ship_id(id: u64) -> ShipId {
+        ShipId::new(NodeId(0), id)
+    }
+
+    fn ship(id: u64, is_player: bool) -> ShipRegistration {
         ShipRegistration {
-            ship_id,
+            ship_id: ship_id(id),
             ship: ShipInput {
                 is_player,
-                ship_type_name: format!("Ship {ship_id}"),
+                ship_type_name: format!("Ship {id}"),
                 max_shield: 100.0,
                 max_armor: 100.0,
                 max_hull: 100.0,
@@ -343,7 +344,7 @@ mod tests {
         ModuleRow {
             slot: "High".to_owned(),
             index: 0,
-            module_id,
+            module_id: ModuleId(module_id),
             name: "Test module".to_owned(),
             kind: ModuleKind::Weapon,
             is_active: active,
@@ -364,11 +365,11 @@ mod tests {
                 navigation: NavigationInput {
                     system_name: "Alpha".to_owned(),
                     systems: vec![SystemNameInput {
-                        id: 2,
+                        id: StarSystemId(2),
                         name: "Beta".to_owned(),
                     }],
                     stations: vec![StationInput {
-                        station_id: 5,
+                        station_id: StationId(5),
                         name: "Forge Station".to_owned(),
                         position: PositionInput::default(),
                         docking_radius: 5000.0,
@@ -376,7 +377,7 @@ mod tests {
                     ..NavigationInput::default()
                 },
                 ships: vec![ship(1, true), ship(2, false)],
-                connection_ship_id: 1,
+                connection_ship_id: ship_id(1),
             })
             .unwrap();
         (session, loadout)
@@ -387,31 +388,31 @@ mod tests {
         let (mut session, mut loadout) = setup();
         ClientState::new(&mut session, &mut loadout)
             .apply(ClientFact::TargetLocked {
-                locker_id: 1,
-                target_id: 2,
+                locker_id: ship_id(1),
+                target_id: ship_id(2),
             })
             .unwrap();
         ClientState::new(&mut session, &mut loadout)
             .apply(ClientFact::ShipLeft {
-                ship_id: 2,
+                ship_id: ship_id(2),
                 reason: ShipLeaveReason::AreaOfInterest,
             })
             .unwrap();
-        assert_eq!(session.player_lock_target(), 2);
+        assert_eq!(session.player_lock_target(), Some(ship_id(2)));
 
         ClientState::new(&mut session, &mut loadout)
             .apply(ClientFact::ShipEntered {
                 ship: ship(2, false),
-                connection_ship_id: 1,
+                connection_ship_id: ship_id(1),
             })
             .unwrap();
         ClientState::new(&mut session, &mut loadout)
             .apply(ClientFact::ShipLeft {
-                ship_id: 2,
+                ship_id: ship_id(2),
                 reason: ShipLeaveReason::Despawn,
             })
             .unwrap();
-        assert_eq!(session.player_lock_target(), -1);
+        assert_eq!(session.player_lock_target(), None);
     }
 
     #[test]
@@ -420,8 +421,8 @@ mod tests {
         assert_eq!(
             ClientState::new(&mut session, &mut loadout)
                 .apply(ClientFact::Docked {
-                    ship_id: 1,
-                    station_id: 5,
+                    ship_id: ship_id(1),
+                    station_id: StationId(5),
                     tick: 10,
                 })
                 .unwrap(),
@@ -430,15 +431,15 @@ mod tests {
         assert_eq!(session.docked_station_name(), "Forge Station");
         ClientState::new(&mut session, &mut loadout)
             .apply(ClientFact::Undocked {
-                ship_id: 1,
+                ship_id: ship_id(1),
                 tick: 11,
             })
             .unwrap();
         assert_eq!(
             ClientState::new(&mut session, &mut loadout)
                 .apply(ClientFact::Docked {
-                    ship_id: 1,
-                    station_id: 5,
+                    ship_id: ship_id(1),
+                    station_id: StationId(5),
                     tick: 10,
                 })
                 .unwrap(),
@@ -452,12 +453,12 @@ mod tests {
         let effect = ClientState::new(&mut session, &mut loadout)
             .apply(ClientFact::PlayerLoadout(PlayerLoadoutMsg {
                 tick: 4,
-                active_ship_id: Some(2),
+                active_ship_id: Some(ship_id(2)),
                 ..PlayerLoadoutMsg::default()
             }))
             .unwrap();
         assert!(matches!(effect, WorldSessionEffect::PlayerLoadout { .. }));
-        assert_eq!(session.player_ship_id(), 2);
+        assert_eq!(session.player_ship_id(), Some(ship_id(2)));
         assert_eq!(loadout.as_ref().unwrap().tick, 4);
     }
 
@@ -480,7 +481,7 @@ mod tests {
         let mut active_module = module(7, true);
         active_module.cycle_remaining = 0;
         let mut loadout = Some(PlayerLoadoutMsg {
-            active_ship_id: Some(1),
+            active_ship_id: Some(ship_id(1)),
             modules: vec![active_module],
             ..PlayerLoadoutMsg::default()
         });
@@ -502,15 +503,15 @@ mod tests {
     fn module_activation_updates_loadout_state_and_resets_cycle() {
         let (mut session, _) = setup();
         let mut loadout = Some(PlayerLoadoutMsg {
-            active_ship_id: Some(1),
+            active_ship_id: Some(ship_id(1)),
             modules: vec![module(7, false)],
             ..PlayerLoadoutMsg::default()
         });
 
         ClientState::new(&mut session, &mut loadout)
             .apply(ClientFact::ModuleActivation {
-                ship_id: 1,
-                module_id: 7,
+                ship_id: ship_id(1),
+                module_id: ModuleId(7),
                 active: true,
                 forced_reason: String::new(),
             })
@@ -525,15 +526,15 @@ mod tests {
     fn foreign_ship_module_activation_does_not_mutate_player_loadout() {
         let (mut session, _) = setup();
         let mut loadout = Some(PlayerLoadoutMsg {
-            active_ship_id: Some(1),
+            active_ship_id: Some(ship_id(1)),
             modules: vec![module(7, false)],
             ..PlayerLoadoutMsg::default()
         });
 
         ClientState::new(&mut session, &mut loadout)
             .apply(ClientFact::ModuleActivation {
-                ship_id: 2,
-                module_id: 7,
+                ship_id: ship_id(2),
+                module_id: ModuleId(7),
                 active: true,
                 forced_reason: "foreign".to_owned(),
             })
@@ -550,17 +551,17 @@ mod tests {
         let (mut session, mut loadout) = setup();
         ClientState::new(&mut session, &mut loadout)
             .apply(ClientFact::PlayerLoadout(PlayerLoadoutMsg {
-                active_ship_id: Some(2),
+                active_ship_id: Some(ship_id(2)),
                 modules: vec![module(7, false)],
                 ..PlayerLoadoutMsg::default()
             }))
             .unwrap();
-        assert_eq!(session.player_ship_id(), 2);
+        assert_eq!(session.player_ship_id(), Some(ship_id(2)));
 
         ClientState::new(&mut session, &mut loadout)
             .apply(ClientFact::ModuleActivation {
-                ship_id: 1,
-                module_id: 7,
+                ship_id: ship_id(1),
+                module_id: ModuleId(7),
                 active: true,
                 forced_reason: "old ship".to_owned(),
             })
@@ -572,8 +573,8 @@ mod tests {
 
         ClientState::new(&mut session, &mut loadout)
             .apply(ClientFact::ModuleActivation {
-                ship_id: 2,
-                module_id: 7,
+                ship_id: ship_id(2),
+                module_id: ModuleId(7),
                 active: true,
                 forced_reason: String::new(),
             })
@@ -588,18 +589,18 @@ mod tests {
         let (mut session, mut loadout) = setup();
         ClientState::new(&mut session, &mut loadout)
             .apply(ClientFact::PlayerLoadout(PlayerLoadoutMsg {
-                active_ship_id: Some(33),
+                active_ship_id: Some(ship_id(33)),
                 modules: vec![module(7, false)],
                 ..PlayerLoadoutMsg::default()
             }))
             .unwrap();
-        assert_eq!(session.player_ship_id(), 1);
-        assert_eq!(loadout.as_ref().unwrap().active_ship_id, Some(33));
+        assert_eq!(session.player_ship_id(), Some(ship_id(1)));
+        assert_eq!(loadout.as_ref().unwrap().active_ship_id, Some(ship_id(33)));
 
         ClientState::new(&mut session, &mut loadout)
             .apply(ClientFact::ModuleActivation {
-                ship_id: 1,
-                module_id: 7,
+                ship_id: ship_id(1),
+                module_id: ModuleId(7),
                 active: true,
                 forced_reason: "old ship".to_owned(),
             })
@@ -611,8 +612,8 @@ mod tests {
 
         ClientState::new(&mut session, &mut loadout)
             .apply(ClientFact::ModuleActivation {
-                ship_id: 33,
-                module_id: 7,
+                ship_id: ship_id(33),
+                module_id: ModuleId(7),
                 active: true,
                 forced_reason: String::new(),
             })
@@ -629,12 +630,12 @@ mod tests {
         active_module.cycle_remaining = 0;
         ClientState::new(&mut session, &mut loadout)
             .apply(ClientFact::PlayerLoadout(PlayerLoadoutMsg {
-                active_ship_id: Some(33),
+                active_ship_id: Some(ship_id(33)),
                 modules: vec![active_module],
                 ..PlayerLoadoutMsg::default()
             }))
             .unwrap();
-        assert_eq!(session.player_ship_id(), 1);
+        assert_eq!(session.player_ship_id(), Some(ship_id(1)));
         assert_eq!(session.cap_current(), 100.0);
 
         ClientState::new(&mut session, &mut loadout)
@@ -652,7 +653,7 @@ mod tests {
         let effect = ClientState::new(&mut session, &mut loadout)
             .apply(ClientFact::ShipEntered {
                 ship: ship(33, true),
-                connection_ship_id: 1,
+                connection_ship_id: ship_id(1),
             })
             .unwrap();
         assert_eq!(
@@ -662,7 +663,7 @@ mod tests {
                 became_player: true,
             }
         );
-        assert_eq!(session.player_ship_id(), 33);
+        assert_eq!(session.player_ship_id(), Some(ship_id(33)));
 
         ClientState::new(&mut session, &mut loadout)
             .apply(ClientFact::Tick { tick: 3 })
@@ -676,16 +677,16 @@ mod tests {
         let (mut session, mut loadout) = setup();
         ClientState::new(&mut session, &mut loadout)
             .apply(ClientFact::PlayerLoadout(PlayerLoadoutMsg {
-                active_ship_id: Some(33),
+                active_ship_id: Some(ship_id(33)),
                 ..PlayerLoadoutMsg::default()
             }))
             .unwrap();
-        assert_eq!(session.player_ship_id(), 1);
+        assert_eq!(session.player_ship_id(), Some(ship_id(1)));
 
         let effect = ClientState::new(&mut session, &mut loadout)
             .apply(ClientFact::ShipEntered {
                 ship: ship(33, true),
-                connection_ship_id: 1,
+                connection_ship_id: ship_id(1),
             })
             .unwrap();
 
@@ -696,10 +697,10 @@ mod tests {
                 became_player: true,
             }
         );
-        assert_eq!(session.player_ship_id(), 33);
+        assert_eq!(session.player_ship_id(), Some(ship_id(33)));
         assert_eq!(session.player_ship_type_name(), "Ship 33");
-        assert!(session.has_ship(1));
-        assert!(!session.opponent_ship_ids().contains(&33));
+        assert!(session.has_ship(ship_id(1)));
+        assert!(!session.opponent_ship_ids().contains(&ship_id(33)));
     }
 
     #[test]
@@ -707,16 +708,16 @@ mod tests {
         let (mut session, mut loadout) = setup();
         ClientState::new(&mut session, &mut loadout)
             .apply(ClientFact::PlayerLoadout(PlayerLoadoutMsg {
-                active_ship_id: Some(44),
+                active_ship_id: Some(ship_id(44)),
                 ..PlayerLoadoutMsg::default()
             }))
             .unwrap();
-        assert_eq!(session.player_ship_id(), 1);
+        assert_eq!(session.player_ship_id(), Some(ship_id(1)));
 
         let effect = ClientState::new(&mut session, &mut loadout)
             .apply(ClientFact::ShipSpawned {
-                ship_id: 44,
-                connection_ship_id: 1,
+                ship_id: ship_id(44),
+                connection_ship_id: ship_id(1),
             })
             .unwrap();
 
@@ -727,8 +728,8 @@ mod tests {
                 became_player: true,
             }
         );
-        assert_eq!(session.player_ship_id(), 44);
-        assert!(session.has_ship(1));
+        assert_eq!(session.player_ship_id(), Some(ship_id(44)));
+        assert!(session.has_ship(ship_id(1)));
     }
 
     #[test]
@@ -736,8 +737,8 @@ mod tests {
         let (mut session, mut loadout) = setup();
         let effect = ClientState::new(&mut session, &mut loadout)
             .apply(ClientFact::SystemChanged {
-                ship_id: 1,
-                to_system: 2,
+                ship_id: ship_id(1),
+                to_system: StarSystemId(2),
             })
             .unwrap();
 
@@ -755,8 +756,8 @@ mod tests {
         let (mut session, mut loadout) = setup();
         ClientState::new(&mut session, &mut loadout)
             .apply(ClientFact::TargetLocked {
-                locker_id: 1,
-                target_id: 2,
+                locker_id: ship_id(1),
+                target_id: ship_id(2),
             })
             .unwrap();
 
@@ -767,13 +768,13 @@ mod tests {
                     ..NavigationInput::default()
                 },
                 ships: vec![ship(3, true)],
-                connection_ship_id: 3,
+                connection_ship_id: ship_id(3),
             })
             .unwrap();
 
         assert_eq!(session.current_system_name(), "Gamma");
-        assert_eq!(session.player_ship_id(), 3);
-        assert_eq!(session.player_lock_target(), -1);
+        assert_eq!(session.player_ship_id(), Some(ship_id(3)));
+        assert_eq!(session.player_lock_target(), None);
         assert_eq!(session.event_count(), 0);
         assert_eq!(session.ship_count(), 1);
     }
@@ -790,8 +791,8 @@ mod tests {
 
         ClientState::new(&mut session, &mut loadout)
             .apply(ClientFact::ModuleActivation {
-                ship_id: 1,
-                module_id: 7,
+                ship_id: ship_id(1),
+                module_id: ModuleId(7),
                 active: true,
                 forced_reason: String::new(),
             })
@@ -805,8 +806,8 @@ mod tests {
 
         ClientState::new(&mut session, &mut loadout)
             .apply(ClientFact::TargetLocked {
-                locker_id: 1,
-                target_id: 2,
+                locker_id: ship_id(1),
+                target_id: ship_id(2),
             })
             .unwrap();
         assert_eq!(session.event_count(), 2);
@@ -818,8 +819,8 @@ mod tests {
         assert_eq!(
             ClientState::new(&mut session, &mut loadout)
                 .apply(ClientFact::ShipSpawned {
-                    ship_id: 4,
-                    connection_ship_id: 1,
+                    ship_id: ship_id(4),
+                    connection_ship_id: ship_id(1),
                 })
                 .unwrap(),
             WorldSessionEffect::ShipRegistered {
@@ -827,15 +828,17 @@ mod tests {
                 became_player: false,
             }
         );
-        assert!(session.has_ship(4));
+        assert!(session.has_ship(ship_id(4)));
 
         let effect = ClientState::new(&mut session, &mut loadout)
-            .apply(ClientFact::ShipDestroyed { ship_id: 4 })
+            .apply(ClientFact::ShipDestroyed {
+                ship_id: ship_id(4),
+            })
             .unwrap();
         let WorldSessionEffect::ShipDestroyed(outcome) = effect else {
             panic!("expected destruction effect");
         };
         assert!(outcome.destroyed);
-        assert!(!session.has_ship(4));
+        assert!(!session.has_ship(ship_id(4)));
     }
 }

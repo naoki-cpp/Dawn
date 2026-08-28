@@ -2,10 +2,13 @@ use dawn_client_core::{
     ClientAction as CoreClientAction, ClientActionContext,
     ClientInteraction as CoreClientInteraction, ClientKey, ClientLocalAction, Selection,
 };
-use dawn_core::{CelestialBodyId, EntityId, JumpGateId, ShipId, ShipTypeId, StationId};
 use godot::prelude::*;
 
 use crate::client_command_gd::{request_result_from_request, ClientCommandResult};
+use crate::id_boundary::{
+    celestial_body_id_from_godot, jump_gate_id_from_godot, ship_id_from_godot,
+    ship_type_id_from_godot, station_id_from_godot,
+};
 
 const ACTION_NONE: i64 = 0;
 const ACTION_REQUEST: i64 = 1;
@@ -149,16 +152,16 @@ impl ClientInteraction {
         let Some(key) = ClientKey::from_code(key_code) else {
             return ClientAction::from_core(CoreClientAction::None);
         };
-        let Some(buildable_ship_type_id) = ship_type_id(buildable_ship_type_id) else {
+        let Some(buildable_ship_type_id) = ship_type_id_from_godot(buildable_ship_type_id) else {
             return ClientAction::from_core(CoreClientAction::None);
         };
         ClientAction::from_core(self.core.resolve_key_action(
             key,
             ClientActionContext {
-                player_ship_id: ship_id(player_ship_id),
-                nearby_gate_id: gate_id(nearby_gate_id),
-                nearby_station_id: station_id(nearby_station_id),
-                docked_station_id: station_id(docked_station_id),
+                player_ship_id: ship_id_from_godot(player_ship_id),
+                nearby_gate_id: jump_gate_id_from_godot(nearby_gate_id),
+                nearby_station_id: station_id_from_godot(nearby_station_id),
+                docked_station_id: station_id_from_godot(docked_station_id),
                 keep_at_range_m,
                 buildable_ship_type_id,
             },
@@ -178,13 +181,13 @@ impl ClientInteraction {
         hit_body_id: i64,
         hit_station_id: i64,
     ) -> Gd<ClientAction> {
-        let hit = if let Some(id) = ship_id(hit_ship_id) {
+        let hit = if let Some(id) = ship_id_from_godot(hit_ship_id) {
             Selection::Ship(id)
-        } else if let Some(id) = gate_id(hit_gate_id) {
+        } else if let Some(id) = jump_gate_id_from_godot(hit_gate_id) {
             Selection::Gate(id)
-        } else if let Some(id) = station_id(hit_station_id) {
+        } else if let Some(id) = station_id_from_godot(hit_station_id) {
             Selection::Station(id)
-        } else if let Some(id) = body_id(hit_body_id) {
+        } else if let Some(id) = celestial_body_id_from_godot(hit_body_id) {
             Selection::Body(id)
         } else {
             Selection::None
@@ -194,17 +197,17 @@ impl ClientInteraction {
             f64::from(screen_pos.y),
             now_sec,
             camera_dragging,
-            ship_id(player_ship_id),
+            ship_id_from_godot(player_ship_id),
             hit,
         ))
     }
 
     #[func]
     fn lock_click(&self, player_ship_id: i64, hit_ship_id: i64) -> Gd<ClientAction> {
-        ClientAction::from_core(
-            self.core
-                .lock_click(ship_id(player_ship_id), ship_id(hit_ship_id)),
-        )
+        ClientAction::from_core(self.core.lock_click(
+            ship_id_from_godot(player_ship_id),
+            ship_id_from_godot(hit_ship_id),
+        ))
     }
 
     #[func]
@@ -251,30 +254,8 @@ impl ClientInteraction {
 
     #[func]
     fn clear_target_if_matches(&mut self, raw_ship_id: i64) {
-        if let Some(ship_id) = ship_id(raw_ship_id) {
+        if let Some(ship_id) = ship_id_from_godot(raw_ship_id) {
             self.core.clear_target_if_matches(ship_id);
         }
     }
-}
-
-fn ship_id(raw: i64) -> Option<ShipId> {
-    u64::try_from(raw)
-        .ok()
-        .map(|raw| ShipId(EntityId::from_raw(raw)))
-}
-
-fn gate_id(raw: i64) -> Option<JumpGateId> {
-    u32::try_from(raw).ok().map(JumpGateId)
-}
-
-fn body_id(raw: i64) -> Option<CelestialBodyId> {
-    u32::try_from(raw).ok().map(CelestialBodyId)
-}
-
-fn station_id(raw: i64) -> Option<StationId> {
-    u32::try_from(raw).ok().map(StationId)
-}
-
-fn ship_type_id(raw: i64) -> Option<ShipTypeId> {
-    u32::try_from(raw).ok().map(ShipTypeId)
 }

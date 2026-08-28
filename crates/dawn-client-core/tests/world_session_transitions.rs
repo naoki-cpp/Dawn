@@ -2,6 +2,11 @@ use dawn_client_core::{
     ClientFact, ClientState, NavigationInput, PlayerLoadoutMsg, ShipInput, ShipLeaveReason,
     ShipRegistration, WorldSessionEffect, WorldSessionState,
 };
+use dawn_core::{NodeId, ShipId, StationId};
+
+fn ship_id(id: u64) -> ShipId {
+    ShipId::new(NodeId(0), id)
+}
 
 fn player_ship(ship_type_name: &str) -> ShipInput {
     ShipInput {
@@ -40,20 +45,22 @@ fn session() -> (WorldSessionState, Option<PlayerLoadoutMsg>) {
             navigation: NavigationInput::default(),
             ships: vec![
                 ShipRegistration {
-                    ship_id: 11,
+                    ship_id: ship_id(11),
                     ship: player_ship("Magpie"),
                 },
                 ShipRegistration {
-                    ship_id: 22,
+                    ship_id: ship_id(22),
                     ship: player_ship("Venture"),
                 },
             ],
-            connection_ship_id: 11,
+            connection_ship_id: ship_id(11),
         },
     );
     assert_eq!(
         effect,
-        WorldSessionEffect::InitialState { player_ship_id: 11 }
+        WorldSessionEffect::InitialState {
+            player_ship_id: Some(ship_id(11)),
+        }
     );
     (state, loadout)
 }
@@ -66,14 +73,17 @@ fn health_updates_preserve_registered_maxima() {
         &mut state,
         &mut loadout,
         ClientFact::HealthChanged {
-            ship_id: 11,
+            ship_id: ship_id(11),
             shield: 40.0,
             armor: 30.0,
             hull: 20.0,
         },
     );
 
-    let health = state.ship_hp().get(&11).expect("registered player ship");
+    let health = state
+        .ship_hp()
+        .get(&ship_id(11))
+        .expect("registered player ship");
     assert_eq!(health.shield, 40.0);
     assert_eq!(health.max_shield, 100.0);
     assert_eq!(state.player_health().hull, 20.0);
@@ -88,39 +98,39 @@ fn lock_updates_only_change_the_players_lock() {
             &mut state,
             &mut loadout,
             ClientFact::TargetLocked {
-                locker_id: 22,
-                target_id: 99,
+                locker_id: ship_id(22),
+                target_id: ship_id(99),
             },
         ),
         WorldSessionEffect::LockChanged { changed: false }
     );
-    assert_eq!(state.player_lock_target(), -1);
+    assert_eq!(state.player_lock_target(), None);
 
     assert_eq!(
         apply(
             &mut state,
             &mut loadout,
             ClientFact::TargetLocked {
-                locker_id: 11,
-                target_id: 22,
+                locker_id: ship_id(11),
+                target_id: ship_id(22),
             },
         ),
         WorldSessionEffect::LockChanged { changed: true }
     );
-    assert_eq!(state.player_lock_target(), 22);
+    assert_eq!(state.player_lock_target(), Some(ship_id(22)));
 
     assert_eq!(
         apply(
             &mut state,
             &mut loadout,
             ClientFact::LockLost {
-                locker_id: 11,
-                target_id: 22,
+                locker_id: ship_id(11),
+                target_id: ship_id(22),
             },
         ),
         WorldSessionEffect::LockChanged { changed: true }
     );
-    assert_eq!(state.player_lock_target(), -1);
+    assert_eq!(state.player_lock_target(), None);
 }
 
 #[test]
@@ -130,8 +140,8 @@ fn aoi_leave_preserves_lock_while_despawn_clears_it() {
         &mut aoi_state,
         &mut aoi_loadout,
         ClientFact::TargetLocked {
-            locker_id: 11,
-            target_id: 22,
+            locker_id: ship_id(11),
+            target_id: ship_id(22),
         },
     );
 
@@ -140,33 +150,33 @@ fn aoi_leave_preserves_lock_while_despawn_clears_it() {
             &mut aoi_state,
             &mut aoi_loadout,
             ClientFact::ShipLeft {
-                ship_id: 22,
+                ship_id: ship_id(22),
                 reason: ShipLeaveReason::AreaOfInterest,
             },
         ),
         WorldSessionEffect::ShipRemoved { removed: true }
     );
-    assert_eq!(aoi_state.player_lock_target(), 22);
-    assert!(!aoi_state.has_ship(22));
+    assert_eq!(aoi_state.player_lock_target(), Some(ship_id(22)));
+    assert!(!aoi_state.has_ship(ship_id(22)));
 
     let (mut despawn_state, mut despawn_loadout) = session();
     apply(
         &mut despawn_state,
         &mut despawn_loadout,
         ClientFact::TargetLocked {
-            locker_id: 11,
-            target_id: 22,
+            locker_id: ship_id(11),
+            target_id: ship_id(22),
         },
     );
     apply(
         &mut despawn_state,
         &mut despawn_loadout,
         ClientFact::ShipLeft {
-            ship_id: 22,
+            ship_id: ship_id(22),
             reason: ShipLeaveReason::Despawn,
         },
     );
-    assert_eq!(despawn_state.player_lock_target(), -1);
+    assert_eq!(despawn_state.player_lock_target(), None);
 }
 
 #[test]
@@ -176,7 +186,9 @@ fn destroying_an_opponent_reports_the_presentation_outcome() {
     let effect = apply(
         &mut state,
         &mut loadout,
-        ClientFact::ShipDestroyed { ship_id: 22 },
+        ClientFact::ShipDestroyed {
+            ship_id: ship_id(22),
+        },
     );
 
     let WorldSessionEffect::ShipDestroyed(outcome) = effect else {
@@ -185,7 +197,7 @@ fn destroying_an_opponent_reports_the_presentation_outcome() {
     assert!(outcome.destroyed);
     assert!(!outcome.destroyed_player);
     assert!(outcome.destroyed_opponent);
-    assert!(!state.has_ship(22));
+    assert!(!state.has_ship(ship_id(22)));
 }
 
 #[test]
@@ -197,29 +209,29 @@ fn station_zero_is_docked_and_newer_dock_state_wins() {
             &mut state,
             &mut loadout,
             ClientFact::Docked {
-                ship_id: 11,
-                station_id: 0,
+                ship_id: ship_id(11),
+                station_id: StationId(0),
                 tick: 20,
             },
         ),
         WorldSessionEffect::DockState { accepted: true }
     );
     assert!(state.is_docked());
-    assert_eq!(state.docked_station_id(), 0);
+    assert_eq!(state.docked_station_id(), Some(StationId(0)));
 
     assert_eq!(
         apply(
             &mut state,
             &mut loadout,
             ClientFact::Undocked {
-                ship_id: 11,
+                ship_id: ship_id(11),
                 tick: 19,
             },
         ),
         WorldSessionEffect::DockState { accepted: false }
     );
     assert!(state.is_docked());
-    assert_eq!(state.docked_station_id(), 0);
+    assert_eq!(state.docked_station_id(), Some(StationId(0)));
 }
 
 #[test]
@@ -229,7 +241,7 @@ fn newer_undock_rejects_stale_loadout_dock_context() {
         &mut state,
         &mut loadout,
         ClientFact::Undocked {
-            ship_id: 11,
+            ship_id: ship_id(11),
             tick: 20,
         },
     );
@@ -238,8 +250,8 @@ fn newer_undock_rejects_stale_loadout_dock_context() {
         &mut state,
         &mut loadout,
         ClientFact::PlayerLoadout(PlayerLoadoutMsg {
-            active_ship_id: Some(11),
-            docked_station_id: Some(3),
+            active_ship_id: Some(ship_id(11)),
+            docked_station_id: Some(StationId(3)),
             docked_station_name: Some("Forge Station".to_string()),
             tick: 19,
             ..PlayerLoadoutMsg::default()
@@ -254,5 +266,5 @@ fn newer_undock_rejects_stale_loadout_dock_context() {
         }
     );
     assert!(!state.is_docked());
-    assert_eq!(state.docked_station_id(), -1);
+    assert_eq!(state.docked_station_id(), None);
 }

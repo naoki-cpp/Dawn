@@ -3,6 +3,10 @@
 use dawn_client_core::{HudReadModel as CoreHudReadModel, HudSceneFacts as CoreHudSceneFacts};
 use godot::prelude::*;
 
+use crate::id_boundary::{
+    celestial_body_id_from_godot, jump_gate_id_from_godot, ship_id_from_godot, ship_id_to_godot,
+    station_id_from_godot,
+};
 use crate::loadout_gd::PlayerLoadout;
 use crate::module_row_gd::ModuleRow;
 use crate::session_record_gd::ShipHealth;
@@ -60,13 +64,17 @@ impl HudSceneFacts {
             target_distance_units: self
                 .has_target_distance
                 .then_some(self.target_distance_units),
-            nearby_gate_id: self.nearby_gate_id,
-            nearby_station_ids: self.nearby_station_ids.iter_shared().collect(),
+            nearby_gate_id: jump_gate_id_from_godot(self.nearby_gate_id),
+            nearby_station_ids: self
+                .nearby_station_ids
+                .iter_shared()
+                .filter_map(station_id_from_godot)
+                .collect(),
             jump_notice: self.jump_notice.to_string(),
-            selected_gate_id: self.selected_gate_id,
-            selected_body_id: self.selected_body_id,
-            selected_station_id: self.selected_station_id,
-            selected_target_id: self.selected_target_id,
+            selected_gate_id: jump_gate_id_from_godot(self.selected_gate_id),
+            selected_body_id: celestial_body_id_from_godot(self.selected_body_id),
+            selected_station_id: station_id_from_godot(self.selected_station_id),
+            selected_target_id: ship_id_from_godot(self.selected_target_id),
             selected_gate_distance_units: self
                 .has_selected_gate_distance
                 .then_some(self.selected_gate_distance_units),
@@ -200,7 +208,11 @@ impl HudSnapshot {
                 speed_text: snapshot.status.speed_text.as_str().into(),
             }),
             ship_status: Gd::from_init_fn(|_base| HudShipStatusPanel {
-                player_ship_id: snapshot.ship_status.player_ship_id,
+                player_ship_id: snapshot
+                    .ship_status
+                    .player_ship_id
+                    .map(ship_id_to_godot)
+                    .unwrap_or(-1),
                 shield: health.shield,
                 max_shield: health.max_shield,
                 armor: health.armor,
@@ -211,7 +223,11 @@ impl HudSnapshot {
                 cap_max: snapshot.ship_status.cap_max,
             }),
             target: Gd::from_init_fn(|_base| HudTargetPanel {
-                lock_target_id: snapshot.target.lock_target_id,
+                lock_target_id: snapshot
+                    .target
+                    .lock_target_id
+                    .map(ship_id_to_godot)
+                    .unwrap_or(-1),
                 target_known: snapshot.target.target_known,
                 distance_text: snapshot.target.distance_text.as_str().into(),
                 target_hp,

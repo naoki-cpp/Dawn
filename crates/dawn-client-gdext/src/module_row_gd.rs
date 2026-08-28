@@ -1,5 +1,5 @@
 use dawn_client_core::{ModuleRow as CoreModuleRow, StatDelta};
-use dawn_core::ModuleKind;
+use dawn_core::{ModuleId, ModuleKind};
 use godot::prelude::*;
 
 /// `ModuleKind`'s wire-string name, exactly matching what the server sends
@@ -80,7 +80,7 @@ impl ModuleRow {
         Gd::from_init_fn(|_base| Self {
             slot: (&inner.slot).into(),
             index: inner.index as i64,
-            module_id: inner.module_id as i64,
+            module_id: i64::from(inner.module_id.0),
             name: (&inner.name).into(),
             kind: kind_str(inner.kind).into(),
             is_active: inner.is_active,
@@ -149,7 +149,7 @@ impl ModuleRow {
         cycle_time_ticks: i64,
     ) -> Option<Gd<ModuleRow>> {
         let index = u32::try_from(index).expect("fixture index must fit u32");
-        let module_id = u32::try_from(module_id).expect("fixture module ID must fit u32");
+        let module_id = ModuleId(u32::try_from(module_id).expect("fixture module ID must fit u32"));
         let cycle_time_ticks =
             u32::try_from(cycle_time_ticks).expect("fixture cycle time must fit u32");
         let kind = parse_kind(&kind.to_string())?;
