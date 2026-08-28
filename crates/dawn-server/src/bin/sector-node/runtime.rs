@@ -35,6 +35,9 @@ fn client_request_rejection(
         ClientRequestAdmissionError::UnsupportedRequest { request } => {
             dawn_protocol::ClientRequestRejectionWire::unsupported_request(request)
         }
+        ClientRequestAdmissionError::StationProjectionRead(error) => {
+            unreachable!("Station projection failure must fence the runtime: {error}")
+        }
     }
 }
 
@@ -82,8 +85,7 @@ impl SectorNodeRuntime {
         if self.host.is_fenced() {
             return Err(RuntimeFrameHostError::Fenced);
         }
-        admission.advance_handshakes(&mut self.host, sector_id, aoi_cell_size);
-        Ok(())
+        admission.advance_handshakes(&mut self.host, sector_id, aoi_cell_size)
     }
 
     pub(crate) fn promote_ready_session(&mut self, sess: ws_server::PlayerSession) {
@@ -162,23 +164,23 @@ impl SectorNodeRuntime {
         dispatches: &[RuntimeCommandDispatch],
     ) -> anyhow::Result<()> {
         for dispatch in dispatches {
-            match *dispatch {
+            match dispatch {
                 RuntimeCommandDispatch::Jump {
                     session_index,
                     ship_id,
                     command,
                     outcome,
                 } => {
-                    let Some(session) = self.sessions.get(session_index) else {
+                    let Some(session) = self.sessions.get(*session_index) else {
                         continue;
                     };
-                    if ship_id != session.ship_id {
+                    if *ship_id != session.ship_id {
                         continue;
                     }
                     match outcome {
                         JumpOutcome::NeedsTransitProposal { to } => {
                             self.host
-                                .propose_transit_request(ship_id, to, Some(command.gate_id))
+                                .propose_transit_request(*ship_id, *to, Some(command.gate_id))
                                 .map_err(|error| anyhow::anyhow!("jump proposal failed: {error}"))?;
                             println!(
                                 "[Node] Jump proposed: ship #{} gate #{} (-> S{})",
@@ -204,23 +206,27 @@ impl SectorNodeRuntime {
                     session_index,
                     player_id,
                 } => {
-                    if let Some(loadout) = self
+                    match self
                         .host
                         .node()
-                        .build_player_loadout_json_for_player(player_id)
+                        .build_player_loadout_json_for_player(*player_id)
                     {
-                        if let Some(session) = self.sessions.get_mut(session_index) {
-                            session.send_message(&ServerMessage::PlayerLoadout(loadout));
+                        Ok(Some(loadout)) => {
+                            if let Some(session) = self.sessions.get_mut(*session_index) {
+                                session.send_message(&ServerMessage::PlayerLoadout(loadout));
+                            }
                         }
+                        Ok(None) => {}
+                        Err(error) => return Err(anyhow::anyhow!(error)),
                     }
                 }
                 RuntimeCommandDispatch::Rejected {
                     session_index,
                     error,
                 } => {
-                    if let Some(session) = self.sessions.get_mut(session_index) {
+                    if let Some(session) = self.sessions.get_mut(*session_index) {
                         session.send_message(&ServerMessage::ClientRequestRejected(
-                            client_request_rejection(error),
+                            client_request_rejection(error.clone()),
                         ));
                     }
                 }

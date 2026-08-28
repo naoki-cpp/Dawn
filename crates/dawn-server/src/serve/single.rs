@@ -183,10 +183,10 @@ pub(crate) async fn run_phase4_server(
                 }
                 Err(RuntimeClientAdmissionError::Host(error)) => {
                     eprintln!(
-                        "[Server] connection from {} refused: {error}",
+                        "[Server] fatal runtime error while admitting {}: {error}",
                         request.peer_addr
                     );
-                    continue;
+                    return;
                 }
             };
             let player_id = attempt.player_id();
@@ -253,7 +253,7 @@ pub(crate) async fn run_phase4_server(
             .expect("in-memory single-sector runtime must accept durable Tick");
         let tick_result = output.tick_result;
         for dispatch in &tick_result.runtime_command_dispatches {
-            match *dispatch {
+            match dispatch {
                 RuntimeCommandDispatch::Jump {
                     ship_id,
                     command,
@@ -281,22 +281,25 @@ pub(crate) async fn run_phase4_server(
                 RuntimeCommandDispatch::RefreshPlayerLoadout {
                     session_index,
                     player_id,
-                } => {
-                    if let Some(loadout) =
-                        host.node().build_player_loadout_json_for_player(player_id)
-                    {
-                        if let Some(session) = sessions.get_mut(session_index) {
+                } => match host.node().build_player_loadout_json_for_player(*player_id) {
+                    Ok(Some(loadout)) => {
+                        if let Some(session) = sessions.get_mut(*session_index) {
                             session.send_message(&ServerMessage::PlayerLoadout(loadout));
                         }
                     }
-                }
+                    Ok(None) => {}
+                    Err(error) => {
+                        eprintln!("[Server] Station projection read failed: {error}");
+                        return;
+                    }
+                },
                 RuntimeCommandDispatch::Rejected {
                     session_index,
                     error,
                 } => {
-                    if let Some(session) = sessions.get_mut(session_index) {
+                    if let Some(session) = sessions.get_mut(*session_index) {
                         session.send_message(&ServerMessage::ClientRequestRejected(
-                            client_request_rejection(error),
+                            client_request_rejection(error.clone()),
                         ));
                     }
                 }
@@ -326,8 +329,15 @@ pub(crate) async fn run_phase4_server(
                 )
             });
             if should_refresh {
-                if let Some(loadout) = host.node().build_player_loadout_json(sess.ship_id) {
-                    sess.send_message(&ServerMessage::PlayerLoadout(loadout));
+                match host.node().build_player_loadout_json(sess.ship_id) {
+                    Ok(Some(loadout)) => {
+                        sess.send_message(&ServerMessage::PlayerLoadout(loadout));
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        eprintln!("[Server] Station projection read failed: {error}");
+                        return;
+                    }
                 }
             }
         }
@@ -396,6 +406,9 @@ fn log_single_refusal(addr: std::net::SocketAddr, refusal: ClientAdmissionRefusa
         }
         ClientAdmissionRefusal::MissingObserver(error) => {
             eprintln!("[Server] handshake from {addr} refused: {error}");
+        }
+        ClientAdmissionRefusal::StationProjectionRead(error) => {
+            eprintln!("[Server] handshake from {addr} stopped: {error}");
         }
     }
 }

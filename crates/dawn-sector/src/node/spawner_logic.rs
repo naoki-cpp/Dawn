@@ -228,10 +228,11 @@ impl SimulationNode {
         // their only ship. For now the starter packaged ship lives at the
         // demo NPC station (`StationId(0)`), which is also where fresh-play
         // station flows are exercised.
-        self.credit_station_item(
+        self.credit_station_item_from_current(
             player_id,
             dawn_core::StationId(0),
             dawn_core::ItemId::PackagedShip(SHIP_TYPE_MAGPIE),
+            0,
             1,
         );
 
@@ -580,7 +581,8 @@ mod tests {
                 player_id,
                 dawn_core::StationId(0),
                 dawn_core::ItemId::PackagedShip(crate::ship_types::SHIP_TYPE_MAGPIE)
-            ),
+            )
+            .unwrap(),
             1
         );
     }
@@ -797,7 +799,8 @@ mod tests {
         for &ship_id in node.simulation.ships.index.keys() {
             let loadout = node
                 .build_player_loadout_json(ship_id)
-                .expect("every spawned ship has a loadout");
+                .expect("every spawned ship has a loadout")
+                .expect("every spawned ship has a PlayerLoadout");
             assert!(
                 loadout
                     .modules

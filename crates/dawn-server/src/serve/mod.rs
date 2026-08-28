@@ -28,6 +28,9 @@ pub(crate) fn client_request_rejection(
         ClientRequestAdmissionError::UnsupportedRequest { request } => {
             dawn_protocol::ClientRequestRejectionWire::unsupported_request(request)
         }
+        ClientRequestAdmissionError::StationProjectionRead(error) => {
+            unreachable!("Station projection failure must fence the runtime: {error}")
+        }
     }
 }
 

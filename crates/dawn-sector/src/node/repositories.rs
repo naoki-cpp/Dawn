@@ -112,6 +112,13 @@ pub(super) fn next_ship_counter_as_sql(ship_id: dawn_core::ShipId) -> rusqlite::
 }
 
 impl SectorRepository {
+    #[cfg(test)]
+    pub(super) fn drop_station_inventory_for_test(&mut self) {
+        self.conn
+            .execute("DROP TABLE station_inventory", [])
+            .expect("test projection storage should be droppable");
+    }
+
     pub(super) fn open(path: &str) -> rusqlite::Result<Self> {
         Self::init(Connection::open(path)?)
     }

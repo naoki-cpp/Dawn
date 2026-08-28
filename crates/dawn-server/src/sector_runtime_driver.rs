@@ -69,7 +69,9 @@ impl From<RuntimeFrameHostError> for FixtureSpawnError {
     fn from(error: RuntimeFrameHostError) -> Self {
         match error {
             RuntimeFrameHostError::BootstrapClosed => Self::BootstrapClosed,
-            RuntimeFrameHostError::Fenced | RuntimeFrameHostError::Tick(_) => Self::RuntimeFenced,
+            RuntimeFrameHostError::Fenced
+            | RuntimeFrameHostError::StationProjectionRead(_)
+            | RuntimeFrameHostError::Tick(_) => Self::RuntimeFenced,
         }
     }
 }

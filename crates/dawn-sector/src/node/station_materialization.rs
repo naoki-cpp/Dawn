@@ -223,7 +223,8 @@ mod tests {
             ship_id,
             DockCommand { station_id }
         )));
-        node.credit_station_item(player_id, station_id, ItemId::ScrapMetal, 3);
+        node.credit_station_item(player_id, station_id, ItemId::ScrapMetal, 3)
+            .unwrap();
 
         assert!(accepted(node.build_packaged_ship_owned(
             player_id,
@@ -235,11 +236,13 @@ mod tests {
         )));
 
         assert_eq!(
-            node.station_item_count(player_id, station_id, ItemId::ScrapMetal),
+            node.station_item_count(player_id, station_id, ItemId::ScrapMetal)
+                .unwrap(),
             2
         );
         assert_eq!(
-            node.station_item_count(player_id, station_id, ItemId::PackagedShip(ShipTypeId(1))),
+            node.station_item_count(player_id, station_id, ItemId::PackagedShip(ShipTypeId(1)))
+                .unwrap(),
             1
         );
     }
@@ -320,7 +323,8 @@ mod tests {
         )));
 
         assert_eq!(
-            node.station_item_count(player_id, station_id, ItemId::PackagedShip(ship_type_id)),
+            node.station_item_count(player_id, station_id, ItemId::PackagedShip(ship_type_id))
+                .unwrap(),
             2
         );
         assert!(!node.simulation.ships.index.contains_key(&ship_id));
@@ -338,7 +342,8 @@ mod tests {
                 player_id,
                 station_id,
                 ItemId::Module(crate::modules::MODULE_RAILGUN_SMALL)
-            ),
+            )
+            .unwrap(),
             2
         );
         assert_eq!(
@@ -346,7 +351,8 @@ mod tests {
                 player_id,
                 station_id,
                 ItemId::Module(crate::modules::MODULE_AFTERBURNER)
-            ),
+            )
+            .unwrap(),
             2
         );
         assert_eq!(
@@ -354,7 +360,8 @@ mod tests {
                 player_id,
                 station_id,
                 ItemId::Module(crate::modules::MODULE_FOLD_DISRUPTOR)
-            ),
+            )
+            .unwrap(),
             2
         );
     }
@@ -420,7 +427,8 @@ mod tests {
         )));
 
         assert_eq!(
-            node.station_item_count(player_id, station_id, ItemId::ScrapMetal),
+            node.station_item_count(player_id, station_id, ItemId::ScrapMetal)
+                .unwrap(),
             5
         );
     }
@@ -518,7 +526,8 @@ mod tests {
             station_id,
             ItemId::PackagedShip(ShipTypeId(1)),
             1,
-        );
+        )
+        .unwrap();
         let ship_b = node
             .assemble_ship_owned(
                 player_id,
@@ -628,7 +637,8 @@ mod tests {
             station_id,
             ItemId::PackagedShip(ShipTypeId(1)),
             1,
-        );
+        )
+        .unwrap();
 
         let new_ship_id = node
             .assemble_ship_owned(
@@ -641,7 +651,8 @@ mod tests {
             .expect("assemble succeeds");
 
         assert_eq!(
-            node.station_item_count(player_id, station_id, ItemId::PackagedShip(ShipTypeId(1))),
+            node.station_item_count(player_id, station_id, ItemId::PackagedShip(ShipTypeId(1)))
+                .unwrap(),
             0
         );
         assert_eq!(node.docked_station(new_ship_id), Some(station_id));

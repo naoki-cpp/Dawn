@@ -4,12 +4,14 @@
 //! expects live here, keeping the core simulation logic in `mod.rs` separate
 //! from the presentation layer.
 
+use crate::node::repositories::ProjectionReadError;
 use dawn_core::{AbsolutePosition, ShipId};
 use dawn_ecs::components::{HullComp, ShipStatsComp, VelocityComp};
 use dawn_protocol::{
     AbsPosWire, BuildableShipTypeWire, CelestialBodyWire, InitialStateWire, JumpGateWire,
     PlayerLoadoutWire, ShipStateWire, StationWire, SystemWire,
 };
+use thiserror::Error;
 
 use super::SimulationNode;
 
@@ -20,6 +22,14 @@ use super::SimulationNode;
 pub struct HandoffPayload {
     pub initial_state: InitialStateWire,
     pub player_loadout: Option<PlayerLoadoutWire>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub(crate) enum HandoffPayloadError {
+    #[error(transparent)]
+    MissingObserver(#[from] MissingObserverShip),
+    #[error(transparent)]
+    ProjectionRead(#[from] ProjectionReadError),
 }
 
 /// The observer ship needed to scope an InitialState could not be resolved.
@@ -64,9 +74,9 @@ impl SimulationNode {
         &self,
         ship_id: ShipId,
         aoi_cell_size: f64,
-    ) -> Result<HandoffPayload, MissingObserverShip> {
+    ) -> Result<HandoffPayload, HandoffPayloadError> {
         let initial_state = self.build_initial_state_for_observer(ship_id, aoi_cell_size)?;
-        let player_loadout = self.build_player_loadout_json(ship_id);
+        let player_loadout = self.build_player_loadout_json(ship_id)?;
         Ok(HandoffPayload {
             initial_state,
             player_loadout,
@@ -537,6 +547,9 @@ mod tests {
             .build_handoff_payload(missing, 1_000.0)
             .expect_err("missing observer must not receive full-world state");
 
-        assert_eq!(error, MissingObserverShip { ship_id: missing });
+        assert_eq!(
+            error,
+            HandoffPayloadError::MissingObserver(MissingObserverShip { ship_id: missing })
+        );
     }
 }

@@ -67,6 +67,7 @@ pub use commands::{
 };
 pub use jump::JumpOutcome;
 pub use repositories::{ProjectionApplyError, ProjectionApplyResult, ProjectionReadError};
+pub(crate) use serialization::HandoffPayloadError;
 pub use serialization::{HandoffPayload, MissingObserverShip};
 pub use tick::TickPreparationError;
 

@@ -16,7 +16,7 @@ use dawn_sector::client_admission_resolution::resolve_client_admission;
 use dawn_sector::client_admission_resolution::ClientAdmissionResolution;
 #[cfg(test)]
 use dawn_sector::node::SimulationNode;
-use dawn_sector::node::{JumpOutcome, RuntimeCommandDispatch};
+use dawn_sector::node::{JumpOutcome, ProjectionReadError, RuntimeCommandDispatch};
 use dawn_server::runtime_frame::{
     OwnedRaftRuntimeConsensus, RuntimeClientAdmissionError, RuntimeClientAdmissionHost,
     RuntimeFrameHost, RuntimeFramePolicy, RuntimeNodeView,
@@ -183,10 +183,10 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                 }
                 Err(RuntimeClientAdmissionError::Host(error)) => {
                     eprintln!(
-                        "[Server] connection from {} refused: {error}",
+                        "[Server] fatal runtime error while admitting {}: {error}",
                         request.peer_addr
                     );
-                    continue;
+                    return;
                 }
             };
             let player_id = attempt.player_id();
@@ -244,12 +244,15 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
         );
 
         for (sector, output) in tick_results.iter().enumerate() {
-            handle_cluster_command_dispatches(
+            if let Err(error) = handle_cluster_command_dispatches(
                 &mut hosts[sector],
                 &mut sessions,
                 sector,
                 &output.tick_result.runtime_command_dispatches,
-            );
+            ) {
+                eprintln!("[Server] Station projection read failed: {error}");
+                return;
+            }
         }
 
         for sess in &sessions {
@@ -262,9 +265,15 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                 )
             });
             if should_refresh {
-                if let Some(loadout) = hosts[sector].node().build_player_loadout_json(sess.ship_id)
-                {
-                    sess.send_message(&ServerMessage::PlayerLoadout(loadout));
+                match hosts[sector].node().build_player_loadout_json(sess.ship_id) {
+                    Ok(Some(loadout)) => {
+                        sess.send_message(&ServerMessage::PlayerLoadout(loadout));
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        eprintln!("[Server] Station projection read failed: {error}");
+                        return;
+                    }
                 }
             }
         }
@@ -294,6 +303,9 @@ fn log_cluster_refusal(addr: std::net::SocketAddr, refusal: ClientAdmissionRefus
         ClientAdmissionRefusal::MissingObserver(error) => {
             eprintln!("[Server] clustered handshake from {addr} refused: {error}");
         }
+        ClientAdmissionRefusal::StationProjectionRead(error) => {
+            eprintln!("[Server] clustered handshake from {addr} stopped: {error}");
+        }
     }
 }
 
@@ -302,24 +314,24 @@ fn handle_cluster_command_dispatches(
     sessions: &mut [ws_server::PlayerSession],
     sector: usize,
     dispatches: &[RuntimeCommandDispatch],
-) {
+) -> Result<(), ProjectionReadError> {
     for dispatch in dispatches {
-        match *dispatch {
+        match dispatch {
             RuntimeCommandDispatch::Jump {
                 session_index,
                 ship_id,
                 command,
                 outcome,
             } => {
-                let Some(session) = sessions.get(session_index) else {
+                let Some(session) = sessions.get(*session_index) else {
                     continue;
                 };
-                if session.ship_id != ship_id {
+                if session.ship_id != *ship_id {
                     continue;
                 }
                 match outcome {
                     JumpOutcome::NeedsTransitProposal { to } => {
-                        host.propose_transit_request(ship_id, to, Some(command.gate_id))
+                        host.propose_transit_request(*ship_id, *to, Some(command.gate_id))
                             .expect("in-memory clustered runtime must remain writable");
                         println!(
                             "  [Server] Jump proposed: ship #{} gate #{} (S{} -> S{})",
@@ -349,25 +361,30 @@ fn handle_cluster_command_dispatches(
             RuntimeCommandDispatch::RefreshPlayerLoadout {
                 session_index,
                 player_id,
-            } => {
-                if let Some(loadout) = host.node().build_player_loadout_json_for_player(player_id) {
-                    if let Some(session) = sessions.get_mut(session_index) {
+            } => match host.node().build_player_loadout_json_for_player(*player_id) {
+                Ok(Some(loadout)) => {
+                    if let Some(session) = sessions.get_mut(*session_index) {
                         session.send_message(&ServerMessage::PlayerLoadout(loadout));
                     }
                 }
-            }
+                Ok(None) => {}
+                Err(error) => {
+                    return Err(error);
+                }
+            },
             RuntimeCommandDispatch::Rejected {
                 session_index,
                 error,
             } => {
-                if let Some(session) = sessions.get_mut(session_index) {
+                if let Some(session) = sessions.get_mut(*session_index) {
                     session.send_message(&ServerMessage::ClientRequestRejected(
-                        client_request_rejection(error),
+                        client_request_rejection(error.clone()),
                     ));
                 }
             }
         }
     }
+    Ok(())
 }
 
 fn find_resume_sector<N: RuntimeNodeView>(

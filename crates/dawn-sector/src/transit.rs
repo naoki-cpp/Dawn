@@ -128,7 +128,9 @@ impl RuntimeHealth {
         }
     }
 
-    fn fence(&mut self, reason: impl Into<String>) {
+    /// Fence the runtime until the caller completes recovery and calls
+    /// [`Self::mark_recovered`].
+    pub fn fence(&mut self, reason: impl Into<String>) {
         self.fenced_reason = Some(reason.into());
     }
 }
@@ -686,6 +688,11 @@ where
         Ok(result) => result,
         Err(error) => {
             node.restore_pending_events(prior_events);
+            if let crate::node::TickPreparationError::StationProjectionRead(read_error) = &error {
+                health.fence(format!(
+                    "Station projection read failed during Tick preparation: {read_error}"
+                ));
+            }
             return Err(TickTransitionError::Preparation(error));
         }
     };

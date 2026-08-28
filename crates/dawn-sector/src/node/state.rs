@@ -237,6 +237,11 @@ impl PersistenceBoundary {
         })
     }
 
+    #[cfg(test)]
+    pub(super) fn drop_station_inventory_for_test(&mut self) {
+        self.repositories.drop_station_inventory_for_test();
+    }
+
     pub(super) fn admissions(&self) -> AdmissionRepository<'_> {
         self.repositories.admissions()
     }

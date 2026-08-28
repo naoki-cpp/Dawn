@@ -875,13 +875,15 @@ mod tests {
 
         let mut node = node_with_modules();
         node.open_repositories(db_path).unwrap();
-        node.credit_station_item(PlayerId(7), StationId(0), ItemId::ScrapMetal, 4);
+        node.credit_station_item(PlayerId(7), StationId(0), ItemId::ScrapMetal, 4)
+            .unwrap();
         node.credit_station_item(
             PlayerId(7),
             StationId(0),
             ItemId::PackagedShip(dawn_core::ShipTypeId(1)),
             1,
-        );
+        )
+        .unwrap();
         let mutations = node.stations.pending_projection().to_vec();
         node.apply_station_projection(
             "seed-station-projection",
@@ -902,15 +904,19 @@ mod tests {
         node2.open_repositories(db_path).unwrap();
 
         assert_eq!(
-            node2.station_item_count(PlayerId(7), StationId(0), ItemId::ScrapMetal),
+            node2
+                .station_item_count(PlayerId(7), StationId(0), ItemId::ScrapMetal)
+                .unwrap(),
             4
         );
         assert_eq!(
-            node2.station_item_count(
-                PlayerId(7),
-                StationId(0),
-                ItemId::PackagedShip(dawn_core::ShipTypeId(1)),
-            ),
+            node2
+                .station_item_count(
+                    PlayerId(7),
+                    StationId(0),
+                    ItemId::PackagedShip(dawn_core::ShipTypeId(1)),
+                )
+                .unwrap(),
             1
         );
     }

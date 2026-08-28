@@ -278,6 +278,7 @@ mod tests {
         assert!(db
             .station_inventory()
             .get_all(PlayerId(1), StationId(7))
+            .unwrap()
             .is_empty());
     }
 
@@ -308,6 +309,7 @@ mod tests {
         assert!(db
             .station_inventory()
             .get_all(PlayerId(1), StationId(7))
+            .unwrap()
             .is_empty());
     }
 
@@ -401,6 +403,7 @@ mod tests {
         assert!(db
             .station_inventory()
             .get_all(PlayerId(1), StationId(7))
+            .unwrap()
             .is_empty());
     }
 
@@ -430,6 +433,7 @@ mod tests {
         assert!(db
             .station_inventory()
             .get_all(PlayerId(1), StationId(7))
+            .unwrap()
             .is_empty());
         assert_eq!(
             db.identities().client_owner(ship_id).unwrap(),

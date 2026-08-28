@@ -202,7 +202,8 @@ impl SimulationNode {
                     station_id,
                     ItemId::PackagedShip(ship_type_id),
                     1,
-                );
+                )
+                .map_err(StationOperationRejection::projection_read)?;
                 self.append_station_event(DomainEvent::PackagedShipBuilt(PackagedShipBuilt {
                     ship_id,
                     player_id,
@@ -232,14 +233,16 @@ impl SimulationNode {
                     .map(|mut inventory| std::mem::take(&mut inventory.items).into_iter().collect())
                     .unwrap_or_default();
                 for (item_id, count) in salvaged_cargo {
-                    self.credit_station_item(player_id, station_id, item_id, count);
+                    self.credit_station_item(player_id, station_id, item_id, count)
+                        .map_err(StationOperationRejection::projection_read)?;
                 }
                 self.credit_station_item(
                     player_id,
                     station_id,
                     ItemId::PackagedShip(ship_type_id),
                     1,
-                );
+                )
+                .map_err(StationOperationRejection::projection_read)?;
                 self.apply_station_runtime_state(StationRuntimeState::Disassemble { ship_id });
                 self.append_station_event(DomainEvent::ShipDisassembled(ShipDisassembled {
                     ship_id,
@@ -353,7 +356,8 @@ mod tests {
                 PlayerId(1),
                 StationId(0),
                 ItemId::PackagedShip(ShipTypeId(1))
-            ),
+            )
+            .unwrap(),
             0
         );
     }
@@ -367,7 +371,8 @@ mod tests {
             StationId(0),
             ItemId::PackagedShip(ShipTypeId(1)),
             1,
-        );
+        )
+        .unwrap();
         let before = node.pending_event_count();
 
         let result = node
@@ -382,7 +387,8 @@ mod tests {
             panic!("expected an assembled ship result");
         };
         assert_eq!(
-            node.station_item_count(player_id, StationId(0), ItemId::PackagedShip(ShipTypeId(1))),
+            node.station_item_count(player_id, StationId(0), ItemId::PackagedShip(ShipTypeId(1)))
+                .unwrap(),
             0
         );
         assert_eq!(node.docked_station(ship_id), Some(StationId(0)));
@@ -482,8 +488,11 @@ mod tests {
         let station_id = StationId(0);
         let ship_type_id = ShipTypeId(1);
         let packaged = ItemId::PackagedShip(ship_type_id);
-        live.credit_station_item(player_id, station_id, packaged, 1);
-        comparison.credit_station_item(player_id, station_id, packaged, 1);
+        live.credit_station_item(player_id, station_id, packaged, 1)
+            .unwrap();
+        comparison
+            .credit_station_item(player_id, station_id, packaged, 1)
+            .unwrap();
 
         let result = live
             .execute_station_operation(StationOperationPlan::AssembleShip {
@@ -508,7 +517,9 @@ mod tests {
 
         assert_eq!(live_ship_id, comparison_ship_id);
         assert_eq!(
-            comparison.station_item_count(player_id, station_id, packaged),
+            comparison
+                .station_item_count(player_id, station_id, packaged)
+                .unwrap(),
             0
         );
         assert_eq!(

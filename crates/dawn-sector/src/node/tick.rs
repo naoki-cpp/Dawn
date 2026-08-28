@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, HashSet};
 
+use super::repositories::ProjectionReadError;
 use super::{SimulationNode, TickResult};
 use crate::persistence::ShipSnapshot;
 use crate::transition::{
@@ -30,6 +31,8 @@ pub enum TickPreparationError {
     Transition(#[from] TransitionError),
     #[error("prepared Tick could not restore the live state: {0}")]
     Restoration(#[from] TransitionApplyError),
+    #[error("Station projection read failed during Tick preparation: {0}")]
+    StationProjectionRead(#[from] ProjectionReadError),
 }
 
 fn lock_event_touches_transit(event: &DomainEvent, transit_ids: &HashSet<ShipId>) -> bool {
@@ -245,6 +248,25 @@ impl SimulationNode {
         let before_market_settlements = self.simulation.applied_market_settlements.clone();
         let before_station_overlay = self.stations.snapshot_projection_overlay();
 
+        let restore_preparation = |node: &mut SimulationNode| -> Result<(), TickPreparationError> {
+            node.simulation.current_tick = before_tick;
+            node.restore_tick_write_set(&before_states)?;
+            node.transit.transit_journal = before_transit_journal.clone();
+            node.simulation.pending_bot_lock_commands = before_bot_commands.clone();
+            node.frame_outputs.pending_auto_jumps = before_auto_jumps.clone();
+            node.frame_outputs.completed_warps = before_completed_warps.clone();
+            node.transit.transit_attempt_counter = before_transit_attempt_counter;
+            node.simulation.applied_market_settlements = before_market_settlements.clone();
+            node.stations
+                .restore_projection_overlay(before_station_overlay.clone());
+            node.restore_transit_saga(before_transit_saga.clone())
+                .expect("prepared Tick must restore the previous Transit Saga");
+            node.frame_outputs
+                .pending_events
+                .truncate(before_pending_event_count);
+            Ok(())
+        };
+
         // Retire settlement identities the Market ledger has already decided
         // before admitting new ones, so the idempotency guard stays bounded
         // (issue #315). Both happen before the write set is captured below,
@@ -255,6 +277,7 @@ impl SimulationNode {
 
         let mut lock_commands = input.lock_commands.to_vec();
         let mut runtime_command_dispatches = Vec::new();
+        let mut station_projection_failure = None;
         for authenticated in input.authenticated_requests {
             match self.apply_client_request(
                 authenticated.player_id,
@@ -279,6 +302,10 @@ impl SimulationNode {
                     },
                 ),
                 Ok(None) => {}
+                Err(crate::node::ClientRequestAdmissionError::StationProjectionRead(error)) => {
+                    station_projection_failure = Some(error);
+                    break;
+                }
                 Err(error) => {
                     runtime_command_dispatches.push(crate::node::RuntimeCommandDispatch::Rejected {
                         session_index: authenticated.session_index,
@@ -286,6 +313,11 @@ impl SimulationNode {
                     })
                 }
             }
+        }
+
+        if let Some(error) = station_projection_failure {
+            restore_preparation(self)?;
+            return Err(TickPreparationError::StationProjectionRead(error));
         }
 
         let settlement_outcomes: Vec<crate::transition::MarketSettlementOutcome> = input
@@ -338,25 +370,10 @@ impl SimulationNode {
             node_state: self.capture_node_state(),
         };
 
-        self.simulation.current_tick = before_tick;
-        let restore_result = self.restore_tick_write_set(&before_states);
         // The legacy systems may emit public facts while preparing. Their
         // node-local projections are speculative until the enclosing journal
         // batch commits, just like the ECS write set.
-        self.transit.transit_journal = before_transit_journal;
-        restore_result?;
-        self.simulation.pending_bot_lock_commands = before_bot_commands;
-        self.frame_outputs.pending_auto_jumps = before_auto_jumps;
-        self.frame_outputs.completed_warps = before_completed_warps;
-        self.transit.transit_attempt_counter = before_transit_attempt_counter;
-        self.simulation.applied_market_settlements = before_market_settlements;
-        self.stations
-            .restore_projection_overlay(before_station_overlay);
-        self.restore_transit_saga(before_transit_saga)
-            .expect("prepared Tick must restore the previous Transit Saga");
-        self.frame_outputs
-            .pending_events
-            .truncate(before_pending_event_count);
+        restore_preparation(self)?;
 
         let prepared = PreparedSectorTransition {
             transition_id,
@@ -1159,6 +1176,53 @@ mod tests {
             .unwrap_or(0);
         assert_eq!(after_commit_count, before_count + 7);
         assert!(node.simulation.applied_market_settlements.contains(&42));
+    }
+
+    #[test]
+    fn station_projection_read_failure_fails_tick_preparation_and_restores_state() {
+        let mut node = mem_node();
+        let player_id = node.next_player_id();
+        let ship_id = node.spawn_player_ship(player_id);
+        let station = node.station(dawn_core::StationId(0)).unwrap().clone();
+        node.set_spawn_anchor_abs(ship_id, station.abs_m);
+        assert!(matches!(
+            node.dock_owned(
+                player_id,
+                ship_id,
+                dawn_core::DockCommand {
+                    station_id: dawn_core::StationId(0),
+                },
+            ),
+            crate::node::station::StationOperationOutcome::Accepted { .. }
+        ));
+        node.persistence.drop_station_inventory_for_test();
+        let before_pending_event_count = node.pending_events().len();
+
+        let requests = [crate::transition::AuthenticatedClientRequest {
+            session_index: 0,
+            player_id,
+            request: dawn_core::ClientRequest::BuildPackagedShip {
+                ship: ship_id,
+                station: dawn_core::StationId(0),
+                ship_type: crate::ship_types::SHIP_TYPE_MAGPIE,
+            },
+        }];
+        let input = crate::transition::FrameInput {
+            lock_commands: &[],
+            authenticated_requests: &requests,
+            market_settlements: &[],
+            acknowledged_settlements: &[],
+        };
+
+        let error = node
+            .prepare_tick_state_transition(input, SectorTransitionId(30), 4)
+            .expect_err("a missing Station projection must stop Tick preparation");
+        assert!(matches!(
+            error,
+            TickPreparationError::StationProjectionRead(_)
+        ));
+        assert_eq!(node.current_tick(), Tick::ZERO);
+        assert_eq!(node.pending_events().len(), before_pending_event_count);
     }
 
     /// A RemoveItem settlement that empties a stack must survive the commit
