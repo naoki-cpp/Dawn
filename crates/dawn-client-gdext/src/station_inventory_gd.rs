@@ -3,12 +3,13 @@ use dawn_client_core::{
     StationInventoryContext, StationInventoryInteraction as CoreInteraction,
     StationInventoryLocalAction, StationInventoryRow as CoreRow,
 };
-use dawn_core::{ModuleId, ShipId, ShipTypeId, StationId};
+use dawn_core::{ModuleId, ShipTypeId};
 use godot::prelude::*;
 
 use crate::client_command_gd::{
     request_result_from_request, slot_kind_from_str, ClientCommandResult,
 };
+use crate::id_boundary::{ship_id_from_godot, station_id_from_godot};
 use crate::item_identity_gd::ItemIdentity;
 use crate::module_row_gd::ModuleRow;
 
@@ -109,7 +110,7 @@ impl StationInventoryRow {
 
     #[func]
     fn owned_ship(raw_ship_id: i64, active: bool) -> Variant {
-        let Some(ship) = ship_id(raw_ship_id) else {
+        let Some(ship) = ship_id_from_godot(raw_ship_id) else {
             return Variant::nil();
         };
         Self::wrap(CoreRow::OwnedShip { ship, active }).to_variant()
@@ -293,8 +294,8 @@ fn context<'a>(
     fitted_modules: &'a [FittedModuleRow],
 ) -> StationInventoryContext<'a> {
     StationInventoryContext::new(
-        ship_id(active_ship_id),
-        station_id(docked_station_id),
+        ship_id_from_godot(active_ship_id),
+        station_id_from_godot(docked_station_id),
         fitted_modules,
     )
 }
@@ -303,7 +304,7 @@ fn fitted_modules_from_godot(rows: &Array<Gd<ModuleRow>>) -> Option<Vec<FittedMo
     rows.iter_shared()
         .map(|row| {
             let inner = row.bind().inner_clone();
-            let module = nonzero_module_id(i64::from(inner.module_id))?;
+            let module = nonzero_module_id(i64::from(inner.module_id.0))?;
             let slot = slot_kind_from_str(&inner.slot)?;
             Some(FittedModuleRow {
                 module,
@@ -322,16 +323,6 @@ fn column_from_code(code: i64) -> Option<StationInventoryColumn> {
         COLUMN_SHIPS => Some(StationInventoryColumn::Ships),
         _ => None,
     }
-}
-
-fn ship_id(value: i64) -> Option<ShipId> {
-    u64::try_from(value)
-        .ok()
-        .map(|raw| ShipId(dawn_core::EntityId::from_raw(raw)))
-}
-
-fn station_id(value: i64) -> Option<StationId> {
-    u32::try_from(value).ok().map(StationId)
 }
 
 fn nonzero_module_id(value: i64) -> Option<ModuleId> {

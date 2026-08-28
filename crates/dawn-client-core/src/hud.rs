@@ -6,6 +6,8 @@
 //! resulting values into Godot objects; it does not reconstruct a frame or
 //! compare mutable Godot objects.
 
+use dawn_core::{CelestialBodyId, JumpGateId, ModuleId, ShipId, StationId};
+
 use crate::{ClientRules, HealthState, ModuleRow, PlayerLoadoutMsg, WorldSessionState};
 
 const AU_METERS: f64 = 1.495_978_707e11;
@@ -16,13 +18,13 @@ pub struct HudSceneFacts {
     pub player_speed_units: Option<f64>,
     pub target_known: bool,
     pub target_distance_units: Option<f64>,
-    pub nearby_gate_id: i64,
-    pub nearby_station_ids: Vec<i64>,
+    pub nearby_gate_id: Option<JumpGateId>,
+    pub nearby_station_ids: Vec<StationId>,
     pub jump_notice: String,
-    pub selected_gate_id: i64,
-    pub selected_body_id: i64,
-    pub selected_station_id: i64,
-    pub selected_target_id: i64,
+    pub selected_gate_id: Option<JumpGateId>,
+    pub selected_body_id: Option<CelestialBodyId>,
+    pub selected_station_id: Option<StationId>,
+    pub selected_target_id: Option<ShipId>,
     pub selected_gate_distance_units: Option<f64>,
     pub keep_at_range_km: f64,
 }
@@ -34,13 +36,13 @@ impl Default for HudSceneFacts {
             player_speed_units: None,
             target_known: false,
             target_distance_units: None,
-            nearby_gate_id: -1,
+            nearby_gate_id: None,
             nearby_station_ids: Vec::new(),
             jump_notice: String::new(),
-            selected_gate_id: -1,
-            selected_body_id: -1,
-            selected_station_id: -1,
-            selected_target_id: -1,
+            selected_gate_id: None,
+            selected_body_id: None,
+            selected_station_id: None,
+            selected_target_id: None,
             selected_gate_distance_units: None,
             keep_at_range_km: 10.0,
         }
@@ -57,7 +59,7 @@ pub struct HudStatusPanel {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct HudShipStatusPanel {
-    pub player_ship_id: i64,
+    pub player_ship_id: Option<ShipId>,
     pub health: HealthState,
     pub cap_current: f64,
     pub cap_max: f64,
@@ -65,7 +67,7 @@ pub struct HudShipStatusPanel {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct HudTargetPanel {
-    pub lock_target_id: i64,
+    pub lock_target_id: Option<ShipId>,
     pub target_known: bool,
     pub distance_text: String,
     pub health: Option<HealthState>,
@@ -182,7 +184,7 @@ fn build_snapshot(
     loadout: Option<&PlayerLoadoutMsg>,
     facts: &HudSceneFacts,
 ) -> HudSnapshot {
-    let target_known = session.player_lock_target() >= 0 && facts.target_known;
+    let target_known = session.player_lock_target().is_some() && facts.target_known;
     let target_distance = target_known
         .then_some(facts.target_distance_units)
         .flatten()
@@ -197,7 +199,7 @@ fn build_snapshot(
             .then(|| {
                 session
                     .ship_hp()
-                    .get(&session.player_lock_target())
+                    .get(&session.player_lock_target()?)
                     .copied()
             })
             .flatten(),
@@ -233,21 +235,23 @@ fn build_snapshot(
 }
 
 fn build_stats_text(session: &WorldSessionState, facts: &HudSceneFacts) -> String {
-    let jump_line = if facts.nearby_gate_id >= 0 {
-        format!("\n[J] Jump Gate #{}", facts.nearby_gate_id)
+    let jump_line = if let Some(gate_id) = facts.nearby_gate_id {
+        format!("\n[J] Jump Gate #{}", gate_id.0)
     } else {
         String::new()
     };
     let jump_line = format!("{}{}", jump_line, non_empty_line(&facts.jump_notice));
 
     let station_line = if session.is_docked() {
-        let station_id = session.docked_station_id();
+        let station_id = session
+            .docked_station_id()
+            .expect("docked sessions always have a station ID");
         let station_name = if session.docked_station_name().is_empty() {
-            format!("Station #{station_id}")
+            format!("Station #{}", station_id.0)
         } else {
             session.docked_station_name().to_owned()
         };
-        if session.player_ship_id() >= 0 {
+        if session.player_ship_id().is_some() {
             format!(
                 "\nDocked: {station_name}\n[U] Undock  [B] Build Magpie\n[Y] Disassemble ship  [X] Disembark"
             )
@@ -282,11 +286,8 @@ fn build_stats_text(session: &WorldSessionState, facts: &HudSceneFacts) -> Strin
         "\n[O] Orbit  [K] Keep at {:.0} km  ([/]  adjust)",
         keep_at_range_km
     );
-    let approach_line = if facts.selected_gate_id >= 0 {
-        let mut line = format!(
-            "\n[A] Approach Gate #{}{}",
-            facts.selected_gate_id, keep_at_range_hint
-        );
+    let approach_line = if let Some(gate_id) = facts.selected_gate_id {
+        let mut line = format!("\n[A] Approach Gate #{}{}", gate_id.0, keep_at_range_hint);
         if let Some(distance) = facts
             .selected_gate_distance_units
             .filter(|distance| distance.is_finite())
@@ -298,30 +299,27 @@ fn build_stats_text(session: &WorldSessionState, facts: &HudSceneFacts) -> Strin
             }
         }
         line
-    } else if facts.selected_body_id >= 0 {
+    } else if let Some(body_id) = facts.selected_body_id {
         let name = session
             .bodies()
             .iter()
-            .find(|body| body.body_id == facts.selected_body_id)
+            .find(|body| body.body_id == body_id)
             .map(|body| body.name.as_str())
             .filter(|name| !name.is_empty())
             .unwrap_or("");
         let name = if name.is_empty() {
-            format!("Body #{}", facts.selected_body_id)
+            format!("Body #{}", body_id.0)
         } else {
             name.to_owned()
         };
         format!("\n[W] Warp to {name}")
-    } else if facts.selected_station_id >= 0 {
+    } else if let Some(station_id) = facts.selected_station_id {
         format!(
             "\n[W] Warp to {}",
-            station_display_name(session, facts.selected_station_id)
+            station_display_name(session, station_id)
         )
-    } else if facts.selected_target_id >= 0 {
-        format!(
-            "\n[A] Approach #{}{}",
-            facts.selected_target_id, keep_at_range_hint
-        )
+    } else if let Some(target_id) = facts.selected_target_id {
+        format!("\n[A] Approach #{}{}", target_id.raw(), keep_at_range_hint)
     } else {
         String::new()
     };
@@ -336,7 +334,7 @@ fn build_stats_text(session: &WorldSessionState, facts: &HudSceneFacts) -> Strin
     )
 }
 
-fn station_display_name(session: &WorldSessionState, station_id: i64) -> String {
+fn station_display_name(session: &WorldSessionState, station_id: StationId) -> String {
     session
         .stations()
         .iter()
@@ -344,7 +342,7 @@ fn station_display_name(session: &WorldSessionState, station_id: i64) -> String 
         .map(|station| station.name.as_str())
         .filter(|name| !name.is_empty())
         .map(ToOwned::to_owned)
-        .unwrap_or_else(|| format!("Station #{station_id}"))
+        .unwrap_or_else(|| format!("Station #{}", station_id.0))
 }
 
 fn non_empty_line(value: &str) -> String {
@@ -355,7 +353,7 @@ fn non_empty_line(value: &str) -> String {
     }
 }
 
-fn active_module_signature(modules: &[ModuleRow]) -> Vec<(u32, String)> {
+fn active_module_signature(modules: &[ModuleRow]) -> Vec<(ModuleId, String)> {
     modules
         .iter()
         .filter(|module| module.is_active_module)
@@ -367,12 +365,16 @@ fn active_module_signature(modules: &[ModuleRow]) -> Vec<(u32, String)> {
 mod tests {
     use super::*;
     use crate::{CelestialBodyInput, NavigationInput, PositionInput, ShipInput, StationInput};
-    use dawn_core::ModuleKind;
+    use dawn_core::{CelestialBodyId, ModuleId, ModuleKind, NodeId, ShipId, StationId};
+
+    fn ship_id(id: u64) -> ShipId {
+        ShipId::new(NodeId(0), id)
+    }
 
     fn player_state() -> WorldSessionState {
         let mut state = WorldSessionState::default();
         state.register_ship(
-            7,
+            ship_id(7),
             ShipInput {
                 is_player: true,
                 ship_type_name: "Magpie".to_owned(),
@@ -385,7 +387,7 @@ mod tests {
                 cap_max: 100.0,
                 cap_recharge_per_tick: 10.0,
             },
-            7,
+            ship_id(7),
         );
         state
     }
@@ -394,7 +396,7 @@ mod tests {
         ModuleRow {
             slot: "High".to_owned(),
             index: id,
-            module_id: id,
+            module_id: ModuleId(id),
             name: format!("Module {id}"),
             kind: ModuleKind::Weapon,
             is_active: active,
@@ -428,9 +430,9 @@ mod tests {
             connected: true,
             player_speed_units: Some(120.0),
             target_distance_units: None,
-            nearby_gate_id: 3,
+            nearby_gate_id: Some(dawn_core::JumpGateId(3)),
             jump_notice: "No target locked".to_owned(),
-            selected_target_id: 9,
+            selected_target_id: Some(ship_id(9)),
             ..HudSceneFacts::default()
         };
         let mut model = HudReadModel::default();
@@ -474,7 +476,7 @@ mod tests {
     fn target_health_is_only_projected_when_the_scene_still_knows_the_target() {
         let mut state = player_state();
         state.register_ship(
-            9,
+            ship_id(9),
             ShipInput {
                 is_player: false,
                 ship_type_name: "Target".to_owned(),
@@ -483,9 +485,9 @@ mod tests {
                 max_hull: 100.0,
                 ..ShipInput::default()
             },
-            7,
+            ship_id(7),
         );
-        state.apply_target_locked(7, 9);
+        state.apply_target_locked(ship_id(7), ship_id(9));
         let visible = HudSceneFacts {
             target_known: true,
             target_distance_units: Some(3_200.0),
@@ -528,21 +530,21 @@ mod tests {
         let mut state = player_state();
         state.ingest_navigation(NavigationInput {
             stations: vec![StationInput {
-                station_id: 4,
+                station_id: StationId(4),
                 name: String::new(),
                 position: PositionInput::default(),
                 docking_radius: 1.0,
             }],
             celestial_bodies: vec![CelestialBodyInput {
-                id: 6,
+                id: CelestialBodyId(6),
                 name: String::new(),
                 ..CelestialBodyInput::default()
             }],
             ..NavigationInput::default()
         });
         let facts = HudSceneFacts {
-            nearby_station_ids: vec![4],
-            selected_body_id: 6,
+            nearby_station_ids: vec![StationId(4)],
+            selected_body_id: Some(CelestialBodyId(6)),
             ..HudSceneFacts::default()
         };
         let mut model = HudReadModel::default();

@@ -29,7 +29,7 @@ impl ModuleActivationIntent {
     fn module_id(&self) -> i64 {
         self.inner
             .as_ref()
-            .map(|intent| i64::from(intent.module_id))
+            .map(|intent| i64::from(intent.module_id.0))
             .unwrap_or(-1)
     }
 

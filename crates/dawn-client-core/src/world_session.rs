@@ -6,7 +6,9 @@
 //! typed presentation records while `main.gd` keeps the Node3D registry and
 //! visual side effects.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+
+use dawn_core::{CelestialBodyId, JumpGateId, ShipId, ShipTypeId, StarSystemId, StationId};
 
 use crate::PlayerLoadoutMsg;
 
@@ -25,31 +27,62 @@ impl PositionInput {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SystemNameInput {
-    pub id: i64,
+    pub id: StarSystemId,
     pub name: String,
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
+impl Default for SystemNameInput {
+    fn default() -> Self {
+        Self {
+            id: StarSystemId(0),
+            name: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct GateInput {
-    pub gate_id: i64,
+    pub gate_id: JumpGateId,
     pub position: PositionInput,
     pub activation_radius: f64,
     pub to_system_name: String,
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
+impl Default for GateInput {
+    fn default() -> Self {
+        Self {
+            gate_id: JumpGateId(0),
+            position: PositionInput::default(),
+            activation_radius: 0.0,
+            to_system_name: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct StationInput {
-    pub station_id: i64,
+    pub station_id: StationId,
     pub name: String,
     pub position: PositionInput,
     pub docking_radius: f64,
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
+impl Default for StationInput {
+    fn default() -> Self {
+        Self {
+            station_id: StationId(0),
+            name: String::new(),
+            position: PositionInput::default(),
+            docking_radius: 0.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct CelestialBodyInput {
-    pub id: i64,
+    pub id: CelestialBodyId,
     pub kind: String,
     pub name: String,
     pub position: PositionInput,
@@ -60,10 +93,32 @@ pub struct CelestialBodyInput {
     pub spectral_type: f64,
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
+impl Default for CelestialBodyInput {
+    fn default() -> Self {
+        Self {
+            id: CelestialBodyId(0),
+            kind: String::new(),
+            name: String::new(),
+            position: PositionInput::default(),
+            radius: 1.0,
+            spectral_type: 0.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct BuildableShipTypeInput {
-    pub ship_type_id: i64,
+    pub ship_type_id: ShipTypeId,
     pub name: String,
+}
+
+impl Default for BuildableShipTypeInput {
+    fn default() -> Self {
+        Self {
+            ship_type_id: ShipTypeId(0),
+            name: String::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -146,7 +201,7 @@ pub struct ShipState {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct GateRecord {
-    pub gate_id: i64,
+    pub gate_id: JumpGateId,
     pub position: [f64; 3],
     pub activation_radius: f64,
     pub to_system_name: String,
@@ -154,7 +209,7 @@ pub struct GateRecord {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct StationRecord {
-    pub station_id: i64,
+    pub station_id: StationId,
     pub name: String,
     pub position: [f64; 3],
     pub docking_radius: f64,
@@ -162,7 +217,7 @@ pub struct StationRecord {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CelestialBodyRecord {
-    pub body_id: i64,
+    pub body_id: CelestialBodyId,
     pub kind: String,
     pub name: String,
     pub position: [f64; 3],
@@ -172,7 +227,7 @@ pub struct CelestialBodyRecord {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct BuildableShipTypeRecord {
-    pub ship_type_id: i64,
+    pub ship_type_id: ShipTypeId,
     pub name: String,
 }
 
@@ -197,7 +252,7 @@ pub struct DestructionOutcome {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShipRegistration {
-    pub ship_id: i64,
+    pub ship_id: ShipId,
     pub ship: ShipInput,
 }
 
@@ -205,7 +260,7 @@ pub struct ShipRegistration {
 pub enum WorldSessionEffect {
     None,
     InitialState {
-        player_ship_id: i64,
+        player_ship_id: Option<ShipId>,
     },
     ShipRegistered {
         registered: bool,
@@ -236,25 +291,25 @@ pub enum WorldSessionEffect {
 /// The pure client-side state for one connected world session.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WorldSessionState {
-    ships: BTreeMap<i64, ShipState>,
-    ship_hp: BTreeMap<i64, HealthState>,
-    opponent_ship_ids: Vec<i64>,
+    ships: BTreeMap<ShipId, ShipState>,
+    ship_hp: BTreeMap<ShipId, HealthState>,
+    opponent_ship_ids: Vec<ShipId>,
     gates: Vec<GateRecord>,
     stations: Vec<StationRecord>,
     bodies: Vec<CelestialBodyRecord>,
     buildable_ship_types: Vec<BuildableShipTypeRecord>,
-    system_names: BTreeMap<i64, String>,
-    player_ship_id: i64,
+    system_names: HashMap<StarSystemId, String>,
+    player_ship_id: Option<ShipId>,
     player_ship_type_name: String,
     player_health: HealthState,
-    player_lock_target: i64,
+    player_lock_target: Option<ShipId>,
     current_tick: i64,
     event_count: i64,
     current_system_name: String,
     cap_current: f64,
     cap_max: f64,
     cap_recharge: f64,
-    docked_station_id: i64,
+    docked_station_id: Option<StationId>,
     docked_station_name: String,
     latest_dock_state_tick: i64,
 }
@@ -269,8 +324,8 @@ impl Default for WorldSessionState {
             stations: Vec::new(),
             bodies: Vec::new(),
             buildable_ship_types: Vec::new(),
-            system_names: BTreeMap::new(),
-            player_ship_id: -1,
+            system_names: HashMap::new(),
+            player_ship_id: None,
             player_ship_type_name: String::new(),
             player_health: HealthState {
                 max_shield: 500.0,
@@ -278,14 +333,14 @@ impl Default for WorldSessionState {
                 max_hull: 200.0,
                 ..HealthState::default()
             },
-            player_lock_target: -1,
+            player_lock_target: None,
             current_tick: 0,
             event_count: 0,
             current_system_name: "Unknown".to_string(),
             cap_current: -1.0,
             cap_max: 500.0,
             cap_recharge: 10.0,
-            docked_station_id: -1,
+            docked_station_id: None,
             docked_station_name: String::new(),
             latest_dock_state_tick: -1,
         }
@@ -297,7 +352,7 @@ impl WorldSessionState {
         *self = Self::default();
     }
 
-    pub fn has_ship(&self, ship_id: i64) -> bool {
+    pub fn has_ship(&self, ship_id: ShipId) -> bool {
         self.ships.contains_key(&ship_id)
     }
 
@@ -305,15 +360,15 @@ impl WorldSessionState {
         self.ships.len()
     }
 
-    pub fn ship_states(&self) -> &BTreeMap<i64, ShipState> {
+    pub fn ship_states(&self) -> &BTreeMap<ShipId, ShipState> {
         &self.ships
     }
 
-    pub fn ship_hp(&self) -> &BTreeMap<i64, HealthState> {
+    pub fn ship_hp(&self) -> &BTreeMap<ShipId, HealthState> {
         &self.ship_hp
     }
 
-    pub fn opponent_ship_ids(&self) -> &[i64] {
+    pub fn opponent_ship_ids(&self) -> &[ShipId] {
         &self.opponent_ship_ids
     }
 
@@ -325,12 +380,12 @@ impl WorldSessionState {
         &self.stations
     }
 
-    pub fn station_name(&self, station_id: i64) -> String {
+    pub fn station_name(&self, station_id: StationId) -> String {
         self.stations
             .iter()
             .find(|station| station.station_id == station_id)
             .map(|station| station.name.clone())
-            .unwrap_or_else(|| format!("Station #{station_id}"))
+            .unwrap_or_else(|| format!("Station #{}", station_id.0))
     }
 
     pub fn bodies(&self) -> &[CelestialBodyRecord] {
@@ -341,17 +396,22 @@ impl WorldSessionState {
         &self.buildable_ship_types
     }
 
-    pub fn system_names(&self) -> &BTreeMap<i64, String> {
+    pub fn system_names(&self) -> &HashMap<StarSystemId, String> {
         &self.system_names
     }
 
-    pub fn player_ship_id(&self) -> i64 {
+    pub fn player_ship_id(&self) -> Option<ShipId> {
         self.player_ship_id
     }
 
-    pub(crate) fn set_player_ship_id(&mut self, player_ship_id: i64) {
+    pub(crate) fn set_player_ship_id(&mut self, player_ship_id: Option<ShipId>) {
         self.player_ship_id = player_ship_id;
-        remove_id(&mut self.opponent_ship_ids, player_ship_id);
+        if let Some(player_ship_id) = player_ship_id {
+            remove_id(&mut self.opponent_ship_ids, player_ship_id);
+        }
+        let Some(player_ship_id) = player_ship_id else {
+            return;
+        };
         let Some(ship) = self.ships.get(&player_ship_id).cloned() else {
             return;
         };
@@ -373,7 +433,7 @@ impl WorldSessionState {
         self.player_health
     }
 
-    pub fn player_lock_target(&self) -> i64 {
+    pub fn player_lock_target(&self) -> Option<ShipId> {
         self.player_lock_target
     }
 
@@ -401,7 +461,7 @@ impl WorldSessionState {
         self.cap_recharge
     }
 
-    pub fn docked_station_id(&self) -> i64 {
+    pub fn docked_station_id(&self) -> Option<StationId> {
         self.docked_station_id
     }
 
@@ -414,7 +474,7 @@ impl WorldSessionState {
     }
 
     pub fn is_docked(&self) -> bool {
-        self.docked_station_id >= 0
+        self.docked_station_id.is_some()
     }
 
     pub(crate) fn increment_event_count(&mut self) {
@@ -472,9 +532,9 @@ impl WorldSessionState {
 
     pub(crate) fn register_ship(
         &mut self,
-        ship_id: i64,
+        ship_id: ShipId,
         input: ShipInput,
-        connection_ship_id: i64,
+        connection_ship_id: ShipId,
     ) -> bool {
         if self.ships.contains_key(&ship_id) {
             return false;
@@ -493,8 +553,8 @@ impl WorldSessionState {
             },
         );
 
-        if ship_id == connection_ship_id && self.player_ship_id < 0 {
-            self.set_player_ship_id(ship_id);
+        if ship_id == connection_ship_id && self.player_ship_id.is_none() {
+            self.set_player_ship_id(Some(ship_id));
             return true;
         }
         if input.is_player && !self.opponent_ship_ids.contains(&ship_id) {
@@ -505,37 +565,37 @@ impl WorldSessionState {
 
     /// Drops `ship_id` from the session. Returns whether it was there to drop
     /// -- the caller uses that to decide whether to free the scene node.
-    pub(crate) fn remove_ship(&mut self, ship_id: i64, clear_lock: bool) -> bool {
+    pub(crate) fn remove_ship(&mut self, ship_id: ShipId, clear_lock: bool) -> bool {
         if self.ships.remove(&ship_id).is_none() {
             return false;
         }
         self.ship_hp.remove(&ship_id);
-        if ship_id == self.player_ship_id {
-            self.player_ship_id = -1;
+        if Some(ship_id) == self.player_ship_id {
+            self.player_ship_id = None;
         }
         remove_id(&mut self.opponent_ship_ids, ship_id);
-        if clear_lock && ship_id == self.player_lock_target {
-            self.player_lock_target = -1;
+        if clear_lock && Some(ship_id) == self.player_lock_target {
+            self.player_lock_target = None;
         }
         true
     }
 
-    pub(crate) fn destroy_ship(&mut self, ship_id: i64) -> DestructionOutcome {
+    pub(crate) fn destroy_ship(&mut self, ship_id: ShipId) -> DestructionOutcome {
         if self.ships.remove(&ship_id).is_none() {
             return DestructionOutcome::default();
         }
         self.ship_hp.remove(&ship_id);
-        let destroyed_player = ship_id == self.player_ship_id;
+        let destroyed_player = Some(ship_id) == self.player_ship_id;
         if destroyed_player {
-            self.player_ship_id = -1;
+            self.player_ship_id = None;
             self.player_health.shield = 0.0;
             self.player_health.armor = 0.0;
             self.player_health.hull = 0.0;
-            self.player_lock_target = -1;
+            self.player_lock_target = None;
         }
         let destroyed_opponent = remove_id(&mut self.opponent_ship_ids, ship_id);
-        if ship_id == self.player_lock_target {
-            self.player_lock_target = -1;
+        if Some(ship_id) == self.player_lock_target {
+            self.player_lock_target = None;
         }
         DestructionOutcome {
             destroyed: true,
@@ -544,15 +604,19 @@ impl WorldSessionState {
         }
     }
 
-    pub(crate) fn system_changed(&mut self, ship_id: i64, to_system: i64) -> Option<String> {
-        if ship_id != self.player_ship_id {
+    pub(crate) fn system_changed(
+        &mut self,
+        ship_id: ShipId,
+        to_system: StarSystemId,
+    ) -> Option<String> {
+        if Some(ship_id) != self.player_ship_id {
             return None;
         }
         let name = self
             .system_names
             .get(&to_system)
             .cloned()
-            .unwrap_or_else(|| format!("System {to_system}"));
+            .unwrap_or_else(|| format!("System {}", to_system.0));
         self.current_system_name = name.clone();
         Some(name)
     }
@@ -562,7 +626,7 @@ impl WorldSessionState {
     /// feedback, and neither of the other two values the old
     /// `HealthEventOutcome` reported (`changed_player`, `has_ship`) had a
     /// reader on either side of the Godot boundary.
-    pub(crate) fn apply_hp_event(&mut self, ship_id: i64, shield: f64, armor: f64, hull: f64) {
+    pub(crate) fn apply_hp_event(&mut self, ship_id: ShipId, shield: f64, armor: f64, hull: f64) {
         if !self.ships.contains_key(&ship_id) {
             return;
         }
@@ -570,27 +634,27 @@ impl WorldSessionState {
         health.shield = shield;
         health.armor = armor;
         health.hull = hull;
-        if ship_id == self.player_ship_id {
+        if Some(ship_id) == self.player_ship_id {
             self.player_health.shield = shield;
             self.player_health.armor = armor;
             self.player_health.hull = hull;
         }
     }
 
-    pub(crate) fn apply_target_locked(&mut self, locker_id: i64, target_id: i64) -> bool {
-        if locker_id != self.player_ship_id {
+    pub(crate) fn apply_target_locked(&mut self, locker_id: ShipId, target_id: ShipId) -> bool {
+        if Some(locker_id) != self.player_ship_id {
             return false;
         }
-        self.player_lock_target = target_id;
+        self.player_lock_target = Some(target_id);
         true
     }
 
-    pub(crate) fn apply_lock_lost(&mut self, locker_id: i64, target_id: i64) -> bool {
-        if locker_id != self.player_ship_id {
+    pub(crate) fn apply_lock_lost(&mut self, locker_id: ShipId, target_id: ShipId) -> bool {
+        if Some(locker_id) != self.player_ship_id {
             return false;
         }
-        if target_id == self.player_lock_target {
-            self.player_lock_target = -1;
+        if Some(target_id) == self.player_lock_target {
+            self.player_lock_target = None;
         }
         true
     }
@@ -619,34 +683,39 @@ impl WorldSessionState {
 
     pub(crate) fn apply_dock_event(
         &mut self,
-        ship_id: i64,
-        station_id: i64,
+        ship_id: ShipId,
+        station_id: StationId,
         station_name: String,
         tick: i64,
     ) -> bool {
-        if ship_id != self.player_ship_id {
+        if Some(ship_id) != self.player_ship_id {
             return false;
         }
-        self.apply_dock_state(station_id, station_name, tick)
+        self.apply_dock_state(Some(station_id), station_name, tick)
     }
 
-    pub(crate) fn apply_undock_event(&mut self, ship_id: i64, tick: i64) -> bool {
-        if ship_id != self.player_ship_id {
+    pub(crate) fn apply_undock_event(&mut self, ship_id: ShipId, tick: i64) -> bool {
+        if Some(ship_id) != self.player_ship_id {
             return false;
         }
-        self.apply_dock_state(-1, String::new(), tick)
+        self.apply_dock_state(None, String::new(), tick)
     }
 
     pub(crate) fn apply_dock_fitting(
         &mut self,
-        station_id: i64,
+        station_id: Option<StationId>,
         station_name: String,
         tick: i64,
     ) -> bool {
         self.apply_dock_state(station_id, station_name, tick)
     }
 
-    fn apply_dock_state(&mut self, station_id: i64, station_name: String, tick: i64) -> bool {
+    fn apply_dock_state(
+        &mut self,
+        station_id: Option<StationId>,
+        station_name: String,
+        tick: i64,
+    ) -> bool {
         if tick < self.latest_dock_state_tick {
             return false;
         }
@@ -657,15 +726,13 @@ impl WorldSessionState {
     }
 
     fn simulate_cap(&mut self, ticks: i64, loadout: Option<&mut PlayerLoadoutMsg>) {
-        if self.cap_current < 0.0 || self.player_ship_id < 0 {
+        if self.cap_current < 0.0 || self.player_ship_id.is_none() {
             return;
         }
-        if loadout.as_ref().is_some_and(|loadout| {
-            loadout
-                .active_ship_id
-                .and_then(|ship_id| i64::try_from(ship_id).ok())
-                != Some(self.player_ship_id)
-        }) {
+        if loadout
+            .as_ref()
+            .is_some_and(|loadout| loadout.active_ship_id != self.player_ship_id)
+        {
             return;
         }
         let ticks = u32::try_from(ticks).unwrap_or(0);
@@ -688,8 +755,10 @@ impl WorldSessionState {
             }
         };
         self.cap_current = cap_current;
-        if let Some(ship) = self.ships.get_mut(&self.player_ship_id) {
-            ship.cap_current = cap_current;
+        if let Some(player_ship_id) = self.player_ship_id {
+            if let Some(ship) = self.ships.get_mut(&player_ship_id) {
+                ship.cap_current = cap_current;
+            }
         }
     }
 }
@@ -705,7 +774,7 @@ fn health_from_ship_input(input: &ShipInput) -> HealthState {
     }
 }
 
-fn remove_id(ids: &mut Vec<i64>, id: i64) -> bool {
+fn remove_id(ids: &mut Vec<ShipId>, id: ShipId) -> bool {
     let Some(index) = ids.iter().position(|candidate| *candidate == id) else {
         return false;
     };
@@ -716,6 +785,11 @@ fn remove_id(ids: &mut Vec<i64>, id: i64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dawn_core::{NodeId, ShipId};
+
+    fn ship_id(id: u64) -> ShipId {
+        ShipId::new(NodeId(0), id)
+    }
 
     fn ship(is_player: bool) -> ShipInput {
         ShipInput {
@@ -736,10 +810,10 @@ mod tests {
     fn registering_connection_ship_promotes_it_to_player_state() {
         let mut state = WorldSessionState::default();
 
-        let result = state.register_ship(11, ship(true), 11);
+        let result = state.register_ship(ship_id(11), ship(true), ship_id(11));
 
         assert!(result, "the connection's own ship becomes the player ship");
-        assert_eq!(state.player_ship_id(), 11);
+        assert_eq!(state.player_ship_id(), Some(ship_id(11)));
         assert_eq!(state.player_ship_type_name(), "Magpie");
         assert_eq!(state.player_health().shield, 80.0);
         assert_eq!(state.cap_current(), 55.0);
@@ -748,7 +822,7 @@ mod tests {
     #[test]
     fn switching_to_a_registered_ship_refreshes_player_projection() {
         let mut state = WorldSessionState::default();
-        state.register_ship(11, ship(true), 11);
+        state.register_ship(ship_id(11), ship(true), ship_id(11));
 
         let mut second = ship(false);
         second.ship_type_name = "Venture".to_string();
@@ -760,11 +834,11 @@ mod tests {
         second.current_hull = Some(110.0);
         second.cap_max = 80.0;
         second.cap_recharge_per_tick = 4.0;
-        state.register_ship(22, second, 11);
+        state.register_ship(ship_id(22), second, ship_id(11));
 
         state.cap_current = 17.0;
-        state.ships.get_mut(&11).unwrap().cap_current = 17.0;
-        state.set_player_ship_id(22);
+        state.ships.get_mut(&ship_id(11)).unwrap().cap_current = 17.0;
+        state.set_player_ship_id(Some(ship_id(22)));
 
         assert_eq!(state.player_ship_type_name(), "Venture");
         assert_eq!(state.player_health().shield, 210.0);
@@ -774,8 +848,8 @@ mod tests {
         assert_eq!(state.cap_recharge(), 4.0);
 
         state.cap_current = 31.0;
-        state.ships.get_mut(&22).unwrap().cap_current = 31.0;
-        state.set_player_ship_id(11);
+        state.ships.get_mut(&ship_id(22)).unwrap().cap_current = 31.0;
+        state.set_player_ship_id(Some(ship_id(11)));
 
         assert_eq!(state.player_ship_type_name(), "Magpie");
         assert_eq!(state.player_health().shield, 80.0);
@@ -787,28 +861,28 @@ mod tests {
     #[test]
     fn removing_an_aoi_ship_can_preserve_the_lock_target() {
         let mut state = WorldSessionState::default();
-        state.register_ship(11, ship(true), 99);
-        state.player_ship_id = 99;
-        state.register_ship(42, ship(false), 99);
-        state.player_lock_target = 42;
+        state.register_ship(ship_id(11), ship(true), ship_id(99));
+        state.player_ship_id = Some(ship_id(99));
+        state.register_ship(ship_id(42), ship(false), ship_id(99));
+        state.player_lock_target = Some(ship_id(42));
 
-        let result = state.remove_ship(42, false);
+        let result = state.remove_ship(ship_id(42), false);
 
         assert!(result);
-        assert!(!state.has_ship(42));
-        assert_eq!(state.player_lock_target(), 42);
+        assert!(!state.has_ship(ship_id(42)));
+        assert_eq!(state.player_lock_target(), Some(ship_id(42)));
     }
 
     #[test]
     fn stale_dock_context_does_not_overwrite_a_newer_one() {
         let mut state = WorldSessionState {
-            player_ship_id: 7,
+            player_ship_id: Some(ship_id(7)),
             ..WorldSessionState::default()
         };
-        assert!(state.apply_dock_fitting(3, "Forge Station".to_string(), 20));
+        assert!(state.apply_dock_fitting(Some(StationId(3)), "Forge Station".to_string(), 20));
 
-        assert!(!state.apply_undock_event(7, 19));
-        assert_eq!(state.docked_station_id(), 3);
+        assert!(!state.apply_undock_event(ship_id(7), 19));
+        assert_eq!(state.docked_station_id(), Some(StationId(3)));
         assert!(state.is_docked());
     }
 
@@ -818,11 +892,11 @@ mod tests {
         state.ingest_navigation(NavigationInput {
             system_name: "Alpha".to_string(),
             systems: vec![SystemNameInput {
-                id: 2,
+                id: StarSystemId(2),
                 name: "Beta".to_string(),
             }],
             jump_gates: vec![GateInput {
-                gate_id: 7,
+                gate_id: JumpGateId(7),
                 position: PositionInput {
                     x: 149_597_870_710.0,
                     y: 20.0,
@@ -835,7 +909,10 @@ mod tests {
         });
 
         assert_eq!(state.current_system_name(), "Alpha");
-        assert_eq!(state.system_names().get(&2), Some(&"Beta".to_string()));
+        assert_eq!(
+            state.system_names().get(&StarSystemId(2)),
+            Some(&"Beta".to_string())
+        );
         assert_eq!(state.gates()[0].position[0], 149_597_870_710.0);
     }
 
@@ -845,11 +922,11 @@ mod tests {
         state.ingest_navigation(NavigationInput {
             system_name: "Alpha".to_string(),
             systems: vec![SystemNameInput {
-                id: 2,
+                id: StarSystemId(2),
                 name: "Beta".to_string(),
             }],
             jump_gates: vec![GateInput {
-                gate_id: 7,
+                gate_id: JumpGateId(7),
                 position: PositionInput {
                     x: 149_597_870_710.0,
                     y: 20.0,
@@ -860,44 +937,44 @@ mod tests {
             }],
             ..NavigationInput::default()
         });
-        state.register_ship(11, ship(true), 11);
+        state.register_ship(ship_id(11), ship(true), ship_id(11));
 
         assert_eq!(state.current_system_name(), "Alpha");
         assert_eq!(state.gates()[0].position[0], 149_597_870_710.0);
-        assert_eq!(state.player_ship_id(), 11);
+        assert_eq!(state.player_ship_id(), Some(ship_id(11)));
     }
 
     #[test]
     fn direct_state_operations_cover_lifecycle_health_lock_and_docking() {
         let mut state = WorldSessionState::default();
-        state.register_ship(11, ship(true), 11);
-        state.apply_hp_event(11, 10.0, 20.0, 30.0);
+        state.register_ship(ship_id(11), ship(true), ship_id(11));
+        state.apply_hp_event(ship_id(11), 10.0, 20.0, 30.0);
         assert_eq!(state.player_health().hull, 30.0);
-        assert!(state.apply_target_locked(11, 42));
-        assert_eq!(state.player_lock_target(), 42);
-        assert!(state.apply_dock_event(11, 3, "Forge".to_string(), 8));
+        assert!(state.apply_target_locked(ship_id(11), ship_id(42)));
+        assert_eq!(state.player_lock_target(), Some(ship_id(42)));
+        assert!(state.apply_dock_event(ship_id(11), StationId(3), "Forge".to_string(), 8));
         assert!(state.is_docked());
-        assert!(state.remove_ship(11, true));
-        assert!(!state.has_ship(11));
+        assert!(state.remove_ship(ship_id(11), true));
+        assert!(!state.has_ship(ship_id(11)));
     }
 
     #[test]
     fn direct_loadout_reconciliation_rejects_stale_dock_state() {
         let mut state = WorldSessionState::default();
-        state.register_ship(11, ship(true), 11);
-        assert!(state.apply_dock_event(11, 3, "New".to_string(), 20));
+        state.register_ship(ship_id(11), ship(true), ship_id(11));
+        assert!(state.apply_dock_event(ship_id(11), StationId(3), "New".to_string(), 20));
 
-        assert!(!state.apply_dock_fitting(2, "Stale".to_string(), 19));
-        assert_eq!(state.player_ship_id(), 11);
-        assert_eq!(state.docked_station_id(), 3);
+        assert!(!state.apply_dock_fitting(Some(StationId(2)), "Stale".to_string(), 19));
+        assert_eq!(state.player_ship_id(), Some(ship_id(11)));
+        assert_eq!(state.docked_station_id(), Some(StationId(3)));
     }
 
     #[test]
     fn direct_health_update_ignores_unknown_ship() {
         let mut state = WorldSessionState::default();
 
-        state.apply_hp_event(99, 1.0, 2.0, 3.0);
+        state.apply_hp_event(ship_id(99), 1.0, 2.0, 3.0);
 
-        assert!(!state.ship_hp().contains_key(&99));
+        assert!(!state.ship_hp().contains_key(&ship_id(99)));
     }
 }

@@ -1,5 +1,8 @@
 use dawn_client_core::OwnedShipRow as CoreOwnedShipRow;
+use dawn_core::{ShipTypeId, StationId};
 use godot::prelude::*;
+
+use crate::id_boundary::{ship_id_from_godot, ship_id_to_godot};
 
 /// GDScript-facing typed view of one owned-ship roster row (ADR-0037).
 /// Optional Rust fields preserve the existing Godot sentinels: `-1` for
@@ -22,22 +25,25 @@ pub struct OwnedShipRow {
 impl OwnedShipRow {
     pub(crate) fn wrap(row: CoreOwnedShipRow) -> Gd<Self> {
         Gd::from_init_fn(|_base| Self {
-            ship_id: i64::try_from(row.ship_id)
-                .expect("PlayerLoadout range validation covers owned ship IDs"),
-            ship_type_id: row.ship_type_id.map(i64::from).unwrap_or(-1),
+            ship_id: ship_id_to_godot(row.ship_id),
+            ship_type_id: row.ship_type_id.map(|id| i64::from(id.0)).unwrap_or(-1),
             ship_type_name: row.ship_type_name.as_deref().unwrap_or_default().into(),
-            docked_station_id: row.docked_station_id.map(i64::from).unwrap_or(-1),
+            docked_station_id: row
+                .docked_station_id
+                .map(|id| i64::from(id.0))
+                .unwrap_or(-1),
             is_active: row.is_active,
         })
     }
 
     pub(crate) fn inner_clone(&self) -> CoreOwnedShipRow {
         CoreOwnedShipRow {
-            ship_id: u64::try_from(self.ship_id).expect("OwnedShipRow stores a validated ship ID"),
-            ship_type_id: u32::try_from(self.ship_type_id).ok(),
+            ship_id: ship_id_from_godot(self.ship_id)
+                .expect("OwnedShipRow stores a validated ship ID"),
+            ship_type_id: u32::try_from(self.ship_type_id).ok().map(ShipTypeId),
             ship_type_name: (!self.ship_type_name.is_empty())
                 .then(|| self.ship_type_name.to_string()),
-            docked_station_id: u32::try_from(self.docked_station_id).ok(),
+            docked_station_id: u32::try_from(self.docked_station_id).ok().map(StationId),
             is_active: self.is_active,
         }
     }
@@ -56,12 +62,11 @@ impl OwnedShipRow {
         docked_station_id: i64,
         is_active: bool,
     ) -> Gd<OwnedShipRow> {
-        let ship_id = u64::try_from(ship_id).expect("fixture ship ID must fit u64");
         Self::wrap(CoreOwnedShipRow {
-            ship_id,
-            ship_type_id: u32::try_from(ship_type_id).ok(),
+            ship_id: ship_id_from_godot(ship_id).expect("fixture ship ID must fit u64"),
+            ship_type_id: u32::try_from(ship_type_id).ok().map(ShipTypeId),
             ship_type_name: (!ship_type_name.is_empty()).then(|| ship_type_name.to_string()),
-            docked_station_id: u32::try_from(docked_station_id).ok(),
+            docked_station_id: u32::try_from(docked_station_id).ok().map(StationId),
             is_active,
         })
     }

@@ -1,8 +1,10 @@
 use dawn_client_core::PlayerLoadoutMsg;
+use dawn_core::{ModuleId, ShipTypeId, StationId};
 use godot::prelude::*;
 
 #[cfg(test)]
 use crate::client_outcome::validate_player_loadout_godot_ranges;
+use crate::id_boundary::{ship_id_from_godot, ship_id_from_wire, ship_id_to_godot};
 use crate::item_row_gd::ItemRow;
 use crate::module_activation_intent_gd::ModuleActivationIntent;
 use crate::module_row_gd::{parse_kind, ModuleRow};
@@ -18,7 +20,7 @@ pub(crate) fn wire_to_loadout_msg(wire: dawn_protocol::PlayerLoadoutWire) -> Pla
             .into_iter()
             .map(wire_to_item_row)
             .collect(),
-        docked_station_id: wire.docked_station_id,
+        docked_station_id: wire.docked_station_id.map(StationId),
         docked_station_name: wire.docked_station_name,
         slot_capacity: dawn_client_core::SlotCapacity {
             high: wire.slot_capacity.high as u32,
@@ -26,15 +28,15 @@ pub(crate) fn wire_to_loadout_msg(wire: dawn_protocol::PlayerLoadoutWire) -> Pla
             low: wire.slot_capacity.low as u32,
             rig: wire.slot_capacity.rig as u32,
         },
-        active_ship_id: wire.active_ship_id,
+        active_ship_id: wire.active_ship_id.map(ship_id_from_wire),
         owned_ships: wire
             .owned_ships
             .into_iter()
             .map(|ship| dawn_client_core::OwnedShipRow {
-                ship_id: ship.ship_id,
-                ship_type_id: ship.ship_type_id,
+                ship_id: ship_id_from_wire(ship.ship_id),
+                ship_type_id: ship.ship_type_id.map(ShipTypeId),
                 ship_type_name: ship.ship_type_name,
-                docked_station_id: ship.docked_station_id,
+                docked_station_id: ship.docked_station_id.map(StationId),
                 is_active: ship.is_active,
             })
             .collect(),
@@ -45,7 +47,7 @@ fn wire_to_module_row(row: dawn_protocol::ModuleRowWire) -> dawn_client_core::Mo
     dawn_client_core::ModuleRow {
         slot: row.slot,
         index: row.index,
-        module_id: row.module_id,
+        module_id: ModuleId(row.module_id),
         name: row.name,
         kind: row.kind,
         is_active: row.is_active,
@@ -117,7 +119,7 @@ impl PlayerLoadout {
                 .collect(),
             inventory: Vec::new(),
             station_inventory: Vec::new(),
-            docked_station_id: u32::try_from(docked_station_id).ok(),
+            docked_station_id: u32::try_from(docked_station_id).ok().map(StationId),
             docked_station_name: (!docked_station_name.is_empty())
                 .then(|| docked_station_name.to_string()),
             slot_capacity: dawn_client_core::SlotCapacity {
@@ -126,7 +128,7 @@ impl PlayerLoadout {
                 low: 0,
                 rig: 0,
             },
-            active_ship_id: u64::try_from(active_ship_id).ok(),
+            active_ship_id: ship_id_from_godot(active_ship_id),
             owned_ships: owned_ships
                 .iter_shared()
                 .map(|row| row.bind().inner_clone())
@@ -150,9 +152,7 @@ impl PlayerLoadout {
         self.loadout
             .as_ref()
             .and_then(|loadout| loadout.active_ship_id)
-            .map(|id| {
-                i64::try_from(id).expect("PlayerLoadout range validation covers the active ship ID")
-            })
+            .map(ship_id_to_godot)
             .unwrap_or(-1)
     }
 
@@ -172,7 +172,7 @@ impl PlayerLoadout {
         self.loadout
             .as_ref()
             .and_then(|loadout| loadout.docked_station_id)
-            .map(i64::from)
+            .map(|id| i64::from(id.0))
             .unwrap_or(-1)
     }
 
@@ -230,7 +230,7 @@ impl PlayerLoadout {
         let Some(loadout) = &mut self.loadout else {
             return;
         };
-        let Ok(module_id) = u32::try_from(module_id) else {
+        let Ok(module_id) = u32::try_from(module_id).map(ModuleId) else {
             return;
         };
         loadout.apply_module_activation(module_id, active, forced_reason.to_string());
@@ -269,7 +269,7 @@ impl PlayerLoadout {
         let Some(loadout) = &self.loadout else {
             return -1.0;
         };
-        let Ok(module_id) = u32::try_from(module_id) else {
+        let Ok(module_id) = u32::try_from(module_id).map(ModuleId) else {
             return -1.0;
         };
         let Some(kind) = parse_kind(&kind.to_string()) else {
@@ -360,7 +360,7 @@ mod tests {
         let wire = node.build_player_loadout_json(ship_id).unwrap();
         validate_player_loadout_godot_ranges(&wire).unwrap();
         let loadout = wire_to_loadout_msg(wire);
-        assert_eq!(loadout.active_ship_id, Some(ship_id.raw()));
+        assert_eq!(loadout.active_ship_id, Some(ship_id));
         assert!(!loadout.modules.is_empty());
         assert!(!loadout.inventory.is_empty());
     }
@@ -382,7 +382,7 @@ mod tests {
         let row = loadout
             .modules
             .iter()
-            .find(|row| row.module_id == module_id.0)
+            .find(|row| row.module_id == module_id)
             .unwrap();
         let _ = row.stat_delta.weapon_range_add;
     }

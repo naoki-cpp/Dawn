@@ -6,6 +6,7 @@ use godot::prelude::*;
 
 type Dict = Dictionary<Variant, Variant>;
 
+use crate::id_boundary::{ship_id_from_godot, ship_id_to_godot};
 use crate::loadout_gd::PlayerLoadout;
 use crate::session_record_gd::{
     BuildableShipType, CapacitorStatus, CelestialBodyRecord, GateRecord, ShipHealth, StationRecord,
@@ -41,7 +42,7 @@ impl WorldSession {
 
     #[func]
     fn has_ship(&self, ship_id: i64) -> bool {
-        self.state.has_ship(ship_id)
+        ship_id_from_godot(ship_id).is_some_and(|ship_id| self.state.has_ship(ship_id))
     }
 
     #[func]
@@ -51,12 +52,18 @@ impl WorldSession {
 
     #[func]
     fn player_ship_id(&self) -> i64 {
-        self.state.player_ship_id()
+        self.state
+            .player_ship_id()
+            .map(ship_id_to_godot)
+            .unwrap_or(-1)
     }
 
     #[func]
     fn player_lock_target(&self) -> i64 {
-        self.state.player_lock_target()
+        self.state
+            .player_lock_target()
+            .map(ship_id_to_godot)
+            .unwrap_or(-1)
     }
 
     #[func]
@@ -72,7 +79,10 @@ impl WorldSession {
 
     #[func]
     fn docked_station_id(&self) -> i64 {
-        self.state.docked_station_id()
+        self.state
+            .docked_station_id()
+            .map(|station_id| i64::from(station_id.0))
+            .unwrap_or(-1)
     }
 
     #[func]
@@ -116,15 +126,25 @@ impl WorldSession {
 
     #[func]
     fn ship_health(&self, ship_id: i64) -> Variant {
-        match self.state.ship_hp().get(&ship_id) {
-            Some(health) => ShipHealth::wrap(ship_id, *health).to_variant(),
+        match ship_id_from_godot(ship_id).and_then(|ship_id| {
+            self.state
+                .ship_hp()
+                .get(&ship_id)
+                .map(|health| (ship_id, *health))
+        }) {
+            Some((ship_id, health)) => ShipHealth::wrap(Some(ship_id), health).to_variant(),
             None => Variant::nil(),
         }
     }
 
     #[func]
     fn opponent_ship_ids(&self) -> Array<i64> {
-        self.state.opponent_ship_ids().iter().copied().collect()
+        self.state
+            .opponent_ship_ids()
+            .iter()
+            .copied()
+            .map(ship_id_to_godot)
+            .collect()
     }
 
     #[func]
@@ -163,7 +183,7 @@ impl WorldSession {
     fn system_names(&self) -> Dict {
         let mut result = Dict::new();
         for (id, name) in self.state.system_names() {
-            result.set(*id, name.clone());
+            result.set(i64::from(id.0), name.clone());
         }
         result
     }

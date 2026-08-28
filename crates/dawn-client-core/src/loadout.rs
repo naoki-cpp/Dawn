@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-use dawn_core::ModuleKind;
+use dawn_core::{ModuleId, ModuleKind, ShipId, ShipTypeId, StationId};
 
 use crate::{ItemRow, ModuleRow};
 
@@ -9,10 +9,10 @@ use crate::{ItemRow, ModuleRow};
 /// `player_loadout_projection.rs::owned_ships_json`.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct OwnedShipRow {
-    pub ship_id: u64,
-    pub ship_type_id: Option<u32>,
+    pub ship_id: ShipId,
+    pub ship_type_id: Option<ShipTypeId>,
     pub ship_type_name: Option<String>,
-    pub docked_station_id: Option<u32>,
+    pub docked_station_id: Option<StationId>,
     pub is_active: bool,
 }
 
@@ -51,13 +51,13 @@ pub struct PlayerLoadoutMsg {
     #[serde(default)]
     pub station_inventory: Vec<ItemRow>,
     #[serde(default)]
-    pub docked_station_id: Option<u32>,
+    pub docked_station_id: Option<StationId>,
     #[serde(default)]
     pub docked_station_name: Option<String>,
     #[serde(default)]
     pub slot_capacity: SlotCapacity,
     #[serde(default)]
-    pub active_ship_id: Option<u64>,
+    pub active_ship_id: Option<ShipId>,
     #[serde(default)]
     pub owned_ships: Vec<OwnedShipRow>,
 }
@@ -66,7 +66,7 @@ pub struct PlayerLoadoutMsg {
 /// `player_loadout.gd::toggle_at`'s return dictionary).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ActivationIntent {
-    pub module_id: u32,
+    pub module_id: ModuleId,
     pub slot: String,
     pub kind: ModuleKind,
     pub is_active: bool,
@@ -117,7 +117,11 @@ impl PlayerLoadoutMsg {
     /// Total effective range for `kind`'s range family if module `module_id`
     /// were active alongside every other currently-active module sharing
     /// that family. `None` if `kind` has no range concept.
-    pub fn effective_range_for_activation(&self, kind: ModuleKind, module_id: u32) -> Option<f64> {
+    pub fn effective_range_for_activation(
+        &self,
+        kind: ModuleKind,
+        module_id: ModuleId,
+    ) -> Option<f64> {
         let family = range_family(kind)?;
         let mut total = 0.0;
         for row in &self.modules {
@@ -161,7 +165,12 @@ impl PlayerLoadoutMsg {
     /// `module_id`, resetting its cycle timer (mirrors the old
     /// `player_loadout.gd::apply_module_activation`). No-op if no module
     /// with that id is fitted.
-    pub fn apply_module_activation(&mut self, module_id: u32, active: bool, forced_reason: String) {
+    pub fn apply_module_activation(
+        &mut self,
+        module_id: ModuleId,
+        active: bool,
+        forced_reason: String,
+    ) {
         for row in &mut self.modules {
             if row.module_id == module_id {
                 row.is_active = active;
@@ -232,12 +241,17 @@ pub fn simulate_modules_capacitor_ticks(
 mod tests {
     use super::*;
     use crate::StatDelta;
+    use dawn_core::{ModuleId, NodeId, ShipId, StationId};
+
+    fn ship_id(id: u64) -> ShipId {
+        ShipId::new(NodeId(0), id)
+    }
 
     fn weapon_row(module_id: u32, is_active: bool, range: f64, falloff: f64) -> ModuleRow {
         ModuleRow {
             slot: "High".to_string(),
             index: 0,
-            module_id,
+            module_id: ModuleId(module_id),
             name: "Test Weapon".to_string(),
             kind: ModuleKind::Weapon,
             is_active,
@@ -268,7 +282,7 @@ mod tests {
                 low: 4,
                 rig: 3,
             },
-            active_ship_id: Some(1),
+            active_ship_id: Some(ship_id(1)),
             owned_ships: Vec::new(),
         }
     }
@@ -285,7 +299,7 @@ mod tests {
     #[test]
     fn effective_range_for_activation_includes_the_module_being_activated() {
         let loadout = empty_loadout(vec![weapon_row(1, false, 50.0, 10.0)]);
-        let range = loadout.effective_range_for_activation(ModuleKind::Weapon, 1);
+        let range = loadout.effective_range_for_activation(ModuleKind::Weapon, ModuleId(1));
         assert_eq!(range, Some(60.0));
     }
 
@@ -295,7 +309,7 @@ mod tests {
         row.kind = ModuleKind::Propulsion;
         let loadout = empty_loadout(vec![row]);
         assert_eq!(
-            loadout.effective_range_for_activation(ModuleKind::Propulsion, 1),
+            loadout.effective_range_for_activation(ModuleKind::Propulsion, ModuleId(1)),
             None
         );
     }
@@ -306,7 +320,7 @@ mod tests {
         row.cycle_remaining = 7;
         let mut loadout = empty_loadout(vec![row]);
 
-        loadout.apply_module_activation(1, true, "".to_string());
+        loadout.apply_module_activation(ModuleId(1), true, "".to_string());
 
         assert!(loadout.modules[0].is_active);
         assert_eq!(loadout.modules[0].cycle_remaining, 0);
@@ -316,7 +330,7 @@ mod tests {
     fn apply_module_activation_is_a_no_op_for_an_unknown_module_id() {
         let mut loadout = empty_loadout(vec![weapon_row(1, false, 0.0, 0.0)]);
 
-        loadout.apply_module_activation(999, true, "".to_string());
+        loadout.apply_module_activation(ModuleId(999), true, "".to_string());
 
         assert!(!loadout.modules[0].is_active);
     }
@@ -327,7 +341,7 @@ mod tests {
         passive.is_active_module = false;
         let loadout = empty_loadout(vec![passive, weapon_row(3, false, 40.0, 0.0)]);
         let intent = loadout.toggle_at(0).expect("one active-capable module");
-        assert_eq!(intent.module_id, 3);
+        assert_eq!(intent.module_id, ModuleId(3));
         assert!(intent.requires_target);
     }
 
@@ -353,7 +367,7 @@ mod tests {
     fn is_docked_reflects_docked_station_id() {
         let mut loadout = empty_loadout(Vec::new());
         assert!(!loadout.is_docked());
-        loadout.docked_station_id = Some(3);
+        loadout.docked_station_id = Some(StationId(3));
         assert!(loadout.is_docked());
     }
 }
