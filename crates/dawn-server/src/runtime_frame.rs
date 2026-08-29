@@ -813,6 +813,8 @@ mod tests {
         ));
         assert_eq!(host.phase(), RuntimeFramePhase::Fenced);
         assert!(host.health().is_fenced());
+        assert_eq!(host.node().docked_station(ship_id), None);
+        assert_eq!(host.node().player_docked_station(player_id), None);
         assert!(matches!(
             host.run_frame(dawn_sector::transition::FrameInput::lock_only(&[])),
             Err(RuntimeFrameHostError::Fenced)

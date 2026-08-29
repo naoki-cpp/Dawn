@@ -53,8 +53,28 @@ impl ProjectionApplyError {
 /// Failure while reading the persisted Station projection.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ProjectionReadError {
-    #[error("station projection storage read failed: {message}")]
-    Storage { message: String },
+    /// SQLite could not return a complete projection row for this scope.
+    #[error(
+        "station projection storage read failed for player {player_id:?} at station {station_id:?}: {message}"
+    )]
+    Storage {
+        player_id: PlayerId,
+        station_id: StationId,
+        message: String,
+    },
+    /// A complete persisted row violated the canonical item identity rules.
+    #[error(
+        "invalid station projection row for player {player_id:?} at station {station_id:?}: item_type={item_type:?}, module_id={module_id}, ship_type_id={ship_type_id}, count={count}: {reason}"
+    )]
+    InvalidItemRow {
+        player_id: PlayerId,
+        station_id: StationId,
+        item_type: String,
+        module_id: i64,
+        ship_type_id: i64,
+        count: i64,
+        reason: String,
+    },
     #[error(
         "station projection item {item_id:?} has no {definition_kind} definition in game data"
     )]
@@ -65,16 +85,32 @@ pub enum ProjectionReadError {
 }
 
 impl ProjectionReadError {
-    fn storage(message: impl Into<String>) -> Self {
+    fn storage(player_id: PlayerId, station_id: StationId, message: impl Into<String>) -> Self {
         Self::Storage {
+            player_id,
+            station_id,
             message: message.into(),
         }
     }
-}
 
-impl From<rusqlite::Error> for ProjectionReadError {
-    fn from(error: rusqlite::Error) -> Self {
-        Self::storage(error.to_string())
+    fn invalid_item_row(
+        player_id: PlayerId,
+        station_id: StationId,
+        item_type: &str,
+        module_id: i64,
+        ship_type_id: i64,
+        count: i64,
+        reason: impl Into<String>,
+    ) -> Self {
+        Self::InvalidItemRow {
+            player_id,
+            station_id,
+            item_type: item_type.to_owned(),
+            module_id,
+            ship_type_id,
+            count,
+            reason: reason.into(),
+        }
     }
 }
 
@@ -84,9 +120,10 @@ impl StationInventoryRepository<'_> {
         player_id: PlayerId,
         station_id: StationId,
     ) -> Result<BTreeMap<ItemId, u64>, ProjectionReadError> {
-        let player_id = i64::try_from(player_id.0)
-            .map_err(|_| ProjectionReadError::storage("PlayerId exceeds SQLite INTEGER"))?;
-        let station_id = i64::from(station_id.0);
+        let player_sql_id = i64::try_from(player_id.0).map_err(|_| {
+            ProjectionReadError::storage(player_id, station_id, "PlayerId exceeds SQLite INTEGER")
+        })?;
+        let station_sql_id = i64::from(station_id.0);
         let mut stmt = self
             .repository
             .conn
@@ -94,41 +131,50 @@ impl StationInventoryRepository<'_> {
                 "SELECT item_type, module_id, ship_type_id, count
                  FROM station_inventory WHERE player_id = ?1 AND station_id = ?2",
             )
-            .map_err(ProjectionReadError::from)?;
+            .map_err(|error| {
+                ProjectionReadError::storage(player_id, station_id, error.to_string())
+            })?;
         let rows = stmt
-            .query_map(params![player_id, station_id], |row| {
+            .query_map(params![player_sql_id, station_sql_id], |row| {
                 let item_type: String = row.get(0)?;
                 let module_id: i64 = row.get(1)?;
                 let ship_type_id: i64 = row.get(2)?;
                 let count: i64 = row.get(3)?;
                 Ok((item_type, module_id, ship_type_id, count))
             })
-            .map_err(ProjectionReadError::from)?;
+            .map_err(|error| {
+                ProjectionReadError::storage(player_id, station_id, error.to_string())
+            })?;
 
         let mut inventory = BTreeMap::new();
         for row in rows {
-            let (item_type, module_id, ship_type_id, count) =
-                row.map_err(ProjectionReadError::from)?;
-            let module_id = u32::try_from(module_id).map_err(|_| {
-                ProjectionReadError::storage("station inventory module_id must be a u32")
+            let (item_type, raw_module_id, raw_ship_type_id, raw_count) = row.map_err(|error| {
+                ProjectionReadError::storage(player_id, station_id, error.to_string())
             })?;
-            let ship_type_id = u32::try_from(ship_type_id).map_err(|_| {
-                ProjectionReadError::storage("station inventory ship_type_id must be a u32")
-            })?;
-            let count = u64::try_from(count).map_err(|_| {
-                ProjectionReadError::storage("station inventory count must be non-negative")
-            })?;
+            let invalid_row = |reason: &str| {
+                ProjectionReadError::invalid_item_row(
+                    player_id,
+                    station_id,
+                    &item_type,
+                    raw_module_id,
+                    raw_ship_type_id,
+                    raw_count,
+                    reason,
+                )
+            };
+            let module_id =
+                u32::try_from(raw_module_id).map_err(|_| invalid_row("module_id must be a u32"))?;
+            let ship_type_id = u32::try_from(raw_ship_type_id)
+                .map_err(|_| invalid_row("ship_type_id must be a u32"))?;
+            let count =
+                u64::try_from(raw_count).map_err(|_| invalid_row("count must be non-negative"))?;
             if count == 0 {
-                return Err(ProjectionReadError::storage(
-                    "station inventory count must be positive",
-                ));
+                return Err(invalid_row("count must be positive"));
             }
             let item_id = ItemId::from_storage_columns(&item_type, module_id, ship_type_id)
-                .map_err(|error| ProjectionReadError::storage(error.to_string()))?;
+                .map_err(|error| invalid_row(&error.to_string()))?;
             if inventory.insert(item_id, count).is_some() {
-                return Err(ProjectionReadError::storage(
-                    "station inventory contains a duplicate item identity",
-                ));
+                return Err(invalid_row("duplicate item identity"));
             }
         }
         Ok(inventory)
@@ -481,9 +527,23 @@ mod tests {
                 )
                 .unwrap();
 
+            let error = db
+                .station_inventory()
+                .get_all(PlayerId(1), StationId(7))
+                .expect_err("invalid persisted item identity must fail the read");
             assert!(matches!(
-                db.station_inventory().get_all(PlayerId(1), StationId(7)),
-                Err(ProjectionReadError::Storage { .. })
+                error,
+                ProjectionReadError::InvalidItemRow {
+                    player_id: PlayerId(1),
+                    station_id: StationId(7),
+                    item_type: ref actual_type,
+                    module_id: actual_module_id,
+                    ship_type_id: actual_ship_type_id,
+                    count: 1,
+                    ..
+                } if actual_type == item_type
+                    && actual_module_id == module_id
+                    && actual_ship_type_id == ship_type_id
             ));
         }
     }
@@ -495,7 +555,11 @@ mod tests {
 
         assert!(matches!(
             db.station_inventory().get_all(PlayerId(1), StationId(7)),
-            Err(ProjectionReadError::Storage { .. })
+            Err(ProjectionReadError::Storage {
+                player_id: PlayerId(1),
+                station_id: StationId(7),
+                ..
+            })
         ));
     }
 

@@ -238,32 +238,22 @@ impl SimulationNode {
         } = logical.context;
         let before_tick = self.simulation.current_tick;
         let before_states = self.capture_tick_write_set();
+        let before_node_state = self.capture_node_state();
         let before_pending_event_count = self.frame_outputs.pending_events.len();
-        let before_bot_commands = self.simulation.pending_bot_lock_commands.clone();
-        let before_auto_jumps = self.frame_outputs.pending_auto_jumps.clone();
         let before_completed_warps = self.frame_outputs.completed_warps.clone();
-        let before_transit_attempt_counter = self.transit.transit_attempt_counter;
-        let before_transit_saga = self.transit_saga_snapshot();
-        let before_transit_journal = self.transit.transit_journal.clone();
-        let before_market_settlements = self.simulation.applied_market_settlements.clone();
         let before_station_overlay = self.stations.snapshot_projection_overlay();
 
         let restore_preparation = |node: &mut SimulationNode| -> Result<(), TickPreparationError> {
             node.simulation.current_tick = before_tick;
-            node.restore_tick_write_set(&before_states)?;
-            node.transit.transit_journal = before_transit_journal.clone();
-            node.simulation.pending_bot_lock_commands = before_bot_commands.clone();
-            node.frame_outputs.pending_auto_jumps = before_auto_jumps.clone();
             node.frame_outputs.completed_warps = before_completed_warps.clone();
-            node.transit.transit_attempt_counter = before_transit_attempt_counter;
-            node.simulation.applied_market_settlements = before_market_settlements.clone();
             node.stations
                 .restore_projection_overlay(before_station_overlay.clone());
-            node.restore_transit_saga(before_transit_saga.clone())
-                .expect("prepared Tick must restore the previous Transit Saga");
             node.frame_outputs
                 .pending_events
                 .truncate(before_pending_event_count);
+            node.restore_tick_write_set(&before_states, &before_node_state)?;
+            node.restore_transit_saga(before_node_state.transit_saga.clone())
+                .map_err(TransitionApplyError::InvalidTransitSaga)?;
             Ok(())
         };
 
@@ -857,8 +847,32 @@ impl SimulationNode {
     fn restore_tick_write_set(
         &mut self,
         states: &BTreeMap<ShipId, ShipState>,
+        node_state: &crate::transition::NodeState,
     ) -> Result<(), TransitionApplyError> {
+        let stale_ships: Vec<_> = self
+            .simulation
+            .ships
+            .index
+            .keys()
+            .filter(|ship_id| !states.contains_key(ship_id))
+            .copied()
+            .collect();
+        for ship_id in stale_ships {
+            self.remove_ship(ship_id);
+        }
+
+        // Ownership must be restored before materialisation so player ships
+        // receive player stats rather than the NPC defaults.
+        self.restore_node_state(node_state);
         for state in states.values() {
+            if !self
+                .simulation
+                .ships
+                .index
+                .contains_key(&state.snapshot.ship_id)
+            {
+                self.restore_ship_from_snapshot(&state.snapshot);
+            }
             self.apply_tick_ship_state(state)?;
         }
         Ok(())
@@ -1185,28 +1199,28 @@ mod tests {
         let ship_id = node.spawn_player_ship(player_id);
         let station = node.station(dawn_core::StationId(0)).unwrap().clone();
         node.set_spawn_anchor_abs(ship_id, station.abs_m);
-        assert!(matches!(
-            node.dock_owned(
-                player_id,
-                ship_id,
-                dawn_core::DockCommand {
-                    station_id: dawn_core::StationId(0),
-                },
-            ),
-            crate::node::station::StationOperationOutcome::Accepted { .. }
-        ));
         node.persistence.drop_station_inventory_for_test();
         let before_pending_event_count = node.pending_events().len();
+        let before_node_state = node.capture_node_state();
 
-        let requests = [crate::transition::AuthenticatedClientRequest {
-            session_index: 0,
-            player_id,
-            request: dawn_core::ClientRequest::BuildPackagedShip {
-                ship: ship_id,
-                station: dawn_core::StationId(0),
-                ship_type: crate::ship_types::SHIP_TYPE_MAGPIE,
+        let requests = [
+            crate::transition::AuthenticatedClientRequest {
+                session_index: 0,
+                player_id,
+                request: dawn_core::ClientRequest::Dock {
+                    station: dawn_core::StationId(0),
+                },
             },
-        }];
+            crate::transition::AuthenticatedClientRequest {
+                session_index: 0,
+                player_id,
+                request: dawn_core::ClientRequest::BuildPackagedShip {
+                    ship: ship_id,
+                    station: dawn_core::StationId(0),
+                    ship_type: crate::ship_types::SHIP_TYPE_MAGPIE,
+                },
+            },
+        ];
         let input = crate::transition::FrameInput {
             lock_commands: &[],
             authenticated_requests: &requests,
@@ -1223,6 +1237,33 @@ mod tests {
         ));
         assert_eq!(node.current_tick(), Tick::ZERO);
         assert_eq!(node.pending_events().len(), before_pending_event_count);
+        assert_eq!(node.docked_station(ship_id), None);
+        assert_eq!(node.player_docked_station(player_id), None);
+        assert_eq!(node.capture_node_state(), before_node_state);
+    }
+
+    #[test]
+    fn tick_write_set_restore_recreates_removed_ships_and_removes_added_ships() {
+        let mut node = mem_node();
+        let player_id = node.next_player_id();
+        let original_ship = node.spawn_player_ship(player_id);
+        let before_node_state = node.capture_node_state();
+        let before_states = node.capture_tick_write_set();
+
+        node.remove_ship(original_ship);
+        let added_ship = node.spawn_ship(
+            dawn_core::ShipTypeId(1),
+            Position::new(100.0, 0.0, 0.0),
+            Velocity::ZERO,
+        );
+
+        node.restore_tick_write_set(&before_states, &before_node_state)
+            .expect("the complete pre-frame Ship set should be restorable");
+
+        assert!(node.simulation.ships.index.contains_key(&original_ship));
+        assert!(!node.simulation.ships.index.contains_key(&added_ship));
+        assert_eq!(node.capture_tick_write_set(), before_states);
+        assert_eq!(node.capture_node_state(), before_node_state);
     }
 
     /// A RemoveItem settlement that empties a stack must survive the commit
