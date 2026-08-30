@@ -24,7 +24,7 @@
 //! Both are separate features that need their own design. Holding the
 //! authoritative snapshot plus ordered suffix is the prerequisite for either.
 
-use crate::{AntiEntropy, BatchApplyPlan, LogBatch, MissingLogRequest};
+use crate::LogBatch;
 use dawn_core::{DomainEvent, SectorId};
 use dawn_storage::{PublicEventIndex, RecoveryIndex};
 use serde::{Deserialize, Serialize};
@@ -62,6 +62,28 @@ impl ReplicaSnapshot {
     }
 }
 
+/// A request for the suffix of one Sector's append-only log.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MissingLogRequest {
+    pub sector_id: SectorId,
+    pub from_public_event_index: PublicEventIndex,
+    pub max_events: usize,
+}
+
+impl MissingLogRequest {
+    pub fn new(
+        sector_id: SectorId,
+        from_public_event_index: impl Into<PublicEventIndex>,
+        max_events: usize,
+    ) -> Self {
+        Self {
+            sector_id,
+            from_public_event_index: from_public_event_index.into(),
+            max_events,
+        }
+    }
+}
+
 /// Result of installing an opaque recovery snapshot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SnapshotInstall {
@@ -89,6 +111,40 @@ pub enum Ingest {
     Gap(MissingLogRequest),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BatchApplyPlan {
+    Duplicate,
+    Gap(MissingLogRequest),
+    Apply {
+        first_event_offset: usize,
+        next_index: u64,
+    },
+}
+
+fn plan_batch(
+    expected_next_index: u64,
+    sector_id: SectorId,
+    batch: &LogBatch,
+    max_events: usize,
+) -> BatchApplyPlan {
+    if batch.next_public_event_index().0 <= expected_next_index {
+        return BatchApplyPlan::Duplicate;
+    }
+
+    if batch.from_public_event_index.0 > expected_next_index {
+        return BatchApplyPlan::Gap(MissingLogRequest::new(
+            sector_id,
+            expected_next_index,
+            max_events,
+        ));
+    }
+
+    BatchApplyPlan::Apply {
+        first_event_offset: (expected_next_index - batch.from_public_event_index.0) as usize,
+        next_index: batch.next_public_event_index().0,
+    }
+}
+
 /// One foreign Sector's recovery replica.
 #[derive(Debug, Default)]
 struct SectorReplica {
@@ -107,8 +163,7 @@ struct SectorReplica {
 /// Sectors, fed by gossiped [`LogBatch`]es and optional snapshots.
 #[derive(Debug)]
 pub struct ReplicaSet {
-    /// Cap on the suffix length a gap request may ask for (passed through to
-    /// [`AntiEntropy::plan_batch`]).
+    /// Cap on the suffix length a gap request may ask for.
     max_events: usize,
     sectors: HashMap<SectorId, SectorReplica>,
 }
@@ -126,7 +181,7 @@ impl ReplicaSet {
     /// only their new suffix.
     pub fn ingest(&mut self, batch: &LogBatch) -> Ingest {
         let replica = self.sectors.entry(batch.sector_id).or_default();
-        match AntiEntropy::plan_batch(
+        match plan_batch(
             replica.next_public_event_index.0,
             batch.sector_id,
             batch,

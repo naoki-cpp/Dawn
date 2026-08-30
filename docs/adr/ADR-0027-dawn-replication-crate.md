@@ -36,7 +36,7 @@ ADR-0021 は Sector-local 複製の戦略を「追記ログのゴシップ配布
 
 ```
 1. 追記ログのゴシップ配布（push-pull, log index ベース差分）
-2. アンチエントロピー（iter_from を使った取りこぼし再要求）
+2. アンチエントロピー（`ReplicaSet` の重複/gap/overlap/連続 batch 分類・順序付き取り込みと、`CatchUpManager` の `PublicEventTail::read_from` suffix 提供・snapshot fallback）
 3. スナップショット転送（遅れた複製が snapshot + tail catch-up で追いつく）
 ```
 
@@ -104,8 +104,8 @@ impl ReplicationTransport for InMemoryReplicationBus { ... }
 /// Sender-side cursor and LogBatch construction for an owning Sector's append log.
 pub struct OutboundLogPublisher<T: ReplicationTransport> { ... }
 
-/// Anti-entropy: request missing events from a peer by public-event index range.
-pub struct AntiEntropy { ... }
+/// Receiver-side gap detection and ordered suffix ingestion for foreign Sectors.
+pub struct ReplicaSet { ... }
 
 /// Snapshot transfer: send/receive a StateSnapshot for far-behind replicas.
 pub struct SnapshotTransfer { ... }
@@ -120,9 +120,9 @@ pub struct SnapshotTransfer { ... }
         - dawn-actor から ReplicationBus を削除
         - dawn-simulation の配線を InMemoryReplicationBus に差し替え
 
-8D-2b: AntiEntropy（PublicEventTail ベース取りこぼし再要求）
-        - ゴシップ受信側が log index gap を検出して再要求
-        - 重複受信は (SectorId, log_index) で冪等に drop
+8D-2b: 受信側 catch-up
+        - ReplicaSet が重複/gap/overlap/連続 batch を判定し、連続 suffix を順序付きで取り込む
+        - CatchUpManager が PublicEventTail の suffix 提供と snapshot fallback を所有する
 
 8D-2c: TCP ゴシップ実装（TcpReplicationTransport）
         - framing: 4-byte length prefix + postcard（wire 形式）
@@ -179,7 +179,7 @@ thiserror        = "1"
 - [x] `ReplicationTransport` trait + `InMemoryReplicationBus` を実装
 - [x] `OutboundLogPublisher` で送信側 cursor と `LogBatch` suffix 構築を集約
 - [x] `dawn-actor` から `ReplicationBus` を削除し、`dawn-simulation` を差し替え
-- [x] `AntiEntropy`（iter_from ベース）を実装しテストを書く
+- [x] `ReplicaSet` に gap 検出・重複/overlap/連続 batch の判定を実装しテストを書く
 - [x] `TcpReplicationTransport`（LAN plaintext）を実装
 - [x] `SnapshotTransfer` を実装しテストを書く
 - [x] `CatchUpManager` に failure cooldown と current-cursor restart を集約
