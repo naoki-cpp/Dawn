@@ -174,7 +174,7 @@ CRDT ライブラリ・LWW レジスタは作らない。現行の `ReplicationB
       に改め、CRDT/LWW を外す（2026-06-15）
 - [x] architecture.md §5（将来スコープ）の「CRDT による最終一貫性」を「追記ログのゴシップ配布による
       最終一貫性（単一所有のため競合解決 CRDT は不要）」へ更新（2026-06-15）
-- [x] （8D-2b）log index アンチエントロピー（`iter_from` 再利用）+ 重複/overlap/gap 判定テスト
+- [x] （8D-2b）log index アンチエントロピー（`ReplicaSet` の重複/gap/overlap/連続 batch 分類・順序付き取り込み + `CatchUpManager` の `PublicEventTail::read_from` suffix 提供・snapshot fallback）テスト
 - [x] （8D-2c）TCP gossip 配布（4-byte length prefix + postcard / LAN plaintext）+ 受信テスト
 - [x] （8D 後続）retained public tail より遅れた複製が
       `CatchUpManager` のスナップショット fallback を使い、

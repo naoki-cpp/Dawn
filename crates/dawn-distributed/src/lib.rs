@@ -16,7 +16,6 @@
 #![warn(missing_debug_implementations)]
 
 pub mod actor;
-pub mod anti_entropy;
 pub mod bus;
 pub mod catch_up;
 pub mod outbound;
@@ -35,7 +34,6 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 
 pub use actor::{RaftActor, RaftActorHandle, RaftActorMessage};
-pub use anti_entropy::{AntiEntropy, BatchApplyPlan, MissingLogRequest};
 pub use bus::{BusMessage, InMemoryReplicationBus};
 pub use catch_up::{
     CatchUpConfig, CatchUpEvent, CatchUpFailure, CatchUpFailureKind, CatchUpManager,
@@ -49,7 +47,7 @@ pub use peer_transport::{
 };
 pub use public_event_tail::{PublicEventSuffix, PublicEventTail, PublicEventTailError};
 pub use raft_peer_transport::PeerRaftTransport;
-pub use replica::{Ingest, ReplicaSet, ReplicaSnapshot, SnapshotInstall};
+pub use replica::{Ingest, MissingLogRequest, ReplicaSet, ReplicaSnapshot, SnapshotInstall};
 pub use replication_peer_transport::{DurabilitySendError, PeerReplicationTransport};
 pub use rpc::{
     AppendEntries, AppendEntriesResponse, RaftMessage, RequestVote, RequestVoteResponse,
