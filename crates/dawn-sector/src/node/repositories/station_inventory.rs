@@ -6,7 +6,7 @@ use dawn_core::{ItemId, PlayerId, StationId};
 use dawn_storage::JournalRange;
 use rusqlite::{params, OptionalExtension};
 
-use super::{columns_to_item_id, item_id_to_columns, non_negative_id, SectorRepository};
+use super::{item_id_to_columns, non_negative_id, SectorRepository};
 use crate::transition::StationProjectionMutation;
 
 pub struct StationInventoryRepository<'a> {
@@ -50,11 +50,68 @@ impl ProjectionApplyError {
     }
 }
 
-/// Failure while reading the persisted Station projection cursor.
+/// Failure while reading the persisted Station projection.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ProjectionReadError {
-    #[error("station projection storage read failed: {message}")]
-    Storage { message: String },
+    /// SQLite could not return a complete projection row for this scope.
+    #[error(
+        "station projection storage read failed for player {player_id:?} at station {station_id:?}: {message}"
+    )]
+    Storage {
+        player_id: PlayerId,
+        station_id: StationId,
+        message: String,
+    },
+    /// A complete persisted row violated the canonical item identity rules.
+    #[error(
+        "invalid station projection row for player {player_id:?} at station {station_id:?}: item_type={item_type:?}, module_id={module_id}, ship_type_id={ship_type_id}, count={count}: {reason}"
+    )]
+    InvalidItemRow {
+        player_id: PlayerId,
+        station_id: StationId,
+        item_type: String,
+        module_id: i64,
+        ship_type_id: i64,
+        count: i64,
+        reason: String,
+    },
+    #[error(
+        "station projection item {item_id:?} has no {definition_kind} definition in game data"
+    )]
+    MissingItemDefinition {
+        item_id: ItemId,
+        definition_kind: &'static str,
+    },
+}
+
+impl ProjectionReadError {
+    fn storage(player_id: PlayerId, station_id: StationId, message: impl Into<String>) -> Self {
+        Self::Storage {
+            player_id,
+            station_id,
+            message: message.into(),
+        }
+    }
+
+    fn invalid_item_row(
+        player_id: PlayerId,
+        station_id: StationId,
+        item_type: &str,
+        module_id: i64,
+        ship_type_id: i64,
+        count: i64,
+        reason: impl Into<String>,
+    ) -> Self {
+        Self::InvalidItemRow {
+            player_id,
+            station_id,
+            item_type: item_type.to_owned(),
+            module_id,
+            ship_type_id,
+            count,
+            reason: reason.into(),
+        }
+    }
 }
 
 impl StationInventoryRepository<'_> {
@@ -62,7 +119,11 @@ impl StationInventoryRepository<'_> {
         &self,
         player_id: PlayerId,
         station_id: StationId,
-    ) -> BTreeMap<ItemId, u64> {
+    ) -> Result<BTreeMap<ItemId, u64>, ProjectionReadError> {
+        let player_sql_id = i64::try_from(player_id.0).map_err(|_| {
+            ProjectionReadError::storage(player_id, station_id, "PlayerId exceeds SQLite INTEGER")
+        })?;
+        let station_sql_id = i64::from(station_id.0);
         let mut stmt = self
             .repository
             .conn
@@ -70,27 +131,53 @@ impl StationInventoryRepository<'_> {
                 "SELECT item_type, module_id, ship_type_id, count
                  FROM station_inventory WHERE player_id = ?1 AND station_id = ?2",
             )
-            .expect("station_inventory table exists");
+            .map_err(|error| {
+                ProjectionReadError::storage(player_id, station_id, error.to_string())
+            })?;
         let rows = stmt
-            .query_map(params![player_id.0 as i64, station_id.0 as i64], |row| {
+            .query_map(params![player_sql_id, station_sql_id], |row| {
                 let item_type: String = row.get(0)?;
                 let module_id: i64 = row.get(1)?;
                 let ship_type_id: i64 = row.get(2)?;
                 let count: i64 = row.get(3)?;
-                Ok((
-                    item_type,
-                    module_id as u32,
-                    ship_type_id as u32,
-                    count as u64,
-                ))
+                Ok((item_type, module_id, ship_type_id, count))
             })
-            .expect("query is well-formed");
+            .map_err(|error| {
+                ProjectionReadError::storage(player_id, station_id, error.to_string())
+            })?;
 
-        rows.filter_map(|r| r.ok())
-            .filter_map(|(item_type, module_id, ship_type_id, count)| {
-                columns_to_item_id(&item_type, module_id, ship_type_id).map(|id| (id, count))
-            })
-            .collect()
+        let mut inventory = BTreeMap::new();
+        for row in rows {
+            let (item_type, raw_module_id, raw_ship_type_id, raw_count) = row.map_err(|error| {
+                ProjectionReadError::storage(player_id, station_id, error.to_string())
+            })?;
+            let invalid_row = |reason: &str| {
+                ProjectionReadError::invalid_item_row(
+                    player_id,
+                    station_id,
+                    &item_type,
+                    raw_module_id,
+                    raw_ship_type_id,
+                    raw_count,
+                    reason,
+                )
+            };
+            let module_id =
+                u32::try_from(raw_module_id).map_err(|_| invalid_row("module_id must be a u32"))?;
+            let ship_type_id = u32::try_from(raw_ship_type_id)
+                .map_err(|_| invalid_row("ship_type_id must be a u32"))?;
+            let count =
+                u64::try_from(raw_count).map_err(|_| invalid_row("count must be non-negative"))?;
+            if count == 0 {
+                return Err(invalid_row("count must be positive"));
+            }
+            let item_id = ItemId::from_storage_columns(&item_type, module_id, ship_type_id)
+                .map_err(|error| invalid_row(&error.to_string()))?;
+            if inventory.insert(item_id, count).is_some() {
+                return Err(invalid_row("duplicate item identity"));
+            }
+        }
+        Ok(inventory)
     }
 
     #[cfg(test)]
@@ -392,7 +479,10 @@ mod tests {
             ItemId::PackagedShip(dawn_core::ShipTypeId(4)),
             1,
         );
-        let inventory = db.station_inventory().get_all(PlayerId(1), StationId(7));
+        let inventory = db
+            .station_inventory()
+            .get_all(PlayerId(1), StationId(7))
+            .unwrap();
         assert_eq!(inventory.get(&ItemId::ScrapMetal), Some(&5));
         assert_eq!(
             inventory.get(&ItemId::Module(dawn_core::ModuleId(3))),
@@ -414,9 +504,63 @@ mod tests {
         assert_eq!(
             db.station_inventory()
                 .get_all(PlayerId(1), StationId(7))
+                .unwrap()
                 .get(&ItemId::ScrapMetal),
             Some(&5)
         );
+    }
+
+    #[test]
+    fn get_all_rejects_invalid_persisted_item_rows() {
+        for (item_type, module_id, ship_type_id) in [
+            ("Unknown", 0_i64, 0_i64),
+            ("Module", -1_i64, 0_i64),
+            ("Module", 3_i64, 4_i64),
+        ] {
+            let db = SectorRepository::open_in_memory().unwrap();
+            db.conn
+                .execute(
+                    "INSERT INTO station_inventory
+                     (player_id, station_id, item_type, module_id, ship_type_id, count)
+                     VALUES (?1, ?2, ?3, ?4, ?5, 1)",
+                    params![1_i64, 7_i64, item_type, module_id, ship_type_id],
+                )
+                .unwrap();
+
+            let error = db
+                .station_inventory()
+                .get_all(PlayerId(1), StationId(7))
+                .expect_err("invalid persisted item identity must fail the read");
+            assert!(matches!(
+                error,
+                ProjectionReadError::InvalidItemRow {
+                    player_id: PlayerId(1),
+                    station_id: StationId(7),
+                    item_type: ref actual_type,
+                    module_id: actual_module_id,
+                    ship_type_id: actual_ship_type_id,
+                    count: 1,
+                    ..
+                } if actual_type == item_type
+                    && actual_module_id == module_id
+                    && actual_ship_type_id == ship_type_id
+            ));
+        }
+    }
+
+    #[test]
+    fn get_all_reports_missing_station_projection_storage() {
+        let db = SectorRepository::open_in_memory().unwrap();
+        db.conn.execute("DROP TABLE station_inventory", []).unwrap();
+
+        assert!(matches!(
+            db.station_inventory().get_all(PlayerId(1), StationId(7)),
+            Err(ProjectionReadError::Storage {
+                player_id: PlayerId(1),
+                station_id: StationId(7),
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -486,6 +630,7 @@ mod tests {
         assert_eq!(
             db.station_inventory()
                 .get_all(PlayerId(8), StationId(3))
+                .unwrap()
                 .get(&ItemId::ScrapMetal),
             Some(&4)
         );
@@ -584,6 +729,7 @@ mod tests {
         assert_eq!(
             db.station_inventory()
                 .get_all(PlayerId(1), StationId(7))
+                .unwrap()
                 .get(&item),
             Some(&1)
         );
@@ -623,6 +769,7 @@ mod tests {
         assert!(db
             .station_inventory()
             .get_all(PlayerId(1), StationId(7))
+            .unwrap()
             .is_empty());
     }
 
@@ -638,6 +785,7 @@ mod tests {
         assert_eq!(
             db.station_inventory()
                 .get_all(PlayerId(1), StationId(7))
+                .unwrap()
                 .get(&ItemId::ScrapMetal),
             Some(&3)
         );

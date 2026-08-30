@@ -31,7 +31,7 @@ use dawn_core::{
 use dawn_ecs::components::{FittedSlot, FittingComp, InventoryComp, IsNpcComp};
 use rand::RngCore;
 
-use super::{HandoffPayload, MissingObserverShip, SimulationNode};
+use super::{HandoffPayload, HandoffPayloadError, SimulationNode};
 
 fn generate_resume_ticket() -> ResumeTicket {
     let mut bytes = [0; ResumeTicket::BYTE_LEN];
@@ -193,7 +193,7 @@ impl SimulationNode {
         ship_id: ShipId,
         spawn_position: Position,
         aoi_cell_size: f64,
-    ) -> Result<HandoffPayload, MissingObserverShip> {
+    ) -> Result<HandoffPayload, HandoffPayloadError> {
         self.materialize_admission_player_ship(player_id, ship_id, spawn_position);
         let handoff = self.build_handoff_payload(ship_id, aoi_cell_size);
         self.remove_ship(ship_id);
@@ -265,10 +265,11 @@ impl SimulationNode {
         };
 
         self.emit_event(DomainEvent::ClientAdmissionCommitted(event.clone()));
-        self.credit_station_item(
+        self.credit_station_item_from_current(
             event.player_id,
             event.starter_station_id,
             event.starter_item_id,
+            0,
             event.starter_item_count,
         );
         true

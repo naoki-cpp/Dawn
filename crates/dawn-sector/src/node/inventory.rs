@@ -654,20 +654,23 @@ mod tests {
             .unwrap()
             .add_item(dawn_core::ItemId::ScrapMetal, 4);
 
-        assert!(node.transfer_to_station_owned(
-            player,
-            TransferToStationCommand {
-                ship_id,
-                station_id,
-                item_id: dawn_core::ItemId::ScrapMetal,
-                direction: dawn_core::TransferDirection::ToStation,
-            }
-        ));
+        assert!(node
+            .transfer_to_station_owned(
+                player,
+                TransferToStationCommand {
+                    ship_id,
+                    station_id,
+                    item_id: dawn_core::ItemId::ScrapMetal,
+                    direction: dawn_core::TransferDirection::ToStation,
+                }
+            )
+            .unwrap());
 
         let inv = node.simulation.world.get::<InventoryComp>(entity).unwrap();
         assert_eq!(inv.item_count(dawn_core::ItemId::ScrapMetal), 0);
         assert_eq!(
             node.station_inventory(player, dawn_core::StationId(0))
+                .unwrap()
                 .and_then(|inv| inv.get(&dawn_core::ItemId::ScrapMetal).copied())
                 .unwrap_or(0),
             4
@@ -680,15 +683,17 @@ mod tests {
         let (_owner, ship_id, station_id) = spawn_and_dock_owned_player(&mut node);
         let stranger = node.next_player_id();
 
-        assert!(!node.transfer_to_station_owned(
-            stranger,
-            TransferToStationCommand {
-                ship_id,
-                station_id,
-                item_id: dawn_core::ItemId::ScrapMetal,
-                direction: dawn_core::TransferDirection::ToStation,
-            }
-        ));
+        assert!(!node
+            .transfer_to_station_owned(
+                stranger,
+                TransferToStationCommand {
+                    ship_id,
+                    station_id,
+                    item_id: dawn_core::ItemId::ScrapMetal,
+                    direction: dawn_core::TransferDirection::ToStation,
+                }
+            )
+            .unwrap());
     }
 
     /// security-review.md SEC-3: `can_use_station` only checks the
@@ -716,15 +721,17 @@ mod tests {
         // The player is docked (via `active_ship`) at `station_id`, so
         // `can_use_station` alone would pass -- but `other_ship` itself
         // isn't docked there.
-        assert!(!node.transfer_to_station_owned(
-            player,
-            TransferToStationCommand {
-                ship_id: other_ship,
-                station_id,
-                item_id: dawn_core::ItemId::ScrapMetal,
-                direction: dawn_core::TransferDirection::ToStation,
-            }
-        ));
+        assert!(!node
+            .transfer_to_station_owned(
+                player,
+                TransferToStationCommand {
+                    ship_id: other_ship,
+                    station_id,
+                    item_id: dawn_core::ItemId::ScrapMetal,
+                    direction: dawn_core::TransferDirection::ToStation,
+                }
+            )
+            .unwrap());
         let inv = node.simulation.world.get::<InventoryComp>(entity).unwrap();
         assert_eq!(
             inv.item_count(dawn_core::ItemId::ScrapMetal),
@@ -744,15 +751,17 @@ mod tests {
             .unwrap()
             .add_item(dawn_core::ItemId::ScrapMetal, 4);
 
-        assert!(!node.transfer_to_station_owned(
-            player,
-            TransferToStationCommand {
-                ship_id,
-                station_id: dawn_core::StationId(0),
-                item_id: dawn_core::ItemId::ScrapMetal,
-                direction: dawn_core::TransferDirection::ToStation,
-            }
-        ));
+        assert!(!node
+            .transfer_to_station_owned(
+                player,
+                TransferToStationCommand {
+                    ship_id,
+                    station_id: dawn_core::StationId(0),
+                    item_id: dawn_core::ItemId::ScrapMetal,
+                    direction: dawn_core::TransferDirection::ToStation,
+                }
+            )
+            .unwrap());
     }
 
     #[test]
@@ -760,38 +769,44 @@ mod tests {
         let mut node = node_with_modules();
         let (player, ship_id, station_id) = spawn_and_dock_owned_player(&mut node);
 
-        assert!(!node.transfer_to_station_owned(
-            player,
-            TransferToStationCommand {
-                ship_id,
-                station_id,
-                item_id: dawn_core::ItemId::ScrapMetal,
-                direction: dawn_core::TransferDirection::ToStation,
-            }
-        ));
+        assert!(!node
+            .transfer_to_station_owned(
+                player,
+                TransferToStationCommand {
+                    ship_id,
+                    station_id,
+                    item_id: dawn_core::ItemId::ScrapMetal,
+                    direction: dawn_core::TransferDirection::ToStation,
+                }
+            )
+            .unwrap());
     }
 
     #[test]
     fn transfer_to_station_owned_to_ship_moves_the_whole_stack_back_into_cargo() {
         let mut node = node_with_modules();
         let (player, ship_id, station_id) = spawn_and_dock_owned_player(&mut node);
-        node.credit_station_item(player, station_id, dawn_core::ItemId::ScrapMetal, 7);
+        node.credit_station_item(player, station_id, dawn_core::ItemId::ScrapMetal, 7)
+            .unwrap();
 
-        assert!(node.transfer_to_station_owned(
-            player,
-            TransferToStationCommand {
-                ship_id,
-                station_id,
-                item_id: dawn_core::ItemId::ScrapMetal,
-                direction: dawn_core::TransferDirection::ToShip,
-            }
-        ));
+        assert!(node
+            .transfer_to_station_owned(
+                player,
+                TransferToStationCommand {
+                    ship_id,
+                    station_id,
+                    item_id: dawn_core::ItemId::ScrapMetal,
+                    direction: dawn_core::TransferDirection::ToShip,
+                }
+            )
+            .unwrap());
 
         let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
         let inv = node.simulation.world.get::<InventoryComp>(entity).unwrap();
         assert_eq!(inv.item_count(dawn_core::ItemId::ScrapMetal), 7);
         assert_eq!(
-            node.station_item_count(player, station_id, dawn_core::ItemId::ScrapMetal),
+            node.station_item_count(player, station_id, dawn_core::ItemId::ScrapMetal)
+                .unwrap(),
             0
         );
     }
@@ -801,15 +816,17 @@ mod tests {
         let mut node = node_with_modules();
         let (player, ship_id, station_id) = spawn_and_dock_owned_player(&mut node);
 
-        assert!(!node.transfer_to_station_owned(
-            player,
-            TransferToStationCommand {
-                ship_id,
-                station_id,
-                item_id: dawn_core::ItemId::ScrapMetal,
-                direction: dawn_core::TransferDirection::ToShip,
-            }
-        ));
+        assert!(!node
+            .transfer_to_station_owned(
+                player,
+                TransferToStationCommand {
+                    ship_id,
+                    station_id,
+                    item_id: dawn_core::ItemId::ScrapMetal,
+                    direction: dawn_core::TransferDirection::ToShip,
+                }
+            )
+            .unwrap());
     }
 
     /// The default loadout (`spawn_player_ship_at`) fits two Mid modules

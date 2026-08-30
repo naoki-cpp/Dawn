@@ -357,7 +357,7 @@ mod tests {
         let mut node = test_node();
         let player_id = node.next_player_id();
         let ship_id = node.spawn_player_ship_at_pub(player_id, Position::ORIGIN);
-        let wire = node.build_player_loadout_json(ship_id).unwrap();
+        let wire = node.build_player_loadout_json(ship_id).unwrap().unwrap();
         validate_player_loadout_godot_ranges(&wire).unwrap();
         let loadout = wire_to_loadout_msg(wire);
         assert_eq!(loadout.active_ship_id, Some(ship_id));
@@ -376,7 +376,7 @@ mod tests {
             slot: SlotKind::High,
             module_id,
         }));
-        let wire = node.build_player_loadout_json(ship_id).unwrap();
+        let wire = node.build_player_loadout_json(ship_id).unwrap().unwrap();
         validate_player_loadout_godot_ranges(&wire).unwrap();
         let loadout = wire_to_loadout_msg(wire);
         let row = loadout

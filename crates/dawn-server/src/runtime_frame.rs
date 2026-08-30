@@ -13,7 +13,7 @@ use dawn_sector::client_admission::{
 use dawn_sector::client_admission_resolution::{
     resolve_client_admission, ClientAdmissionResolution,
 };
-use dawn_sector::node::SimulationNode;
+use dawn_sector::node::{ProjectionReadError, SimulationNode};
 use dawn_sector::persistence::checkpoint::CheckpointJournal;
 use dawn_sector::persistence::{CheckpointScheduler, StateSnapshot};
 use dawn_sector::transit::{
@@ -126,6 +126,8 @@ pub enum RuntimeFrameHostError {
     Fenced,
     /// The durable runtime transition failed.
     Tick(dawn_sector::transit::TickTransitionError),
+    /// A required Station projection read failed; the host is fenced.
+    StationProjectionRead(ProjectionReadError),
 }
 
 impl fmt::Display for RuntimeFrameHostError {
@@ -142,6 +144,9 @@ impl fmt::Display for RuntimeFrameHostError {
                 "runtime host is fenced and requires recovery before further mutation"
             ),
             Self::Tick(error) => write!(formatter, "runtime frame failed: {error}"),
+            Self::StationProjectionRead(error) => {
+                write!(formatter, "Station projection read failed: {error}")
+            }
         }
     }
 }
@@ -151,6 +156,7 @@ impl std::error::Error for RuntimeFrameHostError {
         match self {
             Self::BootstrapClosed | Self::Fenced => None,
             Self::Tick(error) => Some(error),
+            Self::StationProjectionRead(error) => Some(error),
         }
     }
 }
@@ -335,6 +341,11 @@ where
         }
     }
 
+    fn fence(&mut self, reason: impl Into<String>) {
+        self.health.fence(reason);
+        self.phase = RuntimeFramePhase::Fenced;
+    }
+
     fn ensure_bootstrapping(&self) -> Result<(), RuntimeFrameHostError> {
         self.ensure_mutation_available()?;
         if self.phase == RuntimeFramePhase::Bootstrapping {
@@ -400,9 +411,18 @@ where
     ) -> Result<ClientAdmissionAttempt, RuntimeClientAdmissionError> {
         self.ensure_mutation_available()
             .map_err(RuntimeClientAdmissionError::Host)?;
-        self.node
-            .begin_client_admission(intent, aoi_cell_size)
-            .map_err(RuntimeClientAdmissionError::Refused)
+        match self.node.begin_client_admission(intent, aoi_cell_size) {
+            Ok(attempt) => Ok(attempt),
+            Err(ClientAdmissionRefusal::StationProjectionRead(error)) => {
+                self.fence(format!(
+                    "Station projection read failed during client admission: {error}"
+                ));
+                Err(RuntimeClientAdmissionError::Host(
+                    RuntimeFrameHostError::StationProjectionRead(error),
+                ))
+            }
+            Err(refusal) => Err(RuntimeClientAdmissionError::Refused(refusal)),
+        }
     }
 
     /// Commit or abort an admission after its asynchronous handoff completes.
@@ -531,12 +551,8 @@ where
         ) -> Result<(), dawn_sector::transit::RuntimeReconciliationError>,
         F: FnOnce(&SimulationNode, &dawn_sector::node::TickResult, &[DomainEvent]),
     {
-        if self.phase == RuntimeFramePhase::Fenced {
-            // The shared runtime health gate returns the durable recovery error
-            // and keeps the failure visible to the caller.
-        } else {
-            self.phase = RuntimeFramePhase::Running;
-        }
+        self.ensure_mutation_available()?;
+        self.phase = RuntimeFramePhase::Running;
 
         let transition_id = dawn_sector::transit::runtime_transition_id(&self.node);
         let output = run_durable_runtime_frame(
@@ -581,7 +597,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dawn_core::{ClientRequest, NodeId, SectorBounds, SectorId};
+    use dawn_core::{ClientRequest, NodeId, SectorBounds, SectorId, StationId};
     use dawn_sector::{
         galaxy::Galaxy,
         game_data::{GameDataCatalog, PRODUCTION_MODULES_PATH, PRODUCTION_SHIP_TYPES_PATH},
@@ -651,6 +667,24 @@ mod tests {
 
     fn host() -> RuntimeFrameHost<InMemoryJournal, dawn_sector::transit::LocalRuntimeConsensus> {
         host_with_policy(RuntimeFramePolicy::local_durable(0))
+    }
+
+    fn temporary_station_repository(
+        host: &mut RuntimeFrameHost<InMemoryJournal, dawn_sector::transit::LocalRuntimeConsensus>,
+    ) -> (tempfile::TempDir, std::path::PathBuf) {
+        let directory = tempfile::tempdir().expect("temporary projection directory");
+        let path = directory.path().join("station.sqlite");
+        host.node
+            .open_repositories(path.to_str().expect("temporary path is UTF-8"))
+            .expect("temporary Station repository should open");
+        (directory, path)
+    }
+
+    fn remove_station_inventory_table(path: &std::path::Path) {
+        rusqlite::Connection::open(path)
+            .expect("temporary Station repository should reopen")
+            .execute("DROP TABLE station_inventory", [])
+            .expect("Station projection table should be droppable in the test");
     }
 
     #[test]
@@ -732,6 +766,129 @@ mod tests {
         assert_eq!(output.tick_result.tick.value(), 1);
         assert_eq!(host.phase(), RuntimeFramePhase::Running);
         assert!(!host.health().is_fenced());
+    }
+
+    #[test]
+    fn station_projection_read_failure_fences_host_and_rejects_next_frame() {
+        let mut host = host();
+        let (_directory, path) = temporary_station_repository(&mut host);
+        let spawn_position = host.default_player_spawn_position();
+        let (player_id, ship_id) = host
+            .spawn_bot_ship(spawn_position)
+            .expect("bot fixture should be available during bootstrap");
+        remove_station_inventory_table(&path);
+        let requests = [
+            dawn_sector::transition::AuthenticatedClientRequest {
+                session_index: 0,
+                player_id,
+                request: ClientRequest::Dock {
+                    station: StationId(0),
+                },
+            },
+            dawn_sector::transition::AuthenticatedClientRequest {
+                session_index: 0,
+                player_id,
+                request: ClientRequest::BuildPackagedShip {
+                    ship: ship_id,
+                    station: StationId(0),
+                    ship_type: ShipTypeId(1),
+                },
+            },
+        ];
+
+        let result = host.run_frame(dawn_sector::transition::FrameInput {
+            lock_commands: &[],
+            authenticated_requests: &requests,
+            market_settlements: &[],
+            acknowledged_settlements: &[],
+        });
+
+        assert!(matches!(
+            result,
+            Err(RuntimeFrameHostError::Tick(
+                dawn_sector::transit::TickTransitionError::Preparation(
+                    dawn_sector::node::TickPreparationError::StationProjectionRead(_)
+                )
+            ))
+        ));
+        assert_eq!(host.phase(), RuntimeFramePhase::Fenced);
+        assert!(host.health().is_fenced());
+        assert_eq!(host.node().docked_station(ship_id), None);
+        assert_eq!(host.node().player_docked_station(player_id), None);
+        assert!(matches!(
+            host.run_frame(dawn_sector::transition::FrameInput::lock_only(&[])),
+            Err(RuntimeFrameHostError::Fenced)
+        ));
+        assert!(matches!(
+            host.begin_client_admission(
+                ClientAdmissionIntent::Fresh {
+                    spawn_position: Position::ORIGIN,
+                },
+                1_000.0,
+            ),
+            Err(RuntimeClientAdmissionError::Host(
+                RuntimeFrameHostError::Fenced
+            ))
+        ));
+    }
+
+    #[test]
+    fn station_projection_read_failure_during_resume_fences_host_and_keeps_ship() {
+        let mut host = host();
+        let (_directory, path) = temporary_station_repository(&mut host);
+        let spawn_position = host.default_player_spawn_position();
+        let fresh = host
+            .begin_client_admission(ClientAdmissionIntent::Fresh { spawn_position }, 1_000.0)
+            .expect("fresh admission should begin");
+        let resume_ticket = fresh.resume_ticket();
+        let committed = host
+            .resolve_client_admission(fresh, Ok::<(), String>(()))
+            .expect("fresh admission should resolve");
+        assert!(matches!(
+            &committed,
+            dawn_sector::client_admission_resolution::ClientAdmissionResolution::Committed { .. }
+        ));
+        let committed_admission = match committed {
+            dawn_sector::client_admission_resolution::ClientAdmissionResolution::Committed {
+                admission,
+                ..
+            } => admission,
+            _ => unreachable!("fresh admission was asserted committed above"),
+        };
+        host.run_frame(dawn_sector::transition::FrameInput {
+            lock_commands: &[],
+            authenticated_requests: &[dawn_sector::transition::AuthenticatedClientRequest {
+                session_index: 0,
+                player_id: committed_admission.player_id,
+                request: ClientRequest::Dock {
+                    station: StationId(0),
+                },
+            }],
+            market_settlements: &[],
+            acknowledged_settlements: &[],
+        })
+        .expect("fresh admission projection should commit");
+
+        let ship_count = host.node().ship_count();
+        remove_station_inventory_table(&path);
+        let result =
+            host.begin_client_admission(ClientAdmissionIntent::Resume { resume_ticket }, 1_000.0);
+
+        assert!(matches!(
+            result,
+            Err(RuntimeClientAdmissionError::Host(
+                RuntimeFrameHostError::StationProjectionRead(_)
+            ))
+        ));
+        assert_eq!(host.node().ship_count(), ship_count);
+        assert!(host.node().hosts_client_resume_ticket(resume_ticket));
+        assert_eq!(host.phase(), RuntimeFramePhase::Fenced);
+        assert!(matches!(
+            host.begin_client_admission(ClientAdmissionIntent::Resume { resume_ticket }, 1_000.0,),
+            Err(RuntimeClientAdmissionError::Host(
+                RuntimeFrameHostError::Fenced
+            ))
+        ));
     }
 
     #[test]

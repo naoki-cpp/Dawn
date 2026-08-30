@@ -7,7 +7,9 @@
 
 use dawn_core::{PlayerId, Position, ResumeTicket, ShipId};
 
-use crate::node::{HandoffPayload, MissingObserverShip, SimulationNode};
+use crate::node::{
+    HandoffPayload, HandoffPayloadError, MissingObserverShip, ProjectionReadError, SimulationNode,
+};
 
 /// Runtime-provided identity intent for one connection attempt.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -19,7 +21,7 @@ pub enum ClientAdmissionIntent {
 }
 
 /// Why a client admission attempt could not begin.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ClientAdmissionRefusal {
     /// A fresh spawn would exceed the Sector population backstop.
     FreshAtPopulationCap,
@@ -39,6 +41,8 @@ pub enum ClientAdmissionRefusal {
     /// A freshly-created observer could not be used to construct its scoped
     /// handoff. The fresh Ship has already been removed before this is returned.
     MissingObserver(MissingObserverShip),
+    /// The persisted Station projection could not be read safely.
+    StationProjectionRead(ProjectionReadError),
 }
 
 impl std::fmt::Display for ClientAdmissionRefusal {
@@ -57,6 +61,7 @@ impl std::fmt::Display for ClientAdmissionRefusal {
                 ship_id.raw()
             ),
             Self::MissingObserver(error) => write!(f, "{error}"),
+            Self::StationProjectionRead(error) => write!(f, "{error}"),
         }
     }
 }
@@ -239,7 +244,14 @@ impl SimulationNode {
                     Ok(handoff) => handoff,
                     Err(error) => {
                         self.abort_reserved_fresh_admission(ship_id);
-                        return Err(ClientAdmissionRefusal::MissingObserver(error));
+                        return Err(match error {
+                            HandoffPayloadError::MissingObserver(error) => {
+                                ClientAdmissionRefusal::MissingObserver(error)
+                            }
+                            HandoffPayloadError::ProjectionRead(error) => {
+                                ClientAdmissionRefusal::StationProjectionRead(error)
+                            }
+                        });
                     }
                 };
 
@@ -278,7 +290,14 @@ impl SimulationNode {
                         Ok(handoff) => handoff,
                         Err(error) => {
                             self.abort_reserved_fresh_admission(ship_id);
-                            return Err(ClientAdmissionRefusal::MissingObserver(error));
+                            return Err(match error {
+                                HandoffPayloadError::MissingObserver(error) => {
+                                    ClientAdmissionRefusal::MissingObserver(error)
+                                }
+                                HandoffPayloadError::ProjectionRead(error) => {
+                                    ClientAdmissionRefusal::StationProjectionRead(error)
+                                }
+                            });
                         }
                     };
                     return Ok(ClientAdmissionAttempt {
@@ -313,9 +332,16 @@ impl SimulationNode {
                 }
 
                 let result = (|| {
-                    let mut handoff = self
-                        .build_handoff_payload(ship_id, aoi_cell_size)
-                        .map_err(|_| ClientAdmissionRefusal::ResumeTicketInvalid)?;
+                    let mut handoff =
+                        self.build_handoff_payload(ship_id, aoi_cell_size)
+                            .map_err(|error| match error {
+                                HandoffPayloadError::MissingObserver(_) => {
+                                    ClientAdmissionRefusal::ResumeTicketInvalid
+                                }
+                                HandoffPayloadError::ProjectionRead(error) => {
+                                    ClientAdmissionRefusal::StationProjectionRead(error)
+                                }
+                            })?;
 
                     if let Some(observer) = handoff
                         .initial_state
@@ -328,6 +354,7 @@ impl SimulationNode {
 
                     let loadout = self
                         .build_player_loadout_json_for_admission(player_id, ship_id)
+                        .map_err(ClientAdmissionRefusal::StationProjectionRead)?
                         .ok_or(ClientAdmissionRefusal::ResumeTicketInvalid)?;
                     handoff.player_loadout = Some(loadout);
                     let proposed_next_ticket = self.issue_resume_ticket();
@@ -446,7 +473,8 @@ mod tests {
                 committed.player_id,
                 dawn_core::StationId(0),
                 dawn_core::ItemId::PackagedShip(crate::ship_types::SHIP_TYPE_MAGPIE),
-            ),
+            )
+            .unwrap(),
             1
         );
     }
@@ -469,7 +497,8 @@ mod tests {
         assert_eq!(node.ship_count(), 0);
         assert!(!node.apply_stop_command_owned(player_id, ship_id));
         assert_eq!(
-            node.station_item_count(player_id, dawn_core::StationId(0), starter_ship),
+            node.station_item_count(player_id, dawn_core::StationId(0), starter_ship)
+                .unwrap(),
             0
         );
         assert!(matches!(
@@ -612,7 +641,8 @@ mod tests {
         assert!(committed.resumed);
         let loadout = node
             .build_player_loadout_json(committed.ship_id)
-            .expect("committed resume has a complete loadout");
+            .expect("committed resume has a complete loadout")
+            .expect("committed resume ship has a loadout");
         assert_eq!(loadout.active_ship_id, Some(ship_id.raw()));
         assert!(loadout
             .owned_ships

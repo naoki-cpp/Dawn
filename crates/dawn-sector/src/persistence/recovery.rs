@@ -368,11 +368,13 @@ mod tests {
             .expect("Station projection must advance over the public event")
             .0;
         assert_eq!(
-            restored.station_item_count(
-                dawn_core::PlayerId(7),
-                dawn_core::StationId(0),
-                dawn_core::ItemId::ScrapMetal,
-            ),
+            restored
+                .station_item_count(
+                    dawn_core::PlayerId(7),
+                    dawn_core::StationId(0),
+                    dawn_core::ItemId::ScrapMetal,
+                )
+                .unwrap(),
             4
         );
     }
@@ -430,11 +432,13 @@ mod tests {
             Some(dawn_core::AbsolutePosition::ORIGIN)
         );
         assert_eq!(
-            recovered.station_item_count(
-                player_id,
-                dawn_core::StationId(0),
-                dawn_core::ItemId::PackagedShip(crate::ship_types::SHIP_TYPE_MAGPIE),
-            ),
+            recovered
+                .station_item_count(
+                    player_id,
+                    dawn_core::StationId(0),
+                    dawn_core::ItemId::PackagedShip(crate::ship_types::SHIP_TYPE_MAGPIE),
+                )
+                .unwrap(),
             1
         );
         assert_eq!(

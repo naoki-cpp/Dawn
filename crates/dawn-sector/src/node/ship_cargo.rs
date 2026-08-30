@@ -232,19 +232,20 @@ impl SimulationNode {
         &mut self,
         player_id: PlayerId,
         cmd: TransferToStationCommand,
-    ) -> bool {
+    ) -> Result<bool, super::repositories::ProjectionReadError> {
         if !self.owns_ship(player_id, cmd.ship_id)
             || !self.can_use_station(player_id, cmd.station_id)
             || self.docked_station(cmd.ship_id) != Some(cmd.station_id)
         {
-            return false;
+            return Ok(false);
         }
         let Some(&entity) = self.simulation.ships.index.get(&cmd.ship_id) else {
-            return false;
+            return Ok(false);
         };
 
         match cmd.direction {
             TransferDirection::ToStation => {
+                let current = self.station_item_count(player_id, cmd.station_id, cmd.item_id)?;
                 let taken = self
                     .simulation
                     .world
@@ -252,22 +253,38 @@ impl SimulationNode {
                     .map(|mut inventory| inventory.take_all(cmd.item_id))
                     .unwrap_or(0);
                 if taken == 0 {
-                    return false;
+                    return Ok(false);
                 }
-                self.credit_station_item(player_id, cmd.station_id, cmd.item_id, taken);
-                true
+                self.credit_station_item_from_current(
+                    player_id,
+                    cmd.station_id,
+                    cmd.item_id,
+                    current,
+                    taken,
+                );
+                Ok(true)
             }
             TransferDirection::ToShip => {
-                let count = self.station_item_count(player_id, cmd.station_id, cmd.item_id);
-                if count == 0
-                    || self
-                        .try_debit_station_item(player_id, cmd.station_id, cmd.item_id, count)
-                        .is_err()
-                {
-                    return false;
+                let count = self.station_item_count(player_id, cmd.station_id, cmd.item_id)?;
+                if count == 0 {
+                    return Ok(false);
+                }
+                if let Err(reason) = self.try_debit_station_item_from_current(
+                    player_id,
+                    cmd.station_id,
+                    cmd.item_id,
+                    count,
+                    count,
+                ) {
+                    return match reason {
+                        super::station::StationOperationRejection::ProjectionRead(error) => {
+                            Err(error)
+                        }
+                        _ => Ok(false),
+                    };
                 }
                 self.add_ship_item(entity, cmd.item_id, count);
-                true
+                Ok(true)
             }
         }
     }
@@ -532,20 +549,23 @@ mod tests {
         let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
         node.add_ship_item(entity, ItemId::ScrapMetal, 4);
 
-        assert!(node.transfer_to_station_owned(
-            player,
-            TransferToStationCommand {
-                ship_id,
-                station_id,
-                item_id: ItemId::ScrapMetal,
-                direction: TransferDirection::ToStation,
-            }
-        ));
+        assert!(node
+            .transfer_to_station_owned(
+                player,
+                TransferToStationCommand {
+                    ship_id,
+                    station_id,
+                    item_id: ItemId::ScrapMetal,
+                    direction: TransferDirection::ToStation,
+                }
+            )
+            .unwrap());
 
         let inventory = node.simulation.world.get::<InventoryComp>(entity).unwrap();
         assert_eq!(inventory.item_count(ItemId::ScrapMetal), 0);
         assert_eq!(
             node.station_inventory(player, station_id)
+                .unwrap()
                 .and_then(|items| items.get(&ItemId::ScrapMetal).copied())
                 .unwrap_or(0),
             4
@@ -558,15 +578,17 @@ mod tests {
         let (_owner, ship_id, station_id) = spawn_and_dock_owned_player(&mut node);
         let stranger = node.next_player_id();
 
-        assert!(!node.transfer_to_station_owned(
-            stranger,
-            TransferToStationCommand {
-                ship_id,
-                station_id,
-                item_id: ItemId::ScrapMetal,
-                direction: TransferDirection::ToStation,
-            }
-        ));
+        assert!(!node
+            .transfer_to_station_owned(
+                stranger,
+                TransferToStationCommand {
+                    ship_id,
+                    station_id,
+                    item_id: ItemId::ScrapMetal,
+                    direction: TransferDirection::ToStation,
+                }
+            )
+            .unwrap());
     }
 
     #[test]
@@ -577,15 +599,17 @@ mod tests {
         let entity = *node.simulation.ships.index.get(&other_ship).unwrap();
         node.add_ship_item(entity, ItemId::ScrapMetal, 4);
 
-        assert!(!node.transfer_to_station_owned(
-            player,
-            TransferToStationCommand {
-                ship_id: other_ship,
-                station_id,
-                item_id: ItemId::ScrapMetal,
-                direction: TransferDirection::ToStation,
-            }
-        ));
+        assert!(!node
+            .transfer_to_station_owned(
+                player,
+                TransferToStationCommand {
+                    ship_id: other_ship,
+                    station_id,
+                    item_id: ItemId::ScrapMetal,
+                    direction: TransferDirection::ToStation,
+                }
+            )
+            .unwrap());
         assert_eq!(
             node.simulation
                 .world
@@ -605,15 +629,17 @@ mod tests {
         let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
         node.add_ship_item(entity, ItemId::ScrapMetal, 4);
 
-        assert!(!node.transfer_to_station_owned(
-            player,
-            TransferToStationCommand {
-                ship_id,
-                station_id: StationId(0),
-                item_id: ItemId::ScrapMetal,
-                direction: TransferDirection::ToStation,
-            }
-        ));
+        assert!(!node
+            .transfer_to_station_owned(
+                player,
+                TransferToStationCommand {
+                    ship_id,
+                    station_id: StationId(0),
+                    item_id: ItemId::ScrapMetal,
+                    direction: TransferDirection::ToStation,
+                }
+            )
+            .unwrap());
     }
 
     #[test]
@@ -621,32 +647,37 @@ mod tests {
         let mut node = node_with_modules();
         let (player, ship_id, station_id) = spawn_and_dock_owned_player(&mut node);
 
-        assert!(!node.transfer_to_station_owned(
-            player,
-            TransferToStationCommand {
-                ship_id,
-                station_id,
-                item_id: ItemId::ScrapMetal,
-                direction: TransferDirection::ToStation,
-            }
-        ));
+        assert!(!node
+            .transfer_to_station_owned(
+                player,
+                TransferToStationCommand {
+                    ship_id,
+                    station_id,
+                    item_id: ItemId::ScrapMetal,
+                    direction: TransferDirection::ToStation,
+                }
+            )
+            .unwrap());
     }
 
     #[test]
     fn transfer_to_station_owned_to_ship_moves_the_whole_stack_back_into_cargo() {
         let mut node = node_with_modules();
         let (player, ship_id, station_id) = spawn_and_dock_owned_player(&mut node);
-        node.credit_station_item(player, station_id, ItemId::ScrapMetal, 7);
+        node.credit_station_item(player, station_id, ItemId::ScrapMetal, 7)
+            .unwrap();
 
-        assert!(node.transfer_to_station_owned(
-            player,
-            TransferToStationCommand {
-                ship_id,
-                station_id,
-                item_id: ItemId::ScrapMetal,
-                direction: TransferDirection::ToShip,
-            }
-        ));
+        assert!(node
+            .transfer_to_station_owned(
+                player,
+                TransferToStationCommand {
+                    ship_id,
+                    station_id,
+                    item_id: ItemId::ScrapMetal,
+                    direction: TransferDirection::ToShip,
+                }
+            )
+            .unwrap());
 
         let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
         assert_eq!(
@@ -658,7 +689,8 @@ mod tests {
             7
         );
         assert_eq!(
-            node.station_item_count(player, station_id, ItemId::ScrapMetal),
+            node.station_item_count(player, station_id, ItemId::ScrapMetal)
+                .unwrap(),
             0
         );
     }
@@ -668,14 +700,16 @@ mod tests {
         let mut node = node_with_modules();
         let (player, ship_id, station_id) = spawn_and_dock_owned_player(&mut node);
 
-        assert!(!node.transfer_to_station_owned(
-            player,
-            TransferToStationCommand {
-                ship_id,
-                station_id,
-                item_id: ItemId::ScrapMetal,
-                direction: TransferDirection::ToShip,
-            }
-        ));
+        assert!(!node
+            .transfer_to_station_owned(
+                player,
+                TransferToStationCommand {
+                    ship_id,
+                    station_id,
+                    item_id: ItemId::ScrapMetal,
+                    direction: TransferDirection::ToShip,
+                }
+            )
+            .unwrap());
     }
 }

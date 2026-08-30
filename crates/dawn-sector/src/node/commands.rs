@@ -14,7 +14,12 @@ use dawn_core::{
     UnfitModuleCommand, WarpCommand,
 };
 
-use super::{jump::JumpOutcome, SimulationNode};
+use super::{
+    jump::JumpOutcome,
+    repositories::ProjectionReadError,
+    station::{StationOperationOutcome, StationOperationRejection},
+    SimulationNode,
+};
 
 /// What request application hands back to a serving adapter.
 #[derive(Debug, Clone)]
@@ -29,7 +34,7 @@ pub enum ClientCommandFollowup {
 }
 
 /// Structured failures before a request reaches gameplay policy.
-#[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum ClientRequestAdmissionError {
     #[error(transparent)]
     Validation(#[from] ClientRequestValidationError),
@@ -37,12 +42,14 @@ pub enum ClientRequestAdmissionError {
     NoActiveShip,
     #[error("{request} is not currently supported")]
     UnsupportedRequest { request: &'static str },
+    #[error(transparent)]
+    StationProjectionRead(#[from] ProjectionReadError),
 }
 
 /// Result of admitting a request during one runtime frame. These values are
 /// returned from the durable frame output; they are never sent before the
 /// transition has committed.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum RuntimeCommandDispatch {
     /// A jump needs consensus submission after the frame commits. Fallback
     /// steering, when any, has already been included in the frame write set.
@@ -70,6 +77,14 @@ fn require_active_ship(active_ship: Option<ShipId>) -> Result<ShipId, ClientRequ
 
 fn refresh_loadout(player_id: PlayerId) -> Option<ClientCommandFollowup> {
     Some(ClientCommandFollowup::RefreshPlayerLoadout { player_id })
+}
+
+fn fail_on_station_projection_read(
+    outcome: StationOperationOutcome,
+) -> Result<StationOperationOutcome, ClientRequestAdmissionError> {
+    outcome
+        .fail_on_projection_read()
+        .map_err(ClientRequestAdmissionError::StationProjectionRead)
 }
 
 /// Collect queued requests without touching authoritative Sector state.
@@ -258,19 +273,19 @@ impl SimulationNode {
                 if self.is_ship_in_transit(ship_id) {
                     None
                 } else {
-                    self.dock_owned(
+                    fail_on_station_projection_read(self.dock_owned(
                         player_id,
                         ship_id,
                         DockCommand {
                             station_id: station,
                         },
-                    );
+                    ))?;
                     refresh_loadout(player_id)
                 }
             }
             ClientRequest::Undock => {
                 let ship_id = require_active_ship(active_ship)?;
-                self.undock_owned(player_id, ship_id);
+                fail_on_station_projection_read(self.undock_owned(player_id, ship_id))?;
                 refresh_loadout(player_id)
             }
             ClientRequest::BuildPackagedShip {
@@ -278,38 +293,45 @@ impl SimulationNode {
                 station,
                 ship_type,
             } => {
-                self.build_packaged_ship_owned(
+                fail_on_station_projection_read(self.build_packaged_ship_owned(
                     player_id,
                     BuildPackagedShipCommand {
                         ship_id: ship,
                         station_id: station,
                         ship_type_id: ship_type,
                     },
-                );
+                ))?;
                 refresh_loadout(player_id)
             }
             ClientRequest::DisassembleShip { ship, station } => {
-                self.disassemble_ship_owned(
+                fail_on_station_projection_read(self.disassemble_ship_owned(
                     player_id,
                     DisassembleShipCommand {
                         ship_id: ship,
                         station_id: station,
                     },
-                );
+                ))?;
                 refresh_loadout(player_id)
             }
             ClientRequest::SelectActiveShip { ship } => {
-                self.select_active_ship_owned(player_id, SelectActiveShipCommand { ship_id: ship });
+                fail_on_station_projection_read(self.select_active_ship_owned(
+                    player_id,
+                    SelectActiveShipCommand { ship_id: ship },
+                ))?;
                 refresh_loadout(player_id)
             }
             ClientRequest::Assemble { station, ship_type } => {
-                let _ = self.assemble_ship_owned(
-                    player_id,
-                    dawn_core::AssembleCommand {
-                        station_id: station,
-                        ship_type_id: ship_type,
-                    },
-                );
+                if let Err(StationOperationRejection::ProjectionRead(error)) = self
+                    .assemble_ship_owned(
+                        player_id,
+                        dawn_core::AssembleCommand {
+                            station_id: station,
+                            ship_type_id: ship_type,
+                        },
+                    )
+                {
+                    return Err(error.into());
+                }
                 refresh_loadout(player_id)
             }
             ClientRequest::Disembark => {
@@ -331,7 +353,7 @@ impl SimulationNode {
                         item_id: item,
                         direction,
                     },
-                );
+                )?;
                 refresh_loadout(player_id)
             }
         };
@@ -1164,7 +1186,8 @@ mod tests {
         use dawn_core::{ClientRequest, ItemId, StationId};
         let mut node = node_with_catalog();
         let (player_id, ship_id) = docked_owned_player(&mut node);
-        node.credit_station_item(player_id, StationId(0), ItemId::ScrapMetal, 10);
+        node.credit_station_item(player_id, StationId(0), ItemId::ScrapMetal, 10)
+            .unwrap();
 
         let mut locks = Vec::new();
         let result = node.apply_client_request_unchecked(
@@ -1189,7 +1212,8 @@ mod tests {
                 player_id,
                 StationId(0),
                 ItemId::PackagedShip(dawn_core::ShipTypeId(1)),
-            ),
+            )
+            .unwrap(),
             1,
             "BuildPackagedShip dispatch must actually credit the packaged-ship item"
         );
@@ -1299,7 +1323,8 @@ mod tests {
             "TransferToStation must return RefreshPlayerLoadout for the caller's player_id"
         );
         assert_eq!(
-            node.station_item_count(player_id, StationId(0), ItemId::ScrapMetal),
+            node.station_item_count(player_id, StationId(0), ItemId::ScrapMetal)
+                .unwrap(),
             5,
             "TransferToStation dispatch must actually move the item into the station inventory"
         );

@@ -9,7 +9,9 @@ use std::collections::BTreeMap;
 
 use dawn_core::{events::ClientAdmissionCommitted, ItemId, PlayerId, StationId};
 
-use super::{station::StationOperationRejection, SimulationNode};
+use super::{
+    repositories::ProjectionReadError, station::StationOperationRejection, SimulationNode,
+};
 
 impl SimulationNode {
     /// Read the player's Station projection at one station.
@@ -17,11 +19,11 @@ impl SimulationNode {
         &self,
         player_id: PlayerId,
         station_id: StationId,
-    ) -> Option<BTreeMap<ItemId, u64>> {
+    ) -> Result<Option<BTreeMap<ItemId, u64>>, ProjectionReadError> {
         let mut inventory = self
             .persistence
             .station_inventory()
-            .get_all(player_id, station_id);
+            .get_all(player_id, station_id)?;
         for (item_id, count) in self.stations.overlay_inventory(player_id, station_id) {
             if count == 0 {
                 inventory.remove(&item_id);
@@ -29,7 +31,7 @@ impl SimulationNode {
                 inventory.insert(item_id, count);
             }
         }
-        (!inventory.is_empty()).then_some(inventory)
+        Ok((!inventory.is_empty()).then_some(inventory))
     }
 
     /// Count one item stack inside the player's Station projection.
@@ -38,10 +40,13 @@ impl SimulationNode {
         player_id: PlayerId,
         station_id: StationId,
         item_id: ItemId,
-    ) -> u64 {
+    ) -> Result<u64, ProjectionReadError> {
         self.station_inventory(player_id, station_id)
-            .and_then(|inventory| inventory.get(&item_id).copied())
-            .unwrap_or(0)
+            .map(|inventory| {
+                inventory
+                    .and_then(|inventory| inventory.get(&item_id).copied())
+                    .unwrap_or(0)
+            })
     }
 
     fn ensure_client_admission_grant(
@@ -96,10 +101,34 @@ impl SimulationNode {
         station_id: StationId,
         item_id: ItemId,
         count: u64,
+    ) -> Result<(), ProjectionReadError> {
+        let current = self.station_item_count(player_id, station_id, item_id)?;
+        self.credit_station_item_from_current(player_id, station_id, item_id, current, count);
+        Ok(())
+    }
+
+    pub(super) fn credit_station_item_from_current(
+        &mut self,
+        player_id: PlayerId,
+        station_id: StationId,
+        item_id: ItemId,
+        current: u64,
+        count: u64,
     ) {
-        let current = self.station_item_count(player_id, station_id, item_id);
         self.stations
             .credit(player_id, station_id, item_id, current, count);
+    }
+
+    pub(super) fn try_debit_station_item_from_current(
+        &mut self,
+        player_id: PlayerId,
+        station_id: StationId,
+        item_id: ItemId,
+        count: u64,
+        current: u64,
+    ) -> Result<(), StationOperationRejection> {
+        self.stations
+            .try_debit(player_id, station_id, item_id, count, current)
     }
 
     pub(super) fn try_debit_station_item(
@@ -109,9 +138,10 @@ impl SimulationNode {
         item_id: ItemId,
         count: u64,
     ) -> Result<(), StationOperationRejection> {
-        let current = self.station_item_count(player_id, station_id, item_id);
-        self.stations
-            .try_debit(player_id, station_id, item_id, count, current)
+        let current = self
+            .station_item_count(player_id, station_id, item_id)
+            .map_err(StationOperationRejection::projection_read)?;
+        self.try_debit_station_item_from_current(player_id, station_id, item_id, count, current)
     }
 
     pub(crate) fn apply_station_projection(
@@ -149,17 +179,21 @@ mod tests {
         let player_a = PlayerId(1);
         let player_b = PlayerId(2);
 
-        node.credit_station_item(player_a, TEST_STATION_ID, ItemId::ScrapMetal, 3);
-        node.credit_station_item(player_a, TEST_STATION_ID, ItemId::ScrapMetal, 2);
+        node.credit_station_item(player_a, TEST_STATION_ID, ItemId::ScrapMetal, 3)
+            .unwrap();
+        node.credit_station_item(player_a, TEST_STATION_ID, ItemId::ScrapMetal, 2)
+            .unwrap();
         node.credit_station_item(
             player_b,
             TEST_STATION_ID,
             ItemId::PackagedShip(dawn_core::ShipTypeId(1)),
             1,
-        );
+        )
+        .unwrap();
 
         assert_eq!(
-            node.station_item_count(player_a, TEST_STATION_ID, ItemId::ScrapMetal),
+            node.station_item_count(player_a, TEST_STATION_ID, ItemId::ScrapMetal)
+                .unwrap(),
             5
         );
         assert_eq!(
@@ -167,7 +201,8 @@ mod tests {
                 player_b,
                 TEST_STATION_ID,
                 ItemId::PackagedShip(dawn_core::ShipTypeId(1)),
-            ),
+            )
+            .unwrap(),
             1
         );
     }
@@ -177,15 +212,19 @@ mod tests {
         let mut node = node();
         let player_id = PlayerId(1);
 
-        node.credit_station_item(player_id, StationId(0), ItemId::ScrapMetal, 3);
-        node.credit_station_item(player_id, StationId(1), ItemId::ScrapMetal, 7);
+        node.credit_station_item(player_id, StationId(0), ItemId::ScrapMetal, 3)
+            .unwrap();
+        node.credit_station_item(player_id, StationId(1), ItemId::ScrapMetal, 7)
+            .unwrap();
 
         assert_eq!(
-            node.station_item_count(player_id, StationId(0), ItemId::ScrapMetal),
+            node.station_item_count(player_id, StationId(0), ItemId::ScrapMetal)
+                .unwrap(),
             3
         );
         assert_eq!(
-            node.station_item_count(player_id, StationId(1), ItemId::ScrapMetal),
+            node.station_item_count(player_id, StationId(1), ItemId::ScrapMetal)
+                .unwrap(),
             7
         );
     }
@@ -193,10 +232,12 @@ mod tests {
     #[test]
     fn station_projection_reads_merge_only_the_frame_local_overlay() {
         let mut node = node();
-        node.credit_station_item(PlayerId(1), TEST_STATION_ID, ItemId::ScrapMetal, 2);
+        node.credit_station_item(PlayerId(1), TEST_STATION_ID, ItemId::ScrapMetal, 2)
+            .unwrap();
 
         assert_eq!(
             node.station_inventory(PlayerId(1), TEST_STATION_ID)
+                .unwrap()
                 .unwrap()
                 .get(&ItemId::ScrapMetal),
             Some(&2)
@@ -204,13 +245,30 @@ mod tests {
     }
 
     #[test]
+    fn station_projection_read_failure_is_not_converted_to_an_empty_inventory() {
+        let mut node = node();
+        node.persistence.drop_station_inventory_for_test();
+
+        assert!(matches!(
+            node.station_inventory(PlayerId(1), TEST_STATION_ID),
+            Err(ProjectionReadError::Storage { .. })
+        ));
+        assert!(matches!(
+            node.station_item_count(PlayerId(1), TEST_STATION_ID, ItemId::ScrapMetal),
+            Err(ProjectionReadError::Storage { .. })
+        ));
+    }
+
+    #[test]
     fn station_mutation_reaches_sqlite_only_after_the_durable_tick() {
         let mut node = node();
-        node.credit_station_item(PlayerId(1), TEST_STATION_ID, ItemId::ScrapMetal, 2);
+        node.credit_station_item(PlayerId(1), TEST_STATION_ID, ItemId::ScrapMetal, 2)
+            .unwrap();
         assert!(node
             .persistence
             .station_inventory()
             .get_all(PlayerId(1), TEST_STATION_ID)
+            .unwrap()
             .is_empty());
 
         let mut journal = dawn_storage::InMemoryJournal::new();
@@ -228,6 +286,7 @@ mod tests {
             node.persistence
                 .station_inventory()
                 .get_all(PlayerId(1), TEST_STATION_ID)
+                .unwrap()
                 .get(&ItemId::ScrapMetal),
             Some(&2)
         );
@@ -237,7 +296,8 @@ mod tests {
     fn try_debit_station_item_rejects_missing_or_insufficient_stacks() {
         let mut node = node();
         let player_id = PlayerId(1);
-        node.credit_station_item(player_id, TEST_STATION_ID, ItemId::ScrapMetal, 2);
+        node.credit_station_item(player_id, TEST_STATION_ID, ItemId::ScrapMetal, 2)
+            .unwrap();
 
         assert!(matches!(
             node.try_debit_station_item(
@@ -256,7 +316,8 @@ mod tests {
             .try_debit_station_item(player_id, TEST_STATION_ID, ItemId::ScrapMetal, 2)
             .is_ok());
         assert_eq!(
-            node.station_item_count(player_id, TEST_STATION_ID, ItemId::ScrapMetal),
+            node.station_item_count(player_id, TEST_STATION_ID, ItemId::ScrapMetal)
+                .unwrap(),
             0
         );
     }

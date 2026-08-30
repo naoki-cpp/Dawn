@@ -13,6 +13,7 @@ use dawn_sector::client_admission_resolution::resolve_client_admission;
 use dawn_sector::client_admission_resolution::ClientAdmissionResolution;
 #[cfg(test)]
 use dawn_sector::node::SimulationNode;
+use dawn_server::runtime_frame::RuntimeFrameHostError;
 use dawn_server::runtime_frame::{RuntimeClientAdmissionError, RuntimeClientAdmissionHost};
 use dawn_server::ws_server;
 use std::sync::Arc;
@@ -69,7 +70,7 @@ impl ClientAdmission {
         host: &mut H,
         sector_id: SectorId,
         aoi_cell_size: f64,
-    ) {
+    ) -> Result<(), RuntimeFrameHostError> {
         // Socket tasks report only their outcome. The tick-loop thread resolves
         // the Sector-owned attempt so authoritative mutation stays single-owner.
         while let Ok((attempt, result)) = self.completion_rx.try_recv() {
@@ -137,12 +138,13 @@ impl ClientAdmission {
                     );
                     continue;
                 }
+                Err(RuntimeClientAdmissionError::Refused(
+                    ClientAdmissionRefusal::StationProjectionRead(error),
+                )) => {
+                    return Err(RuntimeFrameHostError::StationProjectionRead(error));
+                }
                 Err(RuntimeClientAdmissionError::Host(error)) => {
-                    eprintln!(
-                        "[Node] handshake unavailable from {}: {error}",
-                        request.peer_addr
-                    );
-                    continue;
+                    return Err(error);
                 }
             };
 
@@ -175,6 +177,7 @@ impl ClientAdmission {
                 let _ = completion_tx.send((attempt, result));
             });
         }
+        Ok(())
     }
 
     pub(crate) fn try_recv_ready_session(&mut self) -> Option<ws_server::PlayerSession> {
@@ -435,11 +438,13 @@ mod tests {
             ready_sess_rx,
         };
 
-        admission.advance_handshakes(
-            &mut crate::TestAdmissionHost(&mut node),
-            SectorId(3),
-            AOI_CELL_SIZE,
-        );
+        admission
+            .advance_handshakes(
+                &mut crate::TestAdmissionHost(&mut node),
+                SectorId(3),
+                AOI_CELL_SIZE,
+            )
+            .expect("a disconnected handshake should be handled without a host error");
 
         assert_eq!(node.ship_count(), 0);
     }

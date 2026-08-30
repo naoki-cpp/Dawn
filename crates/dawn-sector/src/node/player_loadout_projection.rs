@@ -11,39 +11,58 @@ use dawn_protocol::{
     ItemRowWire, ModuleRowWire, OwnedShipRowWire, PlayerLoadoutWire, SlotCapacityWire,
 };
 
-use super::SimulationNode;
+use super::{repositories::ProjectionReadError, SimulationNode};
 
 impl SimulationNode {
     /// The one seam every `ItemRowWire` (ship cargo, station inventory) goes
     /// through. The Item variant remains typed; only presentation metadata is
-    /// added here. `None` if the registry backing `item_id` no longer has a
-    /// definition for it (stale/renamed module or ship type).
-    fn item_id_to_row_json(&self, item_id: ItemId, count: u64) -> Option<ItemRowWire> {
+    /// added here. A missing registry definition is a projection read failure,
+    /// not an empty row.
+    fn item_id_to_row_json(
+        &self,
+        item_id: ItemId,
+        count: u64,
+    ) -> Result<ItemRowWire, ProjectionReadError> {
         match item_id {
-            ItemId::Module(module_id) => {
-                self.game_data
-                    .module_registry
-                    .get(&module_id)
-                    .map(|def| ItemRowWire {
+            ItemId::Module(module_id) => self
+                .game_data
+                .module_registry
+                .get(&module_id)
+                .map(|def| {
+                    Ok(ItemRowWire {
                         item_id: item_id.into(),
                         name: def.name.clone(),
                         kind: format!("{:?}", def.kind),
                         slot: format!("{:?}", def.slot),
                         count,
                     })
-            }
+                })
+                .unwrap_or_else(|| {
+                    Err(ProjectionReadError::MissingItemDefinition {
+                        item_id,
+                        definition_kind: "module",
+                    })
+                }),
             ItemId::PackagedShip(ship_type_id) => self
                 .game_data
                 .ship_type_registry
                 .get(&ship_type_id)
-                .map(|def| ItemRowWire {
-                    item_id: item_id.into(),
-                    name: def.name.clone(),
-                    kind: String::new(),
-                    slot: String::new(),
-                    count,
+                .map(|def| {
+                    Ok(ItemRowWire {
+                        item_id: item_id.into(),
+                        name: def.name.clone(),
+                        kind: String::new(),
+                        slot: String::new(),
+                        count,
+                    })
+                })
+                .unwrap_or_else(|| {
+                    Err(ProjectionReadError::MissingItemDefinition {
+                        item_id,
+                        definition_kind: "ship type",
+                    })
                 }),
-            ItemId::ScrapMetal => Some(ItemRowWire {
+            ItemId::ScrapMetal => Ok(ItemRowWire {
                 item_id: item_id.into(),
                 name: "Scrap Metal".to_string(),
                 kind: String::new(),
@@ -53,13 +72,31 @@ impl SimulationNode {
         }
     }
 
+    fn inventory_rows_json(
+        &self,
+        inventory: &InventoryComp,
+    ) -> Result<Vec<ItemRowWire>, ProjectionReadError> {
+        inventory
+            .items
+            .iter()
+            .map(|(&item_id, &count)| self.item_id_to_row_json(item_id, count))
+            .collect()
+    }
+
     /// Return the player ship's loadout state as a PlayerLoadout wire message.
     ///
     /// Sent after Welcome + InitialState on connect, and again after every
     /// Fit/Unfit (ADR-0032).
-    pub fn build_player_loadout_json(&self, ship_id: ShipId) -> Option<PlayerLoadoutWire> {
-        let entity = self.simulation.ships.index.get(&ship_id)?;
-        let fitting = self.simulation.world.get::<FittingComp>(*entity)?;
+    pub fn build_player_loadout_json(
+        &self,
+        ship_id: ShipId,
+    ) -> Result<Option<PlayerLoadoutWire>, ProjectionReadError> {
+        let Some(entity) = self.simulation.ships.index.get(&ship_id) else {
+            return Ok(None);
+        };
+        let Some(fitting) = self.simulation.world.get::<FittingComp>(*entity) else {
+            return Ok(None);
+        };
 
         let mut modules: Vec<ModuleRowWire> = Vec::new();
         let slot_names = [
@@ -88,26 +125,20 @@ impl SimulationNode {
             }
         }
 
-        let inventory: Vec<ItemRowWire> = self
-            .simulation
-            .world
-            .get::<InventoryComp>(*entity)
-            .map(|inv| {
-                inv.items
-                    .iter()
-                    .filter_map(|(&item_id, &count)| self.item_id_to_row_json(item_id, count))
-                    .collect()
-            })
-            .unwrap_or_default();
+        let inventory = match self.simulation.world.get::<InventoryComp>(*entity) {
+            Some(inventory) => self.inventory_rows_json(&inventory)?,
+            None => Vec::new(),
+        };
 
         let player_id = self.players.owners.get(&ship_id).copied();
         let docked_station_id = player_id.and_then(|pid| self.player_docked_station(pid));
         let docked_station_name = docked_station_id
             .and_then(|station_id| self.station(station_id))
             .map(|station| station.name.clone());
-        let station_inventory = player_id
-            .map(|pid| self.station_inventory_json(pid))
-            .unwrap_or_default();
+        let station_inventory = match player_id {
+            Some(player_id) => self.station_inventory_json(player_id)?,
+            None => Vec::new(),
+        };
         let active_ship_id = player_id.and_then(|pid| self.players.active_ship.get(&pid).copied());
         let owned_ships = player_id
             .map(|pid| self.owned_ships_json(pid))
@@ -127,7 +158,7 @@ impl SimulationNode {
             rig: layout.map(|l| l.rig).unwrap_or(0),
         };
 
-        Some(PlayerLoadoutWire {
+        Ok(Some(PlayerLoadoutWire {
             tick: self.simulation.current_tick.value(),
             modules,
             inventory,
@@ -137,7 +168,7 @@ impl SimulationNode {
             slot_capacity,
             active_ship_id: active_ship_id.map(|id| id.raw()),
             owned_ships,
-        })
+        }))
     }
 
     /// Build the loadout for an exact resume identity before ownership commits.
@@ -150,22 +181,28 @@ impl SimulationNode {
         &self,
         player_id: PlayerId,
         ship_id: ShipId,
-    ) -> Option<PlayerLoadoutWire> {
-        let mut loadout = self.build_player_loadout_json(ship_id)?;
+    ) -> Result<Option<PlayerLoadoutWire>, ProjectionReadError> {
+        let Some(mut loadout) = self.build_player_loadout_json(ship_id)? else {
+            return Ok(None);
+        };
         let docked_station_id = self.docked_station(ship_id);
         loadout.docked_station_id = docked_station_id.map(|id| id.0);
         loadout.docked_station_name = docked_station_id
             .and_then(|station_id| self.station(station_id))
             .map(|station| station.name.clone());
-        loadout.station_inventory = docked_station_id
-            .and_then(|station_id| self.station_inventory(player_id, station_id))
-            .map(|inventory| {
-                inventory
-                    .into_iter()
-                    .filter_map(|(item_id, count)| self.item_id_to_row_json(item_id, count))
-                    .collect()
-            })
-            .unwrap_or_default();
+        loadout.station_inventory = match docked_station_id {
+            Some(station_id) => self
+                .station_inventory(player_id, station_id)?
+                .map(|inventory| {
+                    inventory
+                        .into_iter()
+                        .map(|(item_id, count)| self.item_id_to_row_json(item_id, count))
+                        .collect::<Result<Vec<_>, _>>()
+                })
+                .transpose()?
+                .unwrap_or_default(),
+            None => Vec::new(),
+        };
         loadout.active_ship_id = Some(ship_id.raw());
 
         let mut owned_ships = self.owned_ships_json(player_id);
@@ -186,7 +223,7 @@ impl SimulationNode {
             });
         }
         loadout.owned_ships = owned_ships;
-        Some(loadout)
+        Ok(Some(loadout))
     }
 
     /// Same wire message as [`Self::build_player_loadout_json`], keyed by
@@ -194,7 +231,7 @@ impl SimulationNode {
     pub fn build_player_loadout_json_for_player(
         &self,
         player_id: PlayerId,
-    ) -> Option<PlayerLoadoutWire> {
+    ) -> Result<Option<PlayerLoadoutWire>, ProjectionReadError> {
         if let Some(ship_id) = self.players.active_ship.get(&player_id).copied() {
             return self.build_player_loadout_json(ship_id);
         }
@@ -202,10 +239,10 @@ impl SimulationNode {
         let docked_station_name = docked_station_id
             .and_then(|station_id| self.station(station_id))
             .map(|station| station.name.clone());
-        let station_inventory = self.station_inventory_json(player_id);
+        let station_inventory = self.station_inventory_json(player_id)?;
         let owned_ships = self.owned_ships_json(player_id);
 
-        Some(PlayerLoadoutWire {
+        Ok(Some(PlayerLoadoutWire {
             tick: self.simulation.current_tick.value(),
             modules: Vec::new(),
             inventory: Vec::new(),
@@ -220,7 +257,7 @@ impl SimulationNode {
             },
             active_ship_id: None,
             owned_ships,
-        })
+        }))
     }
 
     /// Every ship `player_id` owns, active or not.
@@ -247,19 +284,24 @@ impl SimulationNode {
     }
 
     /// Station inventory as wire rows for `player_id`, empty if the player
-    /// isn't currently docked anywhere.
-    fn station_inventory_json(&self, player_id: PlayerId) -> Vec<ItemRowWire> {
+    /// isn't currently docked anywhere. Every row must have presentation
+    /// metadata; stale catalog identities fail the projection read.
+    fn station_inventory_json(
+        &self,
+        player_id: PlayerId,
+    ) -> Result<Vec<ItemRowWire>, ProjectionReadError> {
         let Some(station_id) = self.player_docked_station(player_id) else {
-            return Vec::new();
+            return Ok(Vec::new());
         };
-        self.station_inventory(player_id, station_id)
+        self.station_inventory(player_id, station_id)?
             .map(|inventory| {
                 inventory
                     .iter()
-                    .filter_map(|(&item_id, &count)| self.item_id_to_row_json(item_id, count))
-                    .collect()
+                    .map(|(&item_id, &count)| self.item_id_to_row_json(item_id, count))
+                    .collect::<Result<Vec<_>, _>>()
             })
-            .unwrap_or_default()
+            .transpose()
+            .map(|rows| rows.unwrap_or_default())
     }
 }
 
@@ -294,7 +336,7 @@ mod tests {
             .unwrap()
             .add_item(ItemId::ScrapMetal, 3);
 
-        let payload = node.build_player_loadout_json(ship_id).unwrap();
+        let payload = node.build_player_loadout_json(ship_id).unwrap().unwrap();
         let scrap = payload
             .inventory
             .iter()
@@ -340,7 +382,7 @@ mod tests {
             },
         );
 
-        let payload = node.build_player_loadout_json(ship_id).unwrap();
+        let payload = node.build_player_loadout_json(ship_id).unwrap().unwrap();
 
         let mut rows: Vec<&ItemRowWire> = payload.inventory.iter().collect();
         rows.extend(payload.station_inventory.iter());
@@ -370,24 +412,39 @@ mod tests {
     }
 
     #[test]
-    fn item_id_to_row_json_returns_none_for_an_item_id_with_no_registry_definition() {
+    fn item_id_to_row_json_reports_missing_registry_definitions() {
         let node = mem_node();
-        assert!(node
-            .item_id_to_row_json(ItemId::Module(dawn_core::ModuleId(999)), 1)
-            .is_none());
-        assert!(node
-            .item_id_to_row_json(ItemId::PackagedShip(dawn_core::ShipTypeId(999)), 1)
-            .is_none());
+        assert!(matches!(
+            node.item_id_to_row_json(ItemId::Module(dawn_core::ModuleId(999)), 1)
+                .expect_err("missing module definition must fail"),
+            ProjectionReadError::MissingItemDefinition {
+                item_id: ItemId::Module(dawn_core::ModuleId(999)),
+                definition_kind: "module",
+            }
+        ));
+        assert!(matches!(
+            node.item_id_to_row_json(ItemId::PackagedShip(dawn_core::ShipTypeId(999)), 1)
+                .expect_err("missing ship type definition must fail"),
+            ProjectionReadError::MissingItemDefinition {
+                item_id: ItemId::PackagedShip(dawn_core::ShipTypeId(999)),
+                definition_kind: "ship type",
+            }
+        ));
     }
 
     #[test]
-    fn player_loadout_json_carries_docked_station_context_and_station_inventory() {
+    fn player_loadout_json_fails_on_an_unknown_station_inventory_item() {
         let mut node = mem_node();
-
         let player_id = node.next_player_id();
         let station = node.station(StationId(0)).unwrap().clone();
         let ship_id = node.spawn_player_ship_at_pub(player_id, station.position);
-        node.credit_station_item(player_id, StationId(0), ItemId::ScrapMetal, 5);
+        node.credit_station_item(
+            player_id,
+            StationId(0),
+            ItemId::Module(dawn_core::ModuleId(999)),
+            1,
+        )
+        .unwrap();
         assert!(matches!(
             node.dock_owned(
                 player_id,
@@ -399,7 +456,59 @@ mod tests {
             StationOperationOutcome::Accepted { .. }
         ));
 
-        let payload = node.build_player_loadout_json(ship_id).unwrap();
+        assert!(matches!(
+            node.build_player_loadout_json(ship_id)
+                .expect_err("unknown Station item must fail the loadout projection"),
+            ProjectionReadError::MissingItemDefinition {
+                item_id: ItemId::Module(dawn_core::ModuleId(999)),
+                definition_kind: "module",
+            }
+        ));
+    }
+
+    #[test]
+    fn player_loadout_json_fails_on_an_unknown_ship_cargo_item() {
+        let mut node = mem_node();
+        let player_id = node.next_player_id();
+        let ship_id = node.spawn_player_ship_at_pub(player_id, Position::ORIGIN);
+        let entity = *node.simulation.ships.index.get(&ship_id).unwrap();
+        node.simulation
+            .world
+            .get_mut::<InventoryComp>(entity)
+            .unwrap()
+            .add_item(ItemId::PackagedShip(dawn_core::ShipTypeId(999)), 1);
+
+        assert!(matches!(
+            node.build_player_loadout_json(ship_id)
+                .expect_err("unknown cargo item must fail the loadout projection"),
+            ProjectionReadError::MissingItemDefinition {
+                item_id: ItemId::PackagedShip(dawn_core::ShipTypeId(999)),
+                definition_kind: "ship type",
+            }
+        ));
+    }
+
+    #[test]
+    fn player_loadout_json_carries_docked_station_context_and_station_inventory() {
+        let mut node = mem_node();
+
+        let player_id = node.next_player_id();
+        let station = node.station(StationId(0)).unwrap().clone();
+        let ship_id = node.spawn_player_ship_at_pub(player_id, station.position);
+        node.credit_station_item(player_id, StationId(0), ItemId::ScrapMetal, 5)
+            .unwrap();
+        assert!(matches!(
+            node.dock_owned(
+                player_id,
+                ship_id,
+                DockCommand {
+                    station_id: StationId(0)
+                }
+            ),
+            StationOperationOutcome::Accepted { .. }
+        ));
+
+        let payload = node.build_player_loadout_json(ship_id).unwrap().unwrap();
         assert_eq!(payload.docked_station_id, Some(0));
         assert_eq!(
             payload.docked_station_name.as_deref(),
@@ -434,7 +543,7 @@ mod tests {
             StationOperationOutcome::Accepted { .. }
         ));
 
-        let payload = node.build_player_loadout_json(ship_id).unwrap();
+        let payload = node.build_player_loadout_json(ship_id).unwrap().unwrap();
         assert_eq!(payload.docked_station_id, None);
         assert_eq!(payload.docked_station_name, None);
     }
@@ -445,7 +554,7 @@ mod tests {
         let player_id = node.next_player_id();
         let ship_id = node.spawn_player_ship(player_id);
 
-        let payload = node.build_player_loadout_json(ship_id).unwrap();
+        let payload = node.build_player_loadout_json(ship_id).unwrap().unwrap();
         assert_eq!(payload.active_ship_id, Some(ship_id.raw()));
     }
 
@@ -457,6 +566,7 @@ mod tests {
 
         let payload = node
             .build_player_loadout_json_for_player(player_id)
+            .unwrap()
             .unwrap();
         assert_eq!(payload.active_ship_id, None);
         assert!(payload.modules.is_empty());
@@ -482,6 +592,7 @@ mod tests {
 
         let payload = node
             .build_player_loadout_json_for_player(player_id)
+            .unwrap()
             .unwrap();
         assert_eq!(payload.active_ship_id, None);
     }
@@ -513,7 +624,7 @@ mod tests {
             )
             .unwrap();
 
-        let payload = node.build_player_loadout_json(ship_id).unwrap();
+        let payload = node.build_player_loadout_json(ship_id).unwrap().unwrap();
         assert_eq!(payload.owned_ships.len(), 2);
 
         let first_row = payload
