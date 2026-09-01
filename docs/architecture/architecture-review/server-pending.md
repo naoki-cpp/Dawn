@@ -4,7 +4,7 @@ audience : AI Agent / Human Developer
 update   : /architecture-review で issue を起票・状態更新するたびに更新
 related  : docs/architecture/architecture-review/server.md（構造評価）,
            docs/architecture/architecture-review/server-completed.md（完了済みログ）
-date     : 2026-08-26
+date     : 2026-09-01
 ---
 
 # Architecture Review — Dawn Codebase（未完項目）
@@ -32,16 +32,6 @@ live state、interaction、presentationは分離済み。残るscene lifecycle /
 **判断: Defer。** テストを除く実装が約700行を超え、かつ独立した変更理由が混在する、または
 module間のdriftが実害になるまで分割しない。行数だけでは発火させない。
 
-### R-8（#345・Fix）: Market SQLの全状態reload/rewrite
-
-`MarketDb::execute`は1 commandごとに全order・全Currency balance・全settlementを読み込み、
-`orders`と`currency`を全削除して再挿入する。read APIも全aggregateをhydrateしてから絞り込む。
-**根本原因:** #279でpure `MarketState`とSQLを分離した際、repositoryがpure aggregate全体の
-serialization adapterとして実装され、commandごとのbounded working setを表す契約がないため。
-**判断: Fix。** indexed queryで必要なbook/player/outboxだけを読み、pure policyへbounded working setを
-渡してtransitionのwrite setだけを同一transactionで永続化する。price-time、escrow、settlement、
-Currency gameplay semanticsは変更しない。
-
 ### R-9（#346・Fix）: FileJournalのbounded-memory streaming
 
 `FileJournal::compact`はhot file全体を`Vec<u8>`へ読み、`read_from`も全suffixを
@@ -57,7 +47,6 @@ torn-tail repair、archive retry、alias guard、post-rename poisonを維持す�
 |---|---|
 | R-2 | 保留・trigger付き |
 | R-3 | commands slice・transit deepening 完了、warpはtrigger付きで保留 |
-| R-8 | #345・Fix・Market bounded working set |
 | R-9 | #346・Fix・FileJournal bounded-memory streaming |
 採らない方針: CRDT/LWW、protobuf、薄いadapterだけの追加crate、行数削減目的の網羅match・domain型の破壊、初回LAN検証でのTLS/認証。
 

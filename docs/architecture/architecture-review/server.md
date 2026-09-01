@@ -5,7 +5,7 @@ update   : 大規模リファクタ実施後 / 新クレート追加時 / archit
 related  : AI_DEVELOPMENT_GUIDE.md「Crate Boundaries」, docs/architecture/architecture.md,
            docs/architecture/architecture-review/server-completed.md（完了済みログ）,
            docs/architecture/architecture-review/server-pending.md（未完項目・issue一覧）
-date     : 2026-08-26（issue #343/#344反映。全Rustクレート再計測、R-7〜R-9更新）
+date     : 2026-09-01（issue #345反映。Market bounded working setを完了）
 ---
 
 # Architecture Review — Dawn Codebase（現行構造評価）
@@ -17,9 +17,9 @@ date     : 2026-08-26（issue #343/#344反映。全Rustクレート再計測、R
 
 **総合: B+。** crate DAGとdeep module境界は健全で、production / single-sector / cluster /
 in-process driverは`RuntimeFrameHost`へ統合された。`SectorRepository`は接続とschemaを所有する
-rootへ縮小され、bounded contextの実装はprivate child moduleへ分割された。さらに、
-Marketの全状態reload/rewrite、FileJournalのwhole-hot-log materializationを、正しさを維持したまま
-縮めるFix項目としてR-7〜R-9へ整理した。今回の再計測では、実装行数と責務混在、正しさと
+rootへ縮小され、bounded contextの実装はprivate child moduleへ分割された。Marketの全状態
+reload/rewriteは#345でbounded working setへ移行済みで、FileJournalのwhole-hot-log materialization
+だけを正しさを維持したまま縮めるFix項目としてR-9へ整理した。今回の再計測では、実装行数と責務混在、正しさと
 スケーラビリティを分けて再評価した。
 
 2026-08-24にissue #338をPR #340で完了し、残っていた`dawn-actor`のClientConnection/WebSocket transportを
@@ -36,7 +36,7 @@ Transitについては、Raftの回復判断を`transit::handoff`に残し、Shi
 | ファイルサイズ | A− | `SectorRepository` rootは接続・schema・transaction coordinationに限定し、Admission / Identity / Station projectionはprivate moduleへ分割済み。大きいTick/Transit/Journal kernelはtests込みで凝集している |
 | 型設計 | A− | domain固有のResult/Outcomeを維持。dispatcher都合で共通型へ潰さない（ADR-0047） |
 | 重複 | A− | Station runtime apply、SectorMap projectionを解消。Transit policy/state mutationも分離し、live専用materializationへ集約 |
-| 永続化 | B+ | checkpoint + contiguous RecoveryDeltaの正しさは維持。一方、Marketの全状態rewrite（R-8/#345）とFileJournalの全hot suffix materialization（R-9/#346）は規模に比例するためFix |
+| 永続化 | B+ | checkpoint + contiguous RecoveryDeltaの正しさとMarketのbounded SQL working setは維持。FileJournalの全hot suffix materialization（R-9/#346）は規模に比例するためFix |
 | Rust固有 | A− | 網羅matchとexhaustive destructuringを変更検出器として利用 |
 | AI開発誘発 | A− | `RuntimeFrameHost`のtyped frame boundaryとnarrow host API、repositoryのbounded-context viewを確立。残る大きなkernelは責務とtriggerを明記している |
 
@@ -50,8 +50,7 @@ Transitについては、Raftの回復判断を`transit::handoff`に残し、Shi
 - canonical NodeState checkpoint/delta capture/restore
 
 Open:
-1. **R-8 / #345** Market SQLの全状態reload/rewrite撤去（Fix）
-2. **R-9 / #346** FileJournal read/compactionのbounded-memory streaming（Fix）
+1. **R-9 / #346** FileJournal read/compactionのbounded-memory streaming（Fix）
 
 Resolved in #336: the legacy EventStore/FileEventStore path is deleted. The
 DurableJournal is the sole persistent source of committed public facts, and
@@ -71,6 +70,14 @@ Resolved in #278: production, single-sector, clustered, and in-process test
 drivers now call the shared durable runtime frame. `SectorRuntimeDriver` remains
 only as an async in-memory adapter; it is not a second Tick implementation.
 
+Resolved in #345: `MarketDb` now loads only the command's involved balance,
+order, crossing book, and settlement rows. It persists only changed rows in the
+same SQLite transaction; no command deletes and rebuilds the orders or Currency
+tables. Market list APIs use direct bounded SQL reads, and pending settlement
+pages advance through a stable cyclic ID cursor so an unroutable early row does
+not starve later outbox work. The pure `MarketState` and matching policy remain
+independently testable.
+
 Station projection production wiring is also complete: preparation carries only
 touched-key overlay mutations, the durable RecoveryDelta is applied before the
 SQLite read model, and the projection cursor advances by complete journal batch
@@ -81,7 +88,7 @@ run only after the required projection completes.
 `ClientCommand`外側matchと`StationDispatchCommand`、domain固有の戻り値、process model固有の薄いadapterは
 意図的に維持する。
 
-## ファイルサイズ（2026-08-26再計測、500行以上）
+## ファイルサイズ（2026-09-01再計測、500行以上）
 
 | ファイル | 行数 | 判定 |
 |---|---:|---|
@@ -119,7 +126,7 @@ run only after the required projection completes.
 | `crates/dawn-server/src/serve/cluster.rs` | 686 | 🟢 clustered serve composition・admission/jump tests |
 | `crates/dawn-sector/src/node/approach.rs` | 631 | 🟢 approach steering state machine・tests |
 | `crates/dawn-sector/src/node/ship_cargo.rs` | 681 | 🟢 ship cargo ownership/bridge boundary・tests |
-| `crates/dawn-market/src/repository.rs` | 623 | 🟡 SQLite order/Currency/outbox persistenceとして凝集。ただし毎commandの全状態reload/rewriteはR-8/#345でFix |
+| `crates/dawn-market/src/repository.rs` | 1697 | 🟢 SQLite order/Currency/outbox persistence。command別bounded working set、差分書き込み、直接SQL read API |
 | `crates/dawn-distributed/src/state.rs` | 594 | 🟢 Raft state transition/persistence boundary・tests |
 | `crates/dawn-ecs/src/systems/combat.rs` | 584 | 🟢 combat system・tests |
 | `crates/dawn-server/src/bin/sector-node.rs` | 596 | 🟢 production node bootstrap/config・public tail rebuild wiring |

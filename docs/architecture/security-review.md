@@ -6,10 +6,17 @@ related  : .agents/skills/security-check/SKILL.md,
            .agents/skills/security-check/references/owasp-map.md,
            .agents/skills/security-check/references/baseline.md（初回レビューの凍結記録）,
            docs/architecture/security-review-completed.md（解消済みfindingの作業ログ）
-date     : 2026-08-26
+date     : 2026-09-01
 ---
 
 # Security Review — Dawn Server（OWASP観点）
+
+2026-09-01 SQL-only update: Issue #345 replaced Market's whole-state reload
+and rewrite with indexed, command-scoped working sets and transactional delta
+writes. SQL identifiers remain fixed, all values remain parameter-bound, and
+matching candidates, public order views, and pending-settlement pages now have
+explicit resource bounds. Ownership and authoritative price-time matching stay
+inside the unchanged pure Market policy. No new security finding was introduced.
 
 2026-08-26 SQL-boundary update: Issue #344 moved existing admission,
 identity, and Station projection queries into private bounded-context
