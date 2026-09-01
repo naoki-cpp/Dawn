@@ -225,3 +225,18 @@ transitions. The full Station inventory is not copied into `SimulationNode`,
 conditions. Production recovery attaches the real repository before tail replay,
 and fresh-admission grant/ownership finalization runs after the same transition's
 starter mutation has projected.
+
+### 2026-09-01 — bounded MarketDb working sets (#345)
+
+`MarketDb` no longer hydrates the complete order, Currency, or settlement
+tables for every command. It loads only the involved balance, order, indexed
+crossing candidates, settlement rows, and ID metadata; the pure Market policy
+continues to own matching and escrow decisions over that bounded working set.
+
+Persistence now compares the working set before and after the transition and
+writes only changed rows in the same SQLite transaction. Orders and Currency
+are no longer deleted and rebuilt wholesale. `open_orders_for`,
+`pending_settlements`, and `settlement` use direct bounded SQL reads with
+stable ordering. Pending pages use a cyclic ID cursor so an unroutable early
+intent cannot starve later outbox rows. Regression tests cover unrelated-book
+write isolation, page progress, restart behavior, and transaction rollback.

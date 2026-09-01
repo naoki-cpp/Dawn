@@ -169,6 +169,17 @@ Runtimeは、どのreplica setを使うか、quorumが何台か、どのowner ep
 `dawn-market::MarketDb` は注文帳、Currency、Bid escrowを一つのSQLite DBに置く。発注とキャンセルは
 DB transaction内で処理されるため、**Market DB内部**の原子性を持つ。
 
+Issue #345で、各commandはコマンドに関係する残高、注文、価格条件に合う反対側の板、決済行、
+ID metadataだけをindexed SQLで読み込むbounded working setへ移行した。純粋なMarket policyは
+この作業集合に対して引き続きprice-time priority、partial fill、maker price、escrow、refundを
+決定し、SQLite adapterは適用前後の差分だけを同じtransactionへ書き込む。orders/Currencyの
+全削除・全再挿入は行わない。
+
+`open_orders_for`と`settlement`は直接の主キー/状態別SQL read、`pending_settlements`は明示的な
+上限付きID順ページである。pendingページは接続ごとの循環cursorを進めるため、先頭に残った
+unroutableなintentが後続intentを恒久的に飢餓させない。候補板にも上限を設け、上限超過は
+トランザクションを拒否して暗黙のtruncationを避ける。
+
 #279で、同じtransactionにsettlement outboxも含める。各intentは単調増加する
 `SettlementId`と配送状態を持ち、注文・Currency・escrowと同時にcommitされる。
 
