@@ -8,12 +8,13 @@
 //! is captured in the same durable journal append as the tick that applies
 //! it. This is a two-phase outbox drain:
 //!
-//! 1. [`MarketSettlement::drain_pending_inputs`] reads pending settlement
-//!    intents from the Market DB and translates the ones whose destination
-//!    ship is owned/docked in this Sector into `MarketSettlementInput`s for
-//!    this tick's `FrameInput`. Intents for ships not owned/docked here are
-//!    left pending for a future tick (matching the previous "Unavailable"
-//!    semantics — e.g. the ship jumped away or undocked).
+//! 1. The delivery owner reads one bounded pending settlement page from the
+//!    Market DB and passes that same page to every relevant Sector. This
+//!    module translates the intents whose destination ship is owned/docked in
+//!    this Sector into `MarketSettlementInput`s for this tick's `FrameInput`.
+//!    Intents for ships not owned/docked here are left pending for a future
+//!    tick (matching the previous "Unavailable" semantics — e.g. the ship
+//!    jumped away or undocked).
 //! 2. After the tick commits, [`MarketSettlement::acknowledge_outcomes`]
 //!    reports each `MarketSettlementOutcome` back to the Market DB.
 //!
@@ -127,21 +128,12 @@ impl MarketSettlement {
         }
     }
 
-    /// Whether the settlement outbox still holds any pending row, including
-    /// ones no Sector could take this tick. A storage error reads as "yes"
-    /// so a transient DB failure never strands a pending settlement.
-    pub(super) fn has_pending(db: &MarketDb) -> bool {
-        db.pending_settlements()
-            .map(|pending| !pending.is_empty())
-            .unwrap_or(true)
-    }
-
-    /// Drain pending settlement intents from `db`, translating the ones
-    /// whose destination ship is owned/docked in `node` into
-    /// `MarketSettlementInput`s for this tick's `FrameInput`. Intents for a
-    /// ship that isn't owned/docked here are left pending (e.g. it jumped
-    /// away or undocked in the meantime) so a later tick — possibly in a
-    /// different Sector for a clustered runtime — can pick them up.
+    /// Translate a delivery-owned pending page into inputs for one Sector.
+    ///
+    /// The page has already been scanned and its cursor advanced by the
+    /// delivery owner. A nonempty page can still produce an empty queue here:
+    /// every intent may be unroutable for this Sector, so those intents remain
+    /// pending for another Sector or a later cyclic page.
     ///
     /// An intent whose `SettlementId` can't be represented as the Tick
     /// pipeline's `u64` is surfaced anyway (rather than silently dropped
@@ -150,20 +142,13 @@ impl MarketSettlement {
     /// never becomes a valid `MarketSettlementInput`, this function rejects
     /// it in the DB immediately and does not include it in the returned
     /// queue.
-    pub(super) fn drain_pending_inputs(
+    pub(super) fn queue_pending_inputs(
         db: &mut MarketDb,
+        pending: &[SettlementIntent],
         node: &SimulationNode,
     ) -> Vec<QueuedSettlement> {
-        let pending = match db.pending_settlements() {
-            Ok(pending) => pending,
-            Err(error) => {
-                eprintln!("[Server] Market settlement drain failed: {error}");
-                return Vec::new();
-            }
-        };
-
-        let mut queued = Vec::with_capacity(pending.len());
-        for intent in pending {
+        let mut queued = Vec::new();
+        for &intent in pending {
             let Some(settlement_id) = u64::try_from(intent.id.0).ok().filter(|&id| id > 0) else {
                 // Malformed identity: terminal regardless of which Sector
                 // owns the ship, so clear it out rather than rescanning it
@@ -220,18 +205,20 @@ impl MarketSettlement {
                 // Sector that now owns the ship -- retries it. Rejecting
                 // here would compensate away a legitimate order.
                 MarketSettlementStatus::Unavailable => continue,
-                MarketSettlementStatus::Rejected => {
-                    acknowledgement.rejected_players.push(settlement.player_id);
-                    db.execute(MarketCommand::RejectSettlement {
-                        settlement_id: settlement.settlement_id,
-                        reason: "Sector rejected the inventory settlement".to_owned(),
-                    })
-                }
+                MarketSettlementStatus::Rejected => db.execute(MarketCommand::RejectSettlement {
+                    settlement_id: settlement.settlement_id,
+                    reason: "Sector rejected the inventory settlement".to_owned(),
+                }),
             };
             match result {
                 // Only a durably decided settlement may be retired from the
                 // Sector's idempotency guard: it will never be redelivered.
-                Ok(_) => acknowledgement.decided_settlement_ids.push(expected_id),
+                Ok(_) => {
+                    acknowledgement.decided_settlement_ids.push(expected_id);
+                    if outcome.status == MarketSettlementStatus::Rejected {
+                        acknowledgement.rejected_players.push(settlement.player_id);
+                    }
+                }
                 Err(error) => eprintln!(
                     "[Server] failed to record Market settlement outcome for {:?}: {error}",
                     settlement.settlement_id
@@ -387,6 +374,11 @@ mod tests {
             .unwrap_or(0)
     }
 
+    fn queue_first_pending_page(db: &mut MarketDb, node: &SimulationNode) -> Vec<QueuedSettlement> {
+        let pending = db.pending_settlements_page_after(None).unwrap();
+        MarketSettlement::queue_pending_inputs(db, &pending, node)
+    }
+
     fn host_with_docked_ship(
         player_id: PlayerId,
     ) -> (
@@ -443,7 +435,7 @@ mod tests {
 
         MarketSettlement::place(&mut db, seller, order(seller_ship, OrderSide::Ask, 5));
 
-        let queued = MarketSettlement::drain_pending_inputs(&mut db, &node);
+        let queued = queue_first_pending_page(&mut db, &node);
         assert_eq!(queued.len(), 1);
         match queued[0].input() {
             MarketSettlementInput::RemoveItem(cmd) => {
@@ -479,13 +471,13 @@ mod tests {
             crate::test_catalog(),
         );
 
-        let queued = MarketSettlement::drain_pending_inputs(&mut db, &other_node);
+        let queued = queue_first_pending_page(&mut db, &other_node);
         assert!(queued.is_empty());
         // Still pending in the DB, not rejected.
-        assert_eq!(db.pending_settlements().unwrap().len(), 1);
+        assert_eq!(db.pending_settlements_page_after(None).unwrap().len(), 1);
 
         // A later drain against the real owning node still finds it.
-        let queued = MarketSettlement::drain_pending_inputs(&mut db, &node);
+        let queued = queue_first_pending_page(&mut db, &node);
         assert_eq!(queued.len(), 1);
     }
 
@@ -495,7 +487,7 @@ mod tests {
         let seller = PlayerId(1);
         let (node, seller_ship) = node_with_docked_ship(seller);
         MarketSettlement::place(&mut db, seller, order(seller_ship, OrderSide::Ask, 5));
-        let queued = MarketSettlement::drain_pending_inputs(&mut db, &node);
+        let queued = queue_first_pending_page(&mut db, &node);
         assert_eq!(queued.len(), 1);
         let settlement_id = queued[0].input().settlement_id();
 
@@ -508,7 +500,7 @@ mod tests {
             }],
         );
 
-        assert!(db.pending_settlements().unwrap().is_empty());
+        assert!(db.pending_settlements_page_after(None).unwrap().is_empty());
         assert_eq!(
             acknowledgement.decided_settlement_ids,
             vec![settlement_id],
@@ -531,7 +523,7 @@ mod tests {
         let seller = PlayerId(1);
         let (node, seller_ship) = node_with_docked_ship(seller);
         MarketSettlement::place(&mut db, seller, order(seller_ship, OrderSide::Ask, 5));
-        let queued = MarketSettlement::drain_pending_inputs(&mut db, &node);
+        let queued = queue_first_pending_page(&mut db, &node);
         assert_eq!(queued.len(), 1);
         let settlement_id = queued[0].input().settlement_id();
 
@@ -545,7 +537,7 @@ mod tests {
         );
 
         assert_eq!(
-            db.pending_settlements().unwrap().len(),
+            db.pending_settlements_page_after(None).unwrap().len(),
             1,
             "a transiently unavailable settlement must stay pending for a later drain"
         );
@@ -609,7 +601,7 @@ mod tests {
         let (mut host, seller_ship) = host_with_docked_ship_and_scrap(seller, 5);
 
         MarketSettlement::place(&mut db, seller, order(seller_ship, OrderSide::Ask, 5));
-        let queued = MarketSettlement::drain_pending_inputs(&mut db, host.node());
+        let queued = queue_first_pending_page(&mut db, host.node());
         assert_eq!(queued.len(), 1);
 
         let inputs: Vec<MarketSettlementInput> =
@@ -638,7 +630,7 @@ mod tests {
 
         let acknowledgement =
             MarketSettlement::acknowledge_outcomes(&mut db, &queued, &acknowledged_outcomes);
-        assert!(db.pending_settlements().unwrap().is_empty());
+        assert!(db.pending_settlements_page_after(None).unwrap().is_empty());
         assert_eq!(db.open_orders_for(seller).unwrap().len(), 1);
         assert_eq!(acknowledgement.decided_settlement_ids.len(), 1);
 
@@ -673,7 +665,7 @@ mod tests {
         // cycle, one tick's worth at a time.
         MarketSettlement::place(&mut db, seller, order(seller_ship, OrderSide::Ask, 2));
         let events = settle_one_round(&mut db, &mut host);
-        assert!(db.pending_settlements().unwrap().is_empty());
+        assert!(db.pending_settlements_page_after(None).unwrap().is_empty());
         assert!(
             events.iter().any(|event| matches!(
                 event,
@@ -703,14 +695,14 @@ mod tests {
         // ticks where the pre-#315 code looped synchronously.
         let mut events = Vec::new();
         for _ in 0..8 {
-            if db.pending_settlements().unwrap().is_empty() {
+            if db.pending_settlements_page_after(None).unwrap().is_empty() {
                 break;
             }
             events = settle_one_round(&mut db, &mut host);
         }
 
         assert!(
-            db.pending_settlements().unwrap().is_empty(),
+            db.pending_settlements_page_after(None).unwrap().is_empty(),
             "the compensation cascade must converge"
         );
         assert_eq!(
@@ -737,7 +729,7 @@ mod tests {
         db: &mut MarketDb,
         host: &mut RuntimeFrameHost<InMemoryJournal, LocalRuntimeConsensus>,
     ) -> Vec<DomainEvent> {
-        let queued = MarketSettlement::drain_pending_inputs(db, host.node());
+        let queued = queue_first_pending_page(db, host.node());
         let inputs: Vec<MarketSettlementInput> =
             queued.iter().map(QueuedSettlement::input).collect();
 
@@ -764,7 +756,7 @@ mod tests {
     /// policy that must eventually decide a legitimately `Unavailable` row
     /// so it does not sit in the outbox forever.
     fn expire_unroutable_settlements(db: &mut MarketDb, host_node: &SimulationNode) {
-        for intent in db.pending_settlements().unwrap() {
+        for intent in db.pending_settlements_page_after(None).unwrap() {
             let (player_id, ship_id) = intent_identity(intent);
             if !owns_docked_ship(host_node, player_id, ship_id) {
                 let _ = db.execute(MarketCommand::RejectSettlement {

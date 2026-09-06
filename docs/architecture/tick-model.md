@@ -489,6 +489,14 @@ Market settlement inputs enter the shared durable `FrameInput` path. These
 methods do not provide an alternate production Tick path, and a fenced Host must
 reject them before touching node or journal state.
 
+Market settlement delivery scans one bounded pending page for the participating
+Sector hosts, then routes that page by current Ship ownership and docked state.
+The delivery module owns cyclic scan progress; repository reads and idle checks
+must not consume an un-routed page. Unavailable destinations stay pending for a
+later scan. Only committed Tick outcomes are acknowledged in the Market ledger,
+and only durably decided settlement IDs enter the next frame's idempotency-guard
+retirement input. Query or acknowledgement failures leave the work retryable.
+
 This is current implementation topology, not a permanent storage/API constraint:
 
 - #272 owns the storage-independent engine API and the prepared transition

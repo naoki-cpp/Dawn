@@ -31,17 +31,11 @@ pub(crate) fn run_cluster_runtime_tick(
     ctx: ClusterRuntimeTickContext<'_>,
     authenticated_requests: &[Vec<dawn_sector::transition::AuthenticatedClientRequest>],
 ) -> Vec<transit::RuntimeTickOutput> {
-    // Drain Market settlements per host before running any frame: a
-    // settlement's destination ship lives in exactly one Sector, so each
-    // host's `FrameInput` must only ever carry the settlements that host's
-    // own `SimulationNode` currently owns/docks (issue #315). The Market DB
-    // is shared across the whole cluster, so this is one drain call per
-    // host against the same `MarketRuntime`.
-    let queued_settlements: Vec<_> = ctx
-        .hosts
-        .iter()
-        .map(|host| ctx.market.drain_settlements(host))
-        .collect();
+    // Scan the shared Market outbox once, then route that bounded page to
+    // every host. Each host's `FrameInput` still carries only settlements its
+    // own `SimulationNode` currently owns/docks, but fixed host order can no
+    // longer consume a page before the relevant Sector sees it (issue #315).
+    let queued_settlements = ctx.market.drain_cluster_settlements(ctx.hosts);
     let market_settlements: Vec<Vec<dawn_sector::transition::MarketSettlementInput>> =
         queued_settlements
             .iter()

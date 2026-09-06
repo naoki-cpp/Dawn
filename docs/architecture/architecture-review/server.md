@@ -5,7 +5,7 @@ update   : 大規模リファクタ実施後 / 新クレート追加時 / archit
 related  : AI_DEVELOPMENT_GUIDE.md「Crate Boundaries」, docs/architecture/architecture.md,
            docs/architecture/architecture-review/server-completed.md（完了済みログ）,
            docs/architecture/architecture-review/server-pending.md（未完項目・issue一覧）
-date     : 2026-09-01（issue #345反映。Market bounded working setを完了）
+date     : 2026-09-06（Market settlementのページ進行とSector routingを集約）
 ---
 
 # Architecture Review — Dawn Codebase（現行構造評価）
@@ -73,9 +73,12 @@ only as an async in-memory adapter; it is not a second Tick implementation.
 Resolved in #345: `MarketDb` now loads only the command's involved balance,
 order, crossing book, and settlement rows. It persists only changed rows in the
 same SQLite transaction; no command deletes and rebuilds the orders or Currency
-tables. Market list APIs use direct bounded SQL reads, and pending settlement
-pages advance through a stable cyclic ID cursor so an unroutable early row does
-not starve later outbox work. The pure `MarketState` and matching policy remain
+tables. Market list APIs use direct bounded SQL reads. Settlement delivery owns
+the cyclic page cursor and routes each bounded page across the participating
+Sectors before fetching another page. Repository reads do not advance hidden
+delivery state, and checking whether work remains cannot discard a page. This
+keeps an unavailable early intent or fixed Sector iteration order from starving
+later eligible work. The pure `MarketState` and matching policy remain
 independently testable.
 
 Station projection production wiring is also complete: preparation carries only
@@ -120,13 +123,14 @@ run only after the required projection completes.
 | `crates/dawn-core/src/events.rs` | 777 | 🟢 domain event catalog/type definitions・tests |
 | `crates/dawn-sector/src/node/spawner_logic.rs` | 810 | 🟢 spawn policy・tests |
 | `crates/dawn-sector/src/transit/tests.rs` | 679 | 🟢 transit integration tests |
-| `crates/dawn-server/src/serve/market_settlement.rs` | 774 | 🟢 Market settlementのdurable frame input / acknowledgement adapter・tests |
+| `crates/dawn-server/src/serve/market_settlement.rs` | 769 | 🟢 Market settlementのdurable frame input / acknowledgement adapter・tests |
+| `crates/dawn-server/src/serve/market.rs` | 1063 | 🟢 Market request validationと配送cursor/shared-page routing。大半はsingle/cluster・障害再試行のtests |
 | `crates/dawn-sector/src/node/station_materialization.rs` | 650 | 🟢 station assemble/disassemble materialization・tests |
 | `crates/dawn-server/src/cluster.rs` | 670 | 🟢 in-process cluster wiring・fault tests |
 | `crates/dawn-server/src/serve/cluster.rs` | 686 | 🟢 clustered serve composition・admission/jump tests |
 | `crates/dawn-sector/src/node/approach.rs` | 631 | 🟢 approach steering state machine・tests |
 | `crates/dawn-sector/src/node/ship_cargo.rs` | 681 | 🟢 ship cargo ownership/bridge boundary・tests |
-| `crates/dawn-market/src/repository.rs` | 1697 | 🟢 SQLite order/Currency/outbox persistence。command別bounded working set、差分書き込み、直接SQL read API |
+| `crates/dawn-market/src/repository.rs` | 1748 | 🟢 SQLite order/Currency/outbox persistence。command別bounded working set、差分書き込み、配送cursorを保持しないbounded SQL reads |
 | `crates/dawn-distributed/src/state.rs` | 594 | 🟢 Raft state transition/persistence boundary・tests |
 | `crates/dawn-ecs/src/systems/combat.rs` | 584 | 🟢 combat system・tests |
 | `crates/dawn-server/src/bin/sector-node.rs` | 596 | 🟢 production node bootstrap/config・public tail rebuild wiring |
