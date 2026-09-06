@@ -4,7 +4,6 @@
 //! applies one pure transition, and persists only its changed rows in one
 //! SQLite transaction.
 
-use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use dawn_core::{EntityId, ItemId, PlayerId, ShipId};
@@ -35,7 +34,6 @@ pub enum MarketError {
 /// SQLite-backed Market application boundary.
 pub struct MarketDb {
     conn: Connection,
-    pending_cursor: Cell<i64>,
 }
 
 impl std::fmt::Debug for MarketDb {
@@ -119,23 +117,25 @@ impl MarketDb {
         rows.collect()
     }
 
-    /// Return a bounded pending settlement page in stable cyclic ID order.
+    /// Return at most 1,000 pending settlements in stable cyclic ID order.
     ///
-    /// The cursor advances after every page so a permanently unroutable early
-    /// row cannot starve later rows in the outbox. Each SQL query remains
-    /// explicitly bounded and ordered; the wraparound only joins two such
-    /// ordered ranges into one cyclic page.
-    pub fn pending_settlements(&self) -> rusqlite::Result<Vec<SettlementIntent>> {
-        let cursor = self.pending_cursor.get();
+    /// The caller owns `after_settlement_id` and decides when to advance it.
+    /// This database adapter never stores or advances a delivery cursor. Each
+    /// SQL query remains explicitly bounded and ordered; the wraparound only
+    /// joins two such ordered ranges into one cyclic page. `None` starts after
+    /// ID zero. For an unchanged ledger, an empty page proves the entire pending
+    /// outbox is empty. Reads never mark a settlement delivered or applied.
+    pub fn pending_settlements_page_after(
+        &self,
+        after_settlement_id: Option<SettlementId>,
+    ) -> rusqlite::Result<Vec<SettlementIntent>> {
+        let cursor = after_settlement_id.map_or(0, |settlement_id| settlement_id.0);
         let mut records = load_pending_settlements_after(&self.conn, cursor, MAX_SETTLEMENT_VIEW)?;
         if records.len() < MAX_SETTLEMENT_VIEW {
             let remaining = MAX_SETTLEMENT_VIEW - records.len();
             records.extend(load_pending_settlements_at_most(
                 &self.conn, cursor, remaining,
             )?);
-        }
-        if let Some(record) = records.last() {
-            self.pending_cursor.set(record.id.0);
         }
         Ok(records
             .into_iter()
@@ -233,10 +233,7 @@ impl MarketDb {
             "INSERT OR IGNORE INTO market_meta (key, value) VALUES (?1, ?2)",
             params![NEXT_SETTLEMENT_ID_KEY, 1_i64],
         )?;
-        Ok(Self {
-            conn,
-            pending_cursor: Cell::new(0),
-        })
+        Ok(Self { conn })
     }
 }
 
@@ -1131,7 +1128,7 @@ mod tests {
         );
 
         let mut pure_pending = pure.pending_settlements();
-        let mut db_pending = db.pending_settlements().unwrap();
+        let mut db_pending = db.pending_settlements_page_after(None).unwrap();
         pure_pending.sort_by_key(|intent| intent.id);
         db_pending.sort_by_key(|intent| intent.id);
         assert_eq!(pure_pending, db_pending);
@@ -1179,7 +1176,10 @@ mod tests {
         }
 
         let reopened = MarketDb::open(&path).unwrap();
-        assert_eq!(reopened.pending_settlements().unwrap().len(), 1);
+        assert_eq!(
+            reopened.pending_settlements_page_after(None).unwrap().len(),
+            1
+        );
         let _ = std::fs::remove_file(path);
     }
 
@@ -1651,14 +1651,65 @@ mod tests {
             .unwrap();
         }
 
-        let first_page = db.pending_settlements().unwrap();
-        let second_page = db.pending_settlements().unwrap();
+        let first_page = db.pending_settlements_page_after(None).unwrap();
+        let cursor = first_page.last().map(|intent| intent.id);
+        assert_eq!(db.pending_settlements_page_after(None).unwrap(), first_page);
+        let second_page = db.pending_settlements_page_after(cursor).unwrap();
         assert_eq!(first_page.len(), MAX_SETTLEMENT_VIEW);
         assert_eq!(second_page.len(), MAX_SETTLEMENT_VIEW);
         assert_eq!(second_page[0].id, SettlementId(1_001));
         assert!(second_page
             .iter()
             .any(|intent| intent.id == SettlementId(1_001)));
+        assert_eq!(second_page.last().unwrap().id, SettlementId(999));
+        assert_eq!(
+            db.pending_settlements_page_after(cursor).unwrap(),
+            second_page
+        );
+        assert_eq!(
+            second_page
+                .iter()
+                .map(|intent| intent.id)
+                .collect::<BTreeSet<_>>()
+                .len(),
+            MAX_SETTLEMENT_VIEW,
+            "a wrapped page must not contain duplicate identities"
+        );
+    }
+
+    #[test]
+    fn failed_wrapped_page_read_can_be_retried_from_the_same_cursor() {
+        let mut db = MarketDb::open_in_memory().unwrap();
+        db.execute(MarketCommand::PlaceOrder {
+            player_id: PlayerId(1),
+            ship_id: ship(1),
+            item_id: ItemId::ScrapMetal,
+            side: OrderSide::Ask,
+            price: 100,
+            quantity: 1,
+        })
+        .unwrap();
+        let cursor = Some(SettlementId(1));
+        let page = db.pending_settlements_page_after(cursor).unwrap();
+        // The first range is empty. Fail decoding in the wraparound range.
+        db.conn
+            .execute("UPDATE settlements SET quantity = -1", [])
+            .unwrap();
+        assert!(db.pending_settlements_page_after(cursor).is_err());
+        db.conn
+            .execute("UPDATE settlements SET quantity = 1", [])
+            .unwrap();
+        assert_eq!(db.pending_settlements_page_after(cursor).unwrap(), page);
+
+        db.execute(MarketCommand::AcknowledgeSettlement {
+            settlement_id: SettlementId(1),
+        })
+        .unwrap();
+        assert!(db
+            .pending_settlements_page_after(cursor)
+            .unwrap()
+            .is_empty());
+        assert!(db.pending_settlements_page_after(None).unwrap().is_empty());
     }
 
     #[test]
@@ -1692,6 +1743,6 @@ mod tests {
             .unwrap();
         assert_eq!(order.quantity_remaining, 2);
         assert_eq!(db.currency_balance(PlayerId(2)).unwrap(), 100);
-        assert!(db.pending_settlements().unwrap().is_empty());
+        assert!(db.pending_settlements_page_after(None).unwrap().is_empty());
     }
 }

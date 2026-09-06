@@ -91,8 +91,11 @@ related : ADR-0001 (Event Sourcing), ADR-0014 (Raft / Transit), ADR-0017 (snapsh
 > everything else if preparation does not lead to a committed apply.
 > `serve/market_settlement.rs` was rewritten from a synchronous
 > apply-and-acknowledge loop into a two-phase outbox drain
-> (`drain_pending_inputs` before the tick, `acknowledge_outcomes` after it
-> commits) built on this substrate. Fixture/NPC spawn remains bootstrap-only.
+> (delivery scans and routes a bounded page before the tick;
+> `acknowledge_outcomes` follows its commit) built on this substrate. The
+> delivery owner advances the scan cursor, and clustered delivery routes the
+> same page across participating Sectors before reading another page.
+> Fixture/NPC spawn remains bootstrap-only.
 > Fresh admission still begins through a typed synchronous host surface, but
 > its materialized Ship and starter Station grant are now finalized through the
 > next durable frame as described in the 2026-08-22 correction above. This is

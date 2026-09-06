@@ -8,7 +8,7 @@
 use dawn_core::{EntityId, ItemId, PlayerId, ShipId};
 #[cfg(test)]
 use dawn_market::MarketCommand;
-use dawn_market::{MarketDb, MarketOrderView, OrderId, OrderSide};
+use dawn_market::{MarketDb, MarketOrderView, OrderId, OrderSide, SettlementId, SettlementIntent};
 use dawn_protocol::{
     ItemWire, MarketCommandWire, MarketOrderSide, MarketOrderWire, MarketSnapshotWire,
 };
@@ -29,23 +29,25 @@ const MARKET_DOCK_REQUIRED_NOTICE: &str = "Dock at a station to use the Market";
 /// Owns the persistent Market database for one serve process.
 pub(crate) struct MarketRuntime {
     db: MarketDb,
-    /// Whether the settlement outbox may hold work for a Sector to drain.
+    /// Ephemeral delivery cursor. `MarketDb` never owns or advances it.
+    settlement_cursor: Option<SettlementId>,
+    /// Whether the delivery owner should query the outbox.
     ///
-    /// `drain_settlements` runs on every tick of the serve loop, and its
-    /// first act is a SQLite query. Ledger mutations are the only thing that
-    /// can enqueue a settlement, so an idle Market can skip the query
-    /// entirely instead of paying it 10x/sec/Sector forever. It stays set
-    /// while any settlement is still pending (e.g. its ship is elsewhere),
-    /// so a deferred one is never stranded.
-    settlements_possible: bool,
+    /// An empty observation enables the no-work optimization. A nonempty page
+    /// keeps polling even when a particular Sector queues nothing because all
+    /// rows on that page are unroutable there.
+    /// All settlement-producing ledger mutations pass through this runtime;
+    /// external SQLite writers are not observed while delivery is idle.
+    settlement_polling_enabled: bool,
 }
 
 impl MarketRuntime {
     pub(crate) fn open(path: &str) -> rusqlite::Result<Self> {
         Ok(Self {
             db: MarketDb::open(path)?,
+            settlement_cursor: None,
             // A restart inherits whatever the durable outbox already holds.
-            settlements_possible: true,
+            settlement_polling_enabled: true,
         })
     }
 
@@ -53,7 +55,8 @@ impl MarketRuntime {
     fn open_in_memory() -> Self {
         Self {
             db: MarketDb::open_in_memory().expect("in-memory Market DB"),
-            settlements_possible: true,
+            settlement_cursor: None,
+            settlement_polling_enabled: true,
         }
     }
 
@@ -130,7 +133,7 @@ impl MarketRuntime {
             return self.snapshot(player_id, "Market order rejected");
         }
         let result = MarketSettlement::place(&mut self.db, player_id, order);
-        self.settlements_possible = true;
+        self.settlement_polling_enabled = true;
         self.snapshot(player_id, result.notice())
     }
 
@@ -148,7 +151,7 @@ impl MarketRuntime {
             return self.snapshot(player_id, "Market order rejected");
         }
         let result = MarketSettlement::place(&mut self.db, player_id, order);
-        self.settlements_possible = true;
+        self.settlement_polling_enabled = true;
         self.snapshot(player_id, result.notice())
     }
 
@@ -157,31 +160,67 @@ impl MarketRuntime {
             return self.snapshot(player_id, "Market order rejected");
         };
         let result = MarketSettlement::cancel(&mut self.db, player_id, order_id);
-        self.settlements_possible = true;
+        self.settlement_polling_enabled = true;
         self.snapshot(player_id, result.notice())
     }
 
+    fn scan_pending_settlement_page(&mut self) -> Vec<SettlementIntent> {
+        if !self.settlement_polling_enabled {
+            return Vec::new();
+        }
+
+        let page = match self
+            .db
+            .pending_settlements_page_after(self.settlement_cursor)
+        {
+            Ok(page) => page,
+            Err(error) => {
+                eprintln!("[Server] Market settlement scan failed: {error}");
+                return Vec::new();
+            }
+        };
+
+        if let Some(intent) = page.last() {
+            self.settlement_cursor = Some(intent.id);
+        } else {
+            self.settlement_polling_enabled = false;
+        }
+        page
+    }
+
     /// Drain pending Market settlement intents whose destination ship
-    /// `node` currently owns/docks into inputs for this tick's `FrameInput`
-    /// (issue #315). Call once per tick, per Sector, before `run_frame`.
+    /// `node` currently owns/docks into inputs for this tick's `FrameInput`.
+    /// The delivery owner scans one bounded page before routing it (issue #315).
     ///
-    /// Returns immediately without touching SQLite when no ledger mutation
-    /// has happened since the outbox was last observed empty.
+    /// A nonempty but unroutable page advances the delivery cursor and remains
+    /// eligible for polling on the next tick. An empty observation enables the
+    /// no-work optimization; a read failure is retried on the next tick.
     pub(crate) fn drain_settlements<N: RuntimeNodeView>(
         &mut self,
         node: &N,
     ) -> Vec<QueuedSettlement> {
-        if !self.settlements_possible {
-            return Vec::new();
+        let pending = self.scan_pending_settlement_page();
+        MarketSettlement::queue_pending_inputs(&mut self.db, &pending, node.runtime_node())
+    }
+
+    /// Scan one bounded page once and route that same page to every Sector in
+    /// stable caller order. The shared page is what makes clustered delivery
+    /// independent of which Sector happens to be visited first.
+    pub(crate) fn drain_cluster_settlements<N: RuntimeNodeView>(
+        &mut self,
+        nodes: &[N],
+    ) -> Vec<Vec<QueuedSettlement>> {
+        let pending = self.scan_pending_settlement_page();
+
+        let mut routed = Vec::with_capacity(nodes.len());
+        for node in nodes {
+            routed.push(MarketSettlement::queue_pending_inputs(
+                &mut self.db,
+                &pending,
+                node.runtime_node(),
+            ));
         }
-        let queued = MarketSettlement::drain_pending_inputs(&mut self.db, node.runtime_node());
-        // Only stand down once the outbox is genuinely empty. A settlement
-        // this Sector skipped (its ship is elsewhere) is still pending, so
-        // keep polling until some Sector takes it.
-        if queued.is_empty() && !MarketSettlement::has_pending(&self.db) {
-            self.settlements_possible = false;
-        }
-        queued
+        routed
     }
 
     /// Report a committed tick's `MarketSettlementOutcome`s back to the
@@ -294,6 +333,443 @@ fn market_order_wire(order: MarketOrderView, player_id: PlayerId) -> Option<Mark
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dawn_core::{ClientRequest, CreditItemCommand, NodeId, SectorBounds, SectorId, StationId};
+    use dawn_market::SettlementStatus;
+    use dawn_sector::transit::{LocalRuntimeConsensus, RuntimeTickOutput};
+    use dawn_sector::transition::{FrameInput, MarketSettlementStatus};
+    use dawn_server::runtime_frame::{
+        OwnedRaftRuntimeConsensus, RuntimeFrameHost, RuntimeFramePolicy,
+    };
+    use dawn_storage::InMemoryJournal;
+
+    fn docked_node(node_id: NodeId, player_id: PlayerId, scrap: u64) -> (SimulationNode, ShipId) {
+        let mut node = SimulationNode::new(
+            node_id,
+            SectorId(node_id.0),
+            SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            std::sync::Arc::new(dawn_sector::galaxy::Galaxy::demo()),
+            crate::test_catalog(),
+        );
+        let station_id = StationId(u32::from(node_id.0));
+        let position = node
+            .station(station_id)
+            .expect("local demo station")
+            .position;
+        let ship_id = node.spawn_player_ship_at_pub(player_id, position);
+        node.apply_client_request(
+            player_id,
+            ClientRequest::Dock {
+                station: station_id,
+            },
+            &mut Vec::new(),
+        )
+        .unwrap();
+        assert!(node.credit_item_owned(CreditItemCommand {
+            player_id,
+            ship_id,
+            item_id: ItemId::ScrapMetal,
+            quantity: scrap,
+            settlement_id: 1_000_000,
+        }));
+        let _ = node.drain_pending_events();
+        (node, ship_id)
+    }
+
+    fn place_asks(db: &mut MarketDb, player_id: PlayerId, ship_id: ShipId, count: usize) {
+        for _ in 0..count {
+            db.execute(MarketCommand::PlaceOrder {
+                player_id,
+                ship_id,
+                item_id: ItemId::ScrapMetal,
+                side: OrderSide::Ask,
+                price: 100,
+                quantity: 1,
+            })
+            .unwrap();
+        }
+    }
+
+    fn commit_settlements(
+        host: &mut RuntimeFrameHost<InMemoryJournal, LocalRuntimeConsensus>,
+        queued: &[QueuedSettlement],
+        acknowledged: &[u64],
+    ) -> RuntimeTickOutput {
+        let inputs: Vec<_> = queued.iter().map(QueuedSettlement::input).collect();
+        host.run_frame(FrameInput {
+            lock_commands: &[],
+            authenticated_requests: &[],
+            market_settlements: &inputs,
+            acknowledged_settlements: acknowledged,
+        })
+        .unwrap()
+    }
+
+    fn assert_committed_scrap(output: &RuntimeTickOutput, ship_id: ShipId, quantity: u64) {
+        let cargo = output.events.iter().rev().find_map(|event| match event {
+            dawn_core::DomainEvent::ShipFitted(fitted) if fitted.ship_id == ship_id => Some(
+                fitted
+                    .inventory
+                    .get(&ItemId::ScrapMetal)
+                    .copied()
+                    .unwrap_or(0),
+            ),
+            _ => None,
+        });
+        assert_eq!(cargo, Some(quantity), "a committed cargo event is required");
+    }
+
+    #[test]
+    fn single_delivery_reaches_an_eligible_second_page_after_an_unroutable_page() {
+        let mut market = MarketRuntime::open_in_memory();
+        let player = PlayerId(1);
+        let (node, ship) = docked_node(NodeId(0), player, 1_000);
+        let mut host = RuntimeFrameHost::new(
+            node,
+            InMemoryJournal::new(),
+            LocalRuntimeConsensus,
+            RuntimeFramePolicy::local_durable(0),
+        );
+        place_asks(
+            &mut market.db,
+            PlayerId(9),
+            ShipId::new(NodeId(9), 1),
+            1_000,
+        );
+        place_asks(&mut market.db, player, ship, 1_000);
+
+        assert!(market.drain_settlements(&host).is_empty());
+        assert!(market.settlement_polling_enabled);
+        assert_eq!(market.settlement_cursor, Some(SettlementId(1_000)));
+        // Independent observation must not consume the delivery owner's page.
+        assert_eq!(
+            market
+                .db
+                .pending_settlements_page_after(None)
+                .unwrap()
+                .len(),
+            1_000
+        );
+        let queued = market.drain_settlements(&host);
+        assert_eq!(queued.len(), 1_000);
+        assert_eq!(queued.first().unwrap().input().settlement_id(), 1_001);
+        assert_eq!(queued.last().unwrap().input().settlement_id(), 2_000);
+
+        let output = commit_settlements(&mut host, &queued, &[]);
+        assert_eq!(output.tick_result.market_settlement_outcomes.len(), 1_000);
+        assert!(output
+            .tick_result
+            .market_settlement_outcomes
+            .iter()
+            .all(|outcome| outcome.status == MarketSettlementStatus::Applied));
+        assert_committed_scrap(&output, ship, 0);
+        let ack =
+            market.acknowledge_settlements(&queued, &output.tick_result.market_settlement_outcomes);
+        assert_eq!(ack.decided_settlement_ids.len(), 1_000);
+        assert_eq!(
+            market
+                .db
+                .settlement(SettlementId(2_000))
+                .unwrap()
+                .unwrap()
+                .status,
+            SettlementStatus::Applied
+        );
+        assert_eq!(
+            market
+                .db
+                .settlement(SettlementId(1))
+                .unwrap()
+                .unwrap()
+                .status,
+            SettlementStatus::Pending
+        );
+        assert!(market.drain_settlements(&host).is_empty());
+        assert!(
+            market.settlement_polling_enabled,
+            "unowned rows still require polling"
+        );
+    }
+
+    #[test]
+    fn empty_observation_keeps_cursor_and_skips_reads_until_a_ledger_mutation() {
+        let mut market = MarketRuntime::open_in_memory();
+        let player = PlayerId(1);
+        let (node, ship) = docked_node(NodeId(0), player, 5);
+        place_asks(&mut market.db, player, ship, 1);
+        let queued = market.drain_settlements(&node);
+        let mut host = RuntimeFrameHost::new(
+            node,
+            InMemoryJournal::new(),
+            LocalRuntimeConsensus,
+            RuntimeFramePolicy::local_durable(0),
+        );
+        let output = commit_settlements(&mut host, &queued, &[]);
+        market.acknowledge_settlements(&queued, &output.tick_result.market_settlement_outcomes);
+        assert!(market.drain_settlements(&host).is_empty());
+        assert!(!market.settlement_polling_enabled);
+        assert_eq!(market.settlement_cursor, Some(SettlementId(1)));
+
+        // Bypass the runtime only to prove idle delivery does not query SQL:
+        // a read would observe this row. Production ledger writes wake polling.
+        place_asks(&mut market.db, player, ship, 1);
+        assert!(market.drain_settlements(&host).is_empty());
+        assert_eq!(market.settlement_cursor, Some(SettlementId(1)));
+        market.handle_single(
+            player,
+            MarketCommandWire::PlaceMarketOrderCommand {
+                ship_id: ship.raw(),
+                item_id: ItemWire::ScrapMetal,
+                side: MarketOrderSide::Ask,
+                price: 100,
+                quantity: 1,
+            },
+            &host,
+        );
+        let queued = market.drain_settlements(&host);
+        assert_eq!(
+            queued
+                .iter()
+                .map(|q| q.input().settlement_id())
+                .collect::<Vec<_>>(),
+            vec![2, 3]
+        );
+        let output = commit_settlements(&mut host, &queued, &[]);
+        market.acknowledge_settlements(&queued, &output.tick_result.market_settlement_outcomes);
+        assert!(market.drain_settlements(&host).is_empty());
+        assert!(!market.settlement_polling_enabled);
+
+        market.handle_single(
+            player,
+            MarketCommandWire::CancelMarketOrderCommand { order_id: 1 },
+            &host,
+        );
+        let returned = market.drain_settlements(&host);
+        assert_eq!(
+            returned.len(),
+            1,
+            "cancellation must wake idle delivery too"
+        );
+        let output = commit_settlements(&mut host, &returned, &[]);
+        assert_committed_scrap(&output, ship, 3);
+    }
+
+    #[test]
+    fn settlement_read_failure_preserves_cursor_and_retries_the_eligible_page() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("market.sqlite");
+        let mut market = MarketRuntime::open(path.to_str().unwrap()).unwrap();
+        let fault = rusqlite::Connection::open(&path).unwrap();
+        let (node, ship) = docked_node(NodeId(0), PlayerId(1), 1);
+        place_asks(
+            &mut market.db,
+            PlayerId(9),
+            ShipId::new(NodeId(9), 1),
+            1_000,
+        );
+        place_asks(&mut market.db, PlayerId(1), ship, 1);
+        assert!(market.drain_settlements(&node).is_empty());
+        assert_eq!(market.settlement_cursor, Some(SettlementId(1_000)));
+
+        fault
+            .execute(
+                "ALTER TABLE settlements RENAME TO unavailable_settlements",
+                [],
+            )
+            .unwrap();
+        assert!(market.drain_settlements(&node).is_empty());
+        assert!(market.drain_cluster_settlements(std::slice::from_ref(&node))[0].is_empty());
+        assert!(market.settlement_polling_enabled);
+        assert_eq!(market.settlement_cursor, Some(SettlementId(1_000)));
+        fault
+            .execute(
+                "ALTER TABLE unavailable_settlements RENAME TO settlements",
+                [],
+            )
+            .unwrap();
+
+        let queued = market.drain_settlements(&node);
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].input().settlement_id(), 1_001);
+    }
+
+    #[test]
+    fn failed_market_ack_retries_without_repeating_cargo_or_retiring_the_guard() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("market.sqlite");
+        let mut market = MarketRuntime::open(path.to_str().unwrap()).unwrap();
+        let fault = rusqlite::Connection::open(&path).unwrap();
+        let player = PlayerId(1);
+        let (node, ship) = docked_node(NodeId(0), player, 1);
+        let mut host = RuntimeFrameHost::new(
+            node,
+            InMemoryJournal::new(),
+            LocalRuntimeConsensus,
+            RuntimeFramePolicy::local_durable(0),
+        );
+        // One applies and the second is refused for insufficient cargo.
+        place_asks(&mut market.db, player, ship, 2);
+        let queued = market.drain_settlements(&host);
+        let output = commit_settlements(&mut host, &queued, &[]);
+        assert_committed_scrap(&output, ship, 0);
+        assert_eq!(
+            output
+                .tick_result
+                .market_settlement_outcomes
+                .iter()
+                .map(|outcome| outcome.status)
+                .collect::<Vec<_>>(),
+            vec![
+                MarketSettlementStatus::Applied,
+                MarketSettlementStatus::Rejected
+            ]
+        );
+
+        fault
+            .execute_batch(
+                "CREATE TRIGGER fail_settlement_ack BEFORE UPDATE ON settlements BEGIN
+                SELECT RAISE(ABORT, 'injected ACK write failure');
+             END;",
+            )
+            .unwrap();
+        let ack =
+            market.acknowledge_settlements(&queued, &output.tick_result.market_settlement_outcomes);
+        assert!(ack.decided_settlement_ids.is_empty());
+        assert!(
+            ack.rejected_players.is_empty(),
+            "a failed ledger decision cannot report compensation"
+        );
+        assert_eq!(
+            market
+                .db
+                .pending_settlements_page_after(None)
+                .unwrap()
+                .len(),
+            2
+        );
+        assert!(host
+            .node()
+            .take_snapshot_at(0)
+            .node_state
+            .applied_market_settlements
+            .contains(&1));
+
+        fault
+            .execute_batch("DROP TRIGGER fail_settlement_ack")
+            .unwrap();
+        let retry = market.drain_settlements(&host);
+        assert_eq!(
+            retry
+                .iter()
+                .map(QueuedSettlement::input)
+                .collect::<Vec<_>>(),
+            queued
+                .iter()
+                .map(QueuedSettlement::input)
+                .collect::<Vec<_>>()
+        );
+        let retried = commit_settlements(&mut host, &retry, &ack.decided_settlement_ids);
+        assert_eq!(
+            retried.tick_result.market_settlement_outcomes,
+            output.tick_result.market_settlement_outcomes
+        );
+        assert!(
+            !retried.events.iter().any(|event| matches!(event,
+            dawn_core::DomainEvent::ShipFitted(fitted) if fitted.ship_id == ship)),
+            "duplicate delivery must not emit a second cargo mutation"
+        );
+        let ack =
+            market.acknowledge_settlements(&retry, &retried.tick_result.market_settlement_outcomes);
+        assert_eq!(ack.decided_settlement_ids, vec![1, 2]);
+        assert_eq!(ack.rejected_players, vec![player]);
+        assert_eq!(
+            market
+                .db
+                .settlement(SettlementId(1))
+                .unwrap()
+                .unwrap()
+                .status,
+            SettlementStatus::Applied
+        );
+        assert_eq!(
+            market
+                .db
+                .settlement(SettlementId(2))
+                .unwrap()
+                .unwrap()
+                .status,
+            SettlementStatus::Terminal
+        );
+        assert!(host
+            .node()
+            .take_snapshot_at(0)
+            .node_state
+            .applied_market_settlements
+            .contains(&1));
+        commit_settlements(&mut host, &[], &ack.decided_settlement_ids);
+        assert!(!host
+            .node()
+            .take_snapshot_at(0)
+            .node_state
+            .applied_market_settlements
+            .contains(&1));
+        assert!(market.drain_settlements(&host).is_empty());
+    }
+
+    #[test]
+    fn settlement_waits_while_undocked_and_retries_after_a_committed_redock() {
+        let mut market = MarketRuntime::open_in_memory();
+        let player = PlayerId(1);
+        let (node, ship) = docked_node(NodeId(0), player, 1);
+        let mut host = RuntimeFrameHost::new(
+            node,
+            InMemoryJournal::new(),
+            LocalRuntimeConsensus,
+            RuntimeFramePolicy::local_durable(0),
+        );
+        place_asks(&mut market.db, player, ship, 1);
+        let request = |request| dawn_sector::transition::AuthenticatedClientRequest {
+            session_index: 0,
+            player_id: player,
+            request,
+        };
+        host.run_frame(FrameInput {
+            authenticated_requests: &[request(ClientRequest::Undock)],
+            ..FrameInput::lock_only(&[])
+        })
+        .unwrap();
+        assert_eq!(host.node().docked_station(ship), None);
+        assert!(market.drain_settlements(&host).is_empty());
+        assert!(market.settlement_polling_enabled);
+        assert_eq!(
+            market
+                .db
+                .settlement(SettlementId(1))
+                .unwrap()
+                .unwrap()
+                .status,
+            SettlementStatus::Pending
+        );
+
+        host.run_frame(FrameInput {
+            authenticated_requests: &[request(ClientRequest::Dock {
+                station: StationId(0),
+            })],
+            ..FrameInput::lock_only(&[])
+        })
+        .unwrap();
+        assert_eq!(host.node().docked_station(ship), Some(StationId(0)));
+        let queued = market.drain_settlements(&host);
+        assert_eq!(queued.len(), 1);
+        let output = commit_settlements(&mut host, &queued, &[]);
+        assert_committed_scrap(&output, ship, 0);
+        assert_eq!(
+            output.tick_result.market_settlement_outcomes[0].status,
+            MarketSettlementStatus::Applied
+        );
+        let ack =
+            market.acknowledge_settlements(&queued, &output.tick_result.market_settlement_outcomes);
+        assert_eq!(ack.decided_settlement_ids, vec![1]);
+    }
 
     #[test]
     fn order_validation_rejects_zero_and_overflowing_values() {
@@ -448,5 +924,140 @@ mod tests {
         assert_eq!(result.notice, "Market order rejected");
         assert!(runtime.db.open_orders_for(PlayerId(1)).unwrap().is_empty());
         assert_eq!(runtime.db.currency_balance(PlayerId(1)).unwrap(), 100);
+    }
+
+    #[tokio::test]
+    async fn clustered_delivery_routes_one_shared_page_to_each_sector() {
+        let ids = [NodeId(0), NodeId(1), NodeId(2)];
+        let (endpoints, _partitioned) = crate::cluster::spawn_raft_actors(&ids);
+        let mut hosts = Vec::new();
+        let mut eligible_ships = Vec::new();
+
+        for (&node_id, (raft, committed_rx)) in ids.iter().zip(endpoints) {
+            let player_id = PlayerId(1_000 + u64::from(node_id.0));
+            let (node, ship_id) = docked_node(node_id, player_id, 2);
+            eligible_ships.push((player_id, ship_id));
+            hosts.push(RuntimeFrameHost::new(
+                node,
+                InMemoryJournal::new(),
+                OwnedRaftRuntimeConsensus::new(raft, committed_rx),
+                RuntimeFramePolicy::local_durable(0),
+            ));
+        }
+
+        let mut market = MarketRuntime::open_in_memory();
+        for index in 1..=2_000_u64 {
+            let (player_id, ship_id) = match index {
+                1_500 => eligible_ships[1],
+                2_000 => eligible_ships[2],
+                _ => (PlayerId(10_000 + index), ShipId::new(NodeId(9), index)),
+            };
+            place_asks(&mut market.db, player_id, ship_id, 1);
+        }
+
+        let mut sessions = Vec::new();
+        let mut player_sector = std::collections::HashMap::new();
+        let ship_player = std::collections::HashMap::new();
+        let mut aoi_delivery = super::super::AoiDelivery::new(super::super::AOI_CELL_SIZE);
+        let mut decided_settlements = vec![Vec::new(); hosts.len()];
+        let requests: Vec<Vec<dawn_sector::transition::AuthenticatedClientRequest>> =
+            (0..hosts.len()).map(|_| Vec::new()).collect();
+
+        let mut run_tick = |market: &mut MarketRuntime| {
+            super::super::runtime::run_cluster_runtime_tick(
+                super::super::runtime::ClusterRuntimeTickContext {
+                    hosts: &mut hosts,
+                    sessions: &mut sessions,
+                    player_sector: &mut player_sector,
+                    ship_player: &ship_player,
+                    aoi_delivery: &mut aoi_delivery,
+                    market,
+                    decided_settlements: &mut decided_settlements,
+                },
+                &requests,
+            )
+        };
+        let first_tick = run_tick(&mut market);
+        assert!(first_tick
+            .iter()
+            .all(|output| output.tick_result.market_settlement_outcomes.is_empty()));
+
+        let second_tick = run_tick(&mut market);
+        assert!(second_tick[0]
+            .tick_result
+            .market_settlement_outcomes
+            .is_empty());
+        for (sector, id) in [(1, 1_500), (2, 2_000)] {
+            assert_eq!(
+                second_tick[sector].tick_result.market_settlement_outcomes,
+                vec![MarketSettlementOutcome {
+                    settlement_id: id,
+                    status: MarketSettlementStatus::Applied
+                }]
+            );
+            assert_committed_scrap(&second_tick[sector], eligible_ships[sector].1, 1);
+            assert_eq!(
+                market
+                    .db
+                    .settlement(SettlementId(id as i64))
+                    .unwrap()
+                    .unwrap()
+                    .status,
+                SettlementStatus::Applied
+            );
+        }
+
+        // More backlog spans another boundary; each fixed-order owner must
+        // receive its eligible work, including the first Sector in the loop.
+        for index in 2_001..=3_001_u64 {
+            let (player_id, ship_id) = match index {
+                2_001 => eligible_ships[2],
+                2_500 => eligible_ships[0],
+                3_001 => eligible_ships[1],
+                _ => (PlayerId(10_000 + index), ShipId::new(NodeId(9), index)),
+            };
+            place_asks(&mut market.db, player_id, ship_id, 1);
+        }
+        for expected in [vec![(0, 2_500, 1), (2, 2_001, 0)], vec![(1, 3_001, 0)]] {
+            let outputs = run_tick(&mut market);
+            assert_eq!(
+                outputs
+                    .iter()
+                    .map(|o| o.tick_result.market_settlement_outcomes.len())
+                    .sum::<usize>(),
+                expected.len()
+            );
+            for (sector, id, remaining) in expected {
+                assert_eq!(
+                    outputs[sector].tick_result.market_settlement_outcomes,
+                    vec![MarketSettlementOutcome {
+                        settlement_id: id,
+                        status: MarketSettlementStatus::Applied
+                    }]
+                );
+                assert_committed_scrap(&outputs[sector], eligible_ships[sector].1, remaining);
+                assert_eq!(
+                    market
+                        .db
+                        .settlement(SettlementId(id as i64))
+                        .unwrap()
+                        .unwrap()
+                        .status,
+                    SettlementStatus::Applied
+                );
+            }
+        }
+        for id in [1, 1_000, 2_999] {
+            assert_eq!(
+                market
+                    .db
+                    .settlement(SettlementId(id))
+                    .unwrap()
+                    .unwrap()
+                    .status,
+                SettlementStatus::Pending,
+                "unowned work remains pending"
+            );
+        }
     }
 }
