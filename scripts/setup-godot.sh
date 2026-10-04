@@ -25,7 +25,7 @@ case "$(uname -s)" in
 		;;
 	*)
 		asset="Godot_v${version}_win64.exe.zip"
-		exe_path="$install_dir/Godot_v${version}_win64.exe"
+		exe_path="$install_dir/Godot_v${version}_win64_console.exe"
 		;;
 esac
 client_dir="$repo_root/client"
@@ -64,12 +64,12 @@ install_godot() {
 
 	base_url="https://github.com/godotengine/godot/releases/download/$version"
 	echo "Downloading $asset ($version) from godotengine/godot releases ..."
-	curl --fail --silent --show-error --location "$base_url/$asset" -o "$tmp_dir/$asset"
-	curl --fail --silent --show-error --location "$base_url/SHA512-SUMS.txt" -o "$tmp_dir/SHA512-SUMS.txt"
+	curl --fail --silent --show-error --location --connect-timeout 20 --max-time 180 "$base_url/$asset" -o "$tmp_dir/$asset"
+	curl --fail --silent --show-error --location --connect-timeout 20 --max-time 180 "$base_url/SHA512-SUMS.txt" -o "$tmp_dir/SHA512-SUMS.txt"
 
-	expected_sum="$(grep " $asset\$" "$tmp_dir/SHA512-SUMS.txt" | awk '{print $1}')"
-	if [ -z "$expected_sum" ]; then
-		echo "Error: could not find a checksum for $asset in SHA512-SUMS.txt" >&2
+	expected_sum="$(awk -v asset="$asset" '$2 == asset {print $1}' "$tmp_dir/SHA512-SUMS.txt")"
+	if [[ ! "$expected_sum" =~ ^[[:xdigit:]]{128}$ ]]; then
+		echo "Error: expected exactly one SHA512 checksum for $asset in SHA512-SUMS.txt" >&2
 		exit 1
 	fi
 
@@ -90,6 +90,10 @@ install_godot() {
 
 	echo "Checksum verified. Extracting ..."
 	unzip -q -o "$tmp_dir/$asset" -d "$install_dir"
+	if [ ! -x "$exe_path" ]; then
+		echo "Error: downloaded archive is missing the executable: $exe_path" >&2
+		exit 1
+	fi
 
 	echo "Installed: $exe_path"
 }
@@ -158,7 +162,7 @@ initialize_gdunit() {
 		'"$godot_binary" --headless --log-file .godot-test-logs/gdunit-copy.log --path . --quiet -s res://addons/gdUnit4/bin/GdUnitCopyLog.gd $filtered_args > /dev/null'
 
 	echo "Importing Godot project and warming script-class cache ..."
-	"$exe_path" --headless --editor --quit-after 3 --path "$client_dir"
+	"$exe_path" --headless --editor --import --path "$client_dir" --log-file "$client_dir/.godot-test-logs/import.log"
 
 	if [ "$run_tests" -eq 1 ]; then
 		echo "Running GdUnit4 tests ..."

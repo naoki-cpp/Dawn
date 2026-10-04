@@ -7,6 +7,17 @@
 
 ## Setup
 
+The editor and CI use Godot **4.7.2-stable**, pinned in `.godot-version`.
+`dawn-client-gdext` retains the `api-4-6` API baseline and the extension's
+`compatibility_minimum = "4.6"`: updating the runtime does not require exposing
+new engine APIs. Rebuild the extension before testing the updated engine.
+
+Both setup scripts wait for the complete `--headless --editor --import` run
+and store its log at `client/.godot-test-logs/import.log`. On Windows they use
+the console executable so process completion and exit codes are observable.
+Downloads have connection/transfer timeouts and must pass SHA512 validation;
+PowerShell uses .NET hashing without requiring the `Get-FileHash` cmdlet.
+
 `client/addons/` is `.gitignore`d. Local developers may install addons from
 the Godot editor's AssetLib, while CI restores the pinned GdUnit4 release with
 `scripts/install-gdunit.sh`. **On first local setup, search for "GdUnit4"
@@ -56,7 +67,7 @@ directory and applies the pinned-version GdUnit4 compatibility patches:
 scripts/setup-godot.ps1 -RunTests
 ```
 
-> **Compatibility patches (GdUnit4 v6.1.3 × Godot 4.6.x)**: the setup
+> **Compatibility patches (GdUnit4 v6.1.3 × Godot 4.6/4.7)**: the setup
 > scripts keep the following patches idempotent for local AssetLib installs
 > and the CI copy of the addon (re-apply after any reinstall if running the
 > test runner directly):
@@ -97,6 +108,31 @@ scripts/setup-godot.ps1 -RunTests
 > own warning states), but this project's client tests are already restricted
 > to scene-tree-free pure logic (see "What is testable vs out of scope"
 > below), so this doesn't lose coverage here.
+
+## Godot 4.7.2 upgrade validation
+
+Validated on Windows on 2026-10-04:
+
+- The official editor archive passed SHA512 verification.
+- The Windows setup script was verified through a fresh download and its
+  `-RunTests` entry point (220 tests passed). The sh setup was checked with
+  Git Bash on Windows; Linux/macOS execution remains covered by CI/platform
+  testing rather than this local run.
+- The rebuilt GDExtension loaded with API 4.6 and runtime 4.7.2.
+- Rust client-core/GDExtension tests passed (120 tests).
+- GdUnit4 6.1.3 passed all 220 tests in both headless and Vulkan Forward+
+  runs (21 suites, no failures or skipped tests).
+- The main scene ran for 120 frames under Vulkan Forward+ on Intel UHD
+  Graphics and exited successfully without startup or shader errors.
+- Six `!is_inside_tree()` diagnostics in `main_test.gd` also occur under
+  4.6.3 with the same fixtures; they are pre-existing test diagnostics.
+
+Connected visual playtesting is still required before declaring the upgrade
+fully verified: compare normal flight/camera movement, warp departure/arrival
+and celestial parallax, docking/undocking and HUD state, and star/planet/marker
+visibility against 4.6.3. The automated runs do not establish frame-time or
+image-quality improvements. HDR output and new material features are separate
+follow-up work.
 
 ## What is testable vs out of scope
 
