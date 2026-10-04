@@ -20,13 +20,26 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $version = (Get-Content (Join-Path $repoRoot ".godot-version") -Raw).Trim()
 $installDir = Join-Path $repoRoot ".tools/godot/$version"
 $asset = "Godot_v${version}_win64.exe.zip"
-$exePath = Join-Path $installDir "Godot_v${version}_win64.exe"
+$exePath = Join-Path $installDir "Godot_v${version}_win64_console.exe"
 $clientDir = Join-Path $repoRoot "client"
 $gdUnitDir = Join-Path $clientDir "addons/gdUnit4"
 
 if ($PrintPath) {
 	Write-Output $exePath
 	exit 0
+}
+
+function Receive-Download([string]$Uri, [string]$Path) {
+	if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
+		& curl.exe --fail --silent --show-error --location --connect-timeout 20 --max-time 180 $Uri --output $Path
+		if ($LASTEXITCODE -ne 0) {
+			throw "Download failed: $Uri (exit code $LASTEXITCODE)"
+		}
+	}
+	else {
+		$ProgressPreference = "SilentlyContinue"
+		Invoke-WebRequest -UseBasicParsing -TimeoutSec 180 -Uri $Uri -OutFile $Path
+	}
 }
 
 function Install-Godot {
@@ -45,15 +58,23 @@ function Install-Godot {
 		$sumsPath = Join-Path $tmpDir "SHA512-SUMS.txt"
 
 		Write-Output "Downloading $asset ($version) from godotengine/godot releases ..."
-		Invoke-WebRequest -Uri "$baseUrl/$asset" -OutFile $zipPath
-		Invoke-WebRequest -Uri "$baseUrl/SHA512-SUMS.txt" -OutFile $sumsPath
+		Receive-Download -Uri "$baseUrl/$asset" -Path $zipPath
+		Receive-Download -Uri "$baseUrl/SHA512-SUMS.txt" -Path $sumsPath
 
-		$sumsLine = Select-String -Path $sumsPath -Pattern ([regex]::Escape($asset)) | Select-Object -First 1
-		if ($null -eq $sumsLine) {
-			throw "Could not find a checksum for $asset in SHA512-SUMS.txt"
+		$sumsLines = @(Get-Content -Encoding UTF8 $sumsPath | Where-Object { ($_ -split '\s+')[1] -eq $asset })
+		if ($sumsLines.Count -ne 1) {
+			throw "Expected exactly one checksum for $asset in SHA512-SUMS.txt"
 		}
-		$expectedSum = ($sumsLine.Line -split '\s+')[0].ToLower()
-		$actualSum = (Get-FileHash -Path $zipPath -Algorithm SHA512).Hash.ToLower()
+		$expectedSum = ($sumsLines[0] -split '\s+')[0].ToLowerInvariant()
+		$stream = [System.IO.File]::OpenRead($zipPath)
+		$hasher = [System.Security.Cryptography.SHA512]::Create()
+		try {
+			$actualSum = [BitConverter]::ToString($hasher.ComputeHash($stream)).Replace("-", "").ToLowerInvariant()
+		}
+		finally {
+			$hasher.Dispose()
+			$stream.Dispose()
+		}
 
 		if ($expectedSum -ne $actualSum) {
 			throw "SHA512 mismatch for $asset`n  expected: $expectedSum`n  actual:   $actualSum"
@@ -61,10 +82,17 @@ function Install-Godot {
 
 		Write-Output "Checksum verified. Extracting ..."
 		Expand-Archive -Path $zipPath -DestinationPath $installDir -Force
+		if (!(Test-Path -LiteralPath $exePath)) {
+			throw "Downloaded archive is missing the console executable: $exePath"
+		}
 
 		Write-Output "Installed: $exePath"
 	}
 	finally {
+		$tempRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+		if (![System.IO.Path]::GetFullPath($tmpDir).StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase)) {
+			throw "Temporary directory is outside the expected temp root: $tmpDir"
+		}
 		Remove-Item -Recurse -Force $tmpDir -ErrorAction SilentlyContinue
 	}
 }
@@ -73,7 +101,7 @@ function Set-TextIfChanged([string]$Path, [string]$From, [string]$To) {
 	if (!(Test-Path $Path)) {
 		throw "Required GdUnit4 file is missing: $Path"
 	}
-	$text = Get-Content -Raw -Path $Path
+	$text = (Get-Content -Raw -Encoding UTF8 -Path $Path).Replace("`r`n", "`n")
 	$updated = $text.Replace($From, $To)
 	if ($updated -ne $text) {
 		Set-Content -Path $Path -Value $updated -NoNewline -Encoding UTF8
@@ -136,7 +164,7 @@ function Initialize-GdUnit {
 		-To '"$godot_binary" --headless --log-file .godot-test-logs/gdunit-copy.log --path . --quiet -s res://addons/gdUnit4/bin/GdUnitCopyLog.gd $filtered_args > /dev/null'
 
 	Write-Output "Importing Godot project and warming script-class cache ..."
-	& $exePath --headless --editor --quit-after 3 --path $clientDir
+	& $exePath --headless --editor --import --path $clientDir --log-file (Join-Path $logDir "import.log")
 	$godotExitCode = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
 	if ($godotExitCode -ne 0) {
 		throw "Godot project import failed with exit code $godotExitCode"

@@ -19,8 +19,8 @@ dawn-client-core = { path = "../dawn-client-core" }
 # Client->server wire schema only (ADR-0041) -- no transport/runtime
 # dependency, unlike dawn-server which also owns the server transport.
 dawn-protocol         = { path = "../dawn-protocol" }
-# api-4-6 pins the GDExtension API level to match the repo's pinned Godot
-# build (.godot-version: 4.6.3-stable).
+# Keep the GDExtension API baseline at 4.6 while testing Godot 4.7.2.
+# The engine pin lives in .godot-version; this upgrade uses no new engine APIs.
 godot             = { version = "0.5", features = ["api-4-6"] }
 
 [dev-dependencies]
