@@ -145,31 +145,26 @@ float milkyway_density(vec3 gal) {
 	// Galactic latitude (distance from the plane)
 	float lat  = abs(gal.y);
 
-	// Galactic longitude (angle around the plane)
-	float lon  = atan(gal.z, gal.x);
-
 	// --- Band (thin disk) ---
-	// Real scale height: ~350 pc.  We widen it for visibility.
-	float disk  = exp(-lat * 4.5);
+	// Angular falloff is an artistic approximation, not a distance survey.
+	float disk  = exp(-lat * 11.0);
 
 	// --- Galactic bulge ---
 	// The galactic center is ~8 kpc away, appearing as a bright bulge
 	// in one direction.  We model it as a Gaussian in galactic coordinates.
 	// Direction of galactic center in our rotated frame: positive X.
 	float bulge_dist = length(gal - vec3(1.0, 0.0, 0.0));
-	float bulge      = exp(-bulge_dist * bulge_dist * 5.0) * 1.8;
+	float bulge      = exp(-bulge_dist * bulge_dist * 9.0) * 1.4;
 
-	// --- Spiral arm modulation ---
-	// Milky Way has 4 main arms; pitch angle ~12.5° → b ≈ tan(12.5°) ≈ 0.222
-	// Arm pattern repeats every π/2 radians in longitude.
-	// We use a cosine to create 4-fold density variation.
-	float arm_phase = lon * 2.0 - log(max(0.01, length(gal.xz))) / 0.222;
-	float arms      = 0.5 + 0.5 * cos(arm_phase * 2.0);
+	// --- Unresolved stellar cloud modulation ---
+	// An inside-galaxy view has irregular star clouds, not a face-on spiral.
+	float arms = smoothstep(0.22, 0.78,
+		fbm(gal * 6.0 + vec3(3.0, -2.0, 1.0)));
 
 	// --- Disk clumping (molecular cloud patchiness) ---
 	float clump = fbm(gal * 2.5 + vec3(0.0, 0.0, 3.0)) * 0.5 + 0.5;
 
-	return disk * (0.4 + 0.4 * arms + 0.2 * clump) + bulge * (1.0 - lat);
+	return disk * (0.25 + 0.55 * arms + 0.2 * clump) + bulge * (1.0 - lat);
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -233,7 +228,7 @@ void sky() {
 
 		// ── Milky Way ────────────────────────────────────────────────────────
 		float mw  = milkyway_density(gal);
-		// Core color: warm blue-white (hot young O/B stars + scattered blue starlight)
+		// Warm unresolved bulge light and a cooler, fainter outer band.
 		vec3 mw_core  = milkyway_core_color;
 		// Outer disk: slightly warmer (older K/G stars dominate by count)
 		vec3 mw_outer = milkyway_outer_color;
@@ -245,18 +240,16 @@ void sky() {
 		//
 		// Real nebulae are concentrated near the galactic plane.
 		// Plane concentration factor: drops off with galactic latitude.
-		float plane_weight = exp(-gal_lat * 2.2);
+		float plane_weight = exp(-gal_lat * 14.0);
 
-		// A broad, low-frequency dust layer keeps the background visually rich
-		// across the whole frame instead of confining all colour to a razor-thin
-		// Milky Way stripe. It is presentation-only and has no gameplay meaning.
+		// Faint diffuse light stays near the galactic plane; high latitude stays black.
 		float broad_cloud_noise = fbm(dir * 0.95 + vec3(-0.8, 1.4, 2.1));
 		float broad_cloud = pow(max(0.0, broad_cloud_noise - 0.27), 1.45)
 			* plane_weight;
 		float cloud_highlight = pow(max(0.0, broad_cloud_noise - 0.48), 2.0)
 			* plane_weight;
-		col += nebula_secondary_color * broad_cloud * nebula_strength * 0.95;
-		col += nebula_highlight_color * cloud_highlight * nebula_strength * 0.55;
+		col += nebula_secondary_color * broad_cloud * nebula_strength * 0.08;
+		col += nebula_highlight_color * cloud_highlight * nebula_strength * 0.06;
 
 		// Three FBM regions at different scales + offsets.
 		// Spectral line colors (wavelength → linear RGB approximation):
@@ -277,8 +270,13 @@ void sky() {
 
 		// Dust absorption (dark lanes inside dense regions)
 		float dust      = fbm(dir * 3.5 + vec3(0.0, 1.0, 0.3));
-		float dust_mask = smoothstep(0.52, 0.72, dust) * max(neb1, neb2) * 0.50;
-		col            *= 1.0 - dust_mask;
+		// Dust attenuates unresolved starlight, even where no gas emits light.
+		// A warped narrow lane breaks the band into irregular dark filaments.
+		float lane_offset = (fbm(gal * 5.0 + vec3(7.0, 2.0, -4.0)) - 0.5) * 0.10;
+		float lane = exp(-pow((gal.y + lane_offset) / 0.045, 2.0));
+		float optical_depth = lane * (0.6 + 3.0 * smoothstep(0.30, 0.68, dust));
+		col = ambient_color + (col - ambient_color)
+			* exp(-optical_depth * vec3(0.78, 1.0, 1.25));
 	}
 
 	// ── Local star disc + corona (ADR-0025) ──────────────────────────────
@@ -348,13 +346,7 @@ void sky() {
 
 	}
 
-	// The reference look falls into a darker brown-black floor while keeping
-	// the starfield readable. This is a presentation gradient over world
-	// direction, not a physical horizon or a change to world lighting.
-	if (!bake_pass) {
-		float lower_vignette = smoothstep(-0.86, 0.12, dir.y);
-		col *= mix(0.62, 1.0, lower_vignette);
-	}
+	// No world-up vignette: empty space has no horizon or atmospheric gradient.
 
 	col = max(col, vec3(0.0));
 	COLOR = col;
