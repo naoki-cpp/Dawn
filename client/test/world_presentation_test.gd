@@ -73,7 +73,7 @@ func test_render_scale_is_queried_from_world_space_authority() -> void:
 	assert_float(presentation._render_scale()).is_equal_approx(0.25, 0.0001)
 
 
-func test_space_background_uses_a_warm_nebula_palette() -> void:
+func test_space_background_uses_a_restrained_galactic_palette() -> void:
 	var presentation := WorldPresentationScript.new()
 	var root: Node3D = auto_free(Node3D.new()) as Node3D
 	add_child(root)
@@ -87,12 +87,12 @@ func test_space_background_uses_a_warm_nebula_palette() -> void:
 	var highlight: Color = sky_material.get_shader_parameter("nebula_highlight_color") as Color
 
 	assert_float(sky_material.get_shader_parameter("nebula_strength") as float) \
-		.is_equal_approx(0.72, 0.0001)
-	assert_float(primary.r).is_equal_approx(1.00, 0.0001)
-	assert_float(primary.g).is_equal_approx(0.16, 0.0001)
-	assert_float(secondary.r).is_equal_approx(0.72, 0.0001)
-	assert_float(secondary.g).is_equal_approx(0.24, 0.0001)
-	assert_float(highlight.g).is_equal_approx(0.46, 0.0001)
+		.is_equal_approx(0.18, 0.0001)
+	assert_float(primary.r).is_equal_approx(0.80, 0.0001)
+	assert_float(primary.g).is_equal_approx(0.12, 0.0001)
+	assert_float(secondary.r).is_equal_approx(0.32, 0.0001)
+	assert_float(secondary.g).is_equal_approx(0.38, 0.0001)
+	assert_float(highlight.g).is_equal_approx(0.48, 0.0001)
 
 
 func test_starfield_is_built_and_pinned_to_the_camera() -> void:

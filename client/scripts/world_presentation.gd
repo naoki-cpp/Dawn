@@ -452,14 +452,14 @@ func _setup_space_environment(parent: Node) -> void:
 	var sky_mat := ShaderMaterial.new()
 	sky_mat.shader = shader
 	_sky_mat = sky_mat
-	sky_mat.set_shader_parameter("nebula_strength", 0.72)
-	sky_mat.set_shader_parameter("milkyway_strength", 0.16)
-	sky_mat.set_shader_parameter("milkyway_core_color", Color(0.94, 0.56, 0.28))
-	sky_mat.set_shader_parameter("milkyway_outer_color", Color(0.48, 0.20, 0.08))
-	sky_mat.set_shader_parameter("nebula_primary_color", Color(1.00, 0.16, 0.05))
-	sky_mat.set_shader_parameter("nebula_secondary_color", Color(0.72, 0.24, 0.08))
-	sky_mat.set_shader_parameter("nebula_highlight_color", Color(1.00, 0.46, 0.16))
-	sky_mat.set_shader_parameter("ambient_color", Color(0.006, 0.002, 0.001))
+	sky_mat.set_shader_parameter("nebula_strength", 0.18)
+	sky_mat.set_shader_parameter("milkyway_strength", 0.11)
+	sky_mat.set_shader_parameter("milkyway_core_color", Color(0.88, 0.80, 0.66))
+	sky_mat.set_shader_parameter("milkyway_outer_color", Color(0.62, 0.68, 0.78))
+	sky_mat.set_shader_parameter("nebula_primary_color", Color(0.80, 0.12, 0.18))
+	sky_mat.set_shader_parameter("nebula_secondary_color", Color(0.32, 0.38, 0.48))
+	sky_mat.set_shader_parameter("nebula_highlight_color", Color(0.28, 0.48, 0.52))
+	sky_mat.set_shader_parameter("ambient_color", Color(0.0003, 0.0004, 0.0006))
 
 	var sky := Sky.new()
 	_sky = sky
