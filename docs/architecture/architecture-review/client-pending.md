@@ -4,12 +4,12 @@ audience : AI Agent / Human Developer
 update   : /architecture-review で状態が変わるたびに更新
 related  : docs/architecture/architecture-review/client.md（構造評価）,
            docs/architecture/architecture-review/client-completed.md（完了済みログ）
-date     : 2026-08-25
+date     : 2026-10-31
 ---
 
 # Architecture Review — Dawn Client（未完項目）
 
-C-1〜C-8、C-10〜C-19は解消済み。C-9とC-20はtrigger付きで保留する。
+C-1〜C-8、C-10〜C-19は解消済み。C-9とC-20はtrigger付きで保留し、C-21はFixとする。
 実装詳細と完了条件は各GitHub Issueに置き、ここでは判断だけを保持する。
 
 ## C-9（保留）: `hud_manager.gd` watch帯
@@ -43,6 +43,18 @@ sky/sun/fog/starfield bake、warp tunnel、player material/tactical overlayを�
 **判断: Defer。** production部分が700行を超える、二つ以上のvisual familyを同時編集する回帰が続く、
 またはtest fixtureがenvironmentとplayer effectの両方を常に構築するようになったら、最初に
 sky/sun/fog/starfield bakeを`SpaceEnvironmentPresentation`へ抽出する。抽象的なvisual managerは作らない。
+
+2026-10-31再観測: 637行で据え置き。`_setup_starfield`/`_update_starfield`がcatalogue合成、
+shader/culling設定、camera追従を知る点も監視する。独立したstar-render変更が複数回callerと
+`Starfield`へ波及するなら、まず既存Starfieldへ責務を寄せる。単なる行移動とforwardingは採らない。
+
+## C-21（Fix）: test専用のsystem-name Dictionary投影
+
+**根本原因:** typed WorldSession導入後も`world_session_gd.rs:183`がcoreのsystem-name mapを
+Dictionaryへコピーする。callerは`world_session_test.gd:53`だけで、productionでは未使用。
+**判断: Fix。** Godot公開投影と投影専用assertを削除する。core mapとそのingestion test、
+typed navigation/f64 testは維持し、代わりのmirror型は追加しない。
+新しいGitHub Issueはまだ起票していない。Godot環境準備の分散はserver側R-10で追跡する。
 
 採らない方針:
 

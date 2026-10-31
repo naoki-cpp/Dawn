@@ -250,3 +250,10 @@ and compares archive overlap with fixed 8 KiB buffers. Journal framing, indices,
 checksums, torn-tail repair, archive retry, alias rejection, and post-rename
 poisoning remain unchanged. Regression tests cover lazy corruption, single-batch
 retention, forced small buffers, and multi-chunk archive retry.
+
+### 2026-10-31 — R-9 merge confirmation
+
+PR #369 is merged at `52dd4b5`; issue #346 is closed. FileJournal's bounded
+read/compaction implementation is now on main. The persistence grade advances
+from B+ to A-; the overall B+ remains due to separate preparation/orchestration
+watch items, not whole-log storage materialization.
