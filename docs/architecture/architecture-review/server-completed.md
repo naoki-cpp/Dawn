@@ -240,3 +240,13 @@ are no longer deleted and rebuilt wholesale. `open_orders_for`,
 stable ordering. Pending pages use a cyclic ID cursor so an unroutable early
 intent cannot starve later outbox rows. Regression tests cover unrelated-book
 write isolation, page progress, restart behavior, and transaction rollback.
+
+### 2026-10-31 — FileJournal bounded working memory (#346)
+
+`read_from` owns a buffered reader and exposes records only after validating
+their complete batch. It moves payloads rather than cloning the suffix; later
+corruption becomes an iterator error. Compaction copies validated file ranges
+and compares archive overlap with fixed 8 KiB buffers. Journal framing, indices,
+checksums, torn-tail repair, archive retry, alias rejection, and post-rename
+poisoning remain unchanged. Regression tests cover lazy corruption, single-batch
+retention, forced small buffers, and multi-chunk archive retry.

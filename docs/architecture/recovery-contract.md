@@ -104,6 +104,14 @@ The production checkpoint and recovery path has one explicit storage boundary:
   ECS state plus the canonical `NodeState` containing allocator,
   ownership/active-ship maps, docking context, and cross-tick bot/auto-jump
   queues.
+- File journal iteration validates one complete batch before exposing its
+  records and reports later corruption when iteration reaches it. Consumers
+  must handle iterator errors, not only errors constructing the iterator.
+  Reading and compaction retain at most one decoded batch (the existing
+  64 MiB payload limit plus bounded record metadata); archive copying and
+  overlap comparison use fixed 8 KiB buffers. This bounds storage-internal
+  working memory independently of journal length, not memory retained by
+  callers collecting records. The on-disk journal format is unchanged.
 - Startup restores the checkpoint with its catalog fingerprint, then applies a
   contiguous journal tail. If no checkpoint exists, the configured genesis
   state is constructed once and the same RecoveryDelta reader replays from
