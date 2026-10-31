@@ -23,6 +23,10 @@
 //!
 //! A trailing incomplete batch is truncated on open. A complete batch with a
 //! bad digest or commit marker is rejected as corruption.
+//!
+//! Reads validate one bounded batch at a time; iteration reports corruption
+//! when it reaches that batch, without yielding any of its records. Compaction
+//! scans with the same decoder and copies validated ranges in fixed chunks.
 
 use std::fmt;
 use std::fs::{File, OpenOptions};
@@ -329,7 +333,7 @@ impl FileJournal {
         };
         let archive_end =
             archive_end.ok_or(JournalError::InvalidCompactionBoundary { boundary })?;
-        let hot_bytes = std::fs::read(&self.path)?;
+        let mut hot_reader = File::open(&self.path)?;
         if archive_scan.next_index > self.base_index {
             let mut archive_overlap_start = None;
             let mut archive_overlap_end = None;
@@ -363,7 +367,7 @@ impl FileJournal {
                     archive_path,
                     archive_start,
                     archive_end,
-                    &hot_bytes,
+                    &mut hot_reader,
                     hot_start,
                     hot_end,
                 )?
@@ -392,7 +396,7 @@ impl FileJournal {
                 }
             };
             let end = archive_end;
-            append_archive_bytes(archive_path, &hot_bytes[start as usize..end as usize])?;
+            append_archive_range(archive_path, &mut hot_reader, start, end)?;
         }
 
         let tmp = tmp_path_for(&self.path);
@@ -406,7 +410,8 @@ impl FileJournal {
             writer.write_all(MAGIC)?;
             writer.write_all(&boundary.0.to_le_bytes())?;
             writer.write_all(&header_checksum(boundary).to_le_bytes())?;
-            writer.write_all(&hot_bytes[boundary_offset as usize..])?;
+            let hot_end = hot_reader.metadata()?.len();
+            copy_range(&mut hot_reader, &mut writer, boundary_offset, hot_end)?;
             writer.flush()?;
             writer.get_ref().sync_all()?;
         }
@@ -503,23 +508,14 @@ impl DurableJournal for FileJournal {
                 available_from: self.base_index,
             });
         }
-        let mut records = Vec::new();
-        scan_file(&self.path, false, |first, _, _, batch| {
-            for (ordinal, entry) in batch.entries.iter().enumerate() {
-                let record_index = JournalIndex(first.0 + ordinal as u64);
-                if record_index >= index {
-                    records.push(JournalRecord {
-                        index: record_index,
-                        transition_id: batch.transition_id,
-                        context: batch.context,
-                        stream: entry.stream,
-                        ordinal: ordinal as u32,
-                        payload: entry.payload.clone(),
-                    });
-                }
-            }
-        })?;
-        Ok(Box::new(records.into_iter().map(Ok)))
+        let (reader, base_index) = open_reader(&self.path, false)?;
+        Ok(Box::new(RecordReader {
+            reader,
+            next_index: base_index,
+            requested: index,
+            records: Vec::new().into_iter(),
+            finished: false,
+        }))
     }
 
     fn next_index(&self) -> Result<JournalIndex, JournalError> {
@@ -579,35 +575,89 @@ fn paths_alias(left: &Path, right: &Path) -> io::Result<bool> {
     }
 }
 
+const COPY_BUFFER_BYTES: usize = 8 * 1024;
+
+fn copy_range(reader: &mut File, writer: &mut impl Write, start: u64, end: u64) -> io::Result<()> {
+    reader.seek(SeekFrom::Start(start))?;
+    copy_exact(
+        reader,
+        writer,
+        end.checked_sub(start)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "reversed journal range"))?,
+        &mut [0; COPY_BUFFER_BYTES],
+    )
+}
+
+fn copy_exact(
+    reader: &mut impl Read,
+    writer: &mut impl Write,
+    mut remaining: u64,
+    buffer: &mut [u8],
+) -> io::Result<()> {
+    if buffer.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "empty copy buffer",
+        ));
+    }
+    while remaining > 0 {
+        let len = remaining.min(buffer.len() as u64) as usize;
+        reader.read_exact(&mut buffer[..len])?;
+        writer.write_all(&buffer[..len])?;
+        remaining -= len as u64;
+    }
+    Ok(())
+}
+
 fn archive_range_matches_hot(
     archive_path: &Path,
     archive_start: u64,
     archive_end: u64,
-    hot_bytes: &[u8],
+    hot_reader: &mut File,
     hot_start: u64,
     hot_end: u64,
 ) -> Result<bool, JournalError> {
-    let hot_start = usize::try_from(hot_start).map_err(|_| JournalError::IndexOverflow)?;
-    let hot_end = usize::try_from(hot_end).map_err(|_| JournalError::IndexOverflow)?;
-    if archive_end < archive_start || hot_end > hot_bytes.len() || hot_end < hot_start {
+    if archive_end < archive_start
+        || hot_end < hot_start
+        || archive_end - archive_start != hot_end - hot_start
+    {
         return Ok(false);
     }
-
     let mut archive = File::open(archive_path)?;
     archive.seek(SeekFrom::Start(archive_start))?;
-    let mut remaining = archive_end - archive_start;
-    let mut hot_offset = hot_start;
-    let mut buffer = [0u8; 8 * 1024];
+    hot_reader.seek(SeekFrom::Start(hot_start))?;
+    ranges_match(
+        &mut archive,
+        hot_reader,
+        hot_end - hot_start,
+        &mut [0; COPY_BUFFER_BYTES],
+        &mut [0; COPY_BUFFER_BYTES],
+    )
+    .map_err(Into::into)
+}
+
+fn ranges_match(
+    left: &mut impl Read,
+    right: &mut impl Read,
+    mut remaining: u64,
+    left_buffer: &mut [u8],
+    right_buffer: &mut [u8],
+) -> io::Result<bool> {
+    let capacity = left_buffer.len().min(right_buffer.len());
+    if capacity == 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "empty comparison buffer",
+        ));
+    }
     while remaining > 0 {
-        let chunk_len = remaining.min(buffer.len() as u64) as usize;
-        archive.read_exact(&mut buffer[..chunk_len])?;
-        if hot_offset + chunk_len > hot_end
-            || buffer[..chunk_len] != hot_bytes[hot_offset..hot_offset + chunk_len]
-        {
+        let len = remaining.min(capacity as u64) as usize;
+        left.read_exact(&mut left_buffer[..len])?;
+        right.read_exact(&mut right_buffer[..len])?;
+        if left_buffer[..len] != right_buffer[..len] {
             return Ok(false);
         }
-        hot_offset += chunk_len;
-        remaining -= chunk_len as u64;
+        remaining -= len as u64;
     }
     Ok(true)
 }
@@ -629,10 +679,15 @@ fn ensure_archive(path: &Path, base_index: JournalIndex) -> Result<JournalScan, 
     Ok(scan)
 }
 
-fn append_archive_bytes(path: &Path, bytes: &[u8]) -> Result<(), JournalError> {
+fn append_archive_range(
+    path: &Path,
+    reader: &mut File,
+    start: u64,
+    end: u64,
+) -> Result<(), JournalError> {
     let file = OpenOptions::new().append(true).open(path)?;
     let mut writer = BufWriter::new(file);
-    writer.write_all(bytes)?;
+    copy_range(reader, &mut writer, start, end)?;
     writer.flush()?;
     writer.get_ref().sync_all()?;
     Ok(())
@@ -644,18 +699,11 @@ struct JournalScan {
     next_index: JournalIndex,
 }
 
-fn scan_file<F>(
+fn open_reader(
     path: &Path,
-    repair_trailing_batch: bool,
-    mut on_batch: F,
-) -> Result<JournalScan, JournalError>
-where
-    F: FnMut(JournalIndex, u64, u64, &JournalBatch),
-{
-    let file = OpenOptions::new()
-        .read(true)
-        .write(repair_trailing_batch)
-        .open(path)?;
+    writable: bool,
+) -> Result<(BufReader<File>, JournalIndex), JournalError> {
+    let file = OpenOptions::new().read(true).write(writable).open(path)?;
     let mut reader = BufReader::new(file);
     let mut magic = [0u8; 8];
     reader.read_exact(&mut magic)?;
@@ -671,162 +719,219 @@ where
     if u64::from_le_bytes(checksum_bytes) != header_checksum(base_index) {
         return Err(JournalError::HeaderChecksumMismatch);
     }
-    let mut next_index = base_index;
-    let mut truncate_at = None;
+    Ok((reader, base_index))
+}
 
-    loop {
-        let batch_start = reader.stream_position()?;
-        let record_count = match read_u32_or_eof(&mut reader) {
-            Ok(Some(value)) => value,
-            Ok(None) => break,
-            Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => {
-                truncate_at = Some(batch_start);
-                break;
-            }
-            Err(error) => return Err(error.into()),
-        };
-        let Some(first_index) = read_u64_or_incomplete(&mut reader)? else {
-            truncate_at = Some(batch_start);
-            break;
-        };
-        let first_index = JournalIndex(first_index);
-        if first_index != next_index {
-            return Err(JournalError::NonContiguousBatch {
-                expected: next_index,
-                actual: first_index,
-            });
-        }
-        let Some(transition_id) = read_u128_or_incomplete(&mut reader)? else {
-            truncate_at = Some(batch_start);
-            break;
-        };
-        let Some(sector_id) = read_u8_or_incomplete(&mut reader)? else {
-            truncate_at = Some(batch_start);
-            break;
-        };
-        let Some(owner_epoch) = read_u64_or_incomplete(&mut reader)? else {
-            truncate_at = Some(batch_start);
-            break;
-        };
-        let Some(mode) = read_u8_or_incomplete(&mut reader)? else {
-            truncate_at = Some(batch_start);
-            break;
-        };
-        let durability = match mode {
-            0 => DurabilityMode::Buffered,
-            1 => DurabilityMode::Synced,
-            _ => {
-                return Err(JournalError::InvalidFormat(
-                    "unknown durability mode".into(),
-                ))
-            }
-        };
-        let record_count = record_count as usize;
-        if record_count == 0 || record_count > MAX_RECORDS_PER_BATCH {
-            return Err(JournalError::InvalidFormat(
-                "invalid record count in committed batch".into(),
-            ));
-        }
-
-        let context = DurabilityContext {
-            sector_id: dawn_core::SectorId(sector_id),
-            owner_epoch,
-        };
-        let mut payloads = Vec::with_capacity(record_count);
-        let mut streams = Vec::with_capacity(record_count);
-        let mut total_bytes = 0usize;
-        let mut incomplete = false;
-        for _ in 0..record_count {
-            let Some(stream) = read_u8_or_incomplete(&mut reader)? else {
-                incomplete = true;
-                break;
-            };
-            let stream = match stream {
-                0 => JournalStream::RecoveryDelta,
-                1 => JournalStream::PublicEvent,
-                2 => JournalStream::ReliableEffect,
-                _ => return Err(JournalError::InvalidFormat("unknown journal stream".into())),
-            };
-            let Some(len) = read_u32_or_incomplete(&mut reader)? else {
-                incomplete = true;
-                break;
-            };
-            let len = len as usize;
-            if len > MAX_RECORD_BYTES {
-                return Err(JournalError::RecordTooLarge {
-                    actual: len,
-                    max: MAX_RECORD_BYTES,
-                });
-            }
-            total_bytes = total_bytes
-                .checked_add(len)
-                .ok_or(JournalError::BatchTooLarge {
-                    actual: usize::MAX,
-                    max: MAX_BATCH_BYTES,
-                })?;
-            if total_bytes > MAX_BATCH_BYTES {
-                return Err(JournalError::BatchTooLarge {
-                    actual: total_bytes,
-                    max: MAX_BATCH_BYTES,
-                });
-            }
-            let Some(payload) = read_bytes_or_incomplete(&mut reader, len)? else {
-                incomplete = true;
-                break;
-            };
-            streams.push(stream);
-            payloads.push(payload);
-        }
-        if incomplete {
-            truncate_at = Some(batch_start);
-            break;
-        }
-        let Some(expected_hash) = read_u64_or_incomplete(&mut reader)? else {
-            truncate_at = Some(batch_start);
-            break;
-        };
-        let Some(marker) = read_u64_or_incomplete(&mut reader)? else {
-            truncate_at = Some(batch_start);
-            break;
-        };
-        if marker != COMMIT_MARKER {
-            return Err(JournalError::InvalidCommitMarker);
-        }
-
-        let batch = JournalBatch::with_entries(
-            TransitionId(transition_id),
-            context,
-            streams
-                .into_iter()
-                .zip(payloads)
-                .map(|(stream, payload)| JournalEntry::new(stream, payload))
-                .collect(),
-            durability,
-        )?;
-        if content_hash(first_index, &batch) != expected_hash {
-            return Err(JournalError::ContentHashMismatch);
-        }
-        let batch_end = reader.stream_position()?;
-        on_batch(first_index, batch_start, batch_end, &batch);
-        next_index = next_index
-            .0
-            .checked_add(record_count as u64)
-            .map(JournalIndex)
-            .ok_or(JournalError::IndexOverflow)?;
-    }
-
-    if let Some(offset) = truncate_at {
-        if !repair_trailing_batch {
+fn read_batch(
+    reader: &mut BufReader<File>,
+    expected: JournalIndex,
+) -> Result<Option<JournalBatch>, JournalError> {
+    let record_count = match read_u32_or_eof(reader) {
+        Ok(Some(value)) => value,
+        Ok(None) => return Ok(None),
+        Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => {
             return Err(JournalError::IncompleteBatch);
         }
-        let file = reader.into_inner();
-        file.set_len(offset)?;
-        file.sync_all()?;
+        Err(error) => return Err(error.into()),
+    };
+    let Some(first_index) = read_u64_or_incomplete(reader)? else {
+        return Err(JournalError::IncompleteBatch);
+    };
+    let first_index = JournalIndex(first_index);
+    if first_index != expected {
+        return Err(JournalError::NonContiguousBatch {
+            expected,
+            actual: first_index,
+        });
+    }
+    let Some(transition_id) = read_u128_or_incomplete(reader)? else {
+        return Err(JournalError::IncompleteBatch);
+    };
+    let Some(sector_id) = read_u8_or_incomplete(reader)? else {
+        return Err(JournalError::IncompleteBatch);
+    };
+    let Some(owner_epoch) = read_u64_or_incomplete(reader)? else {
+        return Err(JournalError::IncompleteBatch);
+    };
+    let Some(mode) = read_u8_or_incomplete(reader)? else {
+        return Err(JournalError::IncompleteBatch);
+    };
+    let durability = match mode {
+        0 => DurabilityMode::Buffered,
+        1 => DurabilityMode::Synced,
+        _ => {
+            return Err(JournalError::InvalidFormat(
+                "unknown durability mode".into(),
+            ))
+        }
+    };
+    let record_count = record_count as usize;
+    if record_count == 0 || record_count > MAX_RECORDS_PER_BATCH {
+        return Err(JournalError::InvalidFormat(
+            "invalid record count in committed batch".into(),
+        ));
+    }
+
+    let context = DurabilityContext {
+        sector_id: dawn_core::SectorId(sector_id),
+        owner_epoch,
+    };
+    let mut entries = Vec::with_capacity(record_count);
+    let mut total_bytes = 0usize;
+    for _ in 0..record_count {
+        let Some(stream) = read_u8_or_incomplete(reader)? else {
+            return Err(JournalError::IncompleteBatch);
+        };
+        let stream = match stream {
+            0 => JournalStream::RecoveryDelta,
+            1 => JournalStream::PublicEvent,
+            2 => JournalStream::ReliableEffect,
+            _ => return Err(JournalError::InvalidFormat("unknown journal stream".into())),
+        };
+        let Some(len) = read_u32_or_incomplete(reader)? else {
+            return Err(JournalError::IncompleteBatch);
+        };
+        let len = len as usize;
+        if len > MAX_RECORD_BYTES {
+            return Err(JournalError::RecordTooLarge {
+                actual: len,
+                max: MAX_RECORD_BYTES,
+            });
+        }
+        total_bytes = total_bytes
+            .checked_add(len)
+            .ok_or(JournalError::BatchTooLarge {
+                actual: usize::MAX,
+                max: MAX_BATCH_BYTES,
+            })?;
+        if total_bytes > MAX_BATCH_BYTES {
+            return Err(JournalError::BatchTooLarge {
+                actual: total_bytes,
+                max: MAX_BATCH_BYTES,
+            });
+        }
+        let Some(payload) = read_bytes_or_incomplete(reader, len)? else {
+            return Err(JournalError::IncompleteBatch);
+        };
+        entries.push(JournalEntry::new(stream, payload));
+    }
+    let Some(expected_hash) = read_u64_or_incomplete(reader)? else {
+        return Err(JournalError::IncompleteBatch);
+    };
+    let Some(marker) = read_u64_or_incomplete(reader)? else {
+        return Err(JournalError::IncompleteBatch);
+    };
+    if marker != COMMIT_MARKER {
+        return Err(JournalError::InvalidCommitMarker);
+    }
+
+    let batch =
+        JournalBatch::with_entries(TransitionId(transition_id), context, entries, durability)?;
+    if content_hash(first_index, &batch) != expected_hash {
+        return Err(JournalError::ContentHashMismatch);
+    }
+    Ok(Some(batch))
+}
+
+fn scan_file<F>(
+    path: &Path,
+    repair_trailing_batch: bool,
+    mut on_batch: F,
+) -> Result<JournalScan, JournalError>
+where
+    F: FnMut(JournalIndex, u64, u64, &JournalBatch),
+{
+    let (mut reader, base_index) = open_reader(path, repair_trailing_batch)?;
+    let mut next_index = base_index;
+    loop {
+        let start = reader.stream_position()?;
+        let batch = match read_batch(&mut reader, next_index) {
+            Ok(Some(batch)) => batch,
+            Ok(None) => break,
+            Err(JournalError::IncompleteBatch) if repair_trailing_batch => {
+                let file = reader.into_inner();
+                file.set_len(start)?;
+                file.sync_all()?;
+                break;
+            }
+            Err(error) => return Err(error),
+        };
+        let end = reader.stream_position()?;
+        let following = next_index
+            .0
+            .checked_add(batch.entries.len() as u64)
+            .map(JournalIndex)
+            .ok_or(JournalError::IndexOverflow)?;
+        on_batch(next_index, start, end, &batch);
+        next_index = following;
     }
     Ok(JournalScan {
         base_index,
         next_index,
     })
+}
+
+// Only one fully validated batch is retained. Payloads move into records;
+// callers never observe a prefix of a corrupt transition.
+struct RecordReader {
+    reader: BufReader<File>,
+    next_index: JournalIndex,
+    requested: JournalIndex,
+    records: std::vec::IntoIter<JournalRecord>,
+    finished: bool,
+}
+
+impl Iterator for RecordReader {
+    type Item = Result<JournalRecord, JournalError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if let Some(record) = self.records.next() {
+                if record.index >= self.requested {
+                    return Some(Ok(record));
+                }
+                continue;
+            }
+            if self.finished {
+                return None;
+            }
+            // Release the previous batch before allocating its successor.
+            self.records = Vec::new().into_iter();
+            let batch = match read_batch(&mut self.reader, self.next_index) {
+                Ok(Some(batch)) => batch,
+                Ok(None) => {
+                    self.finished = true;
+                    return None;
+                }
+                Err(error) => {
+                    self.finished = true;
+                    return Some(Err(error));
+                }
+            };
+            let first = self.next_index;
+            self.next_index = match first.0.checked_add(batch.entries.len() as u64) {
+                Some(next) => JournalIndex(next),
+                None => {
+                    self.finished = true;
+                    return Some(Err(JournalError::IndexOverflow));
+                }
+            };
+            self.records = batch
+                .entries
+                .into_iter()
+                .enumerate()
+                .map(|(ordinal, entry)| JournalRecord {
+                    index: JournalIndex(first.0 + ordinal as u64),
+                    transition_id: batch.transition_id,
+                    context: batch.context,
+                    stream: entry.stream,
+                    ordinal: ordinal as u32,
+                    payload: entry.payload,
+                })
+                .collect::<Vec<_>>()
+                .into_iter();
+        }
+    }
 }
 
 fn read_u32_or_eof(reader: &mut BufReader<File>) -> Result<Option<u32>, io::Error> {
@@ -903,6 +1008,127 @@ mod tests {
     use crate::journal::{
         DurabilityContext, DurabilityMode, JournalEntry, JournalStream, TransitionId,
     };
+
+    #[test]
+    fn suffix_reports_later_corruption_only_when_reached_without_emitting_its_prefix() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("journal.bin");
+        let mut journal = FileJournal::open(&path).unwrap();
+        journal.append_batch(batch(1, &[b"first"])).unwrap();
+        journal
+            .append_batch(batch(2, &[b"second", b"third"]))
+            .unwrap();
+        let len = std::fs::metadata(&path).unwrap().len();
+        let mut file = OpenOptions::new().write(true).open(&path).unwrap();
+        file.seek(SeekFrom::Start(len - 16)).unwrap();
+        file.write_all(&0u64.to_le_bytes()).unwrap();
+        drop(file);
+
+        let mut records = journal.read_from(JournalIndex::ZERO).unwrap();
+        assert_eq!(records.next().unwrap().unwrap().payload, b"first");
+        assert!(matches!(
+            records.next(),
+            Some(Err(JournalError::ContentHashMismatch))
+        ));
+        assert!(records.next().is_none());
+        assert!(records.next().is_none());
+    }
+
+    #[test]
+    fn lazy_reader_retains_only_one_batch_and_preserves_requested_ordinals() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("journal.bin");
+        let mut journal = FileJournal::open(&path).unwrap();
+        for id in 0..100 {
+            journal
+                .append_batch(batch(id, &[b"a", b"b", b"c"]))
+                .unwrap();
+        }
+        let (reader, base) = open_reader(&path, false).unwrap();
+        let mut records = RecordReader {
+            reader,
+            next_index: base,
+            requested: JournalIndex(1),
+            records: Vec::new().into_iter(),
+            finished: false,
+        };
+        let record = records.next().unwrap().unwrap();
+        assert_eq!(record.index, JournalIndex(1));
+        assert_eq!(record.ordinal, 1);
+        assert_eq!(records.next_index, JournalIndex(3));
+        assert_eq!(records.records.len(), 1);
+        assert_eq!(records.count(), 298);
+    }
+
+    #[test]
+    fn range_copy_and_comparison_use_small_buffers_and_reject_truncation() {
+        let bytes: Vec<u8> = (0..101).collect();
+        let mut output = Vec::new();
+        copy_exact(&mut io::Cursor::new(&bytes), &mut output, 101, &mut [0; 3]).unwrap();
+        assert_eq!(output, bytes);
+        assert!(ranges_match(
+            &mut io::Cursor::new(&bytes),
+            &mut io::Cursor::new(&output),
+            101,
+            &mut [0; 3],
+            &mut [0; 5]
+        )
+        .unwrap());
+        output[99] ^= 1;
+        assert!(!ranges_match(
+            &mut io::Cursor::new(&bytes),
+            &mut io::Cursor::new(&output),
+            101,
+            &mut [0; 3],
+            &mut [0; 5]
+        )
+        .unwrap());
+        assert_eq!(
+            copy_exact(
+                &mut io::Cursor::new([1, 2]),
+                &mut Vec::new(),
+                3,
+                &mut [0; 1]
+            )
+            .unwrap_err()
+            .kind(),
+            io::ErrorKind::UnexpectedEof
+        );
+    }
+
+    #[test]
+    fn compaction_copies_multiple_chunks_and_validates_archived_overlap() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("journal.bin");
+        let archive = directory.path().join("archive.bin");
+        let mut journal = FileJournal::open(&path).unwrap();
+        let payload = vec![42; COPY_BUFFER_BYTES * 3 + 7];
+        for id in 0..3 {
+            journal.append_batch(batch(id, &[&payload])).unwrap();
+        }
+        // Stage the archive prefix without replacing hot, as in a failed compaction.
+        let mut staged = FileJournal::open(&archive).unwrap();
+        staged.append_batch(batch(0, &[&payload])).unwrap();
+        drop(staged);
+        journal.compact(JournalIndex(2), &archive).unwrap();
+        journal.append_batch(batch(3, &[&payload])).unwrap();
+        journal.compact(JournalIndex(3), &archive).unwrap();
+        let archived = FileJournal::open(&archive).unwrap();
+        let records = archived
+            .read_from(JournalIndex::ZERO)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(records.len(), 3);
+        assert!(records.iter().all(|record| record.payload == payload));
+        let retained = journal
+            .read_from(JournalIndex(3))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(retained.len(), 1);
+        assert_eq!(retained[0].payload, payload);
+    }
 
     fn batch(id: u128, payloads: &[&[u8]]) -> JournalBatch {
         JournalBatch::new(

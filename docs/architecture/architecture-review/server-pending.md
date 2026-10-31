@@ -32,14 +32,11 @@ live state、interaction、presentationは分離済み。残るscene lifecycle /
 **判断: Defer。** テストを除く実装が約700行を超え、かつ独立した変更理由が混在する、または
 module間のdriftが実害になるまで分割しない。行数だけでは発火させない。
 
-### R-9（#346・Fix）: FileJournalのbounded-memory streaming
+### R-9（#346）: 実装済み・マージ待ち
 
-`FileJournal::compact`はhot file全体を`Vec<u8>`へ読み、`read_from`も全suffixを
-`Vec<JournalRecord>`へ構築してからiteratorを返す。
-**根本原因:** #271ではcrash safetyとformat correctnessを先に固定し、scan callbackとcompactionを
-whole-file materializationで実装したため、APIのstreaming shapeとmemory behaviorが一致していない。
-**判断: Fix。** owning `BufReader` iteratorと`Seek` + bounded copyへ置換し、global index、checksum、
-torn-tail repair、archive retry、alias guard、post-rename poisonを維持する。
+FileJournalの読み出しは1バッチずつ検証するiteratorへ、圧縮とarchive重複比較は
+固定サイズの範囲コピーへ変更済み。保存形式・復旧保証は維持する。
+実装記録は[server-completed.md](./server-completed.md)を参照。Issueはマージ後に閉じる。
 
 ## 一覧
 
@@ -47,7 +44,7 @@ torn-tail repair、archive retry、alias guard、post-rename poisonを維持す�
 |---|---|
 | R-2 | 保留・trigger付き |
 | R-3 | commands slice・transit deepening 完了、warpはtrigger付きで保留 |
-| R-9 | #346・Fix・FileJournal bounded-memory streaming |
+| R-9 | #346・実装済み、マージ待ち |
 採らない方針: CRDT/LWW、protobuf、薄いadapterだけの追加crate、行数削減目的の網羅match・domain型の破壊、初回LAN検証でのTLS/認証。
 
 ADR-0051で、薄いadapterのためではなく二重のcomposition rootを統合する
