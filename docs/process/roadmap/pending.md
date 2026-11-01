@@ -20,6 +20,10 @@ related  : ./README.md, ./deferred.md, ../roadmap.md, ../roadmap-history.md
 | NOW | 9E-1 | 経済ループの人間プレイテストと結果記録 | 手順済み・実施待ち |
 | NEXT | 10-5 | GodotエディタでPrediction / dock / warpを手動確認 | 自動テスト済み・手動確認待ち |
 
+9E-1の少人数リモート検証用に、[ADR-0056](../../adr/ADR-0056-invited-disposable-playtest.md)の
+招待制・使い捨てRender構成を用意する。[接続手順](../render-playtest.md)を参照。
+これは永続運用や9E-1自体の完了を意味しない。
+
 ### 3.2 Phase 9 の残作業
 
 | ID | タスク | 状態 |

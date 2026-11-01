@@ -54,7 +54,9 @@ pub(crate) async fn run_phase4_server(
     println!("  Press Ctrl-C to stop");
     println!();
 
-    let server = ws_server::WsServer::bind("127.0.0.1:7878")
+    let playtest = super::playtest::PlaytestConfig::from_environment()
+        .expect("invalid single-node playtest configuration");
+    let server = ws_server::WsServer::bind(playtest.address)
         .await
         .expect("failed to bind WebSocket server");
 
@@ -67,8 +69,19 @@ pub(crate) async fn run_phase4_server(
         LocalRuntimeConsensus,
         RuntimeFramePolicy::local_durable(0),
     );
-    let mut market = MarketRuntime::open("data/market.sqlite")
-        .expect("failed to open Market database at data/market.sqlite");
+    // The in-memory Sector cannot recover an old Market ledger on process restart.
+    // Cloud playtests therefore give both authorities a fresh lifecycle.
+    let market_directory = playtest
+        .address
+        .ip()
+        .is_unspecified()
+        .then(|| tempfile::tempdir().expect("failed to create disposable playtest directory"));
+    let market_path = market_directory.as_ref().map_or_else(
+        || std::path::PathBuf::from("data/market.sqlite"),
+        |directory| directory.path().join("market.sqlite"),
+    );
+    let mut market = MarketRuntime::open(&market_path.to_string_lossy())
+        .expect("failed to open Market database");
 
     host.spawn_npc_frigates(ship_count)
         .expect("NPC fixture population must be created before the first frame");
@@ -100,22 +113,42 @@ pub(crate) async fn run_phase4_server(
 
     println!("  [Server] {ship_count} NPC ships ready. Waiting for players...");
 
-    let (handshake_req_tx, mut handshake_req_rx) =
-        mpsc::unbounded_channel::<ws_server::HandshakeRequest>();
+    let (handshake_req_tx, mut handshake_req_rx) = mpsc::channel::<ws_server::HandshakeRequest>(8);
     let (completion_tx, mut completion_rx) = mpsc::unbounded_channel::<HandshakeCompletion>();
 
     let server_arc = std::sync::Arc::new(server);
     let server_clone = server_arc.clone();
     tokio::spawn(async move {
+        let access = playtest.access;
+        let handshakes = std::sync::Arc::new(tokio::sync::Semaphore::new(8));
         loop {
             if let Some((stream, addr)) = server_clone.try_accept_raw().await {
+                let Ok(permit) = handshakes.clone().try_acquire_owned() else {
+                    drop(stream);
+                    continue;
+                };
+                let access = access.clone();
                 let tx = handshake_req_tx.clone();
                 tokio::spawn(async move {
-                    match ws_server::WsServer::accept_handshake_request(stream, addr).await {
-                        Ok(request) => {
-                            let _ = tx.send(request);
+                    let _permit = permit;
+                    let result = match access.as_deref() {
+                        Some(access) => {
+                            ws_server::WsServer::accept_invited_handshake_request(
+                                stream, addr, access,
+                            )
+                            .await
                         }
-                        Err(error) => eprintln!("[Server] handshake request failed: {error}"),
+                        None => ws_server::WsServer::accept_handshake_request(stream, addr).await,
+                    };
+                    match result {
+                        Ok(request) => {
+                            let _ = tx.send(request).await;
+                        }
+                        Err(error) if access.is_none() => {
+                            eprintln!("[Server] handshake request failed: {error}")
+                        }
+                        // Public denials are expected; do not let anonymous traffic flood logs.
+                        Err(_) => {}
                     }
                 });
             }

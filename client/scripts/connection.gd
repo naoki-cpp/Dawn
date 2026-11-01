@@ -35,6 +35,8 @@ var _reconnect_timer : float         = 0.0
 var _reconnect_log_elapsed : float  = RECONNECT_LOG_INTERVAL
 var _reconnect_attempts : int       = 0
 var _server_url      : String        = SERVER_URL
+var _invite_server_url : String = ""
+var _invite_token : String = ""
 ## Opaque server-issued capability used for reconnect/resume (ADR-0048).
 var _resume_ticket   : PackedByteArray = PackedByteArray()
 ## ClientCommand/ServerMessageDecoder are GDExtension classes (dawn-protocol/
@@ -61,7 +63,37 @@ func bind_client_state(
 
 
 func _ready() -> void:
+	if not configure_endpoint(OS.get_environment("DAWN_SERVER_URL"), OS.get_environment("DAWN_INVITE_TOKEN")):
+		push_error("[Connection] invalid endpoint or invite configuration")
+		set_process(false)
+		return
 	_connect_to_server()
+
+
+## Native-client playtest configuration. Never log or serialize the bearer token.
+func configure_endpoint(url: String, token: String) -> bool:
+	var endpoint := SERVER_URL if url.is_empty() else url
+	if not (endpoint.begins_with("ws://") or endpoint.begins_with("wss://")):
+		return false
+	for forbidden: String in ["@", "?", "#", "\r", "\n", "\t", "\\", " "]:
+		if endpoint.contains(forbidden):
+			return false
+	if not token.is_empty():
+		if token.length() != 64 or not token.is_valid_hex_number(false):
+			return false
+		var loopback := endpoint.begins_with("ws://127.0.0.1:") or endpoint.begins_with("ws://localhost:") or endpoint.begins_with("ws://[::1]:")
+		if not endpoint.begins_with("wss://") and not loopback:
+			return false
+	_server_url = endpoint
+	_invite_server_url = endpoint if not token.is_empty() else ""
+	_invite_token = token
+	return true
+
+
+func _invite_headers() -> PackedStringArray:
+	if _invite_token.is_empty() or _server_url != _invite_server_url:
+		return PackedStringArray()
+	return PackedStringArray(["Authorization: Bearer " + _invite_token])
 
 func _process(delta: float) -> void:
 	_ws.poll()
@@ -192,6 +224,8 @@ func _connect_to_server() -> void:
 			_server_url,
 			_reconnect_attempts])
 	_ws = WebSocketPeer.new()
+	_ws.handshake_headers = _invite_headers()
+	_ws.heartbeat_interval = 20.0
 	var err: int = _ws.connect_to_url(_server_url)
 	if err != OK and should_log_attempt:
 		push_warning("[Connection] connect_to_url failed: %s" % error_string(err))

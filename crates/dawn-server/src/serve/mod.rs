@@ -4,6 +4,7 @@ mod aoi_delivery;
 mod cluster;
 mod market;
 mod market_settlement;
+mod playtest;
 mod runtime;
 mod single;
 

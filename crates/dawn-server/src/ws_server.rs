@@ -39,12 +39,206 @@ use futures_util::{
 };
 use std::fmt::Display;
 use std::net::SocketAddr;
+use subtle::ConstantTimeEq;
 use tokio::{
     net::{TcpListener, TcpStream, ToSocketAddrs},
     sync::mpsc,
     time::{timeout, Duration},
 };
-use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
+use tokio_tungstenite::{
+    accept_async_with_config, accept_hdr_async_with_config, tungstenite::Message, WebSocketStream,
+};
+
+const CLIENT_MESSAGE_LIMIT: usize = 64 * 1024;
+
+fn client_socket_config() -> tokio_tungstenite::tungstenite::protocol::WebSocketConfig {
+    tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default()
+        .max_message_size(Some(CLIENT_MESSAGE_LIMIT))
+        .max_frame_size(Some(CLIENT_MESSAGE_LIMIT))
+}
+
+/// Admission-only bearer tokens for a disposable native-client playtest.
+/// Tokens do not select a PlayerId and never replace a ResumeTicket.
+pub struct InviteAccess {
+    tokens: Vec<String>,
+}
+
+#[cfg(test)]
+mod invite_tests {
+    use super::*;
+    use tokio_tungstenite::tungstenite::{client::IntoClientRequest, http::HeaderMap};
+
+    fn access() -> InviteAccess {
+        InviteAccess::parse(&format!("[\"{}\",\"{}\"]", "a".repeat(64), "b".repeat(64))).unwrap()
+    }
+
+    #[test]
+    fn invite_configuration_is_bounded_validated_and_redacted() {
+        for value in ["", "[]", "[1]", "[\"short\"]", "not json"] {
+            assert!(InviteAccess::parse(value).is_err());
+        }
+        let token = "a".repeat(64);
+        assert!(InviteAccess::parse(&format!("[\"{token}\",\"{token}\"]")).is_err());
+        assert!(
+            InviteAccess::parse(&serde_json::to_string(&vec![token.clone(); 17]).unwrap()).is_err()
+        );
+        assert!(InviteAccess::parse(&format!("[\"{}\"]", "g".repeat(64))).is_err());
+        assert!(!format!("{:?}", access()).contains(&token));
+    }
+
+    #[test]
+    fn authorization_requires_exactly_one_complete_bearer_token() {
+        let access = access();
+        let mut headers = HeaderMap::new();
+        assert!(!access.allows(&headers));
+        for token in ["a".repeat(63), "c".repeat(64), "a".repeat(65)] {
+            headers.insert("authorization", format!("Bearer {token}").parse().unwrap());
+            assert!(!access.allows(&headers));
+        }
+        for token in ["a".repeat(64), "b".repeat(64)] {
+            headers.insert("authorization", format!("Bearer {token}").parse().unwrap());
+            assert!(access.allows(&headers));
+        }
+        headers.append(
+            "authorization",
+            format!("Bearer {}", "a".repeat(64)).parse().unwrap(),
+        );
+        assert!(!access.allows(&headers));
+    }
+
+    #[tokio::test]
+    async fn invited_upgrade_rejects_before_hello_and_allows_valid_binary_hello() {
+        for token in [
+            None,
+            Some("c".repeat(64)),
+            Some("a".repeat(64)),
+            Some("b".repeat(64)),
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move {
+                let (stream, peer) = listener.accept().await.unwrap();
+                WsServer::accept_invited_handshake_request(stream, peer, &access()).await
+            });
+            let mut request = format!("ws://{addr}").into_client_request().unwrap();
+            if let Some(token) = &token {
+                request
+                    .headers_mut()
+                    .insert("authorization", format!("Bearer {token}").parse().unwrap());
+            }
+            let connection = tokio_tungstenite::connect_async(request).await;
+            let allowed = token
+                .as_ref()
+                .is_some_and(|token| token.starts_with('a') || token.starts_with('b'));
+            if allowed {
+                let (mut client, _) = connection.unwrap();
+                client
+                    .send(Message::Binary(
+                        ClientMessage::Hello(dawn_protocol::HelloMessage { resume: None })
+                            .encode()
+                            .unwrap()
+                            .into(),
+                    ))
+                    .await
+                    .unwrap();
+                assert!(server.await.unwrap().unwrap().resume.is_none());
+            } else {
+                let Err(tokio_tungstenite::tungstenite::Error::Http(response)) = connection else {
+                    panic!("expected HTTP rejection");
+                };
+                assert_eq!(response.status().as_u16(), 401);
+                assert!(server.await.unwrap().is_err());
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn invited_connection_rejects_an_oversized_hello_frame() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, peer) = listener.accept().await.unwrap();
+            WsServer::accept_invited_handshake_request(stream, peer, &access()).await
+        });
+        let mut request = format!("ws://{addr}").into_client_request().unwrap();
+        request.headers_mut().insert(
+            "authorization",
+            format!("Bearer {}", "a".repeat(64)).parse().unwrap(),
+        );
+        let (mut client, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+        let _ = client
+            .send(Message::Binary(vec![0; CLIENT_MESSAGE_LIMIT + 1].into()))
+            .await;
+        assert!(timeout(Duration::from_secs(5), server)
+            .await
+            .unwrap()
+            .unwrap()
+            .is_err());
+    }
+}
+
+impl std::fmt::Debug for InviteAccess {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InviteAccess")
+            .field("count", &self.tokens.len())
+            .finish()
+    }
+}
+
+impl InviteAccess {
+    /// Parse 1..=16 distinct 32-byte hexadecimal tokens from a JSON array.
+    /// Generate each token with a cryptographically secure random generator.
+    ///
+    /// # Errors
+    /// Rejects oversized JSON, empty/oversized lists, malformed tokens and duplicates.
+    /// Errors never echo the configuration or tokens.
+    ///
+    /// ```
+    /// use dawn_server::ws_server::InviteAccess;
+    /// assert!(InviteAccess::parse("[]").is_err());
+    /// ```
+    pub fn parse(value: &str) -> anyhow::Result<Self> {
+        anyhow::ensure!(value.len() <= 2048, "invite configuration is too large");
+        let tokens: Vec<String> = serde_json::from_str(value)
+            .map_err(|_| anyhow::anyhow!("invite configuration must be a JSON string array"))?;
+        anyhow::ensure!(
+            !tokens.is_empty() && tokens.len() <= 16,
+            "configure 1..=16 invites"
+        );
+        for (index, token) in tokens.iter().enumerate() {
+            anyhow::ensure!(
+                token.len() == 64 && token.bytes().all(|b| b.is_ascii_hexdigit()),
+                "each invite must be 64 hexadecimal characters"
+            );
+            anyhow::ensure!(!tokens[..index].contains(token), "duplicate invite");
+        }
+        Ok(Self { tokens })
+    }
+
+    fn allows(&self, headers: &tokio_tungstenite::tungstenite::http::HeaderMap) -> bool {
+        let mut values = headers.get_all("authorization").iter();
+        let Some(value) = values.next().and_then(|value| value.to_str().ok()) else {
+            return false;
+        };
+        if values.next().is_some() {
+            return false;
+        }
+        let Some(token) = value
+            .strip_prefix("Bearer ")
+            .filter(|token| token.len() == 64)
+        else {
+            return false;
+        };
+        // Do not compare only a matching prefix or exit on its first mismatch.
+        bool::from(
+            self.tokens
+                .iter()
+                .fold(subtle::Choice::from(0), |allowed, expected| {
+                    allowed | expected.as_bytes().ct_eq(token.as_bytes())
+                }),
+        )
+    }
+}
 
 /// Postcard-encode a [`ServerMessage`] and wrap it as a binary WS frame.
 fn server_message_frame(msg: &ServerMessage) -> Result<Message, ConnectionError> {
@@ -328,7 +522,49 @@ impl WsServer {
         stream: TcpStream,
         peer_addr: SocketAddr,
     ) -> anyhow::Result<HandshakeRequest> {
-        let ws_stream = accept_async(stream).await?;
+        let ws_stream = timeout(
+            Duration::from_secs(3),
+            accept_async_with_config(stream, Some(client_socket_config())),
+        )
+        .await??;
+        Self::read_hello(ws_stream, peer_addr).await
+    }
+
+    /// Reject missing/invalid invite credentials before WebSocket upgrade or Hello.
+    ///
+    /// # Errors
+    /// Returns an error for unauthorized HTTP upgrade, invalid/oversized frames,
+    /// or an upgrade/Hello that exceeds its separate three-second deadline.
+    // Tungstenite's callback requires an unboxed HTTP ErrorResponse.
+    #[allow(clippy::result_large_err)]
+    pub async fn accept_invited_handshake_request(
+        stream: TcpStream,
+        peer_addr: SocketAddr,
+        access: &InviteAccess,
+    ) -> anyhow::Result<HandshakeRequest> {
+        use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, Response};
+        let upgrade = accept_hdr_async_with_config(
+            stream,
+            |request: &Request, response: Response| {
+                if access.allows(request.headers()) {
+                    Ok(response)
+                } else {
+                    let mut denied = ErrorResponse::new(Some("Unauthorized".into()));
+                    *denied.status_mut() =
+                        tokio_tungstenite::tungstenite::http::StatusCode::UNAUTHORIZED;
+                    Err(denied)
+                }
+            },
+            Some(client_socket_config()),
+        );
+        let ws_stream = timeout(Duration::from_secs(3), upgrade).await??;
+        Self::read_hello(ws_stream, peer_addr).await
+    }
+
+    async fn read_hello(
+        ws_stream: WebSocketStream<TcpStream>,
+        peer_addr: SocketAddr,
+    ) -> anyhow::Result<HandshakeRequest> {
         let (ws_sink, mut ws_source) = ws_stream.split();
 
         // Wait for Hello (3s timeout, binary ClientMessage envelope -- ADR-0042).

@@ -12,6 +12,30 @@ func _state() -> Array:
 	return [WorldSession.new(), PlayerLoadout.new()]
 
 
+func test_playtest_configuration_keeps_default_and_sends_invite_only_to_pinned_endpoint() -> void:
+	var connection: Node = auto_free(Connection.new())
+	assert_bool(connection.configure_endpoint("", "")).is_true()
+	assert_str(connection._server_url).is_equal(Connection.SERVER_URL)
+	var token := "a".repeat(64)
+	assert_bool(connection.configure_endpoint("wss://dawn.example", token)).is_true()
+	assert_array(connection._invite_headers()).contains_exactly(["Authorization: Bearer " + token])
+	connection._server_url = "wss://different.example"
+	assert_int(connection._invite_headers().size()).is_equal(0)
+	connection._server_url = "wss://dawn.example"
+	assert_int(connection._invite_headers().size()).is_equal(1)
+
+
+func test_playtest_configuration_rejects_cleartext_remote_tokens_and_header_injection() -> void:
+	var connection: Node = auto_free(Connection.new())
+	var token := "a".repeat(64)
+	assert_bool(connection.configure_endpoint("ws://remote.example", token)).is_false()
+	assert_bool(connection.configure_endpoint("ws://127.0.0.1:7878", token)).is_true()
+	assert_bool(connection.configure_endpoint("ws://127.0.0.1:7878@remote.example", token)).is_false()
+	assert_bool(connection.configure_endpoint("wss://dawn.example?token=secret", token)).is_false()
+	assert_bool(connection.configure_endpoint("wss://dawn.example", "short")).is_false()
+	assert_bool(connection.configure_endpoint("wss://dawn.example", "a".repeat(63) + "\n")).is_false()
+
+
 func test_reconnect_logging_is_emitted_on_first_attempt_and_after_interval() -> void:
 	assert_bool(Connection.should_log_reconnect(1, 0.0, 30.0)).is_true()
 	assert_bool(Connection.should_log_reconnect(10, 29.9, 30.0)).is_false()
