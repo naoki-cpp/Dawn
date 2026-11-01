@@ -1,0 +1,13 @@
+# Disposable, invitation-only native-client playtest. No persistent disk or DB.
+services:
+  - type: web
+    name: dawn-playtest
+    runtime: rust
+    plan: free
+    region: singapore
+    autoDeployTrigger: "off"
+    buildCommand: cargo build --locked --release -p dawn-server --bin simulate
+    startCommand: ./target/release/simulate --serve --ships 5 --pop-cap 8
+    envVars:
+      - key: DAWN_INVITE_TOKENS
+        sync: false

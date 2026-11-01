@@ -6,10 +6,28 @@ related  : .agents/skills/security-check/SKILL.md,
            .agents/skills/security-check/references/owasp-map.md,
            .agents/skills/security-check/references/baseline.md（初回レビューの凍結記録）,
            docs/architecture/security-review-completed.md（解消済みfindingの作業ログ）
-date     : 2026-09-01
+date     : 2026-11-02
 ---
 
 # Security Review — Dawn Server（OWASP観点）
+
+2026-11-02 scoped public-playtest update (ADR-0056): `simulate --serve` requires
+validated individual invites when `PORT` exposes the listener, and rejects
+unauthorized requests before upgrade/Hello. `subtle` compares bearer tokens;
+Debug/errors do not disclose secrets. Upgrade and Hello each time out after
+3 seconds; single-node handshakes and their pending queue are capped at eight.
+Public denials do not emit per-attempt logs. Client credentials are restricted
+to WSS (or explicit loopback tests) and are not forwarded across redirects.
+All client listeners now explicitly cap incoming frames/messages at 64 KiB.
+Token gates do not supply a PlayerId or replace ResumeTicket verification.
+No wire schema, SQL query, ownership check or command validation changed.
+Tests exercise HTTP rejection, two valid invitations, invalid/duplicate
+configuration, redaction, oversized input and client endpoint pinning.
+
+This limited trusted-tester configuration is not an internet-hardened
+production deployment: admitted output queues, long-lived InMemoryJournal
+growth and broader admission fairness remain resource risks. Do not broaden
+the audience without a full public-internet security/resource review.
 
 2026-09-01 SQL-only update: Issue #345 replaced Market's whole-state reload
 and rewrite with indexed, command-scoped working sets and transactional delta
@@ -75,6 +93,7 @@ SQLite INTEGER境界を検証する。ownership・入力値・queue/snapshot上�
 - **TLSなし・認証なし**はLANオンリープロトタイプの明示的な決定
   （`docs/architecture/architecture-review/server-pending.md`「採らない方針」）。
   公開準備が始まるまでは対象外。
+  ADR-0056の招待制playtestは例外で、Render TLS終端と入口token検証を必須にする。
 - クライアント側コード（GDScript・クライアント側Rustクレート）は信頼境界ではない。
 
 ---
@@ -84,6 +103,7 @@ SQLite INTEGER境界を検証する。ownership・入力値・queue/snapshot上�
 | 経路 | ファイル | 内容 |
 |---|---|---|
 | WebSocketフレーム受信 | `crates/dawn-server/src/ws_server.rs` | postcardバイナリフレーム（ADR-0042） |
+| 招待制WebSocket upgrade | `crates/dawn-server/src/ws_server.rs` + `serve/playtest.rs` | 個別bearer token、PORT設定fail-closed、Hello前の401、ADR-0056 |
 | コマンドデコード | `crates/dawn-protocol/src/client_request.rs` + `dawn-core/src/commands.rs` | typed `ClientRequest` |
 | Marketデコード | `crates/dawn-protocol/src/market.rs` | `MarketCommandWire`（Sector commandとは別queue） |
 | Hello/resumeハンドシェイク | `crates/dawn-protocol/src/hello_resume.rs` | セッション識別（resume identity） |
@@ -152,55 +172,8 @@ matching結果は`MarketDb`が計算し、client supplied balance/trade result�
 
 ## 未解消のfinding
 
-### SEC-1（low・トリガー付き保留）: WebSocketサイズ上限が暗黙値
-
-`crates/dawn-server/src/ws_server.rs`（359行）: `accept_async(stream)`が`WebSocketConfig`を
-明示せず呼ばれており、`max_message_size`/`max_frame_size`がtokio-tungsteniteのライブラリ
-既定値（現行ピン留めバージョンで64MiB/16MiB）任せになっている。
-
-**根本原因**: サイズ上限を意識的に選んだのではなく、ライブラリのデフォルトに乗っているだけ。
-**判断: 保留**。LANでは悪用してもメモリ圧迫止まりで実害は小さい。修正は
-`accept_async_with_config`呼び出し1箇所で完結する軽微な変更。
-**再評価トリガー**: 公開準備が始まったとき、または他の理由でこのファイルに手を入れる機会があるとき
-（ついでに直す）。
-
-### SEC-2（high・トリガー付き保留）: Hello resumeでの船の乗っ取り
-
-`crates/dawn-protocol/src/hello_resume.rs` → `crates/dawn-server/src/bin/sector-node/client_admission.rs`
-(`select_handshake_identity`) → `crates/dawn-sector/src/node/spawner_logic.rs`
-(`adopt_player_ship`)。
-
-クライアントがHelloに生の`player_id`/`ship_id`を載せるだけでresumeが成立し、
-`adopt_player_ship`は「そのship_idがこのノードのECSに存在するか」だけを確認して、
-名乗った`player_id`を無条件に`ships.owners`へ上書きする。ship_id/player_idはワイヤ上で
-他イベント（`Redirect`メッセージ等）を通じて露出しているため、攻撃者は他プレイヤーの
-船を指定するだけで所有権を奪取でき、以降の`owns_ship`ベースの検証は全て素通しになる。
-
-**根本原因（設計レベル）**: 調査の結果、これは単純な検証漏れではなく、より深い設計上の
-ギャップだと判明した。ノード間転送（Sector Transit）で運ばれる
-`TransitHandoffState`は`player_id`/所有権情報を一切含んでいない。
-永続化用`ShipSnapshot`も同様にownership authorityではない。
-つまり転送先ノードでは、船が実際に誰の所有かという情報がどこにも存在せず、
-**クライアントのHello resumeが最初に主張した内容がそのまま所有権の確立になる** —
-これは`adopt_player_ship`のdocコメント通りの意図された設計であり、認証なしという
-既存方針の必然的な帰結である。
-
-修正案を2段階で検討した:
-1. **狭い修正**: `TransitHandoffState`にトランジット元ノードの正規`owners`から`player_id`を
-   載せて転送先へ引き継ぎ、resume時は「そのペアが一致するか」だけを検証する。
-   存在しないship_idや無関係なペアでの乗っ取りは防げるが、player_id/ship_idはワイヤ上で
-   観測可能なため、正しいペアを知っている攻撃者はなお成りすませる — 部分的な緩和に留まる。
-2. **本格修正**: 初回接続時にサーバーが秘密のセッショントークンを発行し、resume時に
-   必須で照合する。これでようやく「知っているだけでは奪えない」状態になるが、
-   トークンの発行・保持・失効という新しい状態管理が要る、ADRを伴う設計変更。
-
-**判断: 保留（トリガー付き）。** LANプロトタイプで信頼できるプレイヤー同士という前提に
-照らし、今すぐ本格的なセッション認証を実装するコストは見合わないと判断。ただし
-「無認証」の既定方針とは異なる、能動的に権限を付与してしまう経路である点は記録として残す。
-
-**再評価トリガー**: 公開準備（`THIRD-PARTY-LICENSES.md`のトリガーと同じタイミング）が
-始まったとき、信頼できない参加者を想定する必要が生じたとき、またはこの経路が実際に
-悪用された（悪用の兆候が観測された）とき。
+SEC-1は受信上限の明示化で解消。SEC-2の記述はADR-0048導入前の旧Hello形式を参照しており、
+現行のResumeTicket検証経路に該当しないことを再確認した。履歴はcompletedを参照する。
 
 ---
 
