@@ -201,7 +201,18 @@ jobs:
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       - name: Install Godot test dependencies
-        run: sudo apt-get update && sudo apt-get install --yes unzip xvfb
+        run: sudo apt-get update && sudo apt-get install --yes unzip xvfb libvulkan1 mesa-vulkan-drivers vulkan-tools
+
+      - name: Configure software Vulkan renderer
+        shell: bash
+        run: |
+          icd=$(find /usr/share/vulkan/icd.d -maxdepth 1 -name 'lvp_icd*.json' -print -quit)
+          if [[ -z "$icd" ]]; then
+            echo "Mesa lavapipe Vulkan driver was not installed" >&2
+            exit 1
+          fi
+          echo "VK_DRIVER_FILES=$icd" >> "$GITHUB_ENV"
+          VK_DRIVER_FILES="$icd" xvfb-run --auto-servernum vulkaninfo --summary
 
       - name: Restore GdUnit4 addon
         id: gdunit-cache

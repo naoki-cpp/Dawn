@@ -18,7 +18,8 @@ the console executable so process completion and exit codes are observable.
 Downloads have connection/transfer timeouts and must pass SHA512 validation;
 PowerShell uses .NET hashing without requiring the `Get-FileHash` cmdlet.
 
-`client/addons/` is `.gitignore`d. Local developers may install addons from
+Editor addons under `client/addons/` are `.gitignore`d; the runtime
+`lens_effects` addon is vendored with its license. Local developers may install editor addons from
 the Godot editor's AssetLib, while CI restores the pinned GdUnit4 release with
 `scripts/install-gdunit.sh`. **On first local setup, search for "GdUnit4"
 in the editor's AssetLib tab, install it, and enable the plugin in
@@ -49,6 +50,12 @@ The `godot` job in `.github/workflows/rust-ci.yml` builds
 the full GdUnit4 suite under `xvfb`. GdUnit4's normal CLI runner opens a
 window, so `xvfb-run` provides the display server on the Ubuntu runner; plain
 `--headless` is intentionally not used.
+
+The job installs Mesa's lavapipe software Vulkan driver and explicitly selects
+its ICD using `VK_DRIVER_FILES`. A `vulkaninfo --summary` preflight under xvfb
+checks the driver before running tests. The solar compositor pixel tests need
+Forward+ / RenderingDevice; an automatic fallback to OpenGL Compatibility would
+render no compute effect and is not a valid replacement for GPU test coverage.
 
 ## Running from the CLI
 

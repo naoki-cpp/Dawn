@@ -1,6 +1,12 @@
 extends GdUnitTestSuite
 
 
+func before_test() -> void:
+	assert_object(RenderingServer.get_rendering_device()) \
+		.override_failure_message("Solar compositor tests require Forward+ or Mobile with a working Vulkan/RenderingDevice backend.") \
+		.is_not_null()
+
+
 func test_effect_dispatch_is_local_and_clipped_to_the_viewport() -> void:
 	var effect: GDScript = load("res://addons/lens_effects/lens_flare_compositor_effect.gd")
 	var size := Vector2i(1280, 720)
