@@ -1,5 +1,14 @@
 # Third-Party Licenses
 
+## MIT - compositor lens effects
+
+`client/addons/lens_effects/` vendors the runtime portion of
+[ARez2/compositor-effect-lens-effects](https://github.com/ARez2/compositor-effect-lens-effects)
+at `0ce061271f672f05fbb9aed08a61e019a875c1ad`, adapted for Dawn's solar rendering.
+The base compositor originates from Pink Arcana's distance-field outlines.
+Copyright notices, MIT terms, source attributions, and local changes are kept
+with the addon. Include that directory's LICENSE when distributing the client.
+
 Dawn is currently a private, unpublished project (`publish = false` in
 `Cargo.toml`), so nothing here is a distribution obligation yet. This file
 exists so the one dependency with a non-permissive license doesn't get

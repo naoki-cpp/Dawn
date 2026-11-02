@@ -58,9 +58,6 @@ uniform vec3  sun_color : source_color = vec3(1.00, 0.95, 0.80);
 // distance by WorldPresentation. The default preserves the original disc
 // size until the first body record is available.
 uniform float sun_angular_radius      = 0.0261799;
-// Screen-space axes supplied by the camera for optical lens effects.
-uniform vec3  sun_flare_right : source_color = vec3(1.0, 0.0, 0.0);
-uniform vec3  sun_flare_up : source_color = vec3(0.0, 1.0, 0.0);
 
 // ── Hash / Noise ──────────────────────────────────────────────────────────────
 // Note: PI and TAU are Godot 4 built-in shader constants.
@@ -318,31 +315,9 @@ void sky() {
 		float white_core = exp(-sun_angle_ratio * 6.8) * 8.0;
 		vec3 core_color = mix(sun_color, vec3(1.0, 0.97, 0.88), 0.72);
 
-		// Optical flare is screen-aligned and centered on the sun. The old
-		// world-space tangent frame made the streak rotate as the ship moved.
-		vec2 sun_screen = vec2(
-			dot(sun_dir, sun_flare_right),
-			dot(sun_dir, sun_flare_up)
-		);
-		vec2 flare_uv = vec2(
-			dot(dir, sun_flare_right),
-			dot(dir, sun_flare_up)
-		) - sun_screen;
-		// A projected sun direction can overlap the screen center even when the
-		// star is behind the camera. Only emit lens artifacts on front-facing sky.
-		float front_facing = smoothstep(-0.02, 0.08, cos_angle);
-		float flare_distance = length(flare_uv);
-		float flare_envelope = 1.0 - smoothstep(0.16, 0.34, flare_distance);
-		float horizontal_flare = exp(-pow(flare_uv.y / 0.006, 2.0))
-			* exp(-pow(flare_uv.x / 0.16, 2.0)) * 0.42 * flare_envelope * front_facing;
-		float central_glint = exp(-pow(flare_uv.y / 0.0015, 2.0))
-			* exp(-pow(flare_uv.x / 0.045, 2.0)) * 0.55 * front_facing;
 		float scattered_glow = exp(-sun_angle_ratio * 0.12) * 0.28;
-		vec3 flare_color = mix(core_color, sun_color,
-			smoothstep(0.0, 0.12, flare_distance));
 		col += core_color * white_core;
 		col += sun_color * (inner_corona + outer_corona + scattered_glow);
-		col += flare_color * (horizontal_flare + central_glint);
 
 	}
 

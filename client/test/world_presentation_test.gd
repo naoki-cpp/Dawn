@@ -8,6 +8,29 @@ extends GdUnitTestSuite
 const WorldPresentationScript = preload("res://scripts/world_presentation.gd")
 const StarfieldScript = preload("res://scripts/starfield.gd")
 
+
+func test_sun_flare_rejects_rear_and_offscreen_directions() -> void:
+	var camera: Camera3D = auto_free(Camera3D.new())
+	add_child(camera)
+	assert_dict(WorldPresentationScript.project_sun_flare(camera, Vector3.BACK, 0.005)).is_empty()
+	assert_dict(WorldPresentationScript.project_sun_flare(camera, Vector3(10, 0, -1), 0.005)).is_empty()
+	assert_dict(WorldPresentationScript.project_sun_flare(camera, Vector3.ZERO, 0.005)).is_empty()
+	assert_dict(WorldPresentationScript.project_sun_flare(camera, Vector3.FORWARD, 0.0)).is_empty()
+	var source := WorldPresentationScript.project_sun_flare(camera, Vector3.FORWARD, 0.005)
+	assert_vector(source.position as Vector2).is_equal_approx(Vector2(0.5, 0.5), Vector2(0.001, 0.001))
+	assert_float(source.visibility as float).is_equal(1.0)
+
+
+func test_sun_flare_tracks_direction_and_apparent_radius_not_absolute_distance() -> void:
+	var camera: Camera3D = auto_free(Camera3D.new())
+	add_child(camera)
+	var first := WorldPresentationScript.project_sun_flare(camera, Vector3.FORWARD, 0.005)
+	var moved := WorldPresentationScript.project_sun_flare(camera, Vector3(0.2, 0, -1), 0.01)
+	assert_float((moved.position as Vector2).x).is_greater((first.position as Vector2).x)
+	assert_float(moved.radius as float).is_greater(first.radius as float)
+	camera.rotation.y = PI
+	assert_dict(WorldPresentationScript.project_sun_flare(camera, Vector3.FORWARD, 0.005)).is_empty()
+
 func _position(x: float, y: float, z: float) -> PackedFloat64Array:
 	return PackedFloat64Array([x, y, z])
 
@@ -232,8 +255,6 @@ func test_sky_material_only_sets_uniforms_the_shader_declares() -> void:
 		"sun_active",
 		"sun_color",
 		"sun_angular_radius",
-		"sun_flare_right",
-		"sun_flare_up",
 	]:
 		assert_bool(declared.has(uniform_name)) 			.override_failure_message("sky shader declares no uniform " + uniform_name) 			.is_true()
 

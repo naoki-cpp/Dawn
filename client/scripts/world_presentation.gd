@@ -44,6 +44,7 @@ var _warp_tunnel: ColorRect = null
 var _gates_root: Node3D = null
 var _bodies_root: Node3D = null
 var _sky_mat: ShaderMaterial = null
+var _sun_flare: CompositorEffect = null
 var _starfield_root: Node3D = null
 var _starfield_mat: ShaderMaterial = null
 var _sky: Sky = null
@@ -406,6 +407,8 @@ func _maybe_rebase_origin(player_ship_id: int, ships: Dictionary) -> void:
 
 func _update_sun_direction(player_ship_id: int, ships: Dictionary, bodies: Array) -> void:
 	if _sky_mat == null or player_ship_id < 0 or not ships.has(player_ship_id) or _world == null:
+		if _sun_flare != null:
+			_sun_flare.enabled = false
 		return
 	var ship_node: Node3D = ships[player_ship_id] as Node3D
 	var player_server: PackedFloat64Array
@@ -417,6 +420,8 @@ func _update_sun_direction(player_ship_id: int, ships: Dictionary, bodies: Array
 		player_server = _world.to_server_components(ship_node.global_position)
 	var state: Dictionary = sun_state(bodies, player_server, Callable(_world, "dir_to_godot"))
 	if not (state.get("active", false) as bool):
+		if _sun_flare != null:
+			_sun_flare.enabled = false
 		_sky_mat.set_shader_parameter("sun_active", 0.0)
 		if _directional_light != null:
 			_directional_light.light_energy = 0.0
@@ -429,9 +434,7 @@ func _update_sun_direction(player_ship_id: int, ships: Dictionary, bodies: Array
 	_sky_mat.set_shader_parameter(
 		"sun_angular_radius",
 		maxf(state.get("angular_radius", 0.0) as float, SUN_MIN_RENDER_ANGULAR_RADIUS))
-	if _camera != null:
-		_sky_mat.set_shader_parameter("sun_flare_right", _camera.global_basis.x.normalized())
-		_sky_mat.set_shader_parameter("sun_flare_up", _camera.global_basis.y.normalized())
+	_update_sun_flare(sun_direction, sun_color, state.get("angular_radius", 0.0) as float)
 	if _directional_light != null:
 		var light_ray := star_light_ray(sun_direction)
 		_directional_light.visible = true
@@ -440,7 +443,6 @@ func _update_sun_direction(player_ship_id: int, ships: Dictionary, bodies: Array
 		var target := ship_node.global_position
 		_directional_light.global_position = target - light_ray * 1_000.0
 		_directional_light.look_at(target, light_up_axis(light_ray))
-
 
 
 func _setup_space_environment(parent: Node) -> void:
@@ -510,8 +512,64 @@ func _setup_space_environment(parent: Node) -> void:
 	var world_env := WorldEnvironment.new()
 	world_env.environment = env
 	parent.add_child(world_env)
+	# Compositors require a RenderingDevice (Forward+ or Mobile), not Compatibility.
+	if RenderingServer.get_rendering_device() != null:
+		_sun_flare = load("res://addons/lens_effects/lens_flare_compositor_effect.gd").new()
+		_sun_flare.enabled = false
+		_sun_flare.Effect_Multiplier = 0.65
+		_sun_flare.Anamorphic_Intensity = 16.0
+		_sun_flare.Anamorphic_Stretch = 0.44
+		_sun_flare.Anamorphic_Brightness = 0.65
+		# Local camera optics, not atmospheric scattering throughout the scene.
+		_sun_flare.Weight = 0.045
+		_sun_flare.SampleCount = 24
+		_sun_flare.Density = 0.98
+		_sun_flare.Decay = 0.96
+		var compositor := Compositor.new()
+		compositor.compositor_effects = [_sun_flare]
+		world_env.compositor = compositor
 
 	_setup_starfield(parent)
+
+
+func _update_sun_flare(direction: Vector3, color: Vector3, angular_radius: float) -> void:
+	if _sun_flare == null:
+		return
+	if _camera == null:
+		_sun_flare.enabled = false
+		return
+	var source := project_sun_flare(_camera, direction, angular_radius)
+	if source.is_empty():
+		_sun_flare.enabled = false
+		return
+	_sun_flare.set_sun(source.position, Color(color.x, color.y, color.z, 1.0),
+		source.visibility, source.radius)
+	_sun_flare.enabled = true
+
+
+## Project a direction near the camera, never a narrowed absolute star position.
+static func project_sun_flare(camera: Camera3D, direction: Vector3, angular_radius: float) -> Dictionary:
+	if direction.is_zero_approx() or angular_radius <= 0.0:
+		return {}
+	var forward := -camera.global_basis.z.normalized()
+	var ray := direction.normalized()
+	if forward.dot(ray) <= 0.001:
+		return {}
+	var size := camera.get_viewport().get_visible_rect().size
+	if size.x <= 0.0 or size.y <= 0.0:
+		return {}
+	var distance := maxf(camera.near * 2.0, 1.0)
+	var point := camera.global_position + ray * distance
+	var pixel := camera.unproject_position(point)
+	var uv := pixel / size
+	if uv.x <= 0.0 or uv.x >= 1.0 or uv.y <= 0.0 or uv.y >= 1.0:
+		return {}
+	var edge := minf(minf(uv.x, 1.0 - uv.x), minf(uv.y, 1.0 - uv.y))
+	var tangent := camera.global_basis.y.slide(ray).normalized()
+	var limb := point + tangent * distance * tan(angular_radius)
+	var radius := camera.unproject_position(limb).distance_to(pixel)
+	return {"position": uv, "visibility": smoothstep(0.0, 0.04, edge),
+		"radius": clampf(radius * 0.7, 1.0, 64.0)}
 
 
 func _build_player_material() -> void:
