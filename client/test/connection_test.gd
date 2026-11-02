@@ -12,6 +12,30 @@ func _state() -> Array:
 	return [WorldSession.new(), PlayerLoadout.new()]
 
 
+func test_cancel_clears_credentials_identity_and_stops_retries() -> void:
+	var connection: Node = auto_free(Connection.new())
+	connection.configure_endpoint("wss://dawn.example", "a".repeat(64))
+	connection._active = true
+	connection._accept_welcome(1, 2, PackedByteArray([1, 2]))
+	connection.cancel_connection()
+	assert_bool(connection._active).is_false()
+	assert_bool(connection.is_connected_to_server()).is_false()
+	assert_str(connection._invite_token).is_empty()
+	assert_int(connection._resume_ticket.size()).is_equal(0)
+	assert_int(connection.player_id).is_equal(-1)
+	connection._process(100.0)
+	assert_int(connection._reconnect_attempts).is_equal(0)
+
+
+func test_connection_timeout_stops_retries_and_clears_token() -> void:
+	var connection: Node = auto_free(Connection.new())
+	connection.configure_endpoint("wss://dawn.example", "a".repeat(64))
+	connection._active = true
+	connection._process(90.0)
+	assert_bool(connection._active).is_false()
+	assert_str(connection._invite_token).is_empty()
+
+
 func test_playtest_configuration_keeps_default_and_sends_invite_only_to_pinned_endpoint() -> void:
 	var connection: Node = auto_free(Connection.new())
 	assert_bool(connection.configure_endpoint("", "")).is_true()

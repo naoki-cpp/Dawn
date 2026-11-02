@@ -127,6 +127,8 @@ func _assert_scene_tree_refs() -> void:
 	if not missing.is_empty():
 		push_error("main.tscn is missing expected node(s): %s. Check the scene tree against the @onready paths in main.gd." % ", ".join(missing))
 
+var _connection_dialog: CanvasLayer
+
 func _ready() -> void:
 	_assert_scene_tree_refs()
 	_connection.bind_client_state(_session, _loadout, self)
@@ -140,6 +142,11 @@ func _ready() -> void:
 		Callable(self, "_on_market_cancel_order"))
 	_update_hud()
 	## Gate / body markers are spawned from the server's InitialState, not here.
+	_connection_dialog = preload("res://scripts/connection_dialog.gd").new()
+	add_child(_connection_dialog)
+	_connection_dialog.blocking_changed.connect(func(blocking: bool) -> void:
+		_camera.set_process_unhandled_input(not blocking))
+	_connection_dialog.build(_connection)
 
 func _process(delta: float) -> void:
 	_presentation.refresh(delta, _player_ship_id, _ships, _bodies)
@@ -196,6 +203,8 @@ func _update_station_proximity() -> void:
 
 
 func _input(event: InputEvent) -> void:
+	if _connection_dialog != null and _connection_dialog.is_blocking():
+		return
 	## Input meaning is decided by the engine-independent client policy. This
 	## adapter only performs the resulting network or presentation effect.
 	if event is InputEventKey and event.pressed and not event.echo:

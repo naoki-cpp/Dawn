@@ -33,6 +33,16 @@ revalidated. Invites are bearer capabilities, not persistent player accounts.
 
 ## Native Godot client
 
+Start the client and enter the service's `wss://` URL and your individual
+invite code in the connection dialog, then select Connect. The code is masked,
+cleared from the input after submission, and never saved to a file. It remains
+in connection memory for reconnects until cancellation, timeout, or process exit.
+The dialog closes only after Welcome; Cancel stops retries and clears the code
+and resume ticket. An unsuccessful connection times out after 90 seconds.
+For a local server, use `ws://127.0.0.1:7878` with an empty invite code.
+
+Developers can optionally prefill the dialog using environment variables:
+
 Close the old editor first; an already-running editor does not inherit new
 environment values. In a new PowerShell session:
 
@@ -44,7 +54,7 @@ $env:DAWN_INVITE_TOKEN = [System.Net.NetworkCredential]::new("", $secret).Passwo
 & .\.tools\godot\4.7.2-stable\Godot_v4.7.2-stable_win64.exe --editor --path client
 ```
 
-Use F5 to play. A freshly built GDExtension is required as usual. Clear the two
+Use F5 to play, then select Connect. A freshly built GDExtension is required as usual. Clear the two
 environment variables and reopen the editor to return to localhost. Tokens
 exist in the process environment/memory; do not share process dumps. Browser
 exports are unsupported because they cannot set custom handshake headers.

@@ -16,6 +16,8 @@ extends Node
 # ── シグナル ──────────────────────────────────────────────────────────────────
 
 signal connection_changed(connected: bool)
+signal session_ready
+signal connection_failed
 
 # ── 設定 ─────────────────────────────────────────────────────────────────────
 
@@ -29,6 +31,8 @@ const RECONNECT_LOG_INTERVAL := 30.0
 # ── 内部状態 ─────────────────────────────────────────────────────────────────
 
 var _ws              : WebSocketPeer = WebSocketPeer.new()
+var _active := false
+var _waiting_elapsed := 0.0
 var _connected       : bool          = false
 var _welcomed        : bool          = false   ## Welcome 受信済みか
 var _reconnect_timer : float         = 0.0
@@ -63,11 +67,35 @@ func bind_client_state(
 
 
 func _ready() -> void:
-	if not configure_endpoint(OS.get_environment("DAWN_SERVER_URL"), OS.get_environment("DAWN_INVITE_TOKEN")):
-		push_error("[Connection] invalid endpoint or invite configuration")
-		set_process(false)
-		return
+	set_process(false)
+
+
+func start_connection(url: String, token: String) -> bool:
+	if _active or not configure_endpoint(url, token):
+		return false
+	_resume_ticket.clear()
+	_waiting_elapsed = 0.0
+	_reconnect_timer = 0.0
+	_reconnect_attempts = 0
+	_active = true
+	set_process(true)
 	_connect_to_server()
+	return true
+
+
+func cancel_connection() -> void:
+	_active = false
+	set_process(false)
+	_ws.close()
+	_ws = WebSocketPeer.new()
+	_connected = false
+	_welcomed = false
+	_invite_token = ""
+	_invite_server_url = ""
+	_resume_ticket.clear()
+	player_id = -1
+	ship_id = -1
+	connection_changed.emit(false)
 
 
 ## Native-client playtest configuration. Never log or serialize the bearer token.
@@ -96,6 +124,14 @@ func _invite_headers() -> PackedStringArray:
 	return PackedStringArray(["Authorization: Bearer " + _invite_token])
 
 func _process(delta: float) -> void:
+	if not _active:
+		return
+	if not _welcomed:
+		_waiting_elapsed += delta
+		if _waiting_elapsed >= 90.0:
+			cancel_connection()
+			connection_failed.emit()
+			return
 	_ws.poll()
 	var state: int = _ws.get_ready_state()
 
@@ -265,6 +301,8 @@ func _accept_welcome(
 	ship_id = p_ship_id
 	_resume_ticket = p_resume_ticket
 	_welcomed = true
+	_waiting_elapsed = 0.0
+	session_ready.emit()
 	print("[Connection] Welcome: player_id=%d ship_id=%d" % [player_id, ship_id])
 
 
