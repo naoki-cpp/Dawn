@@ -236,7 +236,7 @@ jobs:
       - name: Run GdUnit4 tests
         run: |
           cd client
-          GODOT_BIN="$(../scripts/setup-godot.sh --print)"
+          GODOT_BIN="$(bash ../scripts/setup-godot.sh --print)"
           xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" bash addons/gdUnit4/runtest.sh --godot_binary "$GODOT_BIN" -a test
 
   # Single required-status-check target for branch protection: succeeds only

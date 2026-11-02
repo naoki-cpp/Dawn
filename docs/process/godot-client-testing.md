@@ -35,10 +35,10 @@ Tests live under `client/test/` as `<target-file>_test.gd`
 it individually).
 
 ```bash
-scripts/setup-godot.sh             # prepare everything through build + import
+bash scripts/setup-godot.sh        # prepare everything through build + import
 # Windows PowerShell:
 scripts/setup-godot.ps1
-scripts/setup-godot.sh --run-tests
+bash scripts/setup-godot.sh --run-tests
 scripts/setup-godot.ps1 -RunTests
 python3 -m unittest discover -s scripts/tests -p 'test_godot_setup.py'
 ```
@@ -68,7 +68,7 @@ Run GdUnit4 with the fetched Godot binary (working directory: `client/`):
 
 ```bash
 cd client
-GODOT_BIN="$(../scripts/setup-godot.sh --print)"
+GODOT_BIN="$(bash ../scripts/setup-godot.sh --print)"
 bash addons/gdUnit4/runtest.sh --godot_binary "$GODOT_BIN" -a test
 ```
 
