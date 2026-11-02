@@ -31,6 +31,10 @@ Dawn changes:
   include (not available in the standard 4.7.2 distribution).
 - Request resolved color/depth after transparency, preserving opaque occlusion
   with MSAA. Transparent surfaces without depth writes do not occlude the sun.
+- Remove unused texture creation, SceneData/normal/color-sampler helpers,
+  linear sampler allocation, and sample code from the base implementation.
+  Retain render-thread lifecycle, color/depth bindings, UBO updates, dispatch
+  and RID cleanup. No private texture context is allocated or cleared on resize.
 
 Forward+ or Mobile is required. Compatibility/headless leaves the physical sun
 intact but does not attach this effect. Only camera-relative rendering data
@@ -44,6 +48,8 @@ occluded, rear-facing and offscreen sources with MSAA disabled and 4x MSAA.
 4x is used as the portable Vulkan framebuffer sample count; 2x is optional.
 It also checks radial shadows from an off-center occluder, unchanged opaque
 surfaces/screen corners, and clipped dispatch bounds.
+The same effect is also exercised across repeated viewport resizes to verify
+buffer updates and source-visibility changes without private texture storage.
 `world_presentation_test.gd` checks camera projection and directional tracking.
 These rendering tests require the normal Forward+ test environment, not the
 headless/Compatibility renderer.
@@ -56,3 +62,6 @@ and 35.9 ms with rays. These short samples share the GPU with other processes
 and are indicative, not a performance guarantee.
 
 Interactive warp gameplay and a sustained frame-time budget still need playtest.
+
+Cleanup verification on 2026-11-03: all 232 GdUnit4 cases passed under the
+same Windows / Forward+ environment, including repeated viewport resize.

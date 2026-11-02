@@ -11,14 +11,10 @@ extends CompositorEffect
 ## Use to troubleshoot errors from freeing invalid RIDs.
 @export var print_freed_rids : bool = false
 
-const SCENE_DATA_BINDING : int = 0
 const COLOR_IMAGE_BINDING : int = 1
 const DEPTH_SAMPLER_BINDING : int = 2
-const NORMAL_SAMPLER_BINDING : int = 3
-const COLOR_SAMPLER_BINDING : int = 4
 
 var nearest_sampler : RID
-var linear_sampler : RID
 
 var rd : RenderingDevice
 var render_data : RenderData
@@ -58,7 +54,6 @@ func _initialize_render_base() -> void:
 		return
 
 	nearest_sampler = create_sampler(RenderingDevice.SamplerFilter.SAMPLER_FILTER_NEAREST)
-	linear_sampler = create_sampler(RenderingDevice.SamplerFilter.SAMPLER_FILTER_LINEAR, RenderingDevice.SamplerRepeatMode.SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE)
 
 	_initialize_render()
 
@@ -163,54 +158,6 @@ func create_pipeline(p_shader : RID, p_constants := {}) -> RID:
 		constants.append(constant)
 
 	return rd.compute_pipeline_create(p_shader, constants)
-
-
-## Creates a unique texture with 1 layer, 1 mipmap, and TEXTURE_SAMPLES_1.
-## Returns the image RID.
-func create_simple_texture(
-		p_context : StringName,
-		p_texture_name : StringName,
-		p_format : RenderingDevice.DataFormat,
-		p_usage_bits : int = RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT \
-			| RenderingDevice.TEXTURE_USAGE_STORAGE_BIT,
-		p_texture_size := Vector2i.ZERO,
-	) -> RID:
-
-	const TEXTURE_SAMPLES := RenderingDevice.TextureSamples.TEXTURE_SAMPLES_1
-	const TEXTURE_LAYER_COUNT : int = 1
-	const TEXTURE_MIPMAP_COUNT : int = 1
-	const TEXTURE_LAYER : int = 0
-	const TEXTURE_MIPMAP : int = 0
-	const TEXTURE_IS_UNIQUE : bool = true
-
-	var texture_size := render_size if p_texture_size == Vector2i.ZERO else p_texture_size
-
-	render_scene_buffers.create_texture(
-			p_context,
-			p_texture_name,
-			p_format,
-			p_usage_bits,
-			TEXTURE_SAMPLES,
-			texture_size,
-			TEXTURE_LAYER_COUNT,
-			TEXTURE_MIPMAP_COUNT,
-			TEXTURE_IS_UNIQUE,
-	)
-
-	var texture_image : RID = render_scene_buffers.get_texture_slice(
-			p_context,
-			p_texture_name,
-			TEXTURE_LAYER,
-			TEXTURE_MIPMAP,
-			TEXTURE_LAYER_COUNT,
-			TEXTURE_MIPMAP_COUNT,
-	)
-
-	# Textures appear to be automatically freed at the time of NOTIFICATION_PREDELETE.
-	# Attempting to free the texture's RID will trigger errors.
-	# So we will not add its RID to rids_to_free.
-	return texture_image
-
 
 
 func create_uniform_buffer(p_data : Array) -> RID:
@@ -359,20 +306,6 @@ func run_compute_shader(
 	rd.compute_list_end()
 	rd.draw_command_end_label()
 
-## Get Godot's built-in SceneData UBO.
-## See https://github.com/godotengine/godot/pull/80214#issuecomment-1953258434
-func get_scene_data_ubo() -> RDUniform:
-	if not render_scene_data:
-		return null
-
-	var scene_data_buffer : RID = render_scene_data.get_uniform_buffer()
-	var scene_data_buffer_uniform := RDUniform.new()
-	scene_data_buffer_uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER
-	scene_data_buffer_uniform.binding = SCENE_DATA_BINDING
-	scene_data_buffer_uniform.add_id(scene_data_buffer)
-	return scene_data_buffer_uniform
-
-
 func get_color_image_uniform(p_view : int) -> RDUniform:
 	# Should be DATA_FORMAT_R16G16B16A16_SFLOAT
 	var color_image : RID = render_scene_buffers.get_color_layer(p_view)
@@ -383,18 +316,6 @@ func get_color_image_uniform(p_view : int) -> RDUniform:
 	return color_image_uniform
 
 
-func get_color_sampler_uniform(p_view : int, p_sampler: RID) -> RDUniform:
-	# Should be DATA_FORMAT_R16G16B16A16_SFLOAT
-	var color_image : RID = render_scene_buffers.get_color_layer(p_view)
-	var color_sampler_uniform : RDUniform = get_sampler_uniform(
-			color_image,
-			p_sampler,
-			COLOR_SAMPLER_BINDING,
-		)
-	return color_sampler_uniform
-
-
-
 func get_depth_sampler_uniform(p_view : int, p_sampler : RID) -> RDUniform:
 	var depth_image : RID = render_scene_buffers.get_depth_layer(p_view)
 	var depth_sampler_uniform : RDUniform = get_sampler_uniform(
@@ -403,30 +324,6 @@ func get_depth_sampler_uniform(p_view : int, p_sampler : RID) -> RDUniform:
 			DEPTH_SAMPLER_BINDING,
 		)
 	return depth_sampler_uniform
-
-
-func get_normal_sampler_uniform(_p_view : int, p_sampler : RID) -> RDUniform:
-	var normal_image : RID = render_scene_buffers.get_texture(
-			"forward_clustered",
-			"normal_roughness",
-		)
-	var normal_sampler_uniform : RDUniform = get_sampler_uniform(
-			normal_image,
-			p_sampler,
-			NORMAL_SAMPLER_BINDING,
-	)
-	return normal_sampler_uniform
-
-
-func get_scene_uniform_set(p_view : int) -> Array[RDUniform]:
-	return [
-			get_scene_data_ubo(),
-			get_color_image_uniform(p_view),
-			get_depth_sampler_uniform(p_view, nearest_sampler),
-			get_normal_sampler_uniform(p_view, nearest_sampler),
-			get_color_sampler_uniform(p_view, nearest_sampler)
-	]
-
 
 
 # ---------------------------------------------------------------------------

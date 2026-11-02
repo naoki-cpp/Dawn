@@ -95,8 +95,6 @@ func set_sun(position: Vector2, color: Color, visibility: float, radius: float) 
 # Set 1
 const EFFECT_DATA_UBO_BINDING := 0
 
-var context := &"Context"
-
 var shader : RID
 var shader_pipeline : RID
 
@@ -152,9 +150,6 @@ func _render_view(p_view : int) -> void:
 	var scene_uniform_set : Array[RDUniform] = [
 		get_color_image_uniform(p_view),
 		get_depth_sampler_uniform(p_view, nearest_sampler),
-		# if we bind this, then the color image is used both as image and sampler which Godot doesnt like
-		# in dev builds.
-		# get_color_sampler_uniform(p_view, nearest_sampler)
 	]
 	var df_uniform_set : Array[RDUniform] = [effect_data_ubo_uniform]
 
@@ -182,20 +177,7 @@ static func effect_region(size: Vector2i, source: Vector2, radius: float) -> Rec
 
 # Called before _render_setup() if `render_size` has changed.
 func _render_size_changed() -> void:
-	# Clear all textures under this context.
-	# This will trigger creation of new textures.
-	render_scene_buffers.clear_context(context)
 	settings_dirty = true
-
-
-# func create_textures() -> void:
-	# texture_image = create_simple_texture(
-	# 		context,
-	# 		texture,
-	# 		RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT,
-	# )
-
-	# texture_image_uniform = get_image_uniform(texture_image, TEXTURE_IMAGE_BINDING)
 
 
 func create_global_uniform_buffer() -> void:

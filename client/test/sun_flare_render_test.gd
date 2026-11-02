@@ -93,6 +93,23 @@ func test_flare_obeys_depth_and_source_visibility() -> void:
 		assert_float(await _capture(viewport)).is_less(visible_light * 0.01)
 
 
+func test_flare_survives_repeated_viewport_resize() -> void:
+	var scene := _scene()
+	var viewport: SubViewport = scene.viewport
+	var effect: CompositorEffect = scene.effect
+	var blocker: MeshInstance3D = scene.blocker
+	blocker.hide()
+	for size: Vector2i in [Vector2i(321, 241), Vector2i(481, 319), Vector2i(321, 241)]:
+		viewport.size = size
+		effect.set_sun(Vector2(0.5, 0.5), Color.WHITE, 1.0, 1.0)
+		var image := await _capture_image(viewport)
+		assert_vector(image.get_size()).is_equal(size)
+		var visible_light := await _capture(viewport)
+		assert_float(visible_light).is_greater(1.0)
+		effect.set_sun(Vector2(0.5, 0.5), Color.WHITE, -1.0, 1.0)
+		assert_float(await _capture(viewport)).is_less(visible_light * 0.01)
+
+
 func test_local_glow_casts_shadows_and_preserves_foreground() -> void:
 	var scene := _scene()
 	var viewport: SubViewport = scene.viewport
