@@ -3,6 +3,10 @@
 One free web service for a few trusted native desktop testers, not production.
 See [ADR-0056](../adr/ADR-0056-invited-disposable-playtest.md).
 
+The service runs one process with three Sectors (Alpha, Beta, Gamma) and
+co-located Raft actors. Gate travel stays on the same WebSocket endpoint.
+This does not provide independent-node failover or durable storage.
+
 ## Deploy
 
 1. Push this change to GitHub through a PR. In the Render dashboard choose
@@ -18,6 +22,11 @@ See [ADR-0056](../adr/ADR-0056-invited-disposable-playtest.md).
    invites fail startup rather than opening an unauthenticated listener.
 5. Copy the service's public hostname. The client URL is
    `wss://<assigned-hostname>.onrender.com`, without an explicit internal port.
+
+For an existing deployment, sync the updated Blueprint and manually deploy
+the merged commit. Confirm its start command includes `--serve --cluster`;
+the old single-Sector start command cannot perform gate handoffs. Keep the
+existing invite secret. Redeploying resets the entire playtest world.
 
 Generate each token locally with a cryptographically secure generator. For
 example, Python's standard library (run once per tester):
@@ -79,7 +88,14 @@ exports are unsupported because they cannot set custom handshake headers.
 - Incoming messages/frames are capped at 64 KiB; at most eight concurrent
   handshakes and eight queued single-node admissions are retained. These do
   not replace production connection/output rate limiting.
-- Single Sector only: cross-Sector gate travel is not available in this setup.
+- Gate travel works among the three in-process Sectors. Select a gate and
+  request Jump; out-of-range requests warp/approach first and then auto-jump.
+  Check that the system changes and that reconnecting resumes the same ship
+  in its destination system. No endpoint change or invite re-entry is needed
+  for an ordinary in-process gate handoff.
+- `--pop-cap 8` is per Sector, not a shared process-wide player/memory cap.
+  Keep the total tester population small; three Sectors share the same free
+  instance's CPU/RAM, and their in-memory journals grow for the session.
 - No extra authentication server/Redis/Postgres; no automatic deploys. Review
   Render's current quotas, billing and spend settings before confirming create.
 

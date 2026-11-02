@@ -7,7 +7,7 @@ services:
     region: singapore
     autoDeployTrigger: "off"
     buildCommand: cargo build --locked --release -p dawn-server --bin simulate
-    startCommand: ./target/release/simulate --serve --ships 5 --pop-cap 8
+    startCommand: ./target/release/simulate --serve --cluster --ships 5 --pop-cap 8
     envVars:
       - key: DAWN_INVITE_TOKENS
         sync: false

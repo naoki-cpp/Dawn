@@ -11,11 +11,12 @@ date     : 2026-11-02
 
 # Security Review — Dawn Server（OWASP観点）
 
-2026-11-02 scoped public-playtest update (ADR-0056): `simulate --serve` requires
+2026-11-02 scoped public-playtest update (ADR-0056): both `simulate --serve`
+and `simulate --serve --cluster` share ingress in `serve/playtest.rs`, requiring
 validated individual invites when `PORT` exposes the listener, and rejects
 unauthorized requests before upgrade/Hello. `subtle` compares bearer tokens;
 Debug/errors do not disclose secrets. Upgrade and Hello each time out after
-3 seconds; single-node handshakes and their pending queue are capped at eight.
+3 seconds; process-wide handshakes and their shared pending queue are capped at eight.
 Public denials do not emit per-attempt logs. Client credentials are restricted
 to WSS (or explicit loopback tests) and are not forwarded across redirects.
 All client listeners now explicitly cap incoming frames/messages at 64 KiB.
@@ -23,6 +24,12 @@ Token gates do not supply a PlayerId or replace ResumeTicket verification.
 No wire schema, SQL query, ownership check or command validation changed.
 Tests exercise HTTP rejection, two valid invitations, invalid/duplicate
 configuration, redaction, oversized input and client endpoint pinning.
+Real-binary cloud-style tests also cover missing/invalid invitation rejection,
+fail-closed startup, a gate handoff on one socket, and ResumeTicket routing to
+the destination Sector. The existing consensus/ownership and command-validation
+paths are unchanged. Cloud Market storage is fresh per process in both modes;
+no SQL query changed. Population limits remain per Sector, not a global resource
+quota. No new finding was introduced by the in-process multi-Sector extension.
 
 This limited trusted-tester configuration is not an internet-hardened
 production deployment: admitted output queues, long-lived InMemoryJournal
