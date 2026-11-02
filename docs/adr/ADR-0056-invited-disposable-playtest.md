@@ -34,6 +34,10 @@ transport authentication is not appropriate for an internet endpoint.
   and does not preserve identities or state across restart.
 - Pin the client credential to its configured endpoint; do not forward it on
   a redirect. Native desktop clients only; browser exports cannot set headers.
+- A native connection dialog accepts the endpoint and masked invite code;
+  environment variables only prefill it. Do not persist the code. Keep it in
+  memory for reconnects and clear it on cancel/timeout. Wait for Welcome before
+  enabling gameplay; initial/reconnect attempts time out after 90 seconds.
 - The Sector uses the existing InMemoryJournal. On every cloud process start,
   Market SQLite also gets a fresh temporary directory, avoiding a surviving
   ledger paired with reset Sector inventories. No recovery/durability claim
