@@ -1,12 +1,6 @@
 extends GdUnitTestSuite
 
 
-func before() -> void:
-	print("Solar test methods: ", get_script().get_script_method_list().map(
-		func(method: Dictionary) -> String: return method.name).filter(
-		func(method: String) -> bool: return method.begins_with("test_")))
-
-
 func before_test() -> void:
 	assert_object(RenderingServer.get_rendering_device()) \
 		.override_failure_message("Solar compositor tests require Forward+ or Mobile with a working Vulkan/RenderingDevice backend.") \
