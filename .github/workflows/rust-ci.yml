@@ -221,21 +221,23 @@ jobs:
           path: client/addons/gdUnit4
           key: gdunit4-${{ hashFiles('.gdunit4-version') }}
 
-      - name: Install GdUnit4 addon
-        if: steps.gdunit-cache.outputs.cache-hit != 'true'
-        run: bash scripts/install-gdunit.sh
-
       - name: Restore Godot editor
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .tools/godot
           key: godot-${{ runner.os }}-${{ hashFiles('.godot-version') }}
 
-      - name: Build GDExtension
-        run: cargo build -p dawn-client-gdext
+      - name: Test Godot preparation
+        run: python3 -m unittest discover -s scripts/tests -p 'test_godot_setup.py'
+
+      - name: Prepare Godot test environment
+        run: bash scripts/setup-godot.sh
 
       - name: Run GdUnit4 tests
-        run: xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" bash scripts/setup-godot.sh --run-tests
+        run: |
+          cd client
+          GODOT_BIN="$(../scripts/setup-godot.sh --print)"
+          xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" bash addons/gdUnit4/runtest.sh --godot_binary "$GODOT_BIN" -a test
 
   # Single required-status-check target for branch protection: succeeds only
   # if every job above succeeded, so protection rules don't need to list
