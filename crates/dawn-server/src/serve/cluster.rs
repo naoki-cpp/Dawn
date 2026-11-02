@@ -2,8 +2,8 @@
 #![allow(clippy::module_name_repetitions)]
 
 use super::{
-    build_serve_node, client_request_rejection, load_serve_dependencies, market::MarketRuntime,
-    runtime, AoiDelivery, AOI_CELL_SIZE, P4_TICK_MS,
+    build_serve_node, client_request_rejection, load_serve_dependencies, runtime, AoiDelivery,
+    AOI_CELL_SIZE, P4_TICK_MS,
 };
 use crate::{cluster, ws_server};
 use dawn_core::{DomainEvent, NodeId, PlayerId, SectorBounds, SectorId, ShipId};
@@ -52,7 +52,9 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
     println!("  Press Ctrl-C to stop");
     println!();
 
-    let server = ws_server::WsServer::bind("127.0.0.1:7878")
+    let playtest = super::playtest::PlaytestConfig::from_environment()
+        .expect("invalid playtest configuration");
+    let server = ws_server::WsServer::bind(playtest.address)
         .await
         .expect("failed to bind WebSocket server");
 
@@ -81,8 +83,9 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
             )
         })
         .collect();
-    let mut market = MarketRuntime::open("data/market.sqlite")
-        .expect("failed to open Market database at data/market.sqlite");
+    let (_market_directory, mut market) = playtest
+        .open_market()
+        .expect("failed to open playtest Market database");
 
     hosts[0]
         .spawn_npc_frigates(ship_count)
@@ -96,28 +99,8 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
     }
     println!("  [Server] Raft warm-up complete. Waiting for players...");
 
-    let (handshake_req_tx, mut handshake_req_rx) =
-        mpsc::unbounded_channel::<ws_server::HandshakeRequest>();
+    let mut handshake_req_rx = playtest.accept_requests(server);
     let (completion_tx, mut completion_rx) = mpsc::unbounded_channel::<HandshakeCompletion>();
-
-    let server_arc = std::sync::Arc::new(server);
-    let server_clone = server_arc.clone();
-    tokio::spawn(async move {
-        loop {
-            if let Some((stream, addr)) = server_clone.try_accept_raw().await {
-                let tx = handshake_req_tx.clone();
-                tokio::spawn(async move {
-                    match ws_server::WsServer::accept_handshake_request(stream, addr).await {
-                        Ok(request) => {
-                            let _ = tx.send(request);
-                        }
-                        Err(error) => eprintln!("[Server] handshake request failed: {error}"),
-                    }
-                });
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        }
-    });
 
     let mut sessions: Vec<ws_server::PlayerSession> = Vec::new();
     let mut player_sector: HashMap<PlayerId, usize> = HashMap::new();

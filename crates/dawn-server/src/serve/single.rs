@@ -2,8 +2,8 @@
 #![allow(clippy::module_name_repetitions)]
 
 use super::{
-    build_serve_node, client_request_rejection, load_serve_dependencies, market::MarketRuntime,
-    AoiDelivery, DuelMetrics, AOI_CELL_SIZE, P4_TICK_MS, TIDI_BUDGET,
+    build_serve_node, client_request_rejection, load_serve_dependencies, AoiDelivery, DuelMetrics,
+    AOI_CELL_SIZE, P4_TICK_MS, TIDI_BUDGET,
 };
 use crate::ws_server;
 use dawn_core::{DomainEvent, NodeId, Position, SectorBounds, SectorId, ShipId};
@@ -55,7 +55,7 @@ pub(crate) async fn run_phase4_server(
     println!();
 
     let playtest = super::playtest::PlaytestConfig::from_environment()
-        .expect("invalid single-node playtest configuration");
+        .expect("invalid playtest configuration");
     let server = ws_server::WsServer::bind(playtest.address)
         .await
         .expect("failed to bind WebSocket server");
@@ -69,19 +69,9 @@ pub(crate) async fn run_phase4_server(
         LocalRuntimeConsensus,
         RuntimeFramePolicy::local_durable(0),
     );
-    // The in-memory Sector cannot recover an old Market ledger on process restart.
-    // Cloud playtests therefore give both authorities a fresh lifecycle.
-    let market_directory = playtest
-        .address
-        .ip()
-        .is_unspecified()
-        .then(|| tempfile::tempdir().expect("failed to create disposable playtest directory"));
-    let market_path = market_directory.as_ref().map_or_else(
-        || std::path::PathBuf::from("data/market.sqlite"),
-        |directory| directory.path().join("market.sqlite"),
-    );
-    let mut market = MarketRuntime::open(&market_path.to_string_lossy())
-        .expect("failed to open Market database");
+    let (_market_directory, mut market) = playtest
+        .open_market()
+        .expect("failed to open playtest Market database");
 
     host.spawn_npc_frigates(ship_count)
         .expect("NPC fixture population must be created before the first frame");
@@ -113,48 +103,8 @@ pub(crate) async fn run_phase4_server(
 
     println!("  [Server] {ship_count} NPC ships ready. Waiting for players...");
 
-    let (handshake_req_tx, mut handshake_req_rx) = mpsc::channel::<ws_server::HandshakeRequest>(8);
+    let mut handshake_req_rx = playtest.accept_requests(server);
     let (completion_tx, mut completion_rx) = mpsc::unbounded_channel::<HandshakeCompletion>();
-
-    let server_arc = std::sync::Arc::new(server);
-    let server_clone = server_arc.clone();
-    tokio::spawn(async move {
-        let access = playtest.access;
-        let handshakes = std::sync::Arc::new(tokio::sync::Semaphore::new(8));
-        loop {
-            if let Some((stream, addr)) = server_clone.try_accept_raw().await {
-                let Ok(permit) = handshakes.clone().try_acquire_owned() else {
-                    drop(stream);
-                    continue;
-                };
-                let access = access.clone();
-                let tx = handshake_req_tx.clone();
-                tokio::spawn(async move {
-                    let _permit = permit;
-                    let result = match access.as_deref() {
-                        Some(access) => {
-                            ws_server::WsServer::accept_invited_handshake_request(
-                                stream, addr, access,
-                            )
-                            .await
-                        }
-                        None => ws_server::WsServer::accept_handshake_request(stream, addr).await,
-                    };
-                    match result {
-                        Ok(request) => {
-                            let _ = tx.send(request).await;
-                        }
-                        Err(error) if access.is_none() => {
-                            eprintln!("[Server] handshake request failed: {error}")
-                        }
-                        // Public denials are expected; do not let anonymous traffic flood logs.
-                        Err(_) => {}
-                    }
-                });
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        }
-    });
 
     let mut sessions: Vec<ws_server::PlayerSession> = Vec::new();
     let mut aoi_delivery = AoiDelivery::new(AOI_CELL_SIZE);
