@@ -22,6 +22,10 @@ func _capture_image(viewport: SubViewport) -> Image:
 	for frame in 5:
 		await get_tree().process_frame
 	RenderingServer.force_draw(false)
+	# GdUnit's CLI can advance process frames without drawing. Render a second
+	# frame after the first submission so scene/depth updates have been consumed.
+	await get_tree().process_frame
+	RenderingServer.force_draw(false)
 	return viewport.get_texture().get_image()
 
 
@@ -67,18 +71,20 @@ func _scene() -> Dictionary:
 ## Real GPU coverage: source visibility, reverse-Z occlusion, MSAA resolve and
 ## non-workgroup-aligned viewport sizes. Projection itself has separate tests.
 func test_flare_obeys_depth_and_source_visibility() -> void:
-	var scene := _scene()
-	var viewport: SubViewport = scene.viewport
-	var effect: CompositorEffect = scene.effect
-	var blocker: MeshInstance3D = scene.blocker
 	for msaa: int in [Viewport.MSAA_DISABLED, Viewport.MSAA_2X]:
+		var scene := _scene()
+		var viewport: SubViewport = scene.viewport
+		var effect: CompositorEffect = scene.effect
+		var blocker: MeshInstance3D = scene.blocker
 		viewport.msaa_3d = msaa
 		blocker.hide()
 		effect.set_sun(Vector2(0.5, 0.5), Color.WHITE, 1.0, 1.0)
 		var visible_light := await _capture(viewport)
 		assert_float(visible_light).is_greater(1.0)
 		blocker.show()
-		assert_float(await _capture(viewport)).is_less(visible_light * 0.01)
+		assert_float(await _capture(viewport)) \
+			.override_failure_message("Solar source must be occluded with MSAA mode %d" % msaa) \
+			.is_less(visible_light * 0.01)
 		blocker.hide()
 		effect.set_sun(Vector2(0.5, 0.5), Color.WHITE, -1.0, 1.0)
 		assert_float(await _capture(viewport)).is_less(visible_light * 0.01)
@@ -86,7 +92,7 @@ func test_flare_obeys_depth_and_source_visibility() -> void:
 		assert_float(await _capture(viewport)).is_less(visible_light * 0.01)
 
 
-func test_local_glow_casts_depth_shadows_without_lighting_foreground_or_screen_corners() -> void:
+func test_local_glow_casts_shadows_and_preserves_foreground() -> void:
 	var scene := _scene()
 	var viewport: SubViewport = scene.viewport
 	var effect: CompositorEffect = scene.effect
