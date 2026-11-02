@@ -4,7 +4,7 @@ audience : AI Agent / Human Developer
 update   : /architecture-review が issue を解消済みへ移動するたびに追記
 related  : docs/architecture/architecture-review/server.md（構造評価）,
            docs/architecture/architecture-review/server-pending.md（未完項目）
-date     : 2026-08-26
+date     : 2026-11-03
 ---
 
 # Architecture Review — Dawn Codebase（完了済みログ）
@@ -16,6 +16,16 @@ date     : 2026-08-26
 ---
 
 ## 改善ロードマップ > 完了済み
+
+### 2026-11-03: Godot test preparation (R-10, implemented; merge pending)
+
+`scripts/godot_setup.py` owns pinned installation, validated/idempotent runner
+patches, GDExtension build and fail-closed project import. PowerShell/Bash are
+thin adapters; CI uses the same preparation before its separate Vulkan test run.
+Obsolete FileAccess/plugin/monitor patches were removed against official
+GdUnit4 6.1.3. All 12 offline readiness tests and 231 Windows GdUnit4 tests
+pass through the setup entry point. Git Bash syntax/path dispatch is verified;
+Linux/macOS execution remains CI/platform validation.
 
 ### 2026-08-26: SectorRepository bounded-context split (#344)
 

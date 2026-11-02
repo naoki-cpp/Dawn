@@ -4,7 +4,7 @@ audience : AI Agent / Human Developer
 update   : /architecture-review で issue を起票・状態更新するたびに更新
 related  : docs/architecture/architecture-review/server.md（構造評価）,
            docs/architecture/architecture-review/server-completed.md（完了済みログ）
-date     : 2026-10-31
+date     : 2026-11-03（R-10実装・検証結果を反映）
 ---
 
 # Architecture Review — Dawn Codebase（未完項目）
@@ -36,14 +36,11 @@ module間のdriftが実害になるまで分割しない。行数だけでは発
 
 PR #369をマージ済み、Issue #346はclosed。実装記録は[server-completed.md](./server-completed.md)を参照。
 
-### R-10（Fix）: Godotテスト環境準備の分散
+### R-10 実装済み（マージ待ち）: Godotテスト環境準備の分散
 
-**根本原因:** `setup-godot.ps1`/`.sh`はGodot取得・互換patch・importを持つ一方、
-GdUnit取得は`install-gdunit.sh`、DLL buildはCI/利用者の別手順であり、準備順序をcallerが所有する。
-両setupに同じpatch意図も重複する。DLL欠損時はimport後に多数の未定義classへ波及する。
-**判断: Fix。** 既存platform adapterを維持し、前提検証と順序を一つの準備contractへ集約する。
-patchの正本を共有し、fresh/repeat setup、DLL欠損、addon版違い、CRLF/LF、import失敗を検証する。
-新crateや委譲だけのmanagerは作らない。新しいGitHub Issueはまだ起票していない。
+`scripts/godot_setup.py`が固定版取得・runner patch・拡張build・importを所有し、
+PowerShell/BashとCIが同じ準備contractを使用する。検証記録は
+[server-completed.md](./server-completed.md)を参照。Linux/macOSの実行確認はCI/platform testingで継続する。
 
 ### R-11（Defer）: Market決済のframe間bookkeeping
 
@@ -68,7 +65,7 @@ bookkeeping修正が両方で再発した場合。抽出時もMarket/Sector auth
 | R-2 | 保留・trigger付き |
 | R-3 | commands slice・transit deepening 完了、warpはtrigger付きで保留 |
 | R-9 | #346・PR #369で解消済み |
-| R-10 | Godot準備contract・Fix（未起票） |
+| R-10 | Godot準備contract・実装済み、マージ待ち |
 | R-11 | 決済bookkeeping・Defer（trigger付き） |
 採らない方針: CRDT/LWW、protobuf、薄いadapterだけの追加crate、行数削減目的の網羅match・domain型の破壊、初回LAN検証でのTLS/認証。
 

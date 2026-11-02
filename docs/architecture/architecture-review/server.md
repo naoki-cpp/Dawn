@@ -5,7 +5,7 @@ update   : 大規模リファクタ実施後 / 新クレート追加時 / archit
 related  : AI_DEVELOPMENT_GUIDE.md「Crate Boundaries」, docs/architecture/architecture.md,
            docs/architecture/architecture-review/server-completed.md（完了済みログ）,
            docs/architecture/architecture-review/server-pending.md（未完項目・issue一覧）
-date     : 2026-10-31（全対象再計測、R-9完了、R-10/R-11の判断を記録）
+date     : 2026-11-03（R-10実装を反映。全対象再計測は2026-10-31）
 ---
 
 # Architecture Review — Dawn Codebase（現行構造評価）
@@ -19,7 +19,7 @@ date     : 2026-10-31（全対象再計測、R-9完了、R-10/R-11の判断を�
 in-process driverは`RuntimeFrameHost`へ統合された。`SectorRepository`は接続とschemaを所有する
 rootへ縮小され、bounded contextの実装はprivate child moduleへ分割された。Marketの全状態
 reload/rewriteは#345でbounded working setへ移行済み。R-9/#346はPR #369で完了し、
-FileJournalのread/compactionもbatch/chunk上限に収まる。残るR-10はGodot準備手順の分散、
+FileJournalのread/compactionもbatch/chunk上限に収まる。R-10は共通Python準備処理へ集約済み（マージ待ち）、
 R-11はMarket決済のframe間bookkeeping（trigger付き保留）であり、永続化の二重authorityではない。
 
 2026-08-24にissue #338をPR #340で完了し、残っていた`dawn-actor`のClientConnection/WebSocket transportを
@@ -38,7 +38,7 @@ Transitについては、Raftの回復判断を`transit::handoff`に残し、Shi
 | 重複 | A− | Station runtime apply、SectorMap projectionを解消。Transit policy/state mutationも分離し、live専用materializationへ集約 |
 | 永続化 | A− | R-9/#346（PR #369）でFileJournal 1593行のread/compactionをbounded-memory化。checkpoint、archive retry、alias/poison保証を維持。大容量実ログのpeak memory計測は未実施 |
 | Rust固有 | A− | 網羅matchとexhaustive destructuringを変更検出器として利用 |
-| AI開発誘発 | B+ | runtime frame 1338行はtyped入出力へ集約済み。R-10のGodot準備手順と互換patchの分散はFix、R-11の決済bookkeepingはtrigger付き保留 |
+| AI開発誘発 | B+ | runtime frame 1338行はtyped入出力へ集約済み。R-10は共通準備contractへ集約済み（マージ待ち）、R-11の決済bookkeepingはtrigger付き保留 |
 
 ## 冗長性
 
@@ -50,10 +50,10 @@ Transitについては、Raftの回復判断を`transit::handoff`に残し、Shi
 - canonical NodeState checkpoint/delta capture/restore
 
 Open / watched:
-1. **R-10** Godotテスト環境の準備順序・互換patchの分散（Fix）
+1. **R-10** Godotテスト環境の準備順序・互換patchの分散（実装済み、マージ待ち）
 2. **R-11** Market決済のframe間bookkeeping（Defer、trigger付き）
 
-**R-9 / #346はPR #369で完了。** 永続化軸はB+→A−。総合B+はR-10と複数の監視項目により据え置く。
+**R-9 / #346はPR #369で完了。** 永続化軸はB+→A−。総合B+は再採点せず据え置く。
 
 Resolved in #336: the legacy EventStore/FileEventStore path is deleted. The
 DurableJournal is the sole persistent source of committed public facts, and

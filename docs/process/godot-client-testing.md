@@ -12,19 +12,20 @@ The editor and CI use Godot **4.7.2-stable**, pinned in `.godot-version`.
 `compatibility_minimum = "4.6"`: updating the runtime does not require exposing
 new engine APIs. Rebuild the extension before testing the updated engine.
 
-Both setup scripts wait for the complete `--headless --editor --import` run
-and store its log at `client/.godot-test-logs/import.log`. On Windows they use
-the console executable so process completion and exit codes are observable.
-Downloads have connection/transfer timeouts and must pass SHA512 validation;
-PowerShell uses .NET hashing without requiring the `Get-FileHash` cmdlet.
+Python 3.10+ and Cargo are required. `scripts/godot_setup.py` owns preparation;
+the PowerShell/Bash scripts are thin entry points. Set `PYTHON` to an explicit
+interpreter path if Python is not available under its normal command name.
+Preparation validates the pinned Godot version (SHA512 on download), installs
+the pinned GdUnit4 addon when absent, validates/applies runner log patches,
+builds `dawn-client-gdext`, then waits for `--headless --editor --import`.
+The import log is `client/.godot-test-logs/import.log`; a nonzero exit or
+script/import error in that log prevents readiness and test execution.
 
 Editor addons under `client/addons/` are `.gitignore`d; the runtime
-`lens_effects` addon is vendored with its license. Local developers may install editor addons from
-the Godot editor's AssetLib, while CI restores the pinned GdUnit4 release with
-`scripts/install-gdunit.sh`. **On first local setup, search for "GdUnit4"
-in the editor's AssetLib tab, install it, and enable the plugin in
-`project.godot`** (`enabled=PackedStringArray("res://addons/gdUnit4/plugin.cfg")`
-is already committed; only the addon body needs per-machine installation).
+`lens_effects` addon is vendored with its license. Local setup and CI both
+install the version in `.gdunit4-version` automatically. An existing addon with
+a different version is rejected, not overwritten: move it aside and rerun.
+The plugin enablement in `project.godot` is already committed.
 
 Tests live under `client/test/` as `<target-file>_test.gd`
 (e.g. `client/test/main_test.gd`).
@@ -34,19 +35,23 @@ Tests live under `client/test/` as `<target-file>_test.gd`
 it individually).
 
 ```bash
-scripts/setup-godot.sh             # fetch the pinned version into .tools/godot/ with SHA512 verification
-# Linux/CI:
-bash scripts/install-gdunit.sh      # restore the GdUnit4 version from .gdunit4-version
+bash scripts/setup-godot.sh        # prepare everything through build + import
 # Windows PowerShell:
 scripts/setup-godot.ps1
-scripts/setup-godot.sh --run-tests
+bash scripts/setup-godot.sh --run-tests
 scripts/setup-godot.ps1 -RunTests
+python3 -m unittest discover -s scripts/tests -p 'test_godot_setup.py'
 ```
+
+`--print` / `-PrintPath` only resolves the binary path, with no preparation.
+`--skip-gdunit` / `-SkipGdUnit` installs/validates Godot only and does not claim
+test readiness; it cannot be combined with test execution.
+`scripts/install-gdunit.sh` remains an addon-only compatibility entry point.
 
 ## GitHub Actions
 
-The `godot` job in `.github/workflows/rust-ci.yml` builds
-`dawn-client-gdext`, installs the pinned Godot and GdUnit4 versions, and runs
+The `godot` job in `.github/workflows/rust-ci.yml` tests the preparer, calls
+the same setup entry point as local development, and separately runs
 the full GdUnit4 suite under `xvfb`. GdUnit4's normal CLI runner opens a
 window, so `xvfb-run` provides the display server on the Ubuntu runner; plain
 `--headless` is intentionally not used.
@@ -63,7 +68,7 @@ Run GdUnit4 with the fetched Godot binary (working directory: `client/`):
 
 ```bash
 cd client
-GODOT_BIN="$(../scripts/setup-godot.sh --print)"
+GODOT_BIN="$(bash ../scripts/setup-godot.sh --print)"
 bash addons/gdUnit4/runtest.sh --godot_binary "$GODOT_BIN" -a test
 ```
 
@@ -74,22 +79,13 @@ directory and applies the pinned-version GdUnit4 compatibility patches:
 scripts/setup-godot.ps1 -RunTests
 ```
 
-> **Compatibility patches (GdUnit4 v6.1.3 × Godot 4.6/4.7)**: the setup
-> scripts keep the following patches idempotent for local AssetLib installs
-> and the CI copy of the addon (re-apply after any reinstall if running the
-> test runner directly):
->   - `addons/gdUnit4/src/core/GdUnitFileAccess.gd:199`:
->     `file.get_as_text(true)` → `file.get_as_text()`
->   - `addons/gdUnit4/plugin.gd:17`: add the second argument `false`
->     (default value) to
->     `ProjectSettings.get_setting("debug/gdscript/warnings/exclude_addons")`
->   - `addons/gdUnit4/src/monitor/GodotGdErrorMonitor.gd`: guard the
->     `FileAccess.open()` calls in `collect_full_logs()` and
->     `_collect_log_entries()` before calling `seek()`, and initialize `_eof` to
->     `0`. Godot 4.6 can start the monitor before the configured log file
->     exists, which otherwise causes `Cannot call method 'seek' on a null value`.
->     `scripts/setup-godot.ps1` and `scripts/setup-godot.sh` apply this patch
->     automatically and idempotently.
+> **Pinned runner patches:** the shared preparer redirects both runner and
+> copy-helper logs to `client/.godot-test-logs/`. Patches accept LF/CRLF and
+> already-patched files, but reject unknown shapes before writing any file.
+> The runner's invalid `--remote-debug tcp://127.0.0.1:0` argument is removed.
+> GdUnit4 6.1.3 already fixes the older FileAccess/plugin/monitor issues;
+> their obsolete compatibility patches have been removed. A version upgrade
+> must update and test the patch expectations, not silently skip them.
 > **Known issue on display-less/headless sandboxes (e.g. AI agent
 > environments with no GPU/window server)**: `runtest.sh`/`runtest.cmd`'s
 > default invocation of `GdUnitCmdTool.gd` does **not** pass `--headless` --
