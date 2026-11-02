@@ -16,8 +16,10 @@ client/.godot/export_credentials
 client/gdextension/target/
 
 # Editor addons are installed per-machine via the Godot AssetLib or restored by
-# scripts/install-gdunit.sh in CI, not vendored (e.g. GdUnit4).
-client/addons/
+# scripts/install-gdunit.sh in CI, not vendored (e.g. GdUnit4). The runtime
+# lens effect is the explicitly vendored exception.
+client/addons/*
+!client/addons/lens_effects/
 
 # Godot engine binary, downloaded per-machine by scripts/setup-godot.(sh|ps1)
 # and pinned by .godot-version (uv/pyenv-style local toolchain, not vendored).
