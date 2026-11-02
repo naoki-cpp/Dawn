@@ -1,6 +1,12 @@
 extends GdUnitTestSuite
 
 
+func before() -> void:
+	print("Solar test methods: ", get_script().get_script_method_list().map(
+		func(method: Dictionary) -> String: return method.name).filter(
+		func(method: String) -> bool: return method.begins_with("test_")))
+
+
 func before_test() -> void:
 	assert_object(RenderingServer.get_rendering_device()) \
 		.override_failure_message("Solar compositor tests require Forward+ or Mobile with a working Vulkan/RenderingDevice backend.") \
@@ -71,7 +77,8 @@ func _scene() -> Dictionary:
 ## Real GPU coverage: source visibility, reverse-Z occlusion, MSAA resolve and
 ## non-workgroup-aligned viewport sizes. Projection itself has separate tests.
 func test_flare_obeys_depth_and_source_visibility() -> void:
-	for msaa: int in [Viewport.MSAA_DISABLED, Viewport.MSAA_2X]:
+	# Vulkan guarantees 4x framebuffer samples; 2x is optional on software drivers.
+	for msaa: int in [Viewport.MSAA_DISABLED, Viewport.MSAA_4X]:
 		var scene := _scene()
 		var viewport: SubViewport = scene.viewport
 		var effect: CompositorEffect = scene.effect
@@ -105,7 +112,7 @@ func test_local_glow_casts_shadows_and_preserves_foreground() -> void:
 	effect.Density = 0.98
 	(blocker.mesh as QuadMesh).size = Vector2(0.15, 0.25)
 	blocker.position = camera.project_position(Vector2(184.5, 120.5), 2.0)
-	for msaa: int in [Viewport.MSAA_DISABLED, Viewport.MSAA_2X]:
+	for msaa: int in [Viewport.MSAA_DISABLED, Viewport.MSAA_4X]:
 		viewport.msaa_3d = msaa
 		effect.set_sun(Vector2(0.5, 0.5), Color.WHITE, 1.0, 1.0)
 		blocker.hide()

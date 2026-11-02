@@ -40,7 +40,8 @@ crosses this GPU boundary; there is no dependency on the engine's precision mode
 
 Run `scripts/setup-godot.ps1 -RunTests` (or the shell equivalent).
 `sun_flare_render_test.gd` reads actual GPU pixels at 321x241, checking visible,
-occluded, rear-facing and offscreen sources with MSAA disabled and 2x MSAA.
+occluded, rear-facing and offscreen sources with MSAA disabled and 4x MSAA.
+4x is used as the portable Vulkan framebuffer sample count; 2x is optional.
 It also checks radial shadows from an off-center occluder, unchanged opaque
 surfaces/screen corners, and clipped dispatch bounds.
 `world_presentation_test.gd` checks camera projection and directional tracking.
