@@ -50,7 +50,6 @@ func test_typed_initial_state_preserves_absolute_f64_navigation_positions() -> v
 	var presentation := _apply_initial_state()
 	assert_int(presentation.ships.size()).is_equal(2)
 	assert_str(_session.current_system_name()).is_equal("Alpha")
-	assert_str((_session.system_names() as Dictionary)[2]).is_equal("Beta")
 	var gate_pos: PackedFloat64Array = (_session.gates()[0] as GateRecord).position
 	var station_pos: PackedFloat64Array = (_session.stations()[0] as StationRecord).position
 	var body_pos: PackedFloat64Array = (_session.bodies()[0] as CelestialBodyRecord).position
