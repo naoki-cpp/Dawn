@@ -100,7 +100,7 @@ navigation map cacheはSector内でwrite-onceに近いpresentation cacheとし�
 | `client/scripts/main.gd` | 976 | 🟡 R-2。scene lifecycle / node registry / event wiring / HUD scene-facts assemblyのorchestration。機械的分割はしない |
 | `client/scripts/hud_manager.gd` | 859 | 🟡 C-9。typed refsとpanel build/updateが同一責務。独立変更理由が分かれるまで保留 |
 | `client/scripts/ship_controller.gd` | 448 | 🟢 motion adapterとvisual effectの一つのShip presentation boundary |
-| `client/scripts/connection.gd` | 326 | 🟢 WebSocket接続・reconnect・typed outcome受け渡し・ClientAction transport seam |
+| `client/scripts/connection.gd` | 301 | 🟢 socket/credential adapter・typed outcome受け渡し。phase/retry/timeoutはRust ConnectionLifecycleが所有 |
 | `client/scripts/world_presentation.gd` | 695 | 🟡 C-20。session visual coordinatorとして有効だが、origin/marker/environment/warp/player effectの独立変更理由を監視 |
 | `client/scripts/market_surface.gd` | 270 | 🟢 Market panel surface |
 | `client/scripts/hud_surface.gd` | 157 | 🟢 typed snapshot paint・HUD reference ownership |

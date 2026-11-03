@@ -45,6 +45,13 @@ transport authentication is not appropriate for an internet endpoint.
   environment variables only prefill it. Do not persist the code. Keep it in
   memory for reconnects and clear it on cancel/timeout. Wait for Welcome before
   enabling gameplay; initial/reconnect attempts time out after 90 seconds.
+  Client-side lifecycle policy is owned by `dawn-client-core::ConnectionLifecycle`;
+  Godot only executes socket effects and renders its state. Initial connection,
+  disconnection recovery, and Redirect each begin a new 90-second budget;
+  opening a socket or retrying without Welcome never renews that budget.
+  Retry delay is two seconds and attempt diagnostics are at least 30 seconds
+  apart within an attempt window after its first diagnostic. Invite/ticket
+  bytes and endpoint pinning stay in the Godot transport adapter.
 - Each Sector uses the existing InMemoryJournal. On every cloud process start,
   Market SQLite also gets a fresh temporary directory, avoiding a surviving
   ledger paired with reset Sector inventories. No recovery/durability claim

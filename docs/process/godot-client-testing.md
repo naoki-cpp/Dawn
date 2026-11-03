@@ -170,6 +170,16 @@ Typed client fixtures must not recreate wire JSON/Dictionary shapes. Prefer
 debug-only typed record factories for focused UI tests and
 `ServerMessageDecoder.test_outcome()` when testing the real binary inbound path.
 
+## Client connection lifecycle tests
+
+`dawn-client-core::ConnectionLifecycle` owns phase, retry/deadline/log timing,
+and Welcome gating. Pure Rust tests cover initial/reconnect/Redirect budgets,
+repeated open/close without Welcome, cancellation, and invalid elapsed time.
+`connection_test.gd` and `connection_dialog_test.gd` use the production connection
+and lifecycle with `test/fixtures/connection_socket.gd` as the socket adapter;
+they do not maintain a FakeConnection policy or modify lifecycle flags.
+They verify transport effects, credential cleanup/pinning, and UI state.
+
 ## WorldSession test boundary
 
 The server-driven mutation surface is `ClientState::apply`: production

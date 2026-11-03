@@ -6,10 +6,20 @@ related  : .agents/skills/security-check/SKILL.md,
            .agents/skills/security-check/references/owasp-map.md,
            .agents/skills/security-check/references/baseline.md（初回レビューの凍結記録）,
            docs/architecture/security-review-completed.md（解消済みfindingの作業ログ）
-date     : 2026-11-02
+date     : 2026-11-03
 ---
 
 # Security Review — Dawn Server（OWASP観点）
+
+2026-11-03 scoped client-lifecycle update: pure Rust owns Welcome gating,
+bounded retry/log timing and independent 90-second start/reconnect/Redirect
+deadlines. Opening a socket never extends an unfinished attempt. Cancel and
+timeout clear adapter-owned invite/ticket bytes; late Welcome cannot restore
+a cancelled identity. Existing endpoint validation and exact credential pinning
+are retained and exercised through the real connection with a controlled socket.
+No SQL, server admission authority, wire type or automatic gameplay-command
+retry was added. Client elapsed time rejects non-finite/negative inputs. No new
+security finding was introduced by this client-only change.
 
 2026-11-02 scoped public-playtest update (ADR-0056): both `simulate --serve`
 and `simulate --serve --cluster` share ingress in `serve/playtest.rs`, requiring

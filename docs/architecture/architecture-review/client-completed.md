@@ -17,6 +17,14 @@ date     : 2026-11-03
 
 ## 解消済み issue の詳細
 
+### 2026-11-03 — Client connection lifecycle
+
+`dawn-client-core::ConnectionLifecycle`が接続phase、Welcome gating、retry/log間隔と
+各90秒budgetを所有する。Godotはsocket/credential adapterとstate描画に限定し、
+`_active`/`_connected`/`_welcomed`/`_busy`と旧ready/failure signalsを削除した。
+FakeConnectionを廃止し、production connectionにcontrolled socketを接続して検証する。
+純粋policyの9テストとGdUnit4全235件が成功。実リモート接続の手動検証は別途必要。
+
 ### 2026-11-03 — C-21 test-only WorldSession Dictionary projection
 
 Godot公開`system_names()`、専用`Dict` aliasと唯一の投影assertを削除。

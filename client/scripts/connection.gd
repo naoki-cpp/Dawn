@@ -16,28 +16,16 @@ extends Node
 # ── シグナル ──────────────────────────────────────────────────────────────────
 
 signal connection_changed(connected: bool)
-signal session_ready
-signal connection_failed
+signal lifecycle_changed
 
 # ── 設定 ─────────────────────────────────────────────────────────────────────
 
 const SERVER_URL         := "ws://127.0.0.1:7878"
-const RECONNECT_INTERVAL := 2.0
-## Keep retry latency short without writing one log record per attempt while
-## the server is unavailable. Godot has no project-level log rotation setting,
-## so the client must bound its own reconnect diagnostics.
-const RECONNECT_LOG_INTERVAL := 30.0
 
 # ── 内部状態 ─────────────────────────────────────────────────────────────────
 
-var _ws              : WebSocketPeer = WebSocketPeer.new()
-var _active := false
-var _waiting_elapsed := 0.0
-var _connected       : bool          = false
-var _welcomed        : bool          = false   ## Welcome 受信済みか
-var _reconnect_timer : float         = 0.0
-var _reconnect_log_elapsed : float  = RECONNECT_LOG_INTERVAL
-var _reconnect_attempts : int       = 0
+var _ws: Variant = null
+var _lifecycle := ClientConnectionLifecycle.new()
 var _server_url      : String        = SERVER_URL
 var _invite_server_url : String = ""
 var _invite_token : String = ""
@@ -67,35 +55,29 @@ func bind_client_state(
 
 
 func _ready() -> void:
-	set_process(false)
+	set_process(_lifecycle.is_running())
+
+
+func lifecycle() -> ClientConnectionLifecycle:
+	return _lifecycle
+
+
+## Overridden by the test socket adapter; policy is identical in both paths.
+func _new_socket() -> Variant:
+	return WebSocketPeer.new()
 
 
 func start_connection(url: String, token: String) -> bool:
-	if _active or not configure_endpoint(url, token):
+	if not _lifecycle.can_edit() or not configure_endpoint(url, token):
 		return false
 	_resume_ticket.clear()
-	_waiting_elapsed = 0.0
-	_reconnect_timer = 0.0
-	_reconnect_attempts = 0
-	_active = true
 	set_process(true)
-	_connect_to_server()
+	_apply_transition(_lifecycle.start())
 	return true
 
 
 func cancel_connection() -> void:
-	_active = false
-	set_process(false)
-	_ws.close()
-	_ws = WebSocketPeer.new()
-	_connected = false
-	_welcomed = false
-	_invite_token = ""
-	_invite_server_url = ""
-	_resume_ticket.clear()
-	player_id = -1
-	ship_id = -1
-	connection_changed.emit(false)
+	_apply_transition(_lifecycle.cancel())
 
 
 ## Native-client playtest configuration. Never log or serialize the bearer token.
@@ -124,40 +106,43 @@ func _invite_headers() -> PackedStringArray:
 	return PackedStringArray(["Authorization: Bearer " + _invite_token])
 
 func _process(delta: float) -> void:
-	if not _active:
+	if not _lifecycle.is_running():
 		return
-	if not _welcomed:
-		_waiting_elapsed += delta
-		if _waiting_elapsed >= 90.0:
-			cancel_connection()
-			connection_failed.emit()
-			return
+	_apply_transition(_lifecycle.advance(delta))
+	if not _lifecycle.is_running():
+		return
 	_ws.poll()
 	var state: int = _ws.get_ready_state()
 
 	if state == WebSocketPeer.STATE_OPEN:
-		if not _connected:
-			_connected = true
-			_welcomed  = false
-			_reconnect_attempts = 0
-			_reconnect_log_elapsed = 0.0
-			print("[Connection] connected to ", _server_url)
-			connection_changed.emit(true)
-			## 接続直後に Hello を送信する
-			_send_hello()
+		_apply_transition(_lifecycle.socket_opened())
 		_receive_messages()
 
 	elif state == WebSocketPeer.STATE_CLOSED:
-		if _connected:
-			_connected = false
-			_welcomed  = false
-			print("[Connection] disconnected, reconnecting in %.1fs" % RECONNECT_INTERVAL)
-			connection_changed.emit(false)
-		_reconnect_timer += delta
-		_reconnect_log_elapsed += delta
-		if _reconnect_timer >= RECONNECT_INTERVAL:
-			_reconnect_timer = 0.0
-			_connect_to_server()
+		_apply_transition(_lifecycle.socket_closed())
+
+
+func _apply_transition(step: ConnectionStep) -> void:
+	if step.is_empty():
+		return
+	if step.should_clear_credentials():
+		set_process(false)
+		if _ws != null:
+			_ws.close()
+		_ws = null
+		_invite_token = ""
+		_invite_server_url = ""
+		_resume_ticket.clear()
+		player_id = -1
+		ship_id = -1
+	if step.should_reset_session():
+		connection_changed.emit(false)
+	if step.should_connect():
+		_connect_to_server(step)
+	if step.should_send_hello():
+		connection_changed.emit(true)
+		_send_hello()
+	lifecycle_changed.emit()
 
 # ── 公開 API ──────────────────────────────────────────────────────────────────
 
@@ -221,7 +206,7 @@ func _accept_client_request_rejected(code: String, message: String) -> void:
 	push_warning("[Connection] client request rejected [%s]: %s" % [code, message])
 
 func is_connected_to_server() -> bool:
-	return _connected and _welcomed
+	return _lifecycle.is_connected()
 
 # ── 内部処理 ──────────────────────────────────────────────────────────────────
 
@@ -240,7 +225,7 @@ func _send_result(result: ClientCommandResult, require_welcome: bool) -> void:
 	if not result.ok:
 		_accept_client_request_rejected(result.error_code, result.error_message)
 		return
-	if require_welcome and not _welcomed:
+	if require_welcome and not _lifecycle.is_connected():
 		return
 	_ws.send(result.bytes, WebSocketPeer.WRITE_MODE_BINARY)
 
@@ -248,28 +233,17 @@ func _send_hello() -> void:
 	_send_result(_cmd.hello_command(_resume_ticket), false)
 	print("[Connection] Hello sent")
 
-func _connect_to_server() -> void:
-	_reconnect_attempts += 1
-	var should_log_attempt := should_log_reconnect(
-		_reconnect_attempts,
-		_reconnect_log_elapsed,
-		RECONNECT_LOG_INTERVAL)
-	if should_log_attempt:
-		_reconnect_log_elapsed = 0.0
+func _connect_to_server(step: ConnectionStep) -> void:
+	if step.should_log_attempt():
 		print("[Connection] connecting to %s ... (attempt %d)" % [
 			_server_url,
-			_reconnect_attempts])
-	_ws = WebSocketPeer.new()
+			step.attempt()])
+	_ws = _new_socket()
 	_ws.handshake_headers = _invite_headers()
 	_ws.heartbeat_interval = 20.0
 	var err: int = _ws.connect_to_url(_server_url)
-	if err != OK and should_log_attempt:
+	if err != OK and step.should_log_attempt():
 		push_warning("[Connection] connect_to_url failed: %s" % error_string(err))
-
-## Reconnect attempts remain frequent for responsiveness, but their diagnostics
-## are emitted only on the first attempt and at the bounded interval thereafter.
-static func should_log_reconnect(attempt: int, elapsed: float, interval: float) -> bool:
-	return attempt <= 1 or elapsed >= interval
 
 ## One WebSocket frame always carries exactly one postcard `ServerMessage`
 ## (ADR-0042). `ServerMessageDecoder` returns a typed Rust outcome. It delegates
@@ -297,12 +271,13 @@ func _accept_welcome(
 	p_ship_id: int,
 	p_resume_ticket: PackedByteArray
 ) -> void:
+	var step := _lifecycle.welcome_received()
+	if step.is_empty():
+		return
 	player_id = p_player_id
 	ship_id = p_ship_id
 	_resume_ticket = p_resume_ticket
-	_welcomed = true
-	_waiting_elapsed = 0.0
-	session_ready.emit()
+	_apply_transition(step)
 	print("[Connection] Welcome: player_id=%d ship_id=%d" % [player_id, ship_id])
 
 
@@ -310,14 +285,14 @@ func _accept_redirect(ws_addr: String, p_resume_ticket: PackedByteArray) -> void
 	if ws_addr.is_empty():
 		push_warning("[Connection] Redirect without ws_addr")
 		return
+	var step := _lifecycle.redirect()
+	if step.is_empty():
+		return
 	_resume_ticket = p_resume_ticket
 	_server_url = _normalize_ws_url(ws_addr)
-	_welcomed = false
-	_connected = false
-	_reconnect_timer = RECONNECT_INTERVAL
 	print("[Connection] Redirect: reconnecting to %s with resume ticket" % _server_url)
-	connection_changed.emit(false)
 	_ws.close()
+	_apply_transition(step)
 
 
 func _normalize_ws_url(addr: String) -> String:

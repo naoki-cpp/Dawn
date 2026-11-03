@@ -70,6 +70,10 @@ player stronger.
   Currency survives ship loss. Priced trades settle via the Market's own
   bid/ask order book, not a fixed or formula-driven price.
 - Capacitor: the ship energy resource shared by active modules.
+- Client connection attempt: the client's bounded wait for Welcome after start,
+  a connection loss, or Redirect. Pure client lifecycle policy decides retries,
+  timeout and gameplay blocking; socket adapters retain credential bytes. Its
+  elapsed time is not a server Tick or an authoritative simulation clock.
 - TiDi: local real-time pacing degradation used only as a bounded last resort;
   logical ticks remain deterministic.
 
@@ -77,7 +81,8 @@ player stronger.
 
 - `dawn-core` defines pure domain types, commands, and events.
 - `dawn-client-core` defines the Godot-independent client-side domain model
-  (loadout, wire row types, WorldSession state, and ClientInteraction policy),
+  (loadout, wire row types, WorldSession state, ClientInteraction policy, and
+  client connection lifecycle),
   depending only on `dawn-core` (ADR-0039, ADR-0041).
 - `dawn-client-gdext` is the GDExtension binding exposing `dawn-client-core`
   to the Godot client (ADR-0040).

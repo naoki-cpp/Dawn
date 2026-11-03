@@ -8,6 +8,7 @@ use godot::prelude::*;
 mod client_action_gd;
 mod client_command_gd;
 mod client_rules_gd;
+mod connection_gd;
 mod hud_gd;
 mod id_boundary;
 mod inbound_delivery;
@@ -36,6 +37,7 @@ mod client_outcome {
 pub use client_action_gd::{ClientAction, ClientInteraction};
 pub use client_command_gd::{ClientCommand, ClientCommandResult};
 pub use client_rules_gd::ClientRules;
+pub use connection_gd::{ClientConnectionLifecycle, ConnectionStep};
 pub use hud_gd::{
     HudChangeSet, HudReadModel, HudSceneFacts, HudShipStatusPanel, HudSnapshot, HudStatsPanel,
     HudStatusPanel, HudTargetPanel,
