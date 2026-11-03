@@ -9,52 +9,37 @@ pub struct ConnectionStep {
 }
 
 impl ConnectionStep {
-    fn wrap(effect: ConnectionEffect) -> Gd<Self> {
-        Gd::from_object(Self { effect })
+    fn wrap(effect: ConnectionEffect) -> Option<Gd<Self>> {
+        (effect != ConnectionEffect::None).then(|| Gd::from_object(Self { effect }))
     }
 }
 
 #[godot_api]
 impl ConnectionStep {
     #[func]
-    fn is_empty(&self) -> bool {
-        self.effect == ConnectionEffect::None
-    }
-
-    #[func]
-    fn should_connect(&self) -> bool {
-        matches!(self.effect, ConnectionEffect::Connect { .. })
-    }
-
-    #[func]
-    fn should_send_hello(&self) -> bool {
-        self.effect == ConnectionEffect::SendHello
-    }
-
-    #[func]
-    fn should_reset_session(&self) -> bool {
-        matches!(
-            self.effect,
-            ConnectionEffect::Retrying { disconnected: true } | ConnectionEffect::Stop { .. }
-        )
-    }
-
-    #[func]
-    fn should_clear_credentials(&self) -> bool {
-        matches!(self.effect, ConnectionEffect::Stop { .. })
-    }
-
-    #[func]
-    fn should_log_attempt(&self) -> bool {
-        matches!(self.effect, ConnectionEffect::Connect { log: true, .. })
-    }
-
-    #[func]
-    fn attempt(&self) -> i64 {
+    fn dispatch(&self, mut target: Gd<Node>) {
         match self.effect {
-            ConnectionEffect::Connect { attempt, .. } => i64::from(attempt),
-            _ => 0,
+            ConnectionEffect::Connect { attempt, log } => {
+                target.call("_connect_to_server", vslice![i64::from(attempt), log]);
+            }
+            ConnectionEffect::SendHello => {
+                target.emit_signal("connection_changed", vslice![true]);
+                target.call("_send_hello", &[]);
+            }
+            ConnectionEffect::Retrying { disconnected: true } => {
+                target.emit_signal("connection_changed", vslice![false]);
+            }
+            ConnectionEffect::Stop { .. } => {
+                target.call("_stop_transport", &[]);
+                target.emit_signal("connection_changed", vslice![false]);
+            }
+            ConnectionEffect::Ready
+            | ConnectionEffect::Retrying {
+                disconnected: false,
+            } => {}
+            ConnectionEffect::None => return,
         }
+        target.emit_signal("lifecycle_changed", &[]);
     }
 }
 
@@ -68,37 +53,37 @@ pub struct ClientConnectionLifecycle {
 #[godot_api]
 impl ClientConnectionLifecycle {
     #[func]
-    fn start(&mut self) -> Gd<ConnectionStep> {
+    fn start(&mut self) -> Option<Gd<ConnectionStep>> {
         ConnectionStep::wrap(self.core.start())
     }
 
     #[func]
-    fn advance(&mut self, delta: f64) -> Gd<ConnectionStep> {
+    fn advance(&mut self, delta: f64) -> Option<Gd<ConnectionStep>> {
         ConnectionStep::wrap(self.core.advance(delta))
     }
 
     #[func]
-    fn socket_opened(&mut self) -> Gd<ConnectionStep> {
+    fn socket_opened(&mut self) -> Option<Gd<ConnectionStep>> {
         ConnectionStep::wrap(self.core.socket_opened())
     }
 
     #[func]
-    fn socket_closed(&mut self) -> Gd<ConnectionStep> {
+    fn socket_closed(&mut self) -> Option<Gd<ConnectionStep>> {
         ConnectionStep::wrap(self.core.socket_closed())
     }
 
     #[func]
-    fn welcome_received(&mut self) -> Gd<ConnectionStep> {
+    fn welcome_received(&mut self) -> Option<Gd<ConnectionStep>> {
         ConnectionStep::wrap(self.core.welcome_received())
     }
 
     #[func]
-    fn redirect(&mut self) -> Gd<ConnectionStep> {
+    fn redirect(&mut self) -> Option<Gd<ConnectionStep>> {
         ConnectionStep::wrap(self.core.redirect())
     }
 
     #[func]
-    fn cancel(&mut self) -> Gd<ConnectionStep> {
+    fn cancel(&mut self) -> Option<Gd<ConnectionStep>> {
         ConnectionStep::wrap(self.core.cancel())
     }
 

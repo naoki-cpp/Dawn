@@ -123,26 +123,20 @@ func _process(delta: float) -> void:
 
 
 func _apply_transition(step: ConnectionStep) -> void:
-	if step.is_empty():
-		return
-	if step.should_clear_credentials():
-		set_process(false)
-		if _ws != null:
-			_ws.close()
-		_ws = null
-		_invite_token = ""
-		_invite_server_url = ""
-		_resume_ticket.clear()
-		player_id = -1
-		ship_id = -1
-	if step.should_reset_session():
-		connection_changed.emit(false)
-	if step.should_connect():
-		_connect_to_server(step)
-	if step.should_send_hello():
-		connection_changed.emit(true)
-		_send_hello()
-	lifecycle_changed.emit()
+	if step != null:
+		step.dispatch(self)
+
+
+func _stop_transport() -> void:
+	set_process(false)
+	if _ws != null:
+		_ws.close()
+	_ws = null
+	_invite_token = ""
+	_invite_server_url = ""
+	_resume_ticket.clear()
+	player_id = -1
+	ship_id = -1
 
 # ── 公開 API ──────────────────────────────────────────────────────────────────
 
@@ -233,16 +227,16 @@ func _send_hello() -> void:
 	_send_result(_cmd.hello_command(_resume_ticket), false)
 	print("[Connection] Hello sent")
 
-func _connect_to_server(step: ConnectionStep) -> void:
-	if step.should_log_attempt():
+func _connect_to_server(attempt: int, log_attempt: bool) -> void:
+	if log_attempt:
 		print("[Connection] connecting to %s ... (attempt %d)" % [
 			_server_url,
-			step.attempt()])
+			attempt])
 	_ws = _new_socket()
 	_ws.handshake_headers = _invite_headers()
 	_ws.heartbeat_interval = 20.0
 	var err: int = _ws.connect_to_url(_server_url)
-	if err != OK and step.should_log_attempt():
+	if err != OK and log_attempt:
 		push_warning("[Connection] connect_to_url failed: %s" % error_string(err))
 
 ## One WebSocket frame always carries exactly one postcard `ServerMessage`
@@ -272,7 +266,7 @@ func _accept_welcome(
 	p_resume_ticket: PackedByteArray
 ) -> void:
 	var step := _lifecycle.welcome_received()
-	if step.is_empty():
+	if step == null:
 		return
 	player_id = p_player_id
 	ship_id = p_ship_id
@@ -286,7 +280,7 @@ func _accept_redirect(ws_addr: String, p_resume_ticket: PackedByteArray) -> void
 		push_warning("[Connection] Redirect without ws_addr")
 		return
 	var step := _lifecycle.redirect()
-	if step.is_empty():
+	if step == null:
 		return
 	_resume_ticket = p_resume_ticket
 	_server_url = _normalize_ws_url(ws_addr)
