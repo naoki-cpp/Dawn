@@ -9,10 +9,10 @@ The base compositor originates from Pink Arcana's distance-field outlines.
 Copyright notices, MIT terms, source attributions, and local changes are kept
 with the addon. Include that directory's LICENSE when distributing the client.
 
-Dawn is currently a private, unpublished project (`publish = false` in
-`Cargo.toml`), so nothing here is a distribution obligation yet. This file
-exists so the one dependency with a non-permissive license doesn't get
-rediscovered from scratch when the project is eventually released.
+`publish = false` in Cargo.toml prevents crates.io publication, not binary
+distribution. Playtest ZIPs must include license notices too. The packaging
+script includes this file, dependency license texts/source links, Godot's
+LICENSE/COPYRIGHT files and the runtime lens-effects license.
 
 ## MPL-2.0 — godot-rust (gdext)
 
