@@ -235,7 +235,7 @@ single typed `ClientRequest` enum accepted from clients.
 | `DisassembleShipCommand` | Convert the current docked ship into a station-side `PackagedShip` item after undamaged/unfitted validation (ADR-0034 9B) | `ShipDisassembled` | ✅ implemented |
 | `AssembleCommand` | Convert a station-inventory `PackagedShip` item into a new live docked `Ship` owned by the caller; does not change `active_ship` (ADR-0034 9B, ADR-0037) | `ShipAssembled` | ✅ implemented |
 | `DisembarkCommand` | Clear the caller's active ship while docked, without disassembling it or changing ownership; ADR-0049 classifies the routing change as authoritative even though it has no public event | — (RecoveryDelta routing transition, no `DomainEvent`) | ✅ implemented |
-| `TransferCargo` | Move the entire stack of an item (`Module` or `ScrapMetal`) between a docked ship's own cargo and the caller's inventory at that station, in either direction (`direction: ToStation\|ToShip`); whole-stack only (ADR-0034 9B) | — public event may be empty; authoritative cargo/Station delta is still durable | ✅ implemented |
+| `TransferToStationCommand` (`ClientRequest::TransferCargo`) | Move the entire stack of an item (`Module` or `ScrapMetal`) between a docked ship's own cargo and the caller's inventory at that station, in either direction (`direction: ToStation\|ToShip`); whole-stack only (ADR-0034 9B) | — public event may be empty; authoritative cargo/Station delta is still durable | ✅ implemented |
 | `ActivateModuleCommand` | Turn on an Active Module | `ModuleActivated` | ✅ implemented |
 | `DeactivateModuleCommand` | Turn off an Active Module | `ModuleDeactivated` | ✅ implemented |
 | `AttackCommand` | Designate an attack target | `WeaponFired` | ⬜ typed core/protocol/GDExt encoder implemented, but `SimulationNode::apply_client_request` rejects it as `UnsupportedRequest`; not wired into combat |
@@ -247,7 +247,7 @@ single typed `ClientRequest` enum accepted from clients.
 | `KeepAtRangeCommand` | Maintain a minimum distance from a target (Ship / Jump Gate) (defaults to weapon range; cancelled by Move/Stop/other helm modes; ADR-0031) | — (no public event required; movement facts may appear separately) | ✅ implemented |
 | `SelectActiveShipCommand` | Switch the caller's active ship to another owned ship docked at the same station. ADR-0049 reclassifies this as authoritative Player routing state because it changes the target of later commands | — (RecoveryDelta routing transition, no `DomainEvent`) | ✅ implemented |
 
-> **ADR-0037 (2026-07-07):** `MoveCommand`/`StopCommand`/`ApproachCommand`/`WarpCommand`/`OrbitCommand`/`KeepAtRangeCommand`/`JumpCommand`/`LockOnCommand`/`ActivateModuleCommand`/`DeactivateModuleCommand`/`UndockCommand` no longer carry a `ship_id` field — the server resolves them against the caller's active ship (`PlayerState.active_ship`), so there is no wire-representable way to name a ship the player isn't flying. `FitModuleCommand`/`UnfitModuleCommand`/`DockCommand`/`BuildPackagedShipCommand`/`DisassembleShipCommand` are unaffected (station inventory-management, any owned ship). See `docs/architecture/ownership.md` §7.
+> **Current acting-identity contract (ADR-0037):** client-facing flight/module requests and `Dock`/`Undock` resolve the caller's active ship (`PlayerState.active_ship`); `DockCommand` carries only `station_id`. Internal `LockOnCommand`/`AttackCommand` still carry resolved ship identities, but their `ClientRequest` forms do not accept an acting ship ID. `FitModuleCommand`/`UnfitModuleCommand`/`ReorderFittedModuleCommand`/`BuildPackagedShipCommand`/`DisassembleShipCommand` retain explicit owned-ship IDs. See `docs/architecture/ownership.md` §7.
 >
 > **ADR-0049 amendment:** the absence of a public event does not make `active_ship` intentionally lossy. `SelectActiveShip`/`Disembark` successful routing changes belong to PlayerState checkpoint/RecoveryDelta recovery under #284/#275.
 
@@ -575,7 +575,7 @@ Active Module turned off.
 | `forced_reason` | `Option<ModuleDeactivationReason>` |  | `None` for a player-issued OFF; `CapacitorExhausted` (CapacitorSystem) or `OutOfRange` (Range Gate System) for a system-forced OFF (ADR-0035) |
 | `tick`      | `Tick`    | ✓ | Tick of deactivation |
 
-**Design note:** counterpart of `ModuleActivated`. The wire protocol maps `forced_reason` to `reason: "cap" | "range"` (omitted for `None`) so the client labels CAP!/RANGE! from the public authoritative reason. Exact active, target, fitting, and cycle state is checkpoint/RecoveryDelta authority.
+**Design note:** counterpart of `ModuleActivated`. The wire protocol maps `forced_reason` to optional closed enum `ServerFactDeactivationReason::{CapacitorExhausted, OutOfRange}`; its presentation strings are `cap` / `range`, used for CAP!/RANGE! labels. Exact active, target, fitting, and cycle state is checkpoint/RecoveryDelta authority.
 
 ---
 

@@ -49,9 +49,9 @@ Phase 6 の主目標は「ゲームが実際に面白いか」を人間から検
   → node/serialization.rs の observer-scoped handoff が 27 セル内の船だけを出力する
   → observer shipを解決できない接続・resume・handoffは失敗し、全world状態を送らない
 
-[必須] Godot に勝敗画面を追加
-  → ShipDestroyed 受信時に自分/相手の船かを判定して表示
-  → main.gd の変更のみ
+[実装済み] Godot の勝敗表示
+  → ShipDestroyed のtyped DestructionOutcomeで自分/相手の船を判定して表示
+  → main.gd → HudSurface → HudManager の勝敗オーバーレイ
 
 [実装済み] デュエルメトリクスの stdout 出力 + JSON ファイル出力
   --duel モード限定。ShipDestroyed 発火時に以下をコンソールへ出力する:
@@ -136,8 +136,9 @@ Phase 6 の主目標は「ゲームが実際に面白いか」を人間から検
 - **Market（Phase 9D、ADR-0034）**: `M` でMarketを開けるのはStationにdock中だけ。
   宇宙空間での閲覧・発注・Cancelは拒否される。発注済みの注文はundockしても残り、
   再dock後に管理できる。
-- **移動ループ（クラスタモード）**: プレイヤーは Sector 原点付近（30,000, 0, 0、恒星から十分離れた安全距離）にスポーンする。
-  Gate 0（x=600,000 付近、Sector の縁）のリングをクリックで選択 → **W でワープ**（または A で接近）→
+- **移動ループ（クラスタモード）**: プレイヤーは同じSectorのNPC Station位置にスポーンする。
+  Stationがない構成では惑星外側、次に恒星外側へフォールバックする（ADR-0053）。
+  Gate 0のブラケットをクリックで選択 → **W でワープ**（または A で接近）→
   ゲート圏内に着いたら **J でジャンプ**。HUD に選択ゲートと「[W] Warp」/「[W] too close to warp」が出る
   （ゲートが 3,000u 未満だと近すぎてワープ不可・接近を使う）
 - HP バーの 3 層（シールド / アーマー / ハル）の意味

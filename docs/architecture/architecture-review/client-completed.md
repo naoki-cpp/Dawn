@@ -4,7 +4,7 @@ audience : AI Agent / Human Developer
 update   : /architecture-review が issue を解消済みへ移動するたびに追記
 related  : docs/architecture/architecture-review/client.md（構造評価）,
            docs/architecture/architecture-review/client-pending.md（未完項目）
-date     : 2026-08-25
+date     : 2026-11-03
 ---
 
 # Architecture Review — Dawn Client（完了済みログ）
@@ -16,6 +16,12 @@ date     : 2026-08-25
 ---
 
 ## 解消済み issue の詳細
+
+### 2026-11-03 — C-21 test-only WorldSession Dictionary projection
+
+Godot公開`system_names()`、専用`Dict` aliasと唯一の投影assertを削除。
+core map・ingestion/transition testsとtyped navigation/f64 testsは維持した。
+Rust関連120件、拡張再build後のGdUnit4全232件が成功（PR #378）。
 
 ### 2026-07-30（2026-08-25再確認） — C-10 / #200 render scale・warp threshold authority
 

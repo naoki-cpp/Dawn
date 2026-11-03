@@ -33,14 +33,14 @@ A newtype over `EntityId`, marking an entity as a Ship at the type level.
 struct ShipId(EntityId);
 ```
 
-Keeps `ShipId` distinct from future types like `StationId`.
+Keeps `ShipId` distinct from other domain identifiers such as `StationId`.
 
 ### NodeId
 
 ```
 type  : u8 newtype
 range : 0-255 (max 256 Nodes)
-today : used as a logical identifier within a single process
+today : configured logical identifier in both in-process and distributed deployments
 ```
 
 ### SectorId
@@ -57,7 +57,8 @@ today : fixed count, fixed assignment
 
 ### Position
 
-3D coordinate. World Space unit is arbitrary (currently an abstract distance unit).
+3D anchor-relative coordinate in metres. Static orbital positions are authored
+in AU in `data/galaxy.toml` and converted to metres by the loader.
 
 | Field | Type | Description |
 |---|---|---|

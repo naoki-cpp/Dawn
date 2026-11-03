@@ -17,7 +17,7 @@ date     : 2026-11-03
 
 ## 改善ロードマップ > 完了済み
 
-### 2026-11-03: Godot test preparation (R-10, implemented; merge pending)
+### 2026-11-03: Godot test preparation (R-10)
 
 `scripts/godot_setup.py` owns pinned installation, validated/idempotent runner
 patches, GDExtension build and fail-closed project import. PowerShell/Bash are

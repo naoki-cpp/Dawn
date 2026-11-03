@@ -10,6 +10,14 @@ related : ADR-0004（クライアント技術選択・godot-rust既定路線）,
 
 # ADR-0040 — dawn-client-gdext GDExtension バインディング
 
+## 現行実装との対応
+
+以下のJSON変換・`apply_payload`・旧GDScript互換メソッド・検証件数は導入当時の記録。
+現行はADR-0041/0042/0046のtyped postcard decode / ClientState / PlayerLoadout投影を使い、
+Dictionary/JSONへの往復は行わない。実行Godotは`.godot-version`の4.7.2-stable、
+Rust側のAPI baselineは4.6。共通setupが拡張buildとimportまで行う。
+導入時のチェック済み項目は、廃止された経路を再実装するTODOではない。
+
 ## 背景
 
 ADR-0039 で `dawn-client-core`（Godot 非依存の Loadout ドメインロジック）を Rust に

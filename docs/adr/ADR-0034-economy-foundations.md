@@ -234,7 +234,7 @@ Market は固定価格やアルゴリズム式（AMM/Bonding curve）で価格�
 - [x] dawn-core: `ItemId` enum（Module/PackagedShip/ScrapMetal。**Currencyは含まない**）
 - [x] dawn-ecs: `InventoryComp.items` を `Vec<ModuleId>` → `BTreeMap<ItemId, u64>` へ一般化（ADR-0032 のデータモデルを置き換え）
 - [x] dawn-sector: `ShipDestroyed` 発生時に Scrap Metal を撃破者へ加算する経路（MVP は `1 kill = 1 Scrap Metal` の固定値）
-- [x] dawn-sector: スナップショット/Transit/PlayerLoadout JSON を `InventoryComp.items: BTreeMap<ItemId, u64>` に追従
+- [x] dawn-sector: スナップショット/Transit/typed PlayerLoadout を `InventoryComp.items: BTreeMap<ItemId, u64>` に追従（PlayerLoadoutの実行時wireはpostcard）
 - [ ] 「受動採取ではない」ことの再点検項目化（現状は取得経路が `ShipDestroyed` のみなのでコード読解で十分。別経路追加時に自動検証/CI 昇格を検討）
 - [x] dawn-sector: Station（NPC提供の最小実装）
 - [x] dawn-sector: Dock/Undock + Station 利用可否判定（`can_use` は docked 状態を見る）
@@ -250,7 +250,7 @@ Market は固定価格やアルゴリズム式（AMM/Bonding curve）で価格�
 - [x] client: Dock/Undock + Station操作UI（入港状態の表示と `D` / `U` / `B` / `Y` 操作、Packaged Ship のインベントリ表示、Assemble/Disassemble/建造UI すべて実装済み。Station Inventory のクリック/ドロップ方針と typed request 構築は `dawn-client-core::StationInventoryInteraction`、Godot側は行描画・ヒットテスト・drag geometry、GDExtensionは薄い型変換adapterを担当する）
 - [x] client: Market閲覧UI（指値注文の発注・Currency残高表示、2026-07-17。Market専用postcard envelope、single/cluster runtime bridge、Godot `market_surface.gd` の板・Bid/Ask・発注・Cancel・Currency表示を実装。snapshotは最大200件）
 
-#279後のSector側適用は`dawn-simulation::serve::market_settlement`に限定する。
+#279後のSector側適用は`dawn-server::serve::market_settlement`を共有するruntime adapterで行う。
 `SimulationNode`はstable IDを受け取り、所有権・数量検証と重複排除を行った後、既存の
 `ShipFitted`インベントリスナップショットへ記録する。Marketのorders schemaでは`ship_id`
 を必須とし、outbox schemaはsettlement effect/status/compensationを保持する。
