@@ -16,3 +16,7 @@ cargo run -p dawn-server --bin simulate -- --serve   # run the server, then open
 ```
 
 Client tests (GdUnit4): see `docs/process/godot-client-testing.md`.
+
+Windows playtest downloads: [GitHub Releases](https://github.com/naoki-cpp/Dawn/releases).
+See [player instructions](docs/process/playtest-download.md) and
+[release procedure](docs/process/playtest-release.md).
