@@ -36,7 +36,7 @@ module間のdriftが実害になるまで分割しない。行数だけでは発
 
 PR #369をマージ済み、Issue #346はclosed。実装記録は[server-completed.md](./server-completed.md)を参照。
 
-### R-10 実装済み（マージ待ち）: Godotテスト環境準備の分散
+### R-10 実装済み: Godotテスト環境準備の分散
 
 `scripts/godot_setup.py`が固定版取得・runner patch・拡張build・importを所有し、
 PowerShell/BashとCIが同じ準備contractを使用する。検証記録は
@@ -65,7 +65,7 @@ bookkeeping修正が両方で再発した場合。抽出時もMarket/Sector auth
 | R-2 | 保留・trigger付き |
 | R-3 | commands slice・transit deepening 完了、warpはtrigger付きで保留 |
 | R-9 | #346・PR #369で解消済み |
-| R-10 | Godot準備contract・実装済み、マージ待ち |
+| R-10 | Godot準備contract・実装済み |
 | R-11 | 決済bookkeeping・Defer（trigger付き） |
 採らない方針: CRDT/LWW、protobuf、薄いadapterだけの追加crate、行数削減目的の網羅match・domain型の破壊、初回LAN検証でのTLS/認証。
 

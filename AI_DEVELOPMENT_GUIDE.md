@@ -238,7 +238,7 @@ If a future feature adds transparent exactly-once retry, the request/wire schema
 retention as one designed protocol change; never infer identity from payload equality.
 
 Since ADR-0042, the actual runtime transport for `Welcome`/`Redirect`/
-`Event`/`Hello`/`Command`/`InitialState`/`PlayerLoadout`/`AoiEnter`/
+`Fact`/`Hello`/`Command`/`InitialState`/`PlayerLoadout`/`AoiEnter`/
 `AoiLeave`/`PositionSnap`/`MotionCorrection` is postcard binary
 (`ServerMessage`/`ClientMessage` in `dawn-protocol`), not JSON text. The two
 schema enums are externally tagged (`{"VariantName": {...}}`), since postcard
@@ -280,11 +280,12 @@ workspace DAG and relevant ADR first.
   its own SQLite authority independent of Sector tick determinism. The SQLite
   layer is an adapter; the private matching policy owns crossing, price-time
   priority, partial fills, maker-price settlement, and Bid price-improvement
-  refunds. Depends only on `dawn-core` + serde + rusqlite -- no
+  refunds. Depends only on `dawn-core` + thiserror + rusqlite -- no
   transport/runtime dependency, same DAG position as `dawn-protocol` (ADR-0034
-  §4/§5/§6). Only constructs
-  `RemoveItemCommand`/`ReturnItemCommand`/`CreditItemCommand`; never applies
-  them to a `SimulationNode` itself, so `dawn-sector` never depends on it.
+  §4/§5/§6). Produces `SettlementIntent`s; `dawn-server` translates them into
+  `RemoveItemCommand`/`ReturnItemCommand`/`CreditItemCommand` and routes them to
+  the owning Sector. `dawn-market` never applies them to a `SimulationNode`,
+  and `dawn-sector` never depends on it.
 - `dawn-sector`: current Sector game logic and broad `SimulationNode` composition.
   #272 removes persistence ownership from the pure engine; #275 splits state
   owners. Depends on `dawn-protocol` today to build typed wire messages it hands to
@@ -431,4 +432,4 @@ this guide.
 
 ---
 
-Last updated: 2026-08-24 / Covers ADR-0001 through ADR-0055
+Last updated: 2026-11-03 / Covers ADR-0001 through ADR-0056

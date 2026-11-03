@@ -9,7 +9,7 @@ date     : 2026-11-03（C-21実装を反映）
 
 # Architecture Review — Dawn Client（未完項目）
 
-C-1〜C-8、C-10〜C-19は解消済み。C-9とC-20はtrigger付きで保留し、C-21は実装済み（マージ待ち）。
+C-1〜C-8、C-10〜C-19は解消済み。C-9とC-20はtrigger付きで保留し、C-21は実装済み。
 実装詳細と完了条件は各GitHub Issueに置き、ここでは判断だけを保持する。
 
 ## C-9（保留）: `hud_manager.gd` watch帯
@@ -34,7 +34,7 @@ node generation / network send / HUD assemblyはcomposition glueとして凝集�
 
 ## C-20（保留）: `WorldPresentation`へのvisual lifecycle集積
 
-`world_presentation.gd`は637行で、floating-origin rebase、navigation marker position/LOD、
+`world_presentation.gd`は695行で、floating-origin rebase、navigation marker position/LOD、
 sky/sun/fog/starfield bake、warp tunnel、player material/tactical overlayを調停する。
 `NavigationMarkerRenderer`と`Starfield`のdeep moduleは既に分離され、現在のcoordinator自体は
 一つのsession visual boundaryとして機能している。
@@ -48,10 +48,11 @@ sky/sun/fog/starfield bakeを`SpaceEnvironmentPresentation`へ抽出する。抽
 shader/culling設定、camera追従を知る点も監視する。独立したstar-render変更が複数回callerと
 `Starfield`へ波及するなら、まず既存Starfieldへ責務を寄せる。単なる行移動とforwardingは採らない。
 
-## C-21 実装済み（マージ待ち）: test専用のsystem-name Dictionary投影
+2026-11-03整合確認: 695行。700行の閾値未満であり、行数だけで分割しない。
 
-Godot公開`system_names()`、専用Dictionary型エイリアス、投影専用assertを削除。
-core mapとingestion test、typed navigation/f64 testは維持し、代替mirrorは追加しない。
+## C-21 解消済み: test専用のsystem-name Dictionary投影
+
+Godot公開投影を削除。検証記録は[client-completed.md](./client-completed.md)を参照。
 
 採らない方針:
 

@@ -19,7 +19,7 @@ date     : 2026-11-03（R-10実装を反映。全対象再計測は2026-10-31）
 in-process driverは`RuntimeFrameHost`へ統合された。`SectorRepository`は接続とschemaを所有する
 rootへ縮小され、bounded contextの実装はprivate child moduleへ分割された。Marketの全状態
 reload/rewriteは#345でbounded working setへ移行済み。R-9/#346はPR #369で完了し、
-FileJournalのread/compactionもbatch/chunk上限に収まる。R-10は共通Python準備処理へ集約済み（マージ待ち）、
+FileJournalのread/compactionもbatch/chunk上限に収まる。R-10は共通Python準備処理へ集約済み、
 R-11はMarket決済のframe間bookkeeping（trigger付き保留）であり、永続化の二重authorityではない。
 
 2026-08-24にissue #338をPR #340で完了し、残っていた`dawn-actor`のClientConnection/WebSocket transportを
@@ -38,7 +38,7 @@ Transitについては、Raftの回復判断を`transit::handoff`に残し、Shi
 | 重複 | A− | Station runtime apply、SectorMap projectionを解消。Transit policy/state mutationも分離し、live専用materializationへ集約 |
 | 永続化 | A− | R-9/#346（PR #369）でFileJournal 1593行のread/compactionをbounded-memory化。checkpoint、archive retry、alias/poison保証を維持。大容量実ログのpeak memory計測は未実施 |
 | Rust固有 | A− | 網羅matchとexhaustive destructuringを変更検出器として利用 |
-| AI開発誘発 | B+ | runtime frame 1338行はtyped入出力へ集約済み。R-10は共通準備contractへ集約済み（マージ待ち）、R-11の決済bookkeepingはtrigger付き保留 |
+| AI開発誘発 | B+ | runtime frame 1338行はtyped入出力へ集約済み。R-10は共通準備contractへ集約済み、R-11の決済bookkeepingはtrigger付き保留 |
 
 ## 冗長性
 
@@ -49,9 +49,10 @@ Transitについては、Raftの回復判断を`transit::handoff`に残し、Shi
 - postcard encode/decode
 - canonical NodeState checkpoint/delta capture/restore
 
+R-10は共通Godot準備contractで解消済み。詳細は[server-completed.md](./server-completed.md)。
+
 Open / watched:
-1. **R-10** Godotテスト環境の準備順序・互換patchの分散（実装済み、マージ待ち）
-2. **R-11** Market決済のframe間bookkeeping（Defer、trigger付き）
+1. **R-11** Market決済のframe間bookkeeping（Defer、trigger付き）
 
 **R-9 / #346はPR #369で完了。** 永続化軸はB+→A−。総合B+は再採点せず据え置く。
 
@@ -130,7 +131,7 @@ run only after the required projection completes.
 | `crates/dawn-server/src/serve/market.rs` | 1063 | 🟢 Market request validationと配送cursor/shared-page routing。大半はsingle/cluster・障害再試行のtests |
 | `crates/dawn-sector/src/node/station_materialization.rs` | 661 | 🟢 station assemble/disassemble materialization・tests |
 | `crates/dawn-server/src/cluster.rs` | 670 | 🟢 in-process cluster wiring・fault tests |
-| `crates/dawn-server/src/serve/cluster.rs` | 706 | 🟢 clustered serve composition・admission/jump tests |
+| `crates/dawn-server/src/serve/cluster.rs` | 689 | 🟢 clustered serve composition・admission/jump tests |
 | `crates/dawn-sector/src/node/approach.rs` | 631 | 🟢 approach steering state machine・tests |
 | `crates/dawn-sector/src/node/ship_cargo.rs` | 715 | 🟢 ship cargo ownership/bridge boundary・tests |
 | `crates/dawn-market/src/repository.rs` | 1748 | 🟢 SQLite order/Currency/outbox persistence。command別bounded working set、差分書き込み、配送cursorを保持しないbounded SQL reads |
@@ -140,7 +141,7 @@ run only after the required projection completes.
 | `crates/dawn-sector/src/transition.rs` | 753 | 🟢 durable transition preparation / output boundary |
 | `crates/dawn-protocol/src/lib.rs` | 579 | 🟢 wire envelope/schema exports・tests |
 | `crates/dawn-server/src/sector_runtime_driver.rs` | 549 | 🟢 in-process Sector actor/runtime adapter・tests |
-| `crates/dawn-server/src/serve/single.rs` | 573 | 🟢 single-sector serve composition・admission tests |
+| `crates/dawn-server/src/serve/single.rs` | 556 | 🟢 single-sector serve composition・admission tests |
 | `crates/dawn-sector/src/node/serialization.rs` | 555 | 🟢 observer-scoped state projection |
 | `crates/dawn-sector/src/node/player_loadout_projection.rs` | 646 | 🟢 PlayerLoadout wire projection |
 | `crates/dawn-server/src/runtime_frame.rs` | 1338 | 🟡 596行のshared one-Sector frame hostとtests。typed frame input/output、admission/checkpointへ集約済み。追加のauthorityやdeployment policyが混入したら再評価 |

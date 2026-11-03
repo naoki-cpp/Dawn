@@ -28,7 +28,7 @@ mutation calls inside `SimulationNode` remain implementation details, not an
 alternative production commit contract.
 
 The #272 implementation exposes both the logical counter seam and a complete
-Tick seam. `SimulationNode::prepare_tick_state_transition` executes the existing
+Tick seam. `SimulationNode::prepare_tick_state_transition_with_result` executes the existing
 systems against a ship-level write-set image, restores the live state, and
 returns the complete post-tick ship image, node routing/maps, queues, public
 events, and recovery context. `RuntimeFrameHost` delegates to
@@ -175,10 +175,12 @@ Step 2.6: Warp System (after Keep at Range, before Movement, ADR-0022 / ADR-0025
          -> Ships with WarpComp only. Aligning accelerates toward the target direction;
            once velocity along that direction reaches 75% of max_speed, transitions to
            Warping (EVE-style; align time depends on agility; interruptible; Tackle window).
-           Warping flies straight at the target, decelerating proportionally to remaining
-           distance, stopping at:
+           Warping follows a duration-bounded cubic Hermite segment between the
+           authoritative f64 start/arrival points (ADR-0022), ending with zero
+           velocity. The arrival point is chosen at:
              Gate target: within activation_radius x 0.8 (ADR-0022)
              Body target: within body.radius x 1.5 (ADR-0025 BODY_WARP_ARRIVAL_FACTOR)
+             Station target: within docking_radius x 0.8
            If unreachable (e.g. target disappears), removes WarpComp and brakes.
            Gate targets with auto_jump = true feed pending_auto_jumps on arrival
            (ADR-0023). That queue is included in the Tick RecoveryDelta.

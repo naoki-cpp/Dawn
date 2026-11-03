@@ -164,12 +164,12 @@ adapter. The GDExtension maps that error to `ClientCommandResult` so the
 Godot connection can report it without treating an empty frame as a valid
 outcome.
 
-The interaction boundary is typed as well. `InputDecoder` and
-`WorldInteraction` return a Rust-backed `ClientIntent` object, while the
-mutually exclusive ship/gate/body selection is held in `ClientSelection`.
-`main.gd` dispatches through semantic predicates such as `is_jump()` and
-typed accessors such as `gate_id()`; it does not switch on a string tag or
-read action payloads from magic keys.
+The interaction boundary is typed as well. Godot's `WorldInteraction` normalizes
+keys and hit-test results for Rust's `ClientInteraction`, which owns the mutually
+exclusive ship/gate/body/station `Selection`. The result is one `ClientAction`:
+either a typed `ClientRequest`, an engine-local presentation action, or no action.
+`main.gd::_execute_client_action` sends requests or applies local effects; there
+is no intermediate `ClientIntent` or string/Dictionary action dispatch.
 
 ## Market requests and snapshots
 

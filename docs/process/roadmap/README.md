@@ -22,7 +22,9 @@ related  : ./pending.md, ./completed.md, ./deferred.md, ../roadmap.md, ../roadma
 
 現在のフェーズ: **Phase 9 基盤実装完了・9E 経済ループ検証中**
 
-- Rust workspace はグリーン。Godot実行前に `cargo build -p dawn-client-gdext` でDLLを生成する。
+- Godot実行前は `scripts/setup-godot.ps1` または `bash scripts/setup-godot.sh` で
+  固定版の導入・拡張ビルド・importまで準備する（Python 3.10+とCargoが必要）。
+  Rust変更後に拡張だけ更新する場合は `cargo build -p dawn-client-gdext` を使う。
 - 9A（Scrap Metal）、9B（Station / Ship操作）、9D（Market / Currency）は実装済み。
 - 9C（プレイヤー設置インフラ）は設計未着手。新規ADRが必要。
 - 9E-1 は手順準備済み、人間によるプレイテストと結果記録が未完了。
