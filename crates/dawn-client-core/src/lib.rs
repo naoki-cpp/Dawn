@@ -36,6 +36,7 @@
 mod client_action;
 mod client_rules;
 mod client_state;
+mod connection;
 mod hud;
 mod item_row;
 mod loadout;
@@ -51,6 +52,7 @@ pub use client_action::{
 };
 pub use client_rules::ClientRules;
 pub use client_state::{ClientFact, ClientState, ClientStateError, ShipLeaveReason};
+pub use connection::{ConnectionEffect, ConnectionLifecycle, ConnectionPhase};
 pub use dawn_core::{ModuleKind, StatDelta};
 pub use hud::{
     HudChangeSet, HudFrame, HudReadModel, HudSceneFacts, HudShipStatusPanel, HudSnapshot,

@@ -4,7 +4,7 @@
 ## once. connection.gd owns only connection lifecycle and transport callbacks.
 extends GdUnitTestSuite
 
-const Connection = preload("res://scripts/connection.gd")
+const Connection = preload("res://test/fixtures/connection_socket.gd")
 const Main = preload("res://scripts/main.gd")
 
 
@@ -14,25 +14,24 @@ func _state() -> Array:
 
 func test_cancel_clears_credentials_identity_and_stops_retries() -> void:
 	var connection: Node = auto_free(Connection.new())
-	connection.configure_endpoint("wss://dawn.example", "a".repeat(64))
-	connection._active = true
+	connection.start_connection("wss://dawn.example", "a".repeat(64))
+	connection.open_socket()
 	connection._accept_welcome(1, 2, PackedByteArray([1, 2]))
 	connection.cancel_connection()
-	assert_bool(connection._active).is_false()
+	assert_bool(connection.lifecycle().can_edit()).is_true()
 	assert_bool(connection.is_connected_to_server()).is_false()
 	assert_str(connection._invite_token).is_empty()
 	assert_int(connection._resume_ticket.size()).is_equal(0)
 	assert_int(connection.player_id).is_equal(-1)
 	connection._process(100.0)
-	assert_int(connection._reconnect_attempts).is_equal(0)
+	assert_int(connection.sockets.size()).is_equal(1)
 
 
 func test_connection_timeout_stops_retries_and_clears_token() -> void:
 	var connection: Node = auto_free(Connection.new())
-	connection.configure_endpoint("wss://dawn.example", "a".repeat(64))
-	connection._active = true
+	connection.start_connection("wss://dawn.example", "a".repeat(64))
 	connection._process(90.0)
-	assert_bool(connection._active).is_false()
+	assert_bool(connection.lifecycle().can_edit()).is_true()
 	assert_str(connection._invite_token).is_empty()
 
 
@@ -60,12 +59,6 @@ func test_playtest_configuration_rejects_cleartext_remote_tokens_and_header_inje
 	assert_bool(connection.configure_endpoint("wss://dawn.example", "a".repeat(63) + "\n")).is_false()
 
 
-func test_reconnect_logging_is_emitted_on_first_attempt_and_after_interval() -> void:
-	assert_bool(Connection.should_log_reconnect(1, 0.0, 30.0)).is_true()
-	assert_bool(Connection.should_log_reconnect(10, 29.9, 30.0)).is_false()
-	assert_bool(Connection.should_log_reconnect(10, 30.0, 30.0)).is_true()
-
-
 func test_normalize_ws_url_adds_ws_scheme_to_host_port() -> void:
 	var connection: Node = Connection.new()
 	assert_str(connection._normalize_ws_url("127.0.0.1:7880")).is_equal("ws://127.0.0.1:7880")
@@ -89,13 +82,65 @@ func test_welcome_outcome_updates_identity_resume_ticket_and_welcome_state() -> 
 	var outcome: ServerMessageOutcome = decoder.test_outcome("Welcome")
 	var state := _state()
 	var connection: Node = Connection.new()
+	connection.start_connection("ws://127.0.0.1:7878", "")
+	connection.open_socket()
 
 	assert_bool(outcome.dispatch(connection, connection, state[0], state[1], -1)).is_true()
 	assert_int(connection.player_id).is_equal(5)
 	assert_int(connection.ship_id).is_equal(11)
 	assert_int(connection._resume_ticket.size()).is_equal(32)
-	assert_bool(connection._welcomed).is_true()
+	assert_bool(connection.is_connected_to_server()).is_true()
 	connection.free()
+
+
+func test_reconnect_retains_credentials_until_its_own_timeout() -> void:
+	var connection: Node = auto_free(Connection.new())
+	var ticket := "a".repeat(32).to_utf8_buffer()
+	connection.start_connection("wss://dawn.example", "a".repeat(64))
+	connection.open_socket()
+	connection._accept_welcome(1, 2, ticket)
+	connection._process(1000.0)
+	connection.close_socket()
+	connection._process(2.0)
+	assert_int(connection.sockets.size()).is_equal(2)
+	assert_int(connection.sockets[1].handshake_headers.size()).is_equal(1)
+	assert_array(connection._resume_ticket).contains_exactly(ticket)
+	connection.open_socket()
+	assert_int(connection.sockets[1].sent.size()).is_equal(1)
+	connection._process(88.0)
+	assert_bool(connection.lifecycle().can_edit()).is_true()
+	assert_str(connection._invite_token).is_empty()
+	assert_int(connection._resume_ticket.size()).is_equal(0)
+
+
+func test_redirect_pins_invites_and_gets_a_fresh_welcome_deadline() -> void:
+	var connection: Node = auto_free(Connection.new())
+	var ticket := "b".repeat(32).to_utf8_buffer()
+	connection.start_connection("wss://dawn.example", "a".repeat(64))
+	connection._process(80.0)
+	connection.open_socket()
+	connection._accept_redirect("wss://different.example", ticket)
+	connection._process(0.0)
+	assert_int(connection.sockets.size()).is_equal(2)
+	assert_int(connection.sockets[1].handshake_headers.size()).is_equal(0)
+	assert_array(connection._resume_ticket).contains_exactly(ticket)
+	connection.open_socket()
+	connection._process(89.0)
+	assert_bool(connection.lifecycle().is_running()).is_true()
+	connection._process(1.0)
+	assert_bool(connection.lifecycle().can_edit()).is_true()
+	assert_int(connection._resume_ticket.size()).is_equal(0)
+
+
+func test_cancel_ignores_a_late_welcome() -> void:
+	var connection: Node = auto_free(Connection.new())
+	connection.start_connection("wss://dawn.example", "a".repeat(64))
+	connection.open_socket()
+	connection.cancel_connection()
+	connection._accept_welcome(1, 2, PackedByteArray([1, 2]))
+	assert_bool(connection.is_connected_to_server()).is_false()
+	assert_int(connection.player_id).is_equal(-1)
+	assert_int(connection._resume_ticket.size()).is_equal(0)
 
 
 class DirectPresentationTarget:

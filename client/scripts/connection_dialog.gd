@@ -9,7 +9,6 @@ var _token: LineEdit
 var _status: Label
 var _connect: Button
 var _cancel: Button
-var _busy := false
 
 
 func build(connection: Node) -> void:
@@ -54,12 +53,10 @@ func build(connection: Node) -> void:
 	_cancel.disabled = true
 	_cancel.pressed.connect(_cancel_connection)
 	fields.add_child(_cancel)
-	connection.session_ready.connect(_on_ready)
-	connection.connection_changed.connect(_on_connection_changed)
-	connection.connection_failed.connect(_on_failed)
+	connection.lifecycle_changed.connect(_sync_lifecycle)
 	get_viewport().size_changed.connect(_resize.bind(fields))
 	_resize(fields)
-	blocking_changed.emit(true)
+	_sync_lifecycle()
 	_endpoint.grab_focus()
 
 
@@ -78,47 +75,29 @@ func _resize(fields: Control) -> void:
 
 
 func is_blocking() -> bool:
-	return _panel != null and _panel.visible
+	return _connection != null and _connection.lifecycle().blocks_gameplay()
 
 
-func _set_busy(busy: bool) -> void:
-	_busy = busy
-	_endpoint.editable = not busy
-	_token.editable = not busy
-	_connect.disabled = busy
-	_cancel.disabled = not busy
+func _sync_lifecycle() -> void:
+	var state: ClientConnectionLifecycle = _connection.lifecycle()
+	_panel.visible = state.blocks_gameplay()
+	_endpoint.editable = state.can_edit()
+	_token.editable = state.can_edit()
+	_connect.disabled = not state.can_edit()
+	_cancel.disabled = not state.can_cancel()
+	_status.text = state.status_text()
+	blocking_changed.emit(state.blocks_gameplay())
 
 
 func _submit() -> void:
-	if _busy:
+	if not _connection.lifecycle().can_edit():
 		return
 	if not _connection.start_connection(_endpoint.text.strip_edges(), _token.text):
 		_status.text = "Check the server URL and invite code."
 		return
 	_token.clear()
-	_set_busy(true)
-	_status.text = "Connecting..."
 
 
 func _cancel_connection() -> void:
 	_connection.cancel_connection()
-	_set_busy(false)
-	_status.text = "Connection cancelled."
-
-
-func _on_ready() -> void:
-	_panel.hide()
-	blocking_changed.emit(false)
-
-
-func _on_connection_changed(connected: bool) -> void:
-	if connected or not _busy:
-		return
-	_panel.show()
-	_status.text = "Reconnecting..."
-	blocking_changed.emit(true)
-
-
-func _on_failed() -> void:
-	_set_busy(false)
-	_status.text = "Connection timed out. Check the server and invite code."
+	_token.clear()
