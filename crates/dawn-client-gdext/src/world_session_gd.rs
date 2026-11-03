@@ -4,8 +4,6 @@ use dawn_client_core::{
 };
 use godot::prelude::*;
 
-type Dict = Dictionary<Variant, Variant>;
-
 use crate::id_boundary::{ship_id_from_godot, ship_id_to_godot};
 use crate::loadout_gd::PlayerLoadout;
 use crate::session_record_gd::{
@@ -177,14 +175,5 @@ impl WorldSession {
             .iter()
             .map(BuildableShipType::wrap)
             .collect()
-    }
-
-    #[func]
-    fn system_names(&self) -> Dict {
-        let mut result = Dict::new();
-        for (id, name) in self.state.system_names() {
-            result.set(i64::from(id.0), name.clone());
-        }
-        result
     }
 }

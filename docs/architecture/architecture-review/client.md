@@ -5,7 +5,7 @@ update   : クライアント側で大規模リファクタ実施後 / architect
 related  : docs/architecture/architecture-review/server.md（サーバー側）,
            docs/architecture/architecture-review/client-completed.md（完了済みログ）,
            docs/architecture/architecture-review/client-pending.md（未完項目）
-date     : 2026-10-31（19 GDScriptとclient Rust境界を再計測、C-21を登録）
+date     : 2026-11-03（C-21実装を反映。全対象再計測は2026-10-31）
 ---
 
 # Architecture Review — Dawn Client（現行構造評価）
@@ -60,7 +60,7 @@ canonical variantへの明示的な`Option` parseに失敗した場合はrange p
 | `main.gd`責務 | A− | scene lifecycle、node generation、event dispatch、network send、HUD assemblyに限定 |
 | 型境界 | A | wire decode → `ClientFact` → Rust state commit → typed presentationと、input fact → `ClientAction` → typed request/local effectの単一経路。Dictionary再入力なし |
 | 重複 | A | shadow state、JSON往復、adapter内domain policy、二段event dispatchを解消。#200と#342によりrender/warp ruleと`ModuleKind`も単一authority化 |
-| デッドコード | A− | 旧outcome mirrorは削除済み。C-21でtest専用の`WorldSession.system_names()` Dictionary投影を小規模Fixとして記録 |
+| デッドコード | A− | 旧outcome mirrorは削除済み。C-21のtest専用`WorldSession.system_names()` Dictionary投影も削除済み（マージ待ち） |
 | テスト可能性 | A | pure Rust transition tests + typed outcome fixtureを使うGdUnit4。実画面/WebSocketの統合確認とpeak frame-time計測は手動領域。今回は文書レビューのみでtests未実行 |
 
 2026-08-19: Station Inventoryのクリック/ドロップ方針と既存`ClientRequest`構築は
@@ -69,7 +69,7 @@ canonical variantへの明示的な`Option` parseに失敗した場合はrange p
 
 2026-10-31: 19 GDScriptのうち`connection.gd`は313→254行。ログ抑制後も接続とtyped deliveryの責務は維持。
 Rust境界は`world_session.rs` 903→980行、`inbound_delivery.rs` 627→652行へ更新。
-C-21によりデッドコード軸はA→A−、総合B+は据え置く。C-9/R-2/C-20の分割triggerは未発火。
+C-21は実装済み（マージ待ち）。今回は評価を再採点せず総合B+を据え置く。C-9/R-2/C-20の分割triggerは未発火。
 Starfieldのrender constructionを呼び出し側が知る点はC-20の観測対象に含め、新規managerは提案しない。
 
 ## State ownership
@@ -132,7 +132,7 @@ navigation map cacheはSector内でwrite-onceに近いpresentation cacheとし�
 | `crates/dawn-client-core/src/motion.rs` | 680 | 🟢 client motion/prediction kernel・tests |
 | `crates/dawn-client-gdext/src/client_command_gd.rs` | 282 | 🟢 remaining direct typed request builders・入力検証・encode結果のGDExtension boundary |
 | `crates/dawn-client-gdext/src/client_action_gd.rs` | 261 | 🟢 ClientAction/ClientInteractionの薄いGodot adapter |
-| `crates/dawn-client-gdext/src/world_session_gd.rs` | 190 | 🟡 typed session read adapter。C-21のtest専用Dictionary投影のみFix、core stateは維持 |
+| `crates/dawn-client-gdext/src/world_session_gd.rs` | 179 | 🟢 typed session read adapter。C-21のtest専用Dictionary投影を削除、core stateは維持 |
 | `crates/dawn-client-gdext/src/ship_motion_gd.rs` | 243 | 🟢 ShipMotionの型変換adapter。位置authorityはcoreのf64 |
 | `crates/dawn-client-core/src/ship_motion.rs` | 434 | 🟢 motion lifecycleとabsolute/floating-origin policyの単一owner |
 
@@ -153,6 +153,6 @@ navigation map cacheはSector内でwrite-onceに近いpresentation cacheとし�
 | C-18 | — | Station Inventory interaction policy / string action tag ladder | 解消済み |
 | C-19 | — | HUD frame Dictionary / GDScript dirty tracking workaround | 解消済み（2026-08-20、`HudReadModel`） |
 | C-20 | — | `WorldPresentation`への独立visual lifecycle集積 | 再観測・trigger付き保留 |
-| C-21 | — | test専用`WorldSession.system_names()` Dictionary投影 | Fix・core map/typed navigationは維持 |
+| C-21 | — | test専用`WorldSession.system_names()` Dictionary投影 | 実装済み・マージ待ち。core map/typed navigationは維持 |
 
 `main.gd`の機械的な`.tscn`分割、raw `InputEvent`のdeep module流入、typed recordのDictionary回帰は行わない。
