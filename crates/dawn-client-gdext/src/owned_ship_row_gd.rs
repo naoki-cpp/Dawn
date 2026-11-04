@@ -1,8 +1,11 @@
 use dawn_client_core::OwnedShipRow as CoreOwnedShipRow;
+#[cfg(debug_assertions)]
 use dawn_core::{ShipTypeId, StationId};
 use godot::prelude::*;
 
-use crate::id_boundary::{ship_id_from_godot, ship_id_to_godot};
+#[cfg(debug_assertions)]
+use crate::id_boundary::ship_id_from_godot;
+use crate::id_boundary::ship_id_to_godot;
 
 /// GDScript-facing typed view of one owned-ship roster row (ADR-0037).
 /// Optional Rust fields preserve the existing Godot sentinels: `-1` for
@@ -36,6 +39,7 @@ impl OwnedShipRow {
         })
     }
 
+    #[cfg(debug_assertions)]
     pub(crate) fn inner_clone(&self) -> CoreOwnedShipRow {
         CoreOwnedShipRow {
             ship_id: ship_id_from_godot(self.ship_id)
