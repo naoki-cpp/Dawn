@@ -59,20 +59,10 @@ func test_playtest_configuration_rejects_cleartext_remote_tokens_and_header_inje
 	assert_bool(connection.configure_endpoint("wss://dawn.example", "a".repeat(63) + "\n")).is_false()
 
 
-func test_normalize_ws_url_adds_ws_scheme_to_host_port() -> void:
+func test_normalize_ws_url_adds_only_a_missing_scheme() -> void:
 	var connection: Node = Connection.new()
 	assert_str(connection._normalize_ws_url("127.0.0.1:7880")).is_equal("ws://127.0.0.1:7880")
-	connection.free()
-
-
-func test_normalize_ws_url_keeps_existing_ws_scheme() -> void:
-	var connection: Node = Connection.new()
 	assert_str(connection._normalize_ws_url("ws://127.0.0.1:7880")).is_equal("ws://127.0.0.1:7880")
-	connection.free()
-
-
-func test_normalize_ws_url_keeps_existing_wss_scheme() -> void:
-	var connection: Node = Connection.new()
 	assert_str(connection._normalize_ws_url("wss://example.test/ws")).is_equal("wss://example.test/ws")
 	connection.free()
 
@@ -154,7 +144,6 @@ class DirectPresentationTarget:
 	var module_active: bool = false
 	var module_reason: String = ""
 	var market_snapshot: MarketSnapshot
-	var motion_correction: MotionCorrectionPresentation
 
 	func _on_initial_state(state: InitialStatePresentation) -> void:
 		initial_state_seen = true
@@ -175,9 +164,6 @@ class DirectPresentationTarget:
 
 	func _on_market_snapshot(snapshot: MarketSnapshot) -> void:
 		market_snapshot = snapshot
-
-	func _handle_motion_correction(correction: MotionCorrectionPresentation) -> void:
-		motion_correction = correction
 
 
 func _direct_target(state: Array) -> DirectPresentationTarget:
@@ -256,16 +242,6 @@ func test_market_snapshot_reaches_the_final_world_handler_without_a_connection_r
 	assert_int(module.module_id() as int).is_equal(3)
 	assert_bool(ship.is_packaged_ship()).is_true()
 	assert_int(ship.ship_type_id() as int).is_equal(7)
-
-
-func test_motion_correction_reaches_the_final_world_handler_without_a_connection_relay() -> void:
-	var state := _state()
-	var target := _direct_target(state)
-
-	assert_bool(_dispatch("MotionCorrection", target, state)).is_true()
-	assert_object(target.motion_correction).is_not_null()
-	assert_int(target.motion_correction.ship_id).is_equal(11)
-	assert_int(target.motion_correction.tick).is_equal(42)
 
 
 class EventDispatchTarget:

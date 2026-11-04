@@ -4,7 +4,9 @@ use godot::prelude::*;
 
 #[cfg(test)]
 use crate::client_outcome::validate_player_loadout_godot_ranges;
-use crate::id_boundary::{ship_id_from_godot, ship_id_from_wire, ship_id_to_godot};
+#[cfg(debug_assertions)]
+use crate::id_boundary::ship_id_from_godot;
+use crate::id_boundary::{ship_id_from_wire, ship_id_to_godot};
 use crate::item_row_gd::ItemRow;
 use crate::module_activation_intent_gd::ModuleActivationIntent;
 use crate::module_row_gd::{parse_kind, ModuleRow};

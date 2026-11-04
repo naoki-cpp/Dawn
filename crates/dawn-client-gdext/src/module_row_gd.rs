@@ -1,5 +1,9 @@
-use dawn_client_core::{ModuleRow as CoreModuleRow, StatDelta};
-use dawn_core::{ModuleId, ModuleKind};
+use dawn_client_core::ModuleRow as CoreModuleRow;
+#[cfg(debug_assertions)]
+use dawn_client_core::StatDelta;
+#[cfg(debug_assertions)]
+use dawn_core::ModuleId;
+use dawn_core::ModuleKind;
 use godot::prelude::*;
 
 /// `ModuleKind`'s wire-string name, exactly matching what the server sends
