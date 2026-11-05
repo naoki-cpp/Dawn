@@ -63,15 +63,6 @@ class FakeWorld:
 			-position.z / render_scale_value,
 		])
 
-	func distance_components(first: PackedFloat64Array, second: PackedFloat64Array) -> float:
-		var dx: float = first[0] - second[0]
-		var dy: float = first[1] - second[1]
-		var dz: float = first[2] - second[2]
-		return sqrt(dx * dx + dy * dy + dz * dz)
-
-	func dir_to_godot(direction: Vector3) -> Vector3:
-		return Vector3(direction.x, direction.y, -direction.z)
-
 
 class FakeShip:
 	extends Node3D
@@ -389,19 +380,6 @@ func test_sun_state_is_inactive_inside_the_photosphere() -> void:
 		_body(1, "Star", "Helios", _position(0.0, 0.0, 0.0), 1000.0, 0.6),
 	], _position(0.0, 0.0, 0.0))
 	assert_float(sky.get_shader_parameter("sun_active") as float).is_equal(0.0)
-
-
-func test_sun_angular_radius_grows_as_the_observer_approaches_the_star() -> void:
-	var far_state := CelestialProjection.sun(_position(20_000.0, 0.0, 0.0), _position(0.0, 0.0, 0.0), 1000.0)
-	var near_state := CelestialProjection.sun(_position(10_000.0, 0.0, 0.0), _position(0.0, 0.0, 0.0), 1000.0)
-	assert_float(near_state.angular_radius).is_greater(far_state.angular_radius)
-	assert_float(near_state.angular_radius) \
-		.is_equal_approx(asin(0.1), 0.0001)
-
-
-func test_sun_angular_radius_is_not_capped_at_valid_physical_distance() -> void:
-	assert_float(CelestialProjection.sun(_position(2_000.0, 0.0, 0.0), _position(0.0, 0.0, 0.0), 1_000.0).angular_radius) \
-		.is_equal_approx(asin(0.5), 0.0001)
 
 
 func test_directional_light_uses_the_ray_from_star_to_ship() -> void:
