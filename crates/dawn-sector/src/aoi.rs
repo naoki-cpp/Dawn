@@ -330,19 +330,16 @@ impl AoiDelivery {
         }
 
         // Client-side prediction authority (ADR-0043): the owning client gets
-        // an exact normal-flight position/velocity correction alongside the
-        // velocity event. Committed warp is deliberately excluded because its
-        // visual path is capped and its arrival is corrected by PositionSnap.
+        // an exact position/velocity correction alongside the velocity event.
+        // Warp uses it for the uncapped world observer while its ship mesh
+        // remains bounded until the arrival PositionSnap.
         let owner_motion = new_events.iter().rev().find_map(|event| match event {
             DomainEvent::VelocityChanged(change) if change.ship_id == own_ship_id => {
                 Some((change.velocity, change.tick))
             }
             _ => None,
         });
-        if !view.ship_is_warping(own_ship_id)
-            && !warp_arrivals.contains(&own_ship_id)
-            && owner_motion.is_some()
-        {
+        if !warp_arrivals.contains(&own_ship_id) && owner_motion.is_some() {
             if let (Some(position), Some((velocity, tick))) =
                 (view.ship_absolute_pos(own_ship_id), owner_motion)
             {
@@ -744,6 +741,47 @@ mod tests {
             VelWire::from(Velocity::new(4.0, 5.0, 6.0))
         );
         assert_eq!(sink.motion_corrections[0].3, 9);
+    }
+
+    #[test]
+    fn deliver_frame_corrects_the_owner_world_position_during_committed_warp() {
+        use dawn_core::{JumpGateId, Position, Velocity, WarpTarget};
+        let mut node = mem_node();
+        let own_ship = node.spawn_ship(
+            crate::ship_types::SHIP_TYPE_NPC_FRIGATE,
+            Position::ORIGIN,
+            Velocity::ZERO,
+        );
+        assert!(node.apply_warp_command(own_ship, WarpTarget::Gate(JumpGateId(0)), false));
+        for _ in 0..500 {
+            node.tick();
+            if node.ship_is_warping(own_ship) {
+                break;
+            }
+        }
+        assert!(node.ship_is_warping(own_ship));
+        let position = node.ship_absolute_pos(own_ship).unwrap();
+        let event = DomainEvent::VelocityChanged(dawn_core::events::VelocityChanged {
+            ship_id: own_ship,
+            velocity: Velocity::new(100_000.0, 0.0, 0.0),
+            tick: node.current_tick(),
+        });
+        let mut delivery = AoiDelivery::new();
+        let mut sink = FakeSink::default();
+        assert!(delivery.deliver_frame(
+            &mut sink,
+            &node,
+            Observer {
+                player_id: player(1),
+                ship_id: own_ship
+            },
+            vec![],
+            &[event],
+            &[]
+        ));
+        assert_eq!(sink.motion_corrections.len(), 1);
+        assert_eq!(sink.motion_corrections[0].1.x, position[0]);
+        assert!(sink.position_snaps.is_empty());
     }
 
     #[test]

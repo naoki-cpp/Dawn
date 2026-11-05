@@ -36,6 +36,9 @@ var _orbit_quat : Quaternion = (
 	Quaternion(Vector3.RIGHT, -deg_to_rad(35.0))
 )
 
+var _view_quat: Quaternion = _orbit_quat
+var _view_distance: float = _zoom_distance
+
 var _btn_down    : bool    = false
 var _drag_start  : Vector2 = Vector2.ZERO
 var _dragging    : bool    = false
@@ -52,11 +55,15 @@ func _process(delta: float) -> void:
 	if _target_node != null and is_instance_valid(_target_node):
 		_target_pos = _target_node.global_position
 
-	var desired : Vector3 = _target_pos + _orbit_offset()
-	global_position = global_position.lerp(desired, clampf(follow_speed * delta, 0.0, 1.0))
+	# Follow translation exactly; only user-controlled orbit and zoom are eased.
+	# Interpolating world position makes warp velocity change distance and angle.
+	var weight := 1.0 - exp(-maxf(follow_speed, 0.0) * maxf(delta, 0.0))
+	_view_quat = _view_quat.slerp(_orbit_quat, weight).normalized()
+	_view_distance = lerpf(_view_distance, _zoom_distance, weight)
+	global_position = _target_pos + _view_quat * Vector3(0.0, 0.0, _view_distance)
 
 	## look_at の up ベクトルをクォータニオンから導く → ジンバルロックしない
-	var cam_up : Vector3 = (_orbit_quat * Vector3.UP).normalized()
+	var cam_up : Vector3 = (_view_quat * Vector3.UP).normalized()
 	look_at(_target_pos, cam_up)
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -92,6 +99,8 @@ func _unhandled_input(event: InputEvent) -> void:
 func set_target(node: Node3D) -> void:
 	_target_node = node
 	if node != null:
+		_view_quat = _orbit_quat
+		_view_distance = _zoom_distance
 		_target_pos     = node.global_position
 		global_position = _target_pos + _orbit_offset()
 

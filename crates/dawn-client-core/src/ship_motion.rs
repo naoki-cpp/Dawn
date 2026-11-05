@@ -431,4 +431,38 @@ mod tests {
         assert_eq!(motion.frame().predicted_position, [2_000.0, 0.0, 0.0]);
         assert_eq!(motion.world_presentation_position(), [3_500.0, 0.0, 0.0]);
     }
+
+    #[test]
+    fn warp_world_observer_accepts_corrections_without_moving_the_bounded_mesh() {
+        let mut motion =
+            ShipMotion::new(MotionProfile::default(), [0.0; 3], [1.0e9, 0.0, 0.0], 0).unwrap();
+        motion.dispatch(MotionCommand::BeginWarp {
+            server_speed_cap: 20_000.0,
+        });
+        motion.dispatch(MotionCommand::Advance { ticks: 1.2 });
+        let mesh = motion.frame().predicted_position;
+        let sample = MotionCommand::AuthoritativeSample {
+            position: [1.0e9, 0.0, 0.0],
+            velocity: [10.0, 0.0, 0.0],
+            tick: 1,
+        };
+        assert_eq!(motion.dispatch(sample), MotionDispatch::Applied);
+        assert_eq!(motion.world_presentation_position(), [1.0e9, 0.0, 0.0]);
+        assert_eq!(motion.frame().predicted_position, mesh);
+        motion.dispatch(MotionCommand::Advance { ticks: 0.5 });
+        assert_eq!(
+            motion.world_presentation_position(),
+            [1.0e9 + 5.0, 0.0, 0.0]
+        );
+        let before = motion.world_presentation_position();
+        assert_eq!(
+            motion.dispatch(MotionCommand::AuthoritativeSample {
+                position: [0.0; 3],
+                velocity: [0.0; 3],
+                tick: 0,
+            }),
+            MotionDispatch::Ignored
+        );
+        assert_eq!(motion.world_presentation_position(), before);
+    }
 }

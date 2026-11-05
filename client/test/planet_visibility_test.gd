@@ -58,4 +58,13 @@ func test_initial_state_planet_keeps_true_radius_with_distant_marker() -> void:
 	assert_float(rendered_planet.global_position.distance_to(Vector3.ZERO)).is_less(30_000.1)
 	var planet_mesh: SphereMesh = (rendered_planet.get_child(0) as MeshInstance3D).mesh as SphereMesh
 	assert_float(planet_mesh.radius).is_equal_approx(640_000.0, 0.1)
-	assert_bool((rendered_planet.get_child(0) as MeshInstance3D).visible).is_false()
+	var mesh_instance := rendered_planet.get_child(0) as MeshInstance3D
+	assert_bool(mesh_instance.visible).is_true()
+	assert_float(mesh_instance.scale.x).is_less(1.0)
+	var radius := planet_mesh.radius * mesh_instance.scale.x
+	var distance := rendered_planet.global_position.distance_to(_main._camera.global_position)
+	var ship: Node3D = _main._ships[11]
+	var world_distance: float = _main._world.distance_components(
+		ship.world_presentation_position(), planet.position)
+	assert_float(radius / distance).is_equal_approx(planet.radius / world_distance, 0.0000001)
+	assert_float(distance + radius).is_less(_main._camera.far)
