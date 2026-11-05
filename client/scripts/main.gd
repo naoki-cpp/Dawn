@@ -572,6 +572,7 @@ func _spawn_ship_from_record(record: ShipPresentation, became_player: bool) -> v
 		return
 	var server_pos: PackedFloat64Array = record.position
 	var ship: Node3D = _instantiate_ship(sid, server_pos)
+	ship.set_meta("callout_text", "%s #%d" % [record.ship_type_name, sid])
 	ship.call(
 		"configure_motion",
 		record.max_speed,

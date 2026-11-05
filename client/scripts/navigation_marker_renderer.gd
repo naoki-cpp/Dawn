@@ -10,10 +10,7 @@ class_name NavigationMarkerRenderer
 extends RefCounted
 
 const GATE_RING_INNER_RATIO    : float = 0.93
-const GATE_LABEL_HEIGHT_RATIO  : float = 0.3
 const STATION_VISUAL_RADIUS     : float = 350.0
-const STATION_RING_INNER_RATIO  : float = 0.96
-const STATION_LABEL_HEIGHT_RATIO: float = 1.8
 const GATE_COLOR: Color = Color(0.18, 0.86, 1.0, 0.88)
 const PLANET_COLOR: Color = Color(0.62, 0.84, 1.0, 0.82)
 const STATION_COLOR: Color = Color(1.0, 0.72, 0.24, 0.90)
@@ -23,17 +20,6 @@ const STATION_COLOR: Color = Color(1.0, 0.72, 0.24, 0.90)
 ## previous 0.256 width.
 const BRACKET_PIXEL_SIZE: float = 0.0002
 
-## Selection reticle: a fixed-screen-size ring billboard so every planet is
-## equally easy to click regardless of distance (pairs with
-## ShipPicking.pick_body_at's screen-space picking). Built via
-## BillboardRing, shared with ship_controller.gd's lock-on ring -- both are
-## the same kind of "this is selected/selectable" indicator and should
-## behave the same way. Sized smaller than the smallest existing HUD elements
-## (hud_manager.gd's conn_dot is 8x8px, module-slot font is 9px) since this
-## marker sits in 3D space rather than screen space and otherwise reads as
-## too large against the ship/planet geometry around it.
-const RETICLE_PIXEL_SIZE : float = 0.0015
-const RETICLE_COLOR      : Color = Color(1.0, 1.0, 1.0, 0.85)
 const BRACKET_SCRIPT := preload("res://scripts/billboard_bracket.gd")
 const PLANET_SHADER := preload("res://shaders/planet_surface.gdshader")
 
@@ -141,15 +127,8 @@ static func spawn_gate_markers(gates_root: Node3D, gates: Array, world_scale: fl
 		ring.rotation_degrees = Vector3(90.0, 0.0, 0.0)
 		marker.add_child(ring)
 
-		var label: Label3D = Label3D.new()
-		label.text             = "Gate #%d -> %s" % [g.gate_id, g.to_system_name]
-		label.position         = Vector3(0.0, radius * world_scale * GATE_LABEL_HEIGHT_RATIO, 0.0)
-		label.billboard        = BaseMaterial3D.BILLBOARD_ENABLED
-		label.no_depth_test    = true
-		label.modulate         = GATE_COLOR
-		label.outline_size     = 8
-		label.outline_modulate = Color(0.01, 0.03, 0.05, 0.92)
-		marker.add_child(label)
+		marker.set_meta("callout_text", "Gate #%d -> %s" % [g.gate_id, g.to_system_name])
+		marker.set_meta("callout_color", GATE_COLOR)
 		marker.add_child(BRACKET_SCRIPT.build(GATE_COLOR, BRACKET_PIXEL_SIZE))
 
 
@@ -203,28 +182,15 @@ static func spawn_body_markers(bodies_root: Node3D, bodies: Array, world_scale: 
 		marker.add_child(mesh_inst)
 		marker.set_meta("physical_body_mesh", mesh_inst)
 
-		## Name label.
-		var label: Label3D = Label3D.new()
-		label.text        = name_str
-		label.position    = Vector3(0.0, sphere.radius * 1.4, 0.0)
-		label.billboard   = BaseMaterial3D.BILLBOARD_ENABLED
-		label.no_depth_test = true
-		label.modulate    = PLANET_COLOR
-		label.outline_size = 8
-		label.outline_modulate = Color(0.01, 0.02, 0.04, 0.90)
-		marker.add_child(label)
-		marker.set_meta("body_label", label)
+		marker.set_meta("callout_text", name_str)
+		marker.set_meta("callout_color", PLANET_COLOR)
 
-		## Selection reticle: always the same screen size, so the planet stays
-		## easy to click regardless of distance (pairs with
-		## ShipPicking.pick_body_at's screen-space picking).
-		marker.add_child(BillboardRing.build(RETICLE_COLOR, RETICLE_PIXEL_SIZE))
 		marker.add_child(BRACKET_SCRIPT.build(PLANET_COLOR, BRACKET_PIXEL_SIZE))
 
 
 ## Appends visual markers for NPC stations in the current star system.
 ## Stations share the bodies root because they live in the same local spatial
-## context as planets. Their positions and docking rings remain in physical
+## context as planets. Their positions remain in physical
 ## coordinates; only gate markers use the camera-relative distance policy.
 static func spawn_station_markers(bodies_root: Node3D, stations: Array, world_scale: float, to_godot_components: Callable) -> void:
 	for entry: Variant in stations:
@@ -259,29 +225,6 @@ static func spawn_station_markers(bodies_root: Node3D, stations: Array, world_sc
 		mesh_inst.mesh = sphere
 		marker.add_child(mesh_inst)
 
-		var ring: MeshInstance3D = MeshInstance3D.new()
-		var torus: TorusMesh = TorusMesh.new()
-		torus.inner_radius = docking_radius * world_scale * STATION_RING_INNER_RATIO
-		torus.outer_radius = docking_radius * world_scale
-		var ring_mat: StandardMaterial3D = StandardMaterial3D.new()
-		ring_mat.albedo_color = STATION_COLOR
-		ring_mat.emission_enabled = true
-		ring_mat.emission = STATION_COLOR
-		ring_mat.emission_energy_multiplier = 0.9
-		ring_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		ring_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		ring.mesh = torus
-		ring.material_override = ring_mat
-		ring.rotation_degrees = Vector3(90.0, 0.0, 0.0)
-		marker.add_child(ring)
-
-		var label: Label3D = Label3D.new()
-		label.text = name_str
-		label.position = Vector3(0.0, visual_radius * STATION_LABEL_HEIGHT_RATIO, 0.0)
-		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-		label.no_depth_test = true
-		label.modulate = STATION_COLOR
-		label.outline_size = 8
-		label.outline_modulate = Color(0.06, 0.035, 0.01, 0.92)
-		marker.add_child(label)
+		marker.set_meta("callout_text", name_str)
+		marker.set_meta("callout_color", STATION_COLOR)
 		marker.add_child(BRACKET_SCRIPT.build(STATION_COLOR, BRACKET_PIXEL_SIZE))
