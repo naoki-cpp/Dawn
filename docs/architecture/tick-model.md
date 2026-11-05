@@ -175,9 +175,17 @@ Step 2.6: Warp System (after Keep at Range, before Movement, ADR-0022 / ADR-0025
          -> Ships with WarpComp only. Aligning accelerates toward the target direction;
            once velocity along that direction reaches 75% of max_speed, transitions to
            Warping (EVE-style; align time depends on agility; interruptible; Tackle window).
-           Warping follows a duration-bounded cubic Hermite segment between the
-           authoritative f64 start/arrival points (ADR-0022), ending with zero
-           velocity. The arrival point is chosen at:
+           Warping analytically integrates exponential velocity ramps with an
+           optional constant-speed cruise between authoritative f64 start/arrival
+           points (ADR-0022). The ship-type catalog owns warp speed in AU/s
+           (Magpie: 5, other hulls: 0.75). Acceleration uses that numerical
+           rate per second; deceleration uses min(rate/3, 2)/s;
+           short trips lower peak speed rather than compressing decay time.
+           Longer trips add cruise at the hull's speed limit. Actual entry velocity is
+           carried into the ramp. A 100 m/s tail reference sets deceleration
+           duration; a normalized exponential reaches zero at arrival, retaining
+           the existing stop/PositionSnap contract rather than EVE's moving exit. The
+           arrival point is chosen at:
              Gate target: within activation_radius x 0.8 (ADR-0022)
              Body target: within body.radius x 1.5 (ADR-0025 BODY_WARP_ARRIVAL_FACTOR)
              Station target: within docking_radius x 0.8

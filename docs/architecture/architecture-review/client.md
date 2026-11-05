@@ -100,8 +100,8 @@ navigation map cacheはSector内でwrite-onceに近いpresentation cacheとし�
 | `client/scripts/main.gd` | 976 | 🟡 R-2。scene lifecycle / node registry / event wiring / HUD scene-facts assemblyのorchestration。機械的分割はしない |
 | `client/scripts/hud_manager.gd` | 859 | 🟡 C-9。typed refsとpanel build/updateが同一責務。独立変更理由が分かれるまで保留 |
 | `client/scripts/ship_controller.gd` | 448 | 🟢 motion adapterとvisual effectの一つのShip presentation boundary |
-| `client/scripts/connection.gd` | 301 | 🟢 socket/credential adapter・typed outcome受け渡し。phase/retry/timeoutはRust ConnectionLifecycleが所有 |
-| `client/scripts/world_presentation.gd` | 695 | 🟡 C-20。session visual coordinatorとして有効だが、origin/marker/environment/warp/player effectの独立変更理由を監視 |
+| `client/scripts/connection.gd` | 295 | 🟢 socket/credential adapter・typed outcome受け渡し。phase/retry/timeoutはRust ConnectionLifecycleが所有（2026-11-05再計測） |
+| `client/scripts/world_presentation.gd` | 668 | 🟡 C-20。session visual coordinatorとして有効だが、origin/marker/environment/warp/player effectの独立変更理由を監視（2026-11-05再計測） |
 | `client/scripts/market_surface.gd` | 270 | 🟢 Market panel surface |
 | `client/scripts/hud_surface.gd` | 157 | 🟢 typed snapshot paint・HUD reference ownership |
 | `client/scripts/navigation_marker_renderer.gd` | 287 | 🟢 navigation marker・planet surface・EVE-style bracket rendering |
@@ -129,7 +129,7 @@ navigation map cacheはSector内でwrite-onceに近いpresentation cacheとし�
 | `crates/dawn-client-core/src/client_action.rs` | 584 | 🟢 engine-independent selection/input policy・typed ClientAction |
 | `crates/dawn-client-core/src/hud.rs` | 555 | 🟢 engine-independent HUD read model・formatting・change decisions |
 | `crates/dawn-client-core/src/station_inventory.rs` | 758 | 🟢 engine-independent Station Inventory policy・typed request construction |
-| `crates/dawn-client-core/src/motion.rs` | 680 | 🟢 client motion/prediction kernel・tests |
+| `crates/dawn-client-core/src/motion.rs` | 726 | 🟢 client motion/prediction kernel・tests（2026-11-05再計測） |
 | `crates/dawn-client-gdext/src/client_command_gd.rs` | 282 | 🟢 remaining direct typed request builders・入力検証・encode結果のGDExtension boundary |
 | `crates/dawn-client-gdext/src/client_action_gd.rs` | 261 | 🟢 ClientAction/ClientInteractionの薄いGodot adapter |
 | `crates/dawn-client-gdext/src/world_session_gd.rs` | 179 | 🟢 typed session read adapter。C-21のtest専用Dictionary投影を削除、core stateは維持 |

@@ -329,6 +329,7 @@ EVE の**グローバル** TiDi は大規模戦でゲームが 10 倍スロー�
   サイクル開始時に cap 不足 → モジュールを強制 OFF（ModuleDeactivated）
   ```
 - **Warp** — 実装済み（ADR-0022 intra-Sector Warp）。align → warping 2 フェーズ・W キー。
+  船種定義の `warp_speed_au_per_sec` に従う指数加減速。短距離は到達速度を下げ、到着時は停止する。
   移動は `VelocityChanged` で記録し専用イベントは設けない（ADR-0008 の方針）。
 - **Tackler（足止め）** — 実装済み（ADR-0024 Fold Disruptor）。`TackledComp` /
   `TackleApplied` / `TackleReleased`・ワープ / ジャンプ拒否。

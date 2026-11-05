@@ -110,8 +110,8 @@ run only after the required projection completes.
 | `crates/dawn-sector/src/node/commands.rs` | 1391 | 🟢 外側のfamily選択・runtime command collection・follow-up射影・統合tests。policyは専用moduleへ分離済み |
 | `crates/dawn-storage/src/file_journal.rs` | 1593 | 🟢 1004行のjournal IO/validation kernelと589行のtests。R-9/#346でbatch/chunk bounded-memory化済み。framing・crash-safe archiveは同一責務として維持 |
 | `crates/dawn-sector/src/persistence/snapshot.rs` | 1246 | 🟢 checkpoint envelope・atomic publication・platform adapter・tests。単一のsnapshot publication boundary |
-| `crates/dawn-sector/src/node/warp.rs` | 1281 | 🟡 warp state machine・geometry kernel・tests。production実装592行のためR-3の再評価trigger待ち |
-| `crates/dawn-sector/src/node/mod.rs` | 1074 | 🟢 node composition・identity/accessor・population/repository boundary。座標helperはR-4で分離済み |
+| `crates/dawn-sector/src/node/warp.rs` | 1525 | 🟡 warp state machine・geometry kernel・tests。船種別指数曲線を含むproduction実装約640行。R-3の再評価trigger待ち（2026-11-05再計測） |
+| `crates/dawn-sector/src/node/mod.rs` | 1066 | 🟢 node composition・identity/accessor・population/repository boundary。座標helperはR-4で分離済み（2026-11-05再計測） |
 | `crates/dawn-distributed/src/catch_up.rs` | 1115 | 🟢 catch-up / snapshot-tail policy・tests |
 | `crates/dawn-market/src/order_book.rs` | 1044 | 🟢 pure order/matching/SettlementIntent policy。SQLは`repository.rs`へ分離済み（#279） |
 | `crates/dawn-sector/src/transit.rs` | 845 | 🟢 runtime consensus / durable transition policy。Ship handoff state mutationとは分離済み |

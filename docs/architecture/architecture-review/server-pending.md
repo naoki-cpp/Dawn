@@ -28,7 +28,8 @@ live state、interaction、presentationは分離済み。残るscene lifecycle /
 `command_flight.rs` / `command_module.rs` / `command_loadout.rs` / `command_station.rs` へ
 移した。wire shape、domain result、event semantics は変更していない（ADR-0047 amendment）。
 
-`node/warp.rs`は1281行だがproduction実装は592行で、geometry kernelとstate machineが凝集している。
+`node/warp.rs`は1525行、production実装は約640行（2026-11-05再計測）。船種カタログ参照と
+指数加減速を含め、geometry kernelとstate machineが凝集している。
 **判断: Defer。** テストを除く実装が約700行を超え、かつ独立した変更理由が混在する、または
 module間のdriftが実害になるまで分割しない。行数だけでは発火させない。
 
