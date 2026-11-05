@@ -9,6 +9,12 @@ const WorldPresentationScript = preload("res://scripts/world_presentation.gd")
 const StarfieldScript = preload("res://scripts/starfield.gd")
 
 
+func test_projection_adapter_rejects_invalid_coordinate_shapes() -> void:
+	assert_object(CelestialProjection.sun(PackedFloat64Array(), _position(100.0, 0.0, 0.0), 1.0)).is_null()
+	assert_object(CelestialProjection.marker(_position(0.0, 0.0, 0.0), PackedFloat64Array([1.0]),
+		Vector3.ZERO, null, 0.1, false, false, 0.0)).is_null()
+
+
 func test_sun_flare_rejects_rear_and_offscreen_directions() -> void:
 	var camera: Camera3D = auto_free(Camera3D.new())
 	add_child(camera)
@@ -292,15 +298,6 @@ func test_render_scale_authority_controls_spawned_navigation_geometry() -> void:
 	assert_float(station_mesh.outer_radius).is_equal_approx(20.0, 0.0001)
 
 
-func test_clamped_marker_position_leaves_nearby_marker_unchanged() -> void:
-	var player := Vector3.ZERO
-	var marker := Vector3(100.0, 0.0, 0.0)
-
-	var result: Vector3 = WorldPresentationScript.clamped_marker_position(player, marker, 500.0)
-
-	assert_vector(result).is_equal(marker)
-
-
 func test_warp_destination_approaches_before_the_arrival_snap() -> void:
 	var presentation := WorldPresentationScript.new()
 	presentation._world = FakeWorld.new()
@@ -322,15 +319,6 @@ func test_warp_destination_approaches_before_the_arrival_snap() -> void:
 	presentation._update_position_markers(root, "nav_pos", 7, {7: ship})
 	assert_vector(marker.global_position - ship.global_position).is_equal_approx(
 		Vector3(1_000.0, 0.0, 0.0), Vector3.ONE * 0.01)
-
-
-func test_clamped_marker_position_pulls_far_marker_back_to_clamp_radius() -> void:
-	var player := Vector3.ZERO
-	var marker := Vector3(1000.0, 0.0, 0.0)
-
-	var result: Vector3 = WorldPresentationScript.clamped_marker_position(player, marker, 250.0)
-
-	assert_vector(result).is_equal(Vector3(250.0, 0.0, 0.0))
 
 
 func test_next_warp_tunnel_amount_eases_toward_one_above_threshold() -> void:
@@ -379,59 +367,40 @@ func test_warp_effect_retains_arrival_axis_but_keeps_camera_live() -> void:
 
 
 func test_sun_state_returns_inactive_when_no_star_exists() -> void:
-	var state: Dictionary = WorldPresentationScript.sun_state([
+	var sky := _present_sun([
 		_body(2, "Planet", "Forge", _position(100.0, 0.0, 0.0), 200.0, 0.1),
-	], _position(0.0, 0.0, 0.0), func(diff: Vector3) -> Vector3:
-		return diff
-	)
-
-	assert_bool(state.get("active", true) as bool).is_false()
+	], _position(0.0, 0.0, 0.0))
+	assert_float(sky.get_shader_parameter("sun_active") as float).is_equal(0.0)
 
 
 func test_sun_state_returns_direction_and_color_from_star_data() -> void:
-	var state: Dictionary = WorldPresentationScript.sun_state([
+	var sky := _present_sun([
 		_body(1, "Star", "Helios", _position(0.0, 0.0, 0.0), 1000.0, 0.0),
-	], _position(5000.0, 0.0, 0.0), func(diff: Vector3) -> Vector3:
-		return diff
-	)
-
-	assert_bool(state.get("active", false) as bool).is_true()
-	assert_vector(state.get("direction", Vector3.ZERO) as Vector3) \
+	], _position(5000.0, 0.0, 0.0))
+	assert_float(sky.get_shader_parameter("sun_active") as float).is_equal(1.0)
+	assert_vector(sky.get_shader_parameter("sun_direction") as Vector3) \
 		.is_equal_approx(Vector3(-1.0, 0.0, 0.0), Vector3(0.0001, 0.0001, 0.0001))
-	assert_vector(state.get("color", Vector3.ZERO) as Vector3) \
+	assert_vector(sky.get_shader_parameter("sun_color") as Vector3) \
 		.is_equal_approx(Vector3(0.55, 0.65, 1.00), Vector3(0.0001, 0.0001, 0.0001))
 
 
 func test_sun_state_is_inactive_inside_the_photosphere() -> void:
-	var state: Dictionary = WorldPresentationScript.sun_state([
+	var sky := _present_sun([
 		_body(1, "Star", "Helios", _position(0.0, 0.0, 0.0), 1000.0, 0.6),
-	], _position(0.0, 0.0, 0.0), func(diff: Vector3) -> Vector3:
-		return diff
-	)
-
-	assert_bool(state.get("active", true) as bool).is_false()
-	assert_bool(state.get("invalid_position", false) as bool).is_true()
+	], _position(0.0, 0.0, 0.0))
+	assert_float(sky.get_shader_parameter("sun_active") as float).is_equal(0.0)
 
 
 func test_sun_angular_radius_grows_as_the_observer_approaches_the_star() -> void:
-	var bodies: Array = [
-		_body(1, "Star", "Helios", _position(0.0, 0.0, 0.0), 1000.0, 0.6),
-	]
-	var far_state: Dictionary = WorldPresentationScript.sun_state(
-		bodies, _position(20_000.0, 0.0, 0.0), func(diff: Vector3) -> Vector3:
-			return diff)
-	var near_state: Dictionary = WorldPresentationScript.sun_state(
-		bodies, _position(10_000.0, 0.0, 0.0), func(diff: Vector3) -> Vector3:
-			return diff)
-
-	assert_float(near_state.get("angular_radius", 0.0) as float) \
-		.is_greater(far_state.get("angular_radius", 0.0) as float)
-	assert_float(near_state.get("angular_radius", 0.0) as float) \
+	var far_state := CelestialProjection.sun(_position(20_000.0, 0.0, 0.0), _position(0.0, 0.0, 0.0), 1000.0)
+	var near_state := CelestialProjection.sun(_position(10_000.0, 0.0, 0.0), _position(0.0, 0.0, 0.0), 1000.0)
+	assert_float(near_state.angular_radius).is_greater(far_state.angular_radius)
+	assert_float(near_state.angular_radius) \
 		.is_equal_approx(asin(0.1), 0.0001)
 
 
 func test_sun_angular_radius_is_not_capped_at_valid_physical_distance() -> void:
-	assert_float(WorldPresentationScript.sun_angular_radius(1_000.0, 2_000.0)) \
+	assert_float(CelestialProjection.sun(_position(2_000.0, 0.0, 0.0), _position(0.0, 0.0, 0.0), 1_000.0).angular_radius) \
 		.is_equal_approx(asin(0.5), 0.0001)
 
 
@@ -462,17 +431,14 @@ func test_sun_direction_uses_world_position_while_warp_render_position_is_fixed(
 	]
 	presentation._update_sun_direction(7, {7: ship}, bodies)
 
-	var expected: Dictionary = WorldPresentationScript.sun_state(
-		bodies,
-		ship.world_presentation_position_value,
-		Callable(world, "dir_to_godot"))
+	var expected := CelestialProjection.sun(ship.world_presentation_position_value, bodies[0].position, bodies[0].radius)
 	assert_vector(sky_material.get_shader_parameter("sun_direction") as Vector3) \
 		.is_equal_approx(
-			expected.get("direction", Vector3.ZERO) as Vector3,
+			expected.direction,
 			Vector3(0.0001, 0.0001, 0.0001))
 	assert_float(sky_material.get_shader_parameter("sun_angular_radius") as float) \
 		.is_equal_approx(
-			maxf(expected.get("angular_radius", 0.0) as float, WorldPresentationScript.SUN_MIN_RENDER_ANGULAR_RADIUS),
+			maxf(expected.angular_radius, WorldPresentationScript.SUN_MIN_RENDER_ANGULAR_RADIUS),
 			0.0000001)
 
 
@@ -542,6 +508,19 @@ func test_origin_rebase_moves_ship_and_motion_track_together() -> void:
 		PackedFloat64Array([100.0, 2.0, -3.0]),
 	])
 	ship.free()
+
+
+func _present_sun(bodies: Array, observer: PackedFloat64Array) -> ShaderMaterial:
+	var presentation := WorldPresentationScript.new()
+	presentation._world = FakeWorld.new()
+	var sky := ShaderMaterial.new()
+	sky.shader = load("res://shaders/space_sky.gdshader")
+	presentation._sky_mat = sky
+	var ship: FakeShip = auto_free(FakeShip.new())
+	add_child(ship)
+	ship.world_presentation_position_value = observer
+	presentation._update_sun_direction(7, {7: ship}, bodies)
+	return sky
 
 
 ## Typed fixture builders matching the navigation records returned by WorldSession.

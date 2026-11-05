@@ -33,6 +33,7 @@
 //! assert_eq!(loadout.active_ship_id, Some(ShipId::new(NodeId(0), 7)));
 //! ```
 
+mod celestial_projection;
 mod client_action;
 mod client_rules;
 mod client_state;
@@ -47,6 +48,10 @@ mod station_inventory;
 mod world_session;
 mod world_space;
 
+pub use celestial_projection::{
+    CelestialProjection, MarkerGeometry, MarkerProjection, ProjectionCamera, ProjectionView,
+    SunProjection,
+};
 pub use client_action::{
     ClientAction, ClientActionContext, ClientInteraction, ClientKey, ClientLocalAction, Selection,
 };

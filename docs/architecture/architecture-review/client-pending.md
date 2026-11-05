@@ -50,6 +50,10 @@ shader/culling設定、camera追従を知る点も監視する。独立したsta
 
 2026-11-03整合確認: 695行。700行の閾値未満であり、行数だけで分割しない。
 
+2026-11-05: 純粋な天体投影計算は`dawn-client-core::CelestialProjection`へ集約し、
+Godotのcoordinatorは588行。状態を複製せず、observer選択はShipMotionに残す。
+天体投影の重複計算は解消したが、environment全体の追加分割は引き続きDefer。
+
 ## C-21 解消済み: test専用のsystem-name Dictionary投影
 
 Godot公開投影を削除。検証記録は[client-completed.md](./client-completed.md)を参照。

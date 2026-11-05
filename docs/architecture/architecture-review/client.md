@@ -101,7 +101,7 @@ navigation map cacheはSector内でwrite-onceに近いpresentation cacheとし�
 | `client/scripts/hud_manager.gd` | 859 | 🟡 C-9。typed refsとpanel build/updateが同一責務。独立変更理由が分かれるまで保留 |
 | `client/scripts/ship_controller.gd` | 448 | 🟢 motion adapterとvisual effectの一つのShip presentation boundary |
 | `client/scripts/connection.gd` | 295 | 🟢 socket/credential adapter・typed outcome受け渡し。phase/retry/timeoutはRust ConnectionLifecycleが所有（2026-11-05再計測） |
-| `client/scripts/world_presentation.gd` | 668 | 🟡 C-20。session visual coordinatorとして有効だが、origin/marker/environment/warp/player effectの独立変更理由を監視（2026-11-05再計測） |
+| `client/scripts/world_presentation.gd` | 588 | 🟡 C-20。純粋な天体投影はRustへ集約。origin/environment/warp/player effectの独立変更理由を監視（2026-11-05再計測） |
 | `client/scripts/market_surface.gd` | 270 | 🟢 Market panel surface |
 | `client/scripts/hud_surface.gd` | 157 | 🟢 typed snapshot paint・HUD reference ownership |
 | `client/scripts/navigation_marker_renderer.gd` | 287 | 🟢 navigation marker・planet surface・EVE-style bracket rendering |
@@ -134,6 +134,8 @@ navigation map cacheはSector内でwrite-onceに近いpresentation cacheとし�
 | `crates/dawn-client-gdext/src/client_action_gd.rs` | 261 | 🟢 ClientAction/ClientInteractionの薄いGodot adapter |
 | `crates/dawn-client-gdext/src/world_session_gd.rs` | 179 | 🟢 typed session read adapter。C-21のtest専用Dictionary投影を削除、core stateは維持 |
 | `crates/dawn-client-gdext/src/ship_motion_gd.rs` | 243 | 🟢 ShipMotionの型変換adapter。位置authorityはcoreのf64 |
+| `crates/dawn-client-core/src/celestial_projection.rs` | 270 | 🟢 statelessな天体/マーカー投影・角サイズ計算とtests |
+| `crates/dawn-client-gdext/src/celestial_projection_gd.rs` | 92 | 🟢 投影結果の型変換adapter。描画資源と移動状態を所有しない |
 | `crates/dawn-client-core/src/ship_motion.rs` | 434 | 🟢 motion lifecycleとabsolute/floating-origin policyの単一owner |
 
 ## Issue登録簿
