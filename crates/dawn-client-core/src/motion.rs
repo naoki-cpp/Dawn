@@ -111,6 +111,7 @@ pub struct MotionPredictor {
     warp_render_position: Option<[f64; 3]>,
     warp_world_position: Option<[f64; 3]>,
     warp_server_speed_cap: Option<f64>,
+    warp_peak_server_speed: f64,
 }
 
 impl Default for MotionPredictor {
@@ -135,6 +136,7 @@ impl MotionPredictor {
             warp_render_position: None,
             warp_world_position: None,
             warp_server_speed_cap: None,
+            warp_peak_server_speed: 0.0,
         }
     }
 
@@ -190,13 +192,20 @@ impl MotionPredictor {
     ///
     /// The authoritative track still advances at the reported velocity, but
     /// rendering advances at a bounded speed until an authoritative reset
-    /// arrives. This keeps warp presentation policy in the shared Rust track.
+    /// arrives. The trip's observed peak scales that speed down during
+    /// deceleration instead of moving at the cap until an abrupt stop.
+    /// This keeps warp presentation policy in the shared Rust track.
     /// `server_speed_cap` is expressed in server-space units per tick.
     pub fn begin_warp(&mut self, server_speed_cap: f64) -> bool {
         if !server_speed_cap.is_finite() || server_speed_cap <= 0.0 {
             return false;
         }
         let presentation_position = self.predicted_position();
+        if self.state != MotionState::WarpPresentation {
+            self.warp_peak_server_speed = magnitude(self.velocity);
+        } else {
+            self.warp_peak_server_speed = self.warp_peak_server_speed.max(magnitude(self.velocity));
+        }
         self.state = MotionState::WarpPresentation;
         self.input = MotionInput::Coast;
         self.warp_render_position
@@ -226,6 +235,7 @@ impl MotionPredictor {
         self.warp_render_position = None;
         self.warp_world_position = None;
         self.warp_server_speed_cap = None;
+        self.warp_peak_server_speed = 0.0;
         true
     }
 
@@ -296,6 +306,9 @@ impl MotionPredictor {
         let rendered_position = self.has_rendered.then(|| self.predicted_position());
         self.velocity = velocity;
         self.last_authoritative_tick = Some(tick);
+        if self.state == MotionState::WarpPresentation {
+            self.warp_peak_server_speed = self.warp_peak_server_speed.max(magnitude(velocity));
+        }
         if let Some(rendered_position) = rendered_position {
             let base_position = add(self.position, scale(self.velocity, self.fractional_ticks));
             self.render_correction = subtract(rendered_position, base_position);
@@ -323,11 +336,16 @@ impl MotionPredictor {
             if speed > VECTOR_EPSILON {
                 let direction = scale(self.velocity, 1.0 / speed);
                 let cap = self.warp_server_speed_cap.unwrap_or(speed);
+                self.warp_peak_server_speed = self.warp_peak_server_speed.max(speed);
+                // Preserve the authority's deceleration despite compressing AU
+                // speeds into a bounded render track. Re-entering begin_warp
+                // for velocity updates must not reset this trip's peak.
+                let render_speed = speed * (cap / self.warp_peak_server_speed.max(cap));
                 let render_position = self
                     .warp_render_position
                     .unwrap_or_else(|| self.predicted_position());
                 self.warp_render_position =
-                    Some(add(render_position, scale(direction, cap * ticks)));
+                    Some(add(render_position, scale(direction, render_speed * ticks)));
             }
         }
 
@@ -375,6 +393,7 @@ impl MotionPredictor {
         self.warp_render_position = None;
         self.warp_world_position = None;
         self.warp_server_speed_cap = None;
+        self.warp_peak_server_speed = 0.0;
     }
 
     /// Shift the motion track when the Godot floating origin moves.
@@ -544,6 +563,33 @@ mod tests {
 
         assert_eq!(track.position(), [3_000.0, 0.0, 0.0]);
         assert_eq!(track.predicted_position(), [2_000.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn warp_presentation_slows_with_authority_before_arrival() {
+        let mut track = MotionPredictor::default();
+        track.set_velocity_at_tick([1_000_000.0, 0.0, 0.0], 1);
+        track.begin_warp(2_000.0);
+        track.advance(1.0);
+        let cruise = track.predicted_position()[0];
+        track.set_velocity_at_tick([500_000.0, 0.0, 0.0], 2);
+        track.begin_warp(2_000.0);
+        track.advance(1.0);
+        let slowed = track.predicted_position()[0] - cruise;
+        assert!(
+            slowed < cruise * 0.75,
+            "render speed stayed at its cap: {slowed}"
+        );
+        track.set_velocity_at_tick([1_000.0, 0.0, 0.0], 3);
+        let before = track.predicted_position()[0];
+        track.advance(1.0);
+        let tail = track.predicted_position()[0] - before;
+        assert!(tail < slowed && tail <= 1_000.0);
+        assert_eq!(track.velocity(), [1_000.0, 0.0, 0.0]);
+        track.reset([0.0; 3], [1_000.0, 0.0, 0.0], 4);
+        track.begin_warp(2_000.0);
+        track.advance(1.0);
+        assert_eq!(track.predicted_position(), [1_000.0, 0.0, 0.0]);
     }
 
     #[test]

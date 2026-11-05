@@ -27,6 +27,18 @@ mod tests {
     use crate::game_data::test_catalog;
 
     #[test]
+    fn only_magpie_has_the_five_au_per_second_warp_profile() {
+        for definition in test_catalog().ship_types() {
+            let expected = if definition.id == SHIP_TYPE_MAGPIE {
+                5.0
+            } else {
+                0.75
+            };
+            assert_eq!(definition.warp_speed_au_per_sec, expected);
+        }
+    }
+
+    #[test]
     fn all_required_ship_type_ids_are_unique() {
         use std::collections::HashSet;
         let ids: HashSet<_> = REQUIRED_SHIP_TYPE_IDS.iter().copied().collect();

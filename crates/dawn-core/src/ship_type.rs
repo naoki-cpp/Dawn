@@ -125,6 +125,8 @@ pub struct ShipBaseStats {
 pub struct ShipTypeDefinition {
     pub id: ShipTypeId,
     pub name: String,
+    /// Maximum warp speed in astronomical units per second.
+    pub warp_speed_au_per_sec: f64,
     pub class: ShipClass,
     pub base_stats: ShipBaseStats,
     pub slot_layout: SlotLayout,
@@ -141,6 +143,7 @@ mod tests {
         ShipTypeDefinition {
             id: ShipTypeId(1),
             name: "Starter Frigate".to_string(),
+            warp_speed_au_per_sec: 0.75,
             class: ShipClass::Frigate,
             slot_layout: SlotLayout::FRIGATE,
             buildable: false,

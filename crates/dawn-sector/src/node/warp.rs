@@ -23,6 +23,11 @@ use super::{
     WARP_MIN_TICKS, WARP_SPEED,
 };
 
+const AU_METRES: f64 = 149_597_870_700.0;
+const TICKS_PER_SECOND: f64 = 10.0;
+// EVE's rate coefficients use the numerical warp speed in AU/s.
+const WARP_TAIL_SPEED: f64 = 100.0 / TICKS_PER_SECOND;
+
 impl SimulationNode {
     /// Begin an intra-Sector warp toward a gate, body, or station
     /// (short-range Fold, ADR-0022).
@@ -143,6 +148,14 @@ impl SimulationNode {
         let mut events = Vec::new();
 
         for (entity, ship_id, warp, pos, vel, max_speed) in warpers {
+            let warp_speed = self
+                .simulation
+                .ships
+                .type_ids
+                .get(&ship_id)
+                .and_then(|id| self.game_data.ship_type_registry.get(id))
+                .map(|definition| definition.warp_speed_au_per_sec * AU_METRES / TICKS_PER_SECOND)
+                .unwrap_or(WARP_SPEED);
             // Resolve destination, arrival distance, auto-jump gate, and the
             // destination anchor (Body/Station warps rebase onto the nearest
             // local body anchor on arrival,
@@ -237,12 +250,9 @@ impl SimulationNode {
                         arrival_abs[2] - start_abs[2],
                     ];
                     let dist = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
-                    let total = warp_total_ticks(dist);
-                    // Carry the ship's actual speed at engage into the transit
-                    // curve (lore pass, ADR-0022/0029): warp_step blends this in
-                    // as the curve's start tangent so the Aligning cruise speed
-                    // flows continuously into the warp-speed ramp, instead of
-                    // snapping to near-zero before re-accelerating.
+                    let total = warp_total_ticks(dist, warp_speed);
+                    // Carry actual engage velocity into the integrated ramp
+                    // rather than restarting the ship at rest.
                     if let Some(mut w) = self.simulation.world.get_mut::<WarpComp>(entity) {
                         w.warp_start_abs = start_abs;
                         w.warp_arrival_abs = arrival_abs.into();
@@ -262,6 +272,7 @@ impl SimulationNode {
                         dest_anchor,
                         tick,
                         &mut events,
+                        warp_speed,
                     );
                 }
                 // Already warping: advance one tick along the fixed segment plan.
@@ -280,6 +291,7 @@ impl SimulationNode {
                         dest_anchor,
                         tick,
                         &mut events,
+                        warp_speed,
                     );
                 }
             }
@@ -293,16 +305,9 @@ impl SimulationNode {
     /// `arrival_abs` — both Sector-frame f64 — over `total` ticks. This tick
     /// is number `elapsed`.
     ///
-    /// The path is a cubic Hermite spline with `start_vel` (the ship's actual
-    /// speed at the moment warp engaged) as its start tangent and a zero end
-    /// tangent, instead of the plain smoothstep ease this used before: plain
-    /// smoothstep has a zero derivative at *both* ends, so velocity used to
-    /// snap from the Aligning-phase cruise speed down to near-zero the instant
-    /// warp engaged, then ramp back up — a visible stutter at the very moment
-    /// that should read as "entering the tunnel". The Hermite blend keeps
-    /// speed continuous into the ramp while still decelerating smoothly to a
-    /// full stop exactly at `arrival_abs`, so the whole transit reads as one
-    /// continuous accelerate → cruise → decelerate motion.
+    /// Integrate exponential velocity ramps around an optional constant-speed
+    /// cruise. Entry velocity is preserved and the slower deceleration retains
+    /// a seconds-long local-speed approach instead of a fixed short ramp.
     ///
     /// The eased point is computed in f64 and written directly to the ship's
     /// f64 `PositionComp`, so error does not compound across ticks the way
@@ -331,6 +336,7 @@ impl SimulationNode {
         dest_anchor: Option<AnchorId>,
         tick: Tick,
         events: &mut Vec<DomainEvent>,
+        warp_speed: f64,
     ) {
         let total = total.max(1);
         let anchor_abs = self
@@ -347,6 +353,7 @@ impl SimulationNode {
             anchor_abs.as_array(),
             total,
             elapsed,
+            warp_speed,
         );
 
         if let Some(mut p) = self.simulation.world.get_mut::<PositionComp>(entity) {
@@ -510,8 +517,8 @@ impl SimulationNode {
     }
 }
 
-/// One warping-phase step's position/velocity/arrival (candidate 6): pure
-/// Hermite-spline math extracted from `warp_step`, given the ship's current
+/// One warping-phase step's position/velocity/arrival: pure integrated
+/// velocity-ramp math, given the ship's current
 /// anchor-relative position, the absolute-frame start/arrival points, the
 /// tangent start velocity, the current anchor's absolute position, and the
 /// segment's total/elapsed tick counts. No ECS/event-store access -- see
@@ -525,38 +532,56 @@ fn compute_warp_step(
     anchor_abs: [f64; 3],
     total: u32,
     elapsed: u32,
+    warp_speed: f64,
 ) -> (Position, Velocity, bool) {
     if elapsed > total {
         // One tick past the final step: settle and stop. The move tick at
-        // `elapsed == total` already landed exactly on arrival_abs (below,
-        // h01(1) = 1), so this just zeroes velocity — keeping the motion
+        // `elapsed == total` already landed exactly on arrival_abs, so this
+        // just zeroes velocity — keeping the motion
         // velocity-recorded (INV-MOVE) AND the arrival exact.
         return (pos, Velocity::ZERO, true);
     }
-    // Cubic Hermite spline (start tangent = start_vel, end tangent = zero)
-    // along the segment this tick, in absolute f64; velocity carries the
-    // delta so the move is recorded by VelocityChanged (INV-MOVE). At
-    // elapsed == total, t = 1 → planned = arrival_abs exactly
-    // (h00(1)=h10(1)=0, h01(1)=1) regardless of start_vel.
-    let t = (elapsed as f64 / total as f64).clamp(0.0, 1.0);
-    let t2 = t * t;
-    let t3 = t2 * t;
-    let h00 = 2.0 * t3 - 3.0 * t2 + 1.0;
-    let h10 = t3 - 2.0 * t2 + t;
-    let h01 = -2.0 * t3 + 3.0 * t2;
-    // Tangent scaled by `total` so its per-tick rate at t=0 equals the
-    // ship's actual entering speed (the curve parameter spans total ticks
-    // over t in [0,1], so d(planned)/d(elapsed) = d(planned)/dt / total).
-    let m0 = [
-        start_vel.dx * total as f64,
-        start_vel.dy * total as f64,
-        start_vel.dz * total as f64,
+    let displacement = [
+        arrival_abs[0] - start_abs[0],
+        arrival_abs[1] - start_abs[1],
+        arrival_abs[2] - start_abs[2],
     ];
-    let planned_abs = [
-        h00 * start_abs[0] + h10 * m0[0] + h01 * arrival_abs[0],
-        h00 * start_abs[1] + h10 * m0[1] + h01 * arrival_abs[1],
-        h00 * start_abs[2] + h10 * m0[2] + h01 * arrival_abs[2],
-    ];
+    let distance = displacement.iter().map(|v| v * v).sum::<f64>().sqrt();
+    let mut planned_abs = arrival_abs;
+    if elapsed < total && total > 1 && distance > f64::EPSILON {
+        let accel_rate = warp_speed / AU_METRES;
+        let decel_rate = (accel_rate / 3.0).min(2.0 / TICKS_PER_SECOND);
+        let (nominal_accel, nominal_decel) = warp_ramp_durations(distance, warp_speed);
+        let fit = (total as f64 / (nominal_accel + nominal_decel)).min(1.0);
+        let nominal_accel = nominal_accel * fit;
+        // Bound the entry-velocity contribution on very short/high-speed trips
+        // so it cannot consume the entire forward distance before cruise.
+        let entry = [start_vel.dx, start_vel.dy, start_vel.dz];
+        let entry_speed = entry.iter().map(|v| v * v).sum::<f64>().sqrt();
+        let accel = nominal_accel.min(distance / entry_speed.max(f64::EPSILON));
+        let decel = nominal_decel * fit;
+        let cruise = total as f64 - accel - decel;
+        let t = elapsed as f64;
+        let accel_area = warp_accel_integral(accel, accel, accel_rate);
+        let decel_area = warp_decel_remaining(decel, decel, decel_rate);
+        for i in 0..3 {
+            let peak = (displacement[i] - entry[i] * (accel - accel_area))
+                / (cruise + accel_area + decel_area);
+            let offset = if t < accel {
+                entry[i] * t + (peak - entry[i]) * warp_accel_integral(t, accel, accel_rate)
+            } else if t < accel + cruise {
+                entry[i] * (accel - accel_area) + peak * (accel_area + t - accel)
+            } else {
+                // Evaluate the small remaining distance from arrival, rather
+                // than subtracting two AU-scale integrated displacements.
+                let remaining = (total as f64 - t).clamp(0.0, decel);
+                planned_abs[i] =
+                    arrival_abs[i] - peak * warp_decel_remaining(remaining, decel, decel_rate);
+                continue;
+            };
+            planned_abs[i] = start_abs[i] + offset;
+        }
+    }
     let planned = Position::new(
         planned_abs[0] - anchor_abs[0],
         planned_abs[1] - anchor_abs[1],
@@ -570,11 +595,184 @@ fn compute_warp_step(
     (planned, v, false)
 }
 
-/// Warp duration in ticks from the warp distance (start→arrival point), floored
-/// at `WARP_MIN_TICKS` so even a short warp reads as a warp. ADR-0022 amendment.
-fn warp_total_ticks(warp_dist: f64) -> u32 {
-    let n = (warp_dist / WARP_SPEED).ceil().max(0.0) as u32;
-    n.max(WARP_MIN_TICKS)
+/// Integral of normalized exponential acceleration from entry to peak speed.
+fn warp_accel_integral(t: f64, duration: f64, rate: f64) -> f64 {
+    ((rate * t).exp_m1() / rate - t) / (rate * duration).exp_m1()
+}
+
+/// Remaining distance factor for exponential deceleration. Subtracting its
+/// small exit-speed floor reaches zero continuously at the existing stop seam.
+fn warp_decel_remaining(remaining: f64, duration: f64, rate: f64) -> f64 {
+    ((rate * remaining).exp_m1() / rate - remaining) / (rate * duration).exp_m1()
+}
+
+fn warp_ramp_durations(distance: f64, warp_speed: f64) -> (f64, f64) {
+    let accel_rate = warp_speed / AU_METRES;
+    let decel_rate = (accel_rate / 3.0).min(2.0 / TICKS_PER_SECOND);
+    // A short trip has no cruise and lowers its peak instead of compressing
+    // the exponential decay into a fixed few seconds.
+    let peak = (distance / (1.0 / accel_rate + 1.0 / decel_rate))
+        .clamp(WARP_TAIL_SPEED.min(warp_speed), warp_speed);
+    let accel = (peak / accel_rate).ln() / accel_rate;
+    let decel = (peak / WARP_TAIL_SPEED).ln() / decel_rate;
+    (accel.max(1.0), decel.max(1.0))
+}
+
+/// Exponential ramps retain their physical time scale on short and long trips.
+fn warp_total_ticks(warp_dist: f64, warp_speed: f64) -> u32 {
+    let accel_rate = warp_speed / AU_METRES;
+    let decel_rate = (accel_rate / 3.0).min(2.0 / TICKS_PER_SECOND);
+    let (accel, decel) = warp_ramp_durations(warp_dist, warp_speed);
+    let cruise = (warp_dist / warp_speed
+        - warp_accel_integral(accel, accel, accel_rate)
+        - warp_decel_remaining(decel, decel, decel_rate))
+    .max(0.0);
+    ((accel + cruise + decel).ceil() as u32).max(WARP_MIN_TICKS)
+}
+
+#[cfg(test)]
+mod speed_profile_tests {
+    use super::*;
+
+    #[test]
+    fn five_au_per_second_warp_is_bounded_and_faster_than_the_baseline() {
+        let distance = 10.0 * AU_METRES;
+        let cap = 5.0 * AU_METRES / TICKS_PER_SECOND;
+        let total = warp_total_ticks(distance, cap);
+        assert!(total < warp_total_ticks(distance, WARP_SPEED));
+        let mut pos = Position::ORIGIN;
+        let mut peak: f64 = 0.0;
+        for elapsed in 1..=total {
+            let (next, velocity, _) = compute_warp_step(
+                pos,
+                [0.0; 3],
+                [distance, 0.0, 0.0],
+                Velocity::ZERO,
+                [0.0; 3],
+                total,
+                elapsed,
+                cap,
+            );
+            assert!(next.x >= pos.x && next.x <= distance);
+            assert!(velocity.dx <= cap * (1.0 + 1e-10));
+            peak = peak.max(velocity.dx);
+            pos = next;
+        }
+        assert!(peak > cap * 0.98);
+        assert_eq!(pos.x, distance);
+    }
+
+    #[test]
+    fn arrival_reaches_local_flight_speed_before_the_final_tick() {
+        for distance in [149_597_870_700.0, 1_495_978_707_000.0] {
+            let total = warp_total_ticks(distance, WARP_SPEED);
+            let (before, _, _) = compute_warp_step(
+                Position::ORIGIN,
+                [0.0; 3],
+                [distance, 0.0, 0.0],
+                Velocity::ZERO,
+                [0.0; 3],
+                total,
+                total - 1,
+                WARP_SPEED,
+            );
+            let (_, velocity, _) = compute_warp_step(
+                before,
+                [0.0; 3],
+                [distance, 0.0, 0.0],
+                Velocity::ZERO,
+                [0.0; 3],
+                total,
+                total,
+                WARP_SPEED,
+            );
+            assert!(
+                velocity.dx <= 500.0,
+                "final tick still travels {} metres",
+                velocity.dx
+            );
+        }
+    }
+
+    #[test]
+    fn short_trips_lower_peak_without_compressing_the_deceleration() {
+        let au = 149_597_870_700.0;
+        let mut previous = 0;
+        for distance in [3000.0, 0.01 * au, au, 3.0 * au, 10.0 * au] {
+            let total = warp_total_ticks(distance, WARP_SPEED);
+            assert!(total > previous);
+            previous = total;
+        }
+        assert!(warp_ramp_durations(au, WARP_SPEED).1 > 700.0);
+    }
+
+    #[test]
+    fn sampled_profiles_are_monotonic_bounded_and_settle_exactly() {
+        for distance in [
+            3000.0,
+            1_495_978_707.0,
+            149_597_870_700.0,
+            1_495_978_707_000.0,
+        ] {
+            let total = warp_total_ticks(distance, WARP_SPEED);
+            let mut pos = Position::ORIGIN;
+            let mut speeds = Vec::new();
+            for elapsed in 1..=total {
+                let (next, velocity, arrived) = compute_warp_step(
+                    pos,
+                    [0.0; 3],
+                    [distance, 0.0, 0.0],
+                    Velocity::new(5.0, 0.0, 0.0),
+                    [0.0; 3],
+                    total,
+                    elapsed,
+                    WARP_SPEED,
+                );
+                assert!(!arrived);
+                assert!(next.x >= pos.x && next.x <= distance);
+                assert!(velocity.dx >= 0.0 && velocity.dx <= WARP_SPEED * (1.0 + 1e-10));
+                speeds.push(velocity.dx);
+                pos = next;
+            }
+            assert_eq!(pos.x, distance);
+            let (_, stopped, arrived) = compute_warp_step(
+                pos,
+                [0.0; 3],
+                [distance, 0.0, 0.0],
+                Velocity::new(5.0, 0.0, 0.0),
+                [0.0; 3],
+                total,
+                total + 1,
+                WARP_SPEED,
+            );
+            assert!(arrived);
+            assert_eq!(stopped, Velocity::ZERO);
+            let peak = speeds.iter().copied().fold(0.0, f64::max);
+            assert!(speeds.last().unwrap() < &(peak * 0.05));
+            // Local approach lasts seconds, not just the final fraction of a tick.
+            assert!(speeds[speeds.len() - 30..].iter().all(|v| *v <= 50.0));
+        }
+    }
+
+    #[test]
+    fn fast_entry_does_not_reverse_a_short_trip() {
+        let mut pos = Position::ORIGIN;
+        let total = warp_total_ticks(3000.0, WARP_SPEED);
+        for elapsed in 1..=total {
+            let (next, _, _) = compute_warp_step(
+                pos,
+                [0.0; 3],
+                [3000.0, 0.0, 0.0],
+                Velocity::new(2000.0, 0.0, 0.0),
+                [0.0; 3],
+                total,
+                elapsed,
+                WARP_SPEED,
+            );
+            assert!(next.x >= pos.x && next.x <= 3000.0);
+            pos = next;
+        }
+    }
 }
 
 /// Component of velocity along the vector from `pos` toward `target`.
@@ -605,6 +803,7 @@ mod compute_warp_step_tests {
             [0.0, 0.0, 0.0],
             10,
             11,
+            WARP_SPEED,
         );
         assert_eq!(new_pos, pos);
         assert_eq!(new_vel, Velocity::ZERO);
@@ -621,6 +820,7 @@ mod compute_warp_step_tests {
             [0.0, 0.0, 0.0],
             10,
             10,
+            WARP_SPEED,
         );
         assert!(!arrived, "the final move tick has not settled yet");
         assert!(
@@ -630,11 +830,7 @@ mod compute_warp_step_tests {
     }
 
     #[test]
-    fn first_tick_velocity_is_close_to_the_start_velocity_rate() {
-        // Near t=0 the Hermite tangent should closely track start_vel
-        // (per-tick), not snap toward a different rate (the whole point of
-        // the Hermite blend over plain smoothstep -- see warp_step's doc
-        // comment).
+    fn first_tick_carries_entry_velocity_into_acceleration() {
         let start_vel = Velocity {
             dx: 100.0,
             dy: 0.0,
@@ -648,13 +844,19 @@ mod compute_warp_step_tests {
             [0.0, 0.0, 0.0],
             1000,
             1,
+            WARP_SPEED,
         );
-        assert!(
-            (vel_t1.dx - start_vel.dx).abs() < start_vel.dx * 0.05,
-            "first-tick velocity {:?} should be within 5% of the start velocity {:?}",
-            vel_t1,
-            start_vel
+        let (_, from_rest, _) = compute_warp_step(
+            Position::ORIGIN,
+            [0.0; 3],
+            [1_000_000.0, 0.0, 0.0],
+            Velocity::ZERO,
+            [0.0; 3],
+            1000,
+            1,
+            WARP_SPEED,
         );
+        assert!((vel_t1.dx - from_rest.dx - start_vel.dx).abs() < start_vel.dx * 0.05);
         assert_eq!(vel_t1.dy, 0.0);
         assert_eq!(vel_t1.dz, 0.0);
     }
@@ -681,6 +883,42 @@ mod tests {
         let player_id = node.next_player_id();
         let ship_id = node.spawn_player_ship_at_pub(player_id, pos);
         (player_id, ship_id)
+    }
+
+    #[test]
+    fn magpie_uses_its_catalog_warp_speed() {
+        let mut node = mem_node();
+        let (player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        assert!(node.apply_warp_command_owned(
+            player,
+            ship,
+            dawn_core::WarpCommand {
+                target: WarpTarget::Gate(dawn_core::JumpGateId(0)),
+            }
+        ));
+        for _ in 0..500 {
+            node.tick();
+            if node.warp_phase(ship) == Some(WarpPhase::Warping) {
+                break;
+            }
+        }
+        let entity = node.simulation.ships.index[&ship];
+        let plan = node
+            .simulation
+            .world
+            .get::<WarpComp>(entity)
+            .expect("warp engaged");
+        let start = plan.warp_start_abs.as_array();
+        let end = plan.warp_arrival_abs.as_array();
+        let distance = (0..3)
+            .map(|i| (end[i] - start[i]).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        assert_eq!(
+            plan.warp_total,
+            warp_total_ticks(distance, 5.0 * AU_METRES / TICKS_PER_SECOND)
+        );
+        assert!(plan.warp_total < warp_total_ticks(distance, WARP_SPEED));
     }
 
     #[test]
@@ -799,8 +1037,11 @@ mod tests {
             "an aligning ship accelerates sublight, far short of warp speed"
         );
 
-        for _ in 0..250 {
+        for _ in 0..5_000 {
             node.tick();
+            if node.warp_phase(ship).is_none() {
+                break;
+            }
         }
         assert_eq!(
             node.warp_phase(ship),
@@ -863,7 +1104,7 @@ mod tests {
 
         let entity = *node.simulation.ships.index.get(&ship).unwrap();
         let mut saw_decel_step = false;
-        for _ in 0..250 {
+        for _ in 0..5_000 {
             node.tick();
             let warping = node.warp_phase(ship) == Some(WarpPhase::Warping);
             let v = node.simulation.world.get::<VelocityComp>(entity).unwrap().0;
@@ -990,8 +1231,11 @@ mod tests {
         let (_player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
         assert!(node.apply_warp_command(ship, WarpTarget::Gate(dawn_core::JumpGateId(0)), true));
 
-        for _ in 0..250 {
+        for _ in 0..5_000 {
             node.tick();
+            if node.warp_phase(ship).is_none() {
+                break;
+            }
         }
         assert_eq!(node.warp_phase(ship), None, "warp must complete");
         assert!(
@@ -1012,8 +1256,11 @@ mod tests {
         let (_player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
         assert!(node.apply_warp_command(ship, WarpTarget::Gate(dawn_core::JumpGateId(0)), false));
 
-        for _ in 0..250 {
+        for _ in 0..5_000 {
             node.tick();
+            if node.warp_phase(ship).is_none() {
+                break;
+            }
         }
         assert_eq!(node.warp_phase(ship), None);
         assert!(node.drain_pending_auto_jumps().is_empty());
@@ -1021,10 +1268,7 @@ mod tests {
 
     #[test]
     fn parametric_warp_lasts_a_floored_duration_not_an_instant_teleport() {
-        // ADR-0022 amendment: warp walks the start→arrival segment over
-        // max(WARP_MIN_TICKS, ceil(dist / WARP_SPEED)) ticks, so even a warp
-        // whose distance would finish in a couple of ticks still spends a
-        // floored number of ticks in the committed Warping phase.
+        // Even trips with no cruise retain the minimum ramp duration.
         let mut node = mem_node();
         let (player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
         node.apply_warp_command_owned(

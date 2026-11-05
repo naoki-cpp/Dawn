@@ -296,8 +296,13 @@ func _update_position_markers(root: Node3D, meta_key: String, player_ship_id: in
 		if marker == null or not marker.has_meta(meta_key):
 			continue
 		var marker_server := marker.get_meta(meta_key) as PackedFloat64Array
-		var marker_godot: Vector3 = _world.to_godot_components(
-			marker_server[0], marker_server[1], marker_server[2])
+		# Warp bounds the ship mesh, not the observer's travel through the world.
+		# Subtract in f64 before narrowing so destinations approach before reset.
+		var offset := Vector3(
+			marker_server[0] - player_server[0],
+			marker_server[1] - player_server[1],
+			player_server[2] - marker_server[2]) * _render_scale()
+		var marker_godot: Vector3 = player_godot + offset
 		if marker.get_meta("preserve_physical_position", false):
 			var is_physically_visible := _marker_fits_camera(
 				marker, player_server, marker_server)

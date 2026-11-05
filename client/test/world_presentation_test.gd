@@ -301,6 +301,29 @@ func test_clamped_marker_position_leaves_nearby_marker_unchanged() -> void:
 	assert_vector(result).is_equal(marker)
 
 
+func test_warp_destination_approaches_before_the_arrival_snap() -> void:
+	var presentation := WorldPresentationScript.new()
+	presentation._world = FakeWorld.new()
+	var root: Node3D = auto_free(Node3D.new())
+	add_child(root)
+	var marker := Node3D.new()
+	root.add_child(marker)
+	marker.set_meta("nav_pos", _position(1.0e12, 0.0, 0.0))
+	var ship: FakeShip = auto_free(FakeShip.new())
+	add_child(ship)
+	ship.position = Vector3(100.0, 0.0, 0.0)
+	# The mesh's bounded track is far behind the observer during warp.
+	ship.server_position_value = _position(400.0, 0.0, 0.0)
+	ship.world_presentation_position_value = _position(1.0e12 - 40_000.0, 0.0, 0.0)
+	presentation._update_position_markers(root, "nav_pos", 7, {7: ship})
+	assert_vector(marker.global_position - ship.global_position).is_equal_approx(
+		Vector3(10_000.0, 0.0, 0.0), Vector3.ONE * 0.01)
+	ship.world_presentation_position_value = _position(1.0e12 - 4_000.0, 0.0, 0.0)
+	presentation._update_position_markers(root, "nav_pos", 7, {7: ship})
+	assert_vector(marker.global_position - ship.global_position).is_equal_approx(
+		Vector3(1_000.0, 0.0, 0.0), Vector3.ONE * 0.01)
+
+
 func test_clamped_marker_position_pulls_far_marker_back_to_clamp_radius() -> void:
 	var player := Vector3.ZERO
 	var marker := Vector3(1000.0, 0.0, 0.0)
