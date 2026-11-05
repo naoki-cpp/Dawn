@@ -498,6 +498,35 @@ func test_physical_body_marker_keeps_its_true_render_position() -> void:
 		.is_equal_approx(Vector3(40_000.0, 0.0, 0.0), Vector3(0.0001, 0.0001, 0.0001))
 
 
+func test_distant_planet_remains_visible_at_its_true_angular_size() -> void:
+	var presentation := WorldPresentationScript.new()
+	var world := FakeWorld.new()
+	world.render_scale_value = 0.1
+	presentation._world = world
+	var camera: Camera3D = auto_free(Camera3D.new())
+	add_child(camera)
+	camera.far = 100_000.0
+	presentation._camera = camera
+	var bodies_root: Node3D = auto_free(Node3D.new())
+	add_child(bodies_root)
+	presentation._bodies_root = bodies_root
+	presentation.respawn_navigation_markers([], [
+		_body(2, "Planet", "Forge", _position(0.0, 0.0, 1.0e9), 6_400_000.0, 0.0)
+	], [], func() -> void: pass)
+	var ship: FakeShip = auto_free(FakeShip.new())
+	add_child(ship)
+	var marker: Node3D = bodies_root.get_child(0)
+	var mesh: MeshInstance3D = marker.get_meta("physical_body_mesh")
+	for distance: float in [1.0e9, 1.0e8, 1.0e7]:
+		ship.world_presentation_position_value = _position(0.0, 0.0, 1.0e9 - distance)
+		presentation._update_position_markers(bodies_root, "nav_pos", 7, {7: ship})
+		assert_bool(mesh.visible).is_true()
+		var radius: float = (mesh.mesh as SphereMesh).radius * mesh.scale.x
+		var rendered_distance := marker.global_position.distance_to(camera.global_position)
+		assert_float(radius / rendered_distance).is_equal_approx(6_400_000.0 / distance, 0.00001)
+		assert_float(rendered_distance + radius).is_less(camera.far)
+
+
 func test_origin_rebase_moves_ship_and_motion_track_together() -> void:
 	var presentation := WorldPresentationScript.new()
 	var world := FakeWorld.new()

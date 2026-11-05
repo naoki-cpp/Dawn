@@ -76,6 +76,10 @@ command-in / frame-out の境界で束ねる。公開する更新経路は `Moti
 - ゲート・惑星・Stationのマーカーも同じ観測位置を使い、f64の相対差分から船体周囲へ配置する。
   描画用の船体位置だけを基準にすると、到着先が遠方clampに張り付き、PositionSnapで突然現れる。
   速度上限付きの船体経路は、そのワープで観測した最高速度との比で減速も反映する。
+- ワープ中も所有者へ`MotionCorrection`を送り、上限前の観測位置を権威位置へ補正する。
+  船体の上限付きrender経路はその補正で移動させず、到着までの積分誤差を世界表現だけに残さない。
+- 遠方惑星はfar planeに入るまで非表示にせず、カメラからの距離と描画半径を同率に縮小して
+  見かけの角半径を維持する。近距離では実寸描画へ戻る。権威座標・半径・到着判定は変更しない。
 - `dawn-client-gdext::ShipMotion` は `PackedFloat64Array` の絶対座標をRustへ渡し、
   `Vector3` への縮小はrender frameの最終境界だけで行う。
 - `WorldPresentation` は全船へ同じabsolute originを通知する。rebase後の船ノードを

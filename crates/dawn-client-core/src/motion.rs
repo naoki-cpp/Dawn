@@ -369,6 +369,12 @@ impl MotionPredictor {
             return false;
         }
         let rendered_position = self.has_rendered.then(|| self.predicted_position());
+        if self.state == MotionState::WarpPresentation {
+            // Correct the uncapped world observer, not the bounded ship mesh.
+            // Otherwise integration error survives until the arrival reset.
+            self.warp_world_position = Some(position);
+            self.warp_peak_server_speed = self.warp_peak_server_speed.max(magnitude(velocity));
+        }
         self.position = position;
         self.velocity = velocity;
         self.tick = tick;

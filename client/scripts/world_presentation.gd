@@ -306,9 +306,22 @@ func _update_position_markers(root: Node3D, meta_key: String, player_ship_id: in
 		if marker.get_meta("preserve_physical_position", false):
 			var is_physically_visible := _marker_fits_camera(
 				marker, player_server, marker_server)
-			marker.global_position = marker_godot if is_physically_visible else clamped_marker_position(
-				player_godot, marker_godot)
-			_update_body_lod(marker, is_physically_visible)
+			var body_scale := 1.0
+			if not is_physically_visible and marker.has_meta("physical_body_mesh"):
+				# Project distant spheres into the render range without changing
+				# their angular size. Hiding them until they fit causes a large pop.
+				var eye := _camera.global_position if _camera != null else player_godot
+				var relative := marker_godot - eye
+				var extent := float(marker.get_meta("physical_extent", 0.0)) * _render_scale()
+				var limit := NAV_MARKER_CLAMP_DISTANCE
+				if _camera != null:
+					limit = minf(limit, _camera.far * 0.5)
+				body_scale = minf(1.0, limit / maxf(relative.length() + extent, 0.001))
+				marker.global_position = eye + relative * body_scale
+			else:
+				marker.global_position = marker_godot if is_physically_visible else clamped_marker_position(
+					player_godot, marker_godot)
+			_update_body_lod(marker, body_scale)
 		else:
 			marker.global_position = clamped_marker_position(player_godot, marker_godot)
 
@@ -334,18 +347,19 @@ func _marker_fits_camera(
 	return (distance_server + extent_server) * _render_scale() <= _camera.far
 
 
-func _update_body_lod(marker: Node3D, is_physically_visible: bool) -> void:
+func _update_body_lod(marker: Node3D, body_scale: float) -> void:
 	if not marker.has_meta("physical_body_mesh") and not marker.has_meta("body_label"):
 		return
 	var body_mesh: MeshInstance3D = marker.get_meta("physical_body_mesh") as MeshInstance3D
 	if body_mesh != null:
-		body_mesh.visible = is_physically_visible
+		body_mesh.scale = Vector3.ONE * body_scale
+		body_mesh.visible = true
 	var body_label: Label3D = marker.get_meta("body_label") as Label3D
 	if body_label != null:
 		var label_offset := DISTANT_BODY_LABEL_OFFSET
-		if is_physically_visible and body_mesh != null:
+		if body_mesh != null:
 			var sphere: SphereMesh = body_mesh.mesh as SphereMesh
-			label_offset = sphere.radius * 1.4
+			label_offset = sphere.radius * body_scale * 1.4
 		body_label.position = Vector3(0.0, label_offset, 0.0)
 
 
