@@ -72,7 +72,8 @@ in-memory journal still need production resource management.
 - [x] Fail-closed port/invite configuration and redacted token type.
 - [x] HTTP rejection before Hello, with real socket tests.
 - [x] Native client endpoint/token configuration and redirect pinning tests.
-- [x] Free-plan Blueprint with no persistent services and manual deployment.
+- [x] Free-plan Blueprint with no persistent services; branch auto-deploy disabled.
+- [x] Published playtest prereleases request a Render deploy of the exact tagged commit via a secret deploy hook; draft creation does not deploy.
 - [x] Deployment and credential instructions document data loss and limitations.
 - [x] Remote native-client connection verified for the initial single-Sector deployment.
 - [x] Real-binary test covers cloud port, invitation rejection, gate travel and resume.
