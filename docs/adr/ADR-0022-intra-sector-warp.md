@@ -106,6 +106,23 @@ movement_nav §238-241「align time は戦術軸」）。固定タイマーで�
 > の `warp_step` / `warp_arrival_point` / `warp_total_ticks` / `smoothstep`。`WarpComp` に
 > `warp_start`/`warp_total`/`warp_elapsed`（非永続）を追加。移動感の最終調整は要プレイテスト。
 
+> **加減速曲線の更新（2026-11-05）:** Warping区間は単一の位置Hermite補間から、
+> 指数速度ランプを解析的に積分する加速・巡航・減速へ変更する。最高巡航速度は
+> `data/ship_types.toml`の`warp_speed_au_per_sec`を権威とし、Magpieは5 AU/s、他船は0.75 AU/s。
+> EVE Universityの[Warp](https://wiki.eveuniversity.org/Warp)を参考に、
+> 加速係数はAU/sの数値、減速係数はその1/3（上限2/s）とする。固定3秒・5秒へ時間を圧縮せず、
+> 低速接近まで数十秒かけて減速する。短距離では最高到達速度を下げる。
+> 総Tick数は切り上げ、距離に合わせて巡航速度を解き、進入時の実速度を引き継ぐ。
+> EVEの非ゼロ速度でのwarp解除とは異なり、既存の到着時停止・PositionSnapは維持する。
+> 100 m/sを減速の末尾時間を決める基準とし、指数速度から終端の微小な速度床を差し引いて
+> ゼロへ連続的に到達させる。通常航行への非ゼロ速度引き継ぎは本変更には含まない。
+> 減速の残距離積分を到着点から評価し、終点付近の桁落ちを抑える。
+> 極短距離・高速進入では進入速度が距離を使い切らないよう加速区間を短縮する。
+> f64の出発点・到着点・進入速度・総Tick数・経過Tickから各位置を再評価し、
+> 最終移動Tickで到着点へ一致、次Tickで停止・完了する。既存WarpCompで表現し、
+> 永続化項目・イベント・Tick順序・整列条件は追加変更しない。
+> 厳密な状態復旧はADR-0049のRecoveryDelta/checkpointによる。
+
 | フェーズ | Move/Stop | Tackle（ADR-0023） |
 |---|---|---|
 | Align（`ALIGN_TICKS`） | 中断可 → WarpComp 除去 | 有効（warp 突入を阻止 = コミット確定） |
@@ -253,18 +270,18 @@ Approach（ADR-0015）と同じ UX 系統。プレイヤーがクリックで選
 
 - [x] `WarpCommand` を dawn-core に追加（+ test）
 - [x] `WarpComp` / `WarpPhase` を dawn-ecs に追加
-- [x] `process_warp()` を実装（align countdown / warping 着地・到着停止）（+ tests）。
-      gate 位置参照のため `systems/warp.rs` ではなく node.rs に配置（process_approach に倣う）
+- [x] `node/warp.rs`に`process_warp()`を実装（速度方向による整列 / 指数加減速 / 到着停止、tests）。
+- [x] 船種カタログの`warp_speed_au_per_sec`を参照する（Magpie 5 AU/s、船種別計画のtests）。
 - [x] Movement System が warping 船をスキップ（+ test）
-- [x] `can_propose_warp`（距離・セクター・InTransit・重複検証）を node.rs に追加（+ test）
+- [x] `node/navigation.rs`の`can_propose_warp`で距離・セクター・InTransit・重複を検証する（tests）。
 - [x] `apply_warp_command_owned`（所有権チェック付き）を追加（+ test）
 - [x] tick の Step 2.6 として process_warp を配線
 - [x] `apply_move_command` / `apply_stop_command` で align フェーズの WarpComp を解除（warping は不可）（+ test）
 - [x] warping 中の Move/Stop/二重 warp 拒否（+ test）
-- [x] `ClientCommand::Warp` を dawn-actor に追加 + ws_server パース（+ test）
-- [x] run_cluster_server / run_phase4_server でディスパッチ（共有 `dispatch_client_command`）
+- [x] `ClientRequest::Warp`を共有protocol経由で受信し、`SimulationNode::apply_client_request`で処理する。
+- [x] `dawn-server`の単一/cluster実行モードから共通のSector command boundaryへ接続する。
 - [x] クライアント: ゲート選択 + W キー（main.gd / connection.gd）
-- [x] CLAUDE.md §1/§6 の更新（人間承認のうえ）+ tick-model / roadmap / playtest-guide / glossary
+- [x] 共通ガイド`AI_DEVELOPMENT_GUIDE.md`とtick-model / roadmap / playtest-guide / glossaryを同期する。
 
 ---
 

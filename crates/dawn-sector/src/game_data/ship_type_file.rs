@@ -30,6 +30,7 @@ struct ShipTypesFile {
 struct ShipTypeEntry {
     id: u32,
     name: String,
+    warp_speed_au_per_sec: f64,
     class: ShipClass,
     slot_layout: SlotLayoutEntry,
     base_stats: BaseStatsEntry,
@@ -66,6 +67,7 @@ impl From<ShipTypeEntry> for ShipTypeDefinition {
         Self {
             id: ShipTypeId(entry.id),
             name: entry.name,
+            warp_speed_au_per_sec: entry.warp_speed_au_per_sec,
             class: entry.class,
             slot_layout: SlotLayout {
                 high: entry.slot_layout.high,
@@ -105,6 +107,13 @@ pub(super) fn validate_ship_types(
 
     let mut ids = HashSet::new();
     for ship_type in ship_types {
+        validate_positive_f64(
+            "ship-type",
+            path,
+            ship_type.id.0,
+            "warp_speed_au_per_sec",
+            ship_type.warp_speed_au_per_sec,
+        )?;
         if ship_type.id.0 == 0 {
             return validation_error("ship-type", path, "ship type id 0 is reserved");
         }

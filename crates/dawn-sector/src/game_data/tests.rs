@@ -20,6 +20,7 @@ const VALID_SHIP_TYPE: &str = r#"
 [[ship_types]]
 id = 1
 name = "Test Frigate"
+warp_speed_au_per_sec = 0.75
 class = "Frigate"
 buildable = false
 
@@ -95,6 +96,19 @@ fn negative_ship_mass_is_rejected() {
     let file = write_temp(&source);
     let error = load_ship_types_file(file.path()).expect_err("invalid mass must fail");
     assert!(error.to_string().contains("mass value -1"));
+}
+
+#[test]
+fn invalid_warp_speed_is_rejected() {
+    for value in ["0.0", "-1.0", "nan", "inf"] {
+        let source = VALID_SHIP_TYPE.replace(
+            "warp_speed_au_per_sec = 0.75",
+            &format!("warp_speed_au_per_sec = {value}"),
+        );
+        let file = write_temp(&source);
+        let error = load_ship_types_file(file.path()).expect_err("invalid warp speed");
+        assert!(error.to_string().contains("warp_speed_au_per_sec"));
+    }
 }
 
 #[test]

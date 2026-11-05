@@ -82,7 +82,8 @@ Displacement vector per Tick, in distance-units / Tick.
 | `dy` | `f64` | displacement along Y |
 | `dz` | `f64` | displacement along Z |
 
-`Velocity::ZERO` represents zero speed. A Ship at zero velocity does not emit `VelocityChanged`.
+`Velocity::ZERO` represents zero speed. A change to zero can emit
+`VelocityChanged`; a ship that remains at zero emits no repeated change.
 
 ### SectorBounds
 
@@ -183,6 +184,12 @@ base_stats  : ShipBaseStats            velocity      : Velocity
 - Missing or invalid required game data is a fatal startup error; no Rust fallback exists
 - Definitions are immutable; balance changes mean editing TOML + restarting the server (no rebuild)
 - `ShipTypeId` is defined in `dawn-core` and included in the `ShipSpawned` event
+- `warp_speed_au_per_sec: f64` is the positive, finite hull warp speed in AU/s
+  (Magpie: 5). Warp resolves it through `ShipTypeId`, not a Magpie-specific
+  branch or the fitted sub-warp `max_speed`. The 0.75 AU/s fallback is only for
+  unregistered simulation hulls. This speed also sets the exponential ramp
+  rates; deceleration uses one third of the numerical AU/s rate, capped at 2/s
+  (ADR-0022).
 
 ### Coordinate policy (ADR-0044, accepted)
 

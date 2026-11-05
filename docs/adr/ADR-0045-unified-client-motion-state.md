@@ -73,6 +73,9 @@ command-in / frame-out の境界で束ねる。公開する更新経路は `Moti
 - warp中の船体とfloating originは速度上限付きのrender経路を維持する一方、太陽など
   方位だけを描く世界表現は`ShipMotion::world_presentation_position`から速度上限前の連続位置を
   読む。これにより船体をfar plane外へ飛ばさず、天体方位は航路に追従する。
+- ゲート・惑星・Stationのマーカーも同じ観測位置を使い、f64の相対差分から船体周囲へ配置する。
+  描画用の船体位置だけを基準にすると、到着先が遠方clampに張り付き、PositionSnapで突然現れる。
+  速度上限付きの船体経路は、そのワープで観測した最高速度との比で減速も反映する。
 - `dawn-client-gdext::ShipMotion` は `PackedFloat64Array` の絶対座標をRustへ渡し、
   `Vector3` への縮小はrender frameの最終境界だけで行う。
 - `WorldPresentation` は全船へ同じabsolute originを通知する。rebase後の船ノードを

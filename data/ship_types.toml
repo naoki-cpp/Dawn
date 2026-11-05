@@ -6,6 +6,7 @@
 #
 # class: "Frigate" | "Cruiser" | "Battleship"
 # buildable: whether players may build this packaged hull
+# warp_speed_au_per_sec: warp cruise limit and exponential ramp-rate authority
 # slot_layout: { high, mid, low, rig }
 # base_stats:
 #   max_speed             — base max speed without modules (units/tick)
@@ -31,6 +32,7 @@
 [[ship_types]]
 id        = 1
 name      = "NPC Frigate"
+warp_speed_au_per_sec = 0.75
 class     = "Frigate"
 buildable = false
 
@@ -58,6 +60,7 @@ sig_radius            = 40.0
 [[ship_types]]
 id        = 3
 name      = "NPC Destroyer"
+warp_speed_au_per_sec = 0.75
 class     = "Frigate"
 buildable = false
 
@@ -85,6 +88,7 @@ sig_radius            = 60.0
 [[ship_types]]
 id        = 4
 name      = "NPC Cruiser"
+warp_speed_au_per_sec = 0.75
 class     = "Cruiser"
 buildable = false
 
@@ -112,6 +116,7 @@ sig_radius            = 125.0
 [[ship_types]]
 id        = 7
 name      = "Magpie"
+warp_speed_au_per_sec = 5.0
 class     = "Frigate"
 buildable = true
 
@@ -140,6 +145,7 @@ sig_radius            = 35.0
 [[ship_types]]
 id        = 5
 name      = "Player Destroyer"
+warp_speed_au_per_sec = 0.75
 class     = "Frigate"
 buildable = false
 
@@ -167,6 +173,7 @@ sig_radius            = 60.0
 [[ship_types]]
 id        = 6
 name      = "Player Cruiser"
+warp_speed_au_per_sec = 0.75
 class     = "Cruiser"
 buildable = false
 
