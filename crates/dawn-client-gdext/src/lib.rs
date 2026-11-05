@@ -5,6 +5,7 @@
 
 use godot::prelude::*;
 
+mod celestial_projection_gd;
 mod client_action_gd;
 mod client_command_gd;
 mod client_rules_gd;
@@ -34,6 +35,9 @@ mod client_outcome {
     pub(crate) use crate::server_message_validation::validate_player_loadout_godot_ranges;
 }
 
+pub use celestial_projection_gd::{
+    CelestialMarkerProjection, CelestialProjection, CelestialSunProjection,
+};
 pub use client_action_gd::{ClientAction, ClientInteraction};
 pub use client_command_gd::{ClientCommand, ClientCommandResult};
 pub use client_rules_gd::ClientRules;

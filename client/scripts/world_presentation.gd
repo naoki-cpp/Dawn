@@ -11,7 +11,6 @@ extends RefCounted
 const NavigationMarkerRendererScript = preload("res://scripts/navigation_marker_renderer.gd")
 const StarfieldScript = preload("res://scripts/starfield.gd")
 
-const NAV_MARKER_CLAMP_DISTANCE : float = 30_000.0
 const DISTANT_BODY_LABEL_OFFSET : float = 800.0
 const WARP_TUNNEL_THRESHOLD : float = 2_000.0
 const WARP_TUNNEL_FADE_IN_RATE : float = 3.0
@@ -19,8 +18,6 @@ const WARP_TUNNEL_FADE_OUT_RATE : float = 0.5
 const WARP_TUNNEL_MAX_VISUAL_DELTA : float = 0.1
 const WARP_TUNNEL_FOV_BOOST : float = 7.0
 const SUN_MIN_RENDER_ANGULAR_RADIUS : float = 0.0001
-const SUN_DIRECTION_EPSILON : float = 1.0
-const SUN_FAR_DIRECTION : Vector3 = Vector3(0.62, 0.31, 0.72)
 ## Resolution of the baked background panorama (ADR-0055). The nebula is
 ## low-frequency, so this is far above what it can resolve; the star layer is
 ## separate geometry and is unaffected by it.
@@ -194,18 +191,6 @@ func toggle_tactical_overlay() -> void:
 		_tactical_overlay.call("toggle_visible")
 
 
-static func clamped_marker_position(
-	player_godot: Vector3,
-	marker_godot: Vector3,
-	clamp_distance: float = NAV_MARKER_CLAMP_DISTANCE
-) -> Vector3:
-	var delta: Vector3 = marker_godot - player_godot
-	var dist: float = delta.length()
-	if dist <= clamp_distance or dist <= 0.0:
-		return marker_godot
-	return player_godot + delta / dist * clamp_distance
-
-
 static func next_warp_tunnel_amount(
 	current: float,
 	speed_godot: float,
@@ -219,49 +204,6 @@ static func next_warp_tunnel_amount(
 		return lerpf(current, target, clampf(delta * fade_in_rate, 0.0, 1.0))
 	var visual_delta := clampf(delta, 0.0, WARP_TUNNEL_MAX_VISUAL_DELTA)
 	return move_toward(current, target, visual_delta * fade_out_rate)
-
-
-static func sun_state(
-	bodies: Array,
-	player_server: PackedFloat64Array,
-	dir_to_godot: Callable
-) -> Dictionary:
-	var star: CelestialBodyRecord = _find_star(bodies)
-	if star == null:
-		return {"active": false}
-	var star_pos: PackedFloat64Array = star.position
-	var diff_x: float = star_pos[0] - player_server[0]
-	var diff_y: float = star_pos[1] - player_server[1]
-	var diff_z: float = star_pos[2] - player_server[2]
-	var distance: float = sqrt(diff_x * diff_x + diff_y * diff_y + diff_z * diff_z)
-	if distance <= maxf(star.radius, SUN_DIRECTION_EPSILON):
-		## A camera inside a photosphere has no meaningful external solar disc.
-		## Fresh production spawns are station-derived, so this is a defensive
-		## state for incomplete fixtures or invalid reconnect positions.
-		return {"active": false, "invalid_position": true}
-	var direction := SUN_FAR_DIRECTION.normalized()
-	if distance > SUN_DIRECTION_EPSILON:
-		direction = Vector3(diff_x, diff_y, diff_z)
-	var godot_dir: Vector3 = (dir_to_godot.call(direction) as Vector3).normalized()
-	var spec: float = star.spectral_type
-	var sun_col: Color = NavigationMarkerRendererScript.spectral_color(spec)
-	return {
-		"active": true,
-		"direction": godot_dir,
-		"color": Vector3(sun_col.r, sun_col.g, sun_col.b),
-		"angular_radius": sun_angular_radius(star.radius, distance),
-	}
-
-
-static func sun_angular_radius(star_radius: float, distance: float) -> float:
-	var safe_radius: float = maxf(star_radius, 0.0)
-	if safe_radius <= 0.0:
-		return 0.0
-	if distance <= safe_radius:
-		return 0.0
-	var safe_distance: float = distance
-	var radius_ratio: float = clampf(safe_radius / safe_distance, 0.0, 1.0)
-	return asin(radius_ratio)
 
 
 ## Direction from the star toward the illuminated scene. `sun_direction` is
@@ -296,34 +238,14 @@ func _update_position_markers(root: Node3D, meta_key: String, player_ship_id: in
 		if marker == null or not marker.has_meta(meta_key):
 			continue
 		var marker_server := marker.get_meta(meta_key) as PackedFloat64Array
-		# Warp bounds the ship mesh, not the observer's travel through the world.
-		# Subtract in f64 before narrowing so destinations approach before reset.
-		var offset := Vector3(
-			marker_server[0] - player_server[0],
-			marker_server[1] - player_server[1],
-			player_server[2] - marker_server[2]) * _render_scale()
-		var marker_godot: Vector3 = player_godot + offset
-		if marker.get_meta("preserve_physical_position", false):
-			var is_physically_visible := _marker_fits_camera(
-				marker, player_server, marker_server)
-			var body_scale := 1.0
-			if not is_physically_visible and marker.has_meta("physical_body_mesh"):
-				# Project distant spheres into the render range without changing
-				# their angular size. Hiding them until they fit causes a large pop.
-				var eye := _camera.global_position if _camera != null else player_godot
-				var relative := marker_godot - eye
-				var extent := float(marker.get_meta("physical_extent", 0.0)) * _render_scale()
-				var limit := NAV_MARKER_CLAMP_DISTANCE
-				if _camera != null:
-					limit = minf(limit, _camera.far * 0.5)
-				body_scale = minf(1.0, limit / maxf(relative.length() + extent, 0.001))
-				marker.global_position = eye + relative * body_scale
-			else:
-				marker.global_position = marker_godot if is_physically_visible else clamped_marker_position(
-					player_godot, marker_godot)
-			_update_body_lod(marker, body_scale)
-		else:
-			marker.global_position = clamped_marker_position(player_godot, marker_godot)
+		var projected := CelestialProjection.marker(
+			player_server, marker_server, player_godot, _camera, _render_scale(),
+			bool(marker.get_meta("preserve_physical_position", false)),
+			marker.has_meta("physical_body_mesh"), float(marker.get_meta("physical_extent", 0.0)))
+		if projected == null:
+			continue
+		marker.global_position = projected.position
+		_update_body_lod(marker, projected.body_scale)
 
 
 func _ship_server_position(ship: Node3D) -> PackedFloat64Array:
@@ -332,19 +254,6 @@ func _ship_server_position(ship: Node3D) -> PackedFloat64Array:
 	if ship.has_method("server_position"):
 		return ship.call("server_position") as PackedFloat64Array
 	return _world.to_server_components(ship.global_position)
-
-
-func _marker_fits_camera(
-	marker: Node3D,
-	player_server: PackedFloat64Array,
-	marker_server: PackedFloat64Array
-) -> bool:
-	if _camera == null:
-		return true
-	var distance_server: float = _world.call(
-		"distance_components", player_server, marker_server) as float
-	var extent_server: float = marker.get_meta("physical_extent", 0.0) as float
-	return (distance_server + extent_server) * _render_scale() <= _camera.far
 
 
 func _update_body_lod(marker: Node3D, body_scale: float) -> void:
@@ -398,30 +307,27 @@ func _update_sun_direction(player_ship_id: int, ships: Dictionary, bodies: Array
 			_sun_flare.enabled = false
 		return
 	var ship_node: Node3D = ships[player_ship_id] as Node3D
-	var player_server: PackedFloat64Array
-	if ship_node.has_method("world_presentation_position"):
-		player_server = ship_node.call("world_presentation_position") as PackedFloat64Array
-	elif ship_node.has_method("server_position"):
-		player_server = ship_node.call("server_position") as PackedFloat64Array
-	else:
-		player_server = _world.to_server_components(ship_node.global_position)
-	var state: Dictionary = sun_state(bodies, player_server, Callable(_world, "dir_to_godot"))
-	if not (state.get("active", false) as bool):
+	var star := _find_star(bodies)
+	var state: CelestialSunProjection = null
+	if star != null:
+		state = CelestialProjection.sun(_ship_server_position(ship_node), star.position, star.radius)
+	if state == null:
 		if _sun_flare != null:
 			_sun_flare.enabled = false
 		_sky_mat.set_shader_parameter("sun_active", 0.0)
 		if _directional_light != null:
 			_directional_light.light_energy = 0.0
 		return
-	var sun_direction := state.get("direction", Vector3.FORWARD) as Vector3
+	var sun_direction := state.direction
 	_sky_mat.set_shader_parameter("sun_direction", sun_direction)
 	_sky_mat.set_shader_parameter("sun_active", 1.0)
-	var sun_color := state.get("color", Vector3.ONE) as Vector3
+	var color := NavigationMarkerRendererScript.spectral_color(star.spectral_type)
+	var sun_color := Vector3(color.r, color.g, color.b)
 	_sky_mat.set_shader_parameter("sun_color", sun_color)
 	_sky_mat.set_shader_parameter(
 		"sun_angular_radius",
-		maxf(state.get("angular_radius", 0.0) as float, SUN_MIN_RENDER_ANGULAR_RADIUS))
-	_update_sun_flare(sun_direction, sun_color, state.get("angular_radius", 0.0) as float)
+		maxf(state.angular_radius, SUN_MIN_RENDER_ANGULAR_RADIUS))
+	_update_sun_flare(sun_direction, sun_color, state.angular_radius)
 	if _directional_light != null:
 		var light_ray := star_light_ray(sun_direction)
 		_directional_light.visible = true

@@ -80,6 +80,11 @@ command-in / frame-out の境界で束ねる。公開する更新経路は `Moti
   船体の上限付きrender経路はその補正で移動させず、到着までの積分誤差を世界表現だけに残さない。
 - 遠方惑星はfar planeに入るまで非表示にせず、カメラからの距離と描画半径を同率に縮小して
   見かけの角半径を維持する。近距離では実寸描画へ戻る。権威座標・半径・到着判定は変更しない。
+- 天体・マーカーの相対座標、遠方投影、太陽の方向・角半径は、状態を持たない
+  `dawn-client-core::CelestialProjection`で計算する。観測位置はShipMotionが決め、
+  投影moduleがWarp状態や浮動原点を別途保持・推定しない。
+  GDExtensionは値変換と型付き結果の公開、GodotはNode3D・mesh・色・shaderへの適用を担当する。
+  Rustの計算interfaceとGodotの実sceneテストを両方残す。新crateやwire変更は導入しない。
 - `dawn-client-gdext::ShipMotion` は `PackedFloat64Array` の絶対座標をRustへ渡し、
   `Vector3` への縮小はrender frameの最終境界だけで行う。
 - `WorldPresentation` は全船へ同じabsolute originを通知する。rebase後の船ノードを

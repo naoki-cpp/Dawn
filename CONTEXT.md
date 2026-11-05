@@ -44,6 +44,9 @@ player stronger.
 - Transit: an ownership transfer between sectors.
 - Warp: intra-sector fast movement represented through velocity changes and
   deterministic integration.
+- Celestial projection: the apparent position, size, and direction of distant
+  celestial bodies and navigation markers from an observer's viewpoint. It does
+  not change their physical locations or gameplay distances.
 - Tackle: combat control that prevents escape actions such as warp or jump.
 - Area-of-Interest (AoI): the policy deciding which ships and events a given
   player's session is owed each frame, based on spatial proximity
