@@ -126,9 +126,8 @@ func test_spawn_gate_markers_builds_one_marker_per_gate_with_position_and_label(
 	assert_vector(marker.position).is_equal_approx(Vector3(1.0, 0.0, -2.0), Vector3(0.0001, 0.0001, 0.0001))
 	assert_float(marker.get_meta("nav_pick_radius_px") as float).is_equal(BracketScript.PICK_RADIUS_PX)
 
-	var label: Label3D = marker.get_child(1) as Label3D
-	assert_str(label.text).is_equal("Gate #5 -> Beta")
-	var bracket: Sprite3D = marker.get_child(2) as Sprite3D
+	assert_str(marker.get_meta("callout_text")).is_equal("Gate #5 -> Beta")
+	var bracket: Sprite3D = marker.get_child(1) as Sprite3D
 	assert_bool(bracket.fixed_size).is_true()
 
 
@@ -164,30 +163,7 @@ func test_spawn_body_markers_skips_stars_and_only_tags_planet_markers() -> void:
 	assert_int(planet_marker.get_meta("body_id") as int).is_equal(2)
 	assert_str(planet_marker.get_meta("body_kind") as String).is_equal("Planet")
 	assert_float(planet_marker.get_meta("nav_pick_radius_px") as float).is_equal(BracketScript.PICK_RADIUS_PX)
-
-
-func test_spawn_body_markers_uses_the_body_name_as_the_label_text() -> void:
-	var bodies_root: Node3D = auto_free(Node3D.new())
-	var bodies: Array = [
-		_body(2, "Planet", "Forge", _position(500.0, 0.0, 0.0), 200.0, 0.0),
-	]
-
-	NavigationMarkerRenderer.spawn_body_markers(bodies_root, bodies, 0.1, _to_godot_components)
-
-	var marker: Node3D = bodies_root.get_child(0) as Node3D
-	var label: Label3D = marker.get_child(1) as Label3D  ## index 0 = mesh, index 1 = label
-	assert_str(label.text).is_equal("Forge")
-
-
-func test_spawn_body_markers_produces_no_markers_when_only_a_star_is_present() -> void:
-	var bodies_root: Node3D = auto_free(Node3D.new())
-	var bodies: Array = [
-		_body(1, "Star", "Helios", _position(0.0, 0.0, 0.0), 1000.0, 0.5),
-	]
-
-	NavigationMarkerRenderer.spawn_body_markers(bodies_root, bodies, 0.1, _to_godot_components)
-
-	assert_int(bodies_root.get_child_count()).is_equal(0)
+	assert_str(planet_marker.get_meta("callout_text")).is_equal("Forge")
 
 
 func test_spawn_body_markers_converts_physical_planet_radius_once() -> void:
@@ -203,10 +179,7 @@ func test_spawn_body_markers_converts_physical_planet_radius_once() -> void:
 		.is_equal_approx(640_000.0, 0.0001)
 
 
-func test_spawn_body_markers_adds_a_fixed_size_selection_reticle_to_each_planet() -> void:
-	## Pairs with ShipPicking.pick_body_at's screen-space picking: a planet
-	## should stay equally easy to click regardless of distance, which needs
-	## a reticle that renders at a constant screen size (fixed_size).
+func test_spawn_body_markers_keeps_only_a_bracket_beside_the_planet_mesh() -> void:
 	var bodies_root: Node3D = auto_free(Node3D.new())
 	var bodies: Array = [
 		_body(2, "Planet", "Forge", _position(500.0, 0.0, 0.0), 200.0, 0.0),
@@ -215,15 +188,20 @@ func test_spawn_body_markers_adds_a_fixed_size_selection_reticle_to_each_planet(
 	NavigationMarkerRenderer.spawn_body_markers(bodies_root, bodies, 0.1, _to_godot_components)
 
 	var marker: Node3D = bodies_root.get_child(0) as Node3D
-	var reticle: Sprite3D = marker.get_child(2) as Sprite3D  ## index 0=mesh, 1=label, 2=reticle
-	assert_object(reticle).is_not_null()
-	assert_bool(reticle.fixed_size).is_true()
-	assert_object(reticle.texture).is_not_null()
+	var bracket: Sprite3D = null
+	var expected: Sprite3D = auto_free(BracketScript.build(Color.WHITE, NavigationMarkerRenderer.BRACKET_PIXEL_SIZE))
+	for child: Node in marker.get_children():
+		if child is Sprite3D:
+			assert_object((child as Sprite3D).texture).is_same(expected.texture)
+			bracket = child as Sprite3D
+	assert_object(bracket).is_not_null()
+	assert_bool(bracket.fixed_size).is_true()
+	assert_object(bracket.texture).is_not_null()
 
 
 # -- spawn_station_markers ----------------------------------------------------------
 
-func test_spawn_station_markers_builds_one_marker_per_station_with_label_and_ring() -> void:
+func test_spawn_station_markers_builds_visual_and_bracket_without_docking_ring() -> void:
 	var bodies_root: Node3D = auto_free(Node3D.new())
 	var stations: Array = [
 		_station(3, "Forge Station", _position(100.0, 0.0, 200.0), 16000.0),
@@ -235,8 +213,15 @@ func test_spawn_station_markers_builds_one_marker_per_station_with_label_and_rin
 	var marker: Node3D = bodies_root.get_child(0) as Node3D
 	assert_int(marker.get_meta("station_id") as int).is_equal(3)
 	assert_vector(marker.position).is_equal_approx(Vector3(10.0, 0.0, -20.0), Vector3(0.0001, 0.0001, 0.0001))
-	var label: Label3D = marker.get_child(2) as Label3D  ## 0=mesh,1=ring,2=label
-	assert_str(label.text).is_equal("Forge Station")
+	assert_str(marker.get_meta("callout_text")).is_equal("Forge Station")
+	var bracket: Sprite3D = null
+	for child: Node in marker.get_children():
+		if child is Sprite3D:
+			bracket = child as Sprite3D
+		if child is MeshInstance3D:
+			assert_bool((child as MeshInstance3D).mesh is TorusMesh).is_false()
+	assert_object(bracket).is_not_null()
+	assert_float(marker.get_meta("physical_extent") as float).is_equal(16000.0)
 
 
 func test_spawn_station_markers_appends_after_existing_body_markers() -> void:

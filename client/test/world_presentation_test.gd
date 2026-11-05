@@ -284,9 +284,9 @@ func test_render_scale_authority_controls_spawned_navigation_geometry() -> void:
 	assert_float(planet_mesh.radius).is_equal_approx(5.0, 0.0001)
 
 	var station_marker: Node3D = bodies_root.get_child(1) as Node3D
-	var station_ring: MeshInstance3D = station_marker.get_child(1) as MeshInstance3D
-	var station_mesh: TorusMesh = station_ring.mesh as TorusMesh
-	assert_float(station_mesh.outer_radius).is_equal_approx(20.0, 0.0001)
+	var station_visual: MeshInstance3D = station_marker.get_child(0) as MeshInstance3D
+	var station_mesh: SphereMesh = station_visual.mesh as SphereMesh
+	assert_float(station_mesh.radius).is_equal_approx(NavigationMarkerRenderer.STATION_VISUAL_RADIUS * 0.25, 0.0001)
 
 
 func test_warp_destination_approaches_before_the_arrival_snap() -> void:

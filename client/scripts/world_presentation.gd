@@ -11,7 +11,6 @@ extends RefCounted
 const NavigationMarkerRendererScript = preload("res://scripts/navigation_marker_renderer.gd")
 const StarfieldScript = preload("res://scripts/starfield.gd")
 
-const DISTANT_BODY_LABEL_OFFSET : float = 800.0
 const WARP_TUNNEL_THRESHOLD : float = 2_000.0
 const WARP_TUNNEL_FADE_IN_RATE : float = 3.0
 const WARP_TUNNEL_FADE_OUT_RATE : float = 0.5
@@ -257,19 +256,12 @@ func _ship_server_position(ship: Node3D) -> PackedFloat64Array:
 
 
 func _update_body_lod(marker: Node3D, body_scale: float) -> void:
-	if not marker.has_meta("physical_body_mesh") and not marker.has_meta("body_label"):
+	if not marker.has_meta("physical_body_mesh"):
 		return
 	var body_mesh: MeshInstance3D = marker.get_meta("physical_body_mesh") as MeshInstance3D
 	if body_mesh != null:
 		body_mesh.scale = Vector3.ONE * body_scale
 		body_mesh.visible = true
-	var body_label: Label3D = marker.get_meta("body_label") as Label3D
-	if body_label != null:
-		var label_offset := DISTANT_BODY_LABEL_OFFSET
-		if body_mesh != null:
-			var sphere: SphereMesh = body_mesh.mesh as SphereMesh
-			label_offset = sphere.radius * body_scale * 1.4
-		body_label.position = Vector3(0.0, label_offset, 0.0)
 
 
 func _update_warp_tunnel_effect(delta: float, player_ship_id: int, ships: Dictionary) -> void:
