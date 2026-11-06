@@ -4,7 +4,7 @@ title   : プロジェクトの再定義 — 「EVE を超えるゲーム」を�
 status  : accepted
 date    : 2026-06-14
 deciders: [human, ai-agent]
-related : AI_DEVELOPMENT_GUIDE.md「Project North Star」（Scope）, docs/architecture/forbidden-changes.md（Forbidden Changes）, docs/reference/eve-reference.md（観測データ §6/§7）, ADR-0014（Raft）, ADR-0012（Turret Tracking）, ADR-0015（Approach）
+related : AI_DEVELOPMENT_GUIDE.md「Project North Star」（Scope）, docs/architecture/forbidden-changes.md（Forbidden Changes）, docs/reference/eve-reference.md（観測データ §6/§7）, ADR-0014（Raft）, ADR-0012（Turret Tracking）, ADR-0015（Approach）, ADR-0057（構造物採掘に関するFBD-009改訂提案）
 ---
 
 # ADR-0016 — プロジェクトの再定義: 「EVE を超えるゲーム」

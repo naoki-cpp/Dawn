@@ -81,6 +81,8 @@ When adding a new ADR, register it here too (the `/new-adr` skill does both).
 | [ADR-0034](ADR-0034-economy-foundations.md) | Economy Foundations — Item一般化 / Packaged Ship / Scrap Metal / Market・DBの境界 | Accepted |
 | [ADR-0037](ADR-0037-docked-ship-ownership.md) | Docked Ship Ownership — owned ship / active ship / docked station context を分離する | Accepted |
 | [ADR-0038](ADR-0038-station-inventory-sqlite.md) | Station Inventory — SQLite-backed lazy projection | Accepted |
+| [ADR-0057](ADR-0057-structure-mining.md) | Structure mining — extraction by destructible player structures | Proposed |
+| [ADR-0058](ADR-0058-production-jobs.md) | Production tiers — instant NPC production and player infrastructure | Proposed |
 
 ### UI / Client Presentation
 

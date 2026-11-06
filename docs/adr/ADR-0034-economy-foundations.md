@@ -4,7 +4,7 @@ title   : Economy Foundations — Item Generalization, Packaged Ships, Scrap Met
 status  : accepted
 date    : 2026-07-02
 deciders: [human, ai-agent]
-related : ADR-0016（FBD-008 撤廃・段階的拡張方針§5）, ADR-0032（InventoryComp / Fit・Unfit の初出、本ADRが一般化する）, ADR-0003（Local-first development）, docs/process/roadmap.md §12（Phase 9）/ §9（継続的システム）, CONTEXT.md
+related : ADR-0016（FBD-008 撤廃・段階的拡張方針§5）, ADR-0032（InventoryComp / Fit・Unfit の初出、本ADRが一般化する）, ADR-0003（Local-first development）, docs/process/roadmap.md §12（Phase 9）/ §9（継続的システム）, CONTEXT.md, ADR-0058（生産Tier・船種別コストの改訂提案）
 ---
 
 # ADR-0034 — Economy Foundations
