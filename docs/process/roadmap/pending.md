@@ -29,6 +29,8 @@ related  : ./README.md, ./deferred.md, ../roadmap.md, ../roadmap-history.md
 | ID | タスク | 状態 |
 |---|---|---|
 | 9C-1 | 構造物エンティティ・所有権モデルのADR | TODO |
+| 9C-0 | 生産Tier・レシピの設計 | [ADR-0058](../../adr/ADR-0058-production-jobs.md) proposed・実装は別作業 |
+| 9C-0b | 破壊可能な構造物による自動採取 | [ADR-0057](../../adr/ADR-0057-structure-mining.md) proposed・FBD-009改訂の承認後に実装 |
 | 9C-2 | `can_use(actor, structure) -> bool` の決定論的アクセス制御 | 9C-1後 |
 | 9C-3 | 構造物のSector所有権とTransitの関係を確定 | TODO |
 | 9C-4 | NPC Stationをプレイヤー建造可能へ拡張 | 9Cの設計後 |
