@@ -1,0 +1,61 @@
+name: Deploy playtest prerelease to Render
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: render-playtest
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.event.release.prerelease && startsWith(github.event.release.tag_name, 'playtest-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Deploy the released commit
+        shell: python
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          import json
+          import os
+          import re
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          with open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8") as source:
+              release = json.load(source)["release"]
+          tag = release["tag_name"]
+          if not re.fullmatch(r"playtest-[0-9][A-Za-z0-9.-]{0,60}", tag):
+              raise SystemExit("Invalid playtest tag.")
+          names = {asset["name"] for asset in release["assets"] if asset["state"] == "uploaded"}
+          if not any(name.endswith("-windows-x86_64.zip") and name + ".sha256" in names for name in names):
+              raise SystemExit("Publish only after the client ZIP and checksum are attached.")
+          sha = os.environ["RELEASE_SHA"]
+          if not re.fullmatch(r"[0-9a-f]{40}", sha):
+              raise SystemExit("Invalid release commit.")
+          hook = urllib.parse.urlsplit(os.environ["RENDER_DEPLOY_HOOK_URL"])
+          query = urllib.parse.parse_qs(hook.query)
+          if (hook.scheme != "https" or hook.netloc != "api.render.com"
+                  or not hook.path.startswith("/deploy/srv-") or not query.get("key")):
+              raise SystemExit("Set the RENDER_DEPLOY_HOOK_URL repository secret from Render Settings.")
+          query["ref"] = [sha]
+          url = urllib.parse.urlunsplit(hook._replace(query=urllib.parse.urlencode(query, doseq=True)))
+          # Never print the hook URL, response body, or an exception containing the secret.
+          try:
+              request = urllib.request.Request(url, method="POST")
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  if response.status != 200:
+                      raise SystemExit("Render did not accept the deploy request.")
+          except (urllib.error.URLError, TimeoutError):
+              raise SystemExit("Render deploy request failed; check the hook and Render dashboard.") from None
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write(f"Requested Render deployment of `{tag}` (`{sha}`).\n\n")
+              summary.write("This confirms request acceptance, not a live server. Check Render Deploys before playtesting.\n")

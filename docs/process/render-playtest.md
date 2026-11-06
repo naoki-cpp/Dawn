@@ -28,6 +28,38 @@ the merged commit. Confirm its start command includes `--serve --cluster`;
 the old single-Sector start command cannot perform gate handoffs. Keep the
 existing invite secret. Redeploying resets the entire playtest world.
 
+## Prerelease deployments
+
+The `Deploy playtest prerelease to Render` workflow deploys the exact tagged
+commit when a `playtest-*` GitHub prerelease is **published**. Draft creation,
+ordinary main pushes, and stable releases do not trigger it. Keep Render's
+branch-based auto-deploy disabled (`autoDeployTrigger: "off"`).
+
+One-time setup: copy the service's **Settings > Deploy Hook** URL into the
+GitHub repository Actions secret `RENDER_DEPLOY_HOOK_URL`. Treat the entire URL
+as a credential; never commit it or include it in screenshots/logs. No Render
+API key or invite token is needed in GitHub Actions.
+
+1. Push a version tag such as `playtest-2026.11.06.1`. The existing Windows
+   packaging workflow builds the client and creates a draft prerelease.
+2. Confirm the ZIP and checksum are attached, then publish that prerelease
+   through GitHub Releases. Publishing manually triggers the deploy workflow;
+   publishing via another workflow's `GITHUB_TOKEN` does not trigger a second
+   workflow. Do not move published version tags.
+3. Check the deploy workflow and Render's Deploys page. The hook's `ref`
+   parameter pins the server to the release commit rather than latest main.
+   The workflow confirms only that Render accepted the request, not that the
+   build went live. Wait for that commit's successful Render deploy before
+   inviting testers. A failed deploy leaves the previous server version active.
+
+Every deployment resets the disposable world and disconnects players. Publish
+one playtest version at a time and wait for its Render deploy to finish before
+publishing another. Roll back manually by deploying a previously verified
+release commit in Render and distributing its matching client.
+
+References: [Render deploy hooks](https://render.com/docs/deploy-hooks),
+[GitHub release events](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#release).
+
 Generate each token locally with a cryptographically secure generator. For
 example, Python's standard library (run once per tester):
 
@@ -96,7 +128,8 @@ exports are unsupported because they cannot set custom handshake headers.
 - `--pop-cap 8` is per Sector, not a shared process-wide player/memory cap.
   Keep the total tester population small; three Sectors share the same free
   instance's CPU/RAM, and their in-memory journals grow for the session.
-- No extra authentication server/Redis/Postgres; no automatic deploys. Review
+- No extra authentication server/Redis/Postgres; only published playtest
+  prereleases trigger deployments, not branch pushes. Review
   Render's current quotas, billing and spend settings before confirming create.
 
 Local tests cover configuration, bearer matching, pre-Hello rejection and
