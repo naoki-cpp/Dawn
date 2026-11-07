@@ -39,23 +39,9 @@ impl ShipMotion {
     }
 
     #[func]
-    fn enable_prediction(&mut self) {
-        self.core.dispatch(MotionCommand::EnablePrediction);
-    }
-
-    #[func]
-    fn enable_dead_reckoning(&mut self) {
-        self.core.dispatch(MotionCommand::EnableDeadReckoning);
-    }
-
-    #[func]
-    fn begin_warp(&mut self, render_speed_cap: f64) -> bool {
-        let Some(server_speed_cap) = self.core.render_speed_to_server(render_speed_cap) else {
-            return false;
-        };
+    fn set_locally_controlled(&mut self, controlled: bool) {
         self.core
-            .dispatch(MotionCommand::BeginWarp { server_speed_cap })
-            .accepted()
+            .dispatch(MotionCommand::SetLocallyControlled(controlled));
     }
 
     #[func]
@@ -122,28 +108,17 @@ impl ShipMotion {
         server_position: PackedFloat64Array,
         server_velocity: Vector3,
         tick: i64,
-        predict_locally: bool,
     ) -> bool {
         let Some(position) = to_components(server_position) else {
             return false;
         };
-        let accepted = self
-            .core
+        self.core
             .dispatch(MotionCommand::Reset {
                 position,
                 velocity: to_array(server_velocity),
                 tick: tick.max(0) as u64,
             })
-            .accepted();
-        if !accepted {
-            return false;
-        }
-        self.core.dispatch(if predict_locally {
-            MotionCommand::EnablePrediction
-        } else {
-            MotionCommand::EnableDeadReckoning
-        });
-        true
+            .accepted()
     }
 
     #[func]
@@ -165,7 +140,6 @@ impl ShipMotion {
         server_position: PackedFloat64Array,
         server_velocity: Vector3,
         tick: i64,
-        predict_locally: bool,
     ) -> bool {
         let Some(position) = to_components(server_position) else {
             return false;
@@ -175,7 +149,6 @@ impl ShipMotion {
                 position,
                 velocity: to_array(server_velocity),
                 tick: tick.max(0) as u64,
-                predict_locally,
             })
             .accepted()
     }
@@ -227,6 +200,11 @@ impl ShipMotion {
     #[func]
     fn render_speed(&self) -> f64 {
         self.core.render_speed()
+    }
+
+    #[func]
+    fn render_visible(&self) -> bool {
+        self.core.frame().visible
     }
 }
 
