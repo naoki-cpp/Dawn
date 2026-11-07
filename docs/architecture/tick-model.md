@@ -404,6 +404,14 @@ server positions separate; only its origin-relative render position is narrowed
 to Godot `Vector3`. `main.gd` and `WorldPresentation` do not write ship
 positions directly.
 
+`ShipMotion` retains the local control role. Godot sends
+`MotionCommand::SetLocallyControlled` rather than choosing prediction, dead
+reckoning, or warp mode itself. The module owns the unchanged 2,000 render
+units/tick warp threshold and converts it through `WorldSpace`; Reset and
+Undock use the retained role. A control-role notification does not exit Docked,
+and warp deceleration remains in warp presentation until reset. Remote Ship
+visibility is returned in `MotionFrame.visible`, not inferred again in Godot.
+
 This client prediction/reconciliation path is presentation logic. It does not replace
 server RecoveryDelta/checkpoint authority.
 

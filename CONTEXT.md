@@ -47,6 +47,9 @@ player stronger.
 - Celestial projection: the apparent position, size, and direction of distant
   celestial bodies and navigation markers from an observer's viewpoint. It does
   not change their physical locations or gameplay distances.
+- ShipMotion: the client-owned motion module for one Ship. It retains the local
+  control role, selects prediction/dead reckoning/warp presentation, and returns
+  render position and visibility without changing server ownership or routing.
 - Tackle: combat control that prevents escape actions such as warp or jump.
 - Area-of-Interest (AoI): the policy deciding which ships and events a given
   player's session is owed each frame, based on spatial proximity
@@ -91,12 +94,13 @@ player stronger.
   to the Godot client (ADR-0040).
 - `dawn-ecs` defines components and systems without owning persistence.
 - `dawn-storage` owns append-only persistence and snapshots.
-- `dawn-distributed` owns Raft and sector transit consensus.
-- `dawn-distributed` owns sector-local append-log replication.
+- `dawn-distributed` owns Raft, sector transit consensus, sector-local replication,
+  and the shared peer transport.
 - `dawn-sector` owns sector game logic and writes committed facts.
-- `dawn-actor` owns the client/server protocol boundary.
+- `dawn-protocol` owns the typed postcard client/server message schema.
 - `dawn-server` owns the server composition boundary: `simulate` wires local
-  simulations/demos, and `sector-node` is the real hardware node binary.
+  simulations/demos, and `sector-node` is the real hardware node binary. Its
+  client transport owns WebSocket framing, handshake, and admitted sessions.
 
 ## Vocabulary Preferences
 

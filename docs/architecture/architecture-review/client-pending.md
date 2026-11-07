@@ -4,7 +4,7 @@ audience : AI Agent / Human Developer
 update   : /architecture-review で状態が変わるたびに更新
 related  : docs/architecture/architecture-review/client.md（構造評価）,
            docs/architecture/architecture-review/client-completed.md（完了済みログ）
-date     : 2026-11-03（C-21実装を反映）
+date     : 2026-11-07（doc-sync: ShipMotionとC-20の現状を反映）
 ---
 
 # Architecture Review — Dawn Client（未完項目）
@@ -34,7 +34,7 @@ node generation / network send / HUD assemblyはcomposition glueとして凝集�
 
 ## C-20（保留）: `WorldPresentation`へのvisual lifecycle集積
 
-`world_presentation.gd`は695行で、floating-origin rebase、navigation marker position/LOD、
+`world_presentation.gd`は580行で、floating-origin rebase、navigation marker position/LOD、
 sky/sun/fog/starfield bake、warp tunnel、player material/tactical overlayを調停する。
 `NavigationMarkerRenderer`と`Starfield`のdeep moduleは既に分離され、現在のcoordinator自体は
 一つのsession visual boundaryとして機能している。
@@ -53,6 +53,9 @@ shader/culling設定、camera追従を知る点も監視する。独立したsta
 2026-11-05: 純粋な天体投影計算は`dawn-client-core::CelestialProjection`へ集約し、
 Godotのcoordinatorは588行。状態を複製せず、observer選択はShipMotionに残す。
 天体投影の重複計算は解消したが、environment全体の追加分割は引き続きDefer。
+
+2026-11-07 doc-sync: 580行。ラベルを`ObjectCallouts`へ移し、planet labelのLOD追従を削除。
+ShipMotionのrole/mode/visibilityもRustへ集約済み。C-20の分割triggerは未発火。
 
 ## C-21 解消済み: test専用のsystem-name Dictionary投影
 

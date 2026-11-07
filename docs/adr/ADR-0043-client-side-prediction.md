@@ -131,5 +131,9 @@ velocity updates.
   velocity updates without rewinding the presentation clock.
 - [x] Route normal-frame position application, discontinuity resets, and
   floating-origin rebase through the ship controller's single Node3D writer.
+- [x] Retain the local control role and select motion mode/visibility inside
+  ShipMotion; Godot only notifies role changes and applies the render output
+  (ADR-0045). State-transition tests are Rust-owned; scene application remains
+  covered by GdUnit4.
 - [ ] Verify the Godot playtest with the built GDExtension DLL.
 - [ ] Obtain human approval and change status from `proposed` to `accepted`.

@@ -314,6 +314,12 @@ Holds committed true state      Holds display/predicted state
 
 The server remains authoritative. The client can predict ahead of confirmation and reconciles against committed server state/messages. Client prediction is explicitly outside authoritative recovery (#284 non-goal).
 
+`dawn-client-core::ShipMotion` owns the client Ship's local control role,
+prediction/dead-reckoning/warp selection, and render visibility. Godot notifies
+control changes and applies the resulting transforms/visibility; it does not
+select a second motion mode. This client role is not authoritative Sector
+ownership or Player active-ship routing (ADR-0045).
+
 ### Bounded Context expansion order
 
 ```text
