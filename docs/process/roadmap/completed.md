@@ -31,6 +31,7 @@ related  : ./README.md, ../roadmap-history.md, ../../adr/
 - GDExtension crate、`dawn-client-core`、PlayerLoadout projection、WorldSession純粋状態、Command送信、postcardの主要移行、`ShipMotion`のcommand/frame境界完了（ADR-0045/0046）。
 - 10-2/10-4: `InitialState` / `PlayerLoadout` / `AoiEnter` 固定型移行とpostcard WebSocket移行の段階2を完了（ADR-0042）。`register_ship`のJSON往復排除（#178）、`connection.gd`のdead text-frame fallback削除（#179）。
 - 10-6: 絶対座標・floating origin・client motionの再評価と `ShipMotion` への統合完了。Godot editorでの実機確認は pending に残す。
+- ShipMotion deepening: 操船対象・モード選択・表示可否をRustへ集約し、Godotの重複分岐と状態遷移テストを整理（ADR-0045）。
 - Godotの自動テスト環境は固定版導入・拡張ビルド・importを共通setupに集約済み。
   手動プレイテストは [pending.md](./pending.md) に残す。
 
@@ -40,6 +41,7 @@ related  : ./README.md, ../roadmap-history.md, ../../adr/
   synchronized star lighting, deterministic planet surfaces, and bright-star sky
   landmarks (ADR-0053).
 - 11-3: ワープ突入・離脱のトンネル演出、方向フロー、FOV緩和を実装。
+- 船・惑星・Gate・Stationに画面上の引き出し線と名前を表示。惑星の選択円とStationの入港範囲円は削除し、ブラケットと判定を維持。
 - 11-6: Filmic tonemapping、HDR glow / Bloom、星光に連動した環境調整を実装。
 - 11-8: 星野をCPU生成のスプライトgeometryへ移行（ADR-0054）。
 - 11-9: ネビュラとMilky Wayを起動時にパノラマへベイクする表現へ移行

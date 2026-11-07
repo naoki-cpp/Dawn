@@ -243,7 +243,7 @@ Tier そのものは未実装である（本 ADR は `proposed`）。一方 §4 
 - [ ] `CONTEXT.md` の Core Terms に Tier を追加する。
 - [ ] `docs/design/game-design.md` §2「待機時間が多い」に、時間のかかる生産を
       T2 に限る形で再導入する方針と、それが非交渉的制約ではなかった旨を追記する。
-- [ ] ADR-0034 の `related` に本 ADR を追記する。
+- [x] ADR-0034 の `related` に本 ADR を追記する。
 
 ## Open questions
 

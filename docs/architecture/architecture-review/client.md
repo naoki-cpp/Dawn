@@ -5,7 +5,7 @@ update   : クライアント側で大規模リファクタ実施後 / architect
 related  : docs/architecture/architecture-review/server.md（サーバー側）,
            docs/architecture/architecture-review/client-completed.md（完了済みログ）,
            docs/architecture/architecture-review/client-pending.md（未完項目）
-date     : 2026-11-03（C-21実装を反映。全対象再計測は2026-10-31）
+date     : 2026-11-07（doc-sync: ShipMotion・引き出し線を反映、掲載表の行数を照合。再採点なし）
 ---
 
 # Architecture Review — Dawn Client（現行構造評価）
@@ -15,12 +15,12 @@ date     : 2026-11-03（C-21実装を反映。全対象再計測は2026-10-31）
 
 ## 現状評価
 
-**総合: B+。** `main.gd`は976行、`hud_manager.gd`は859行まで増えているが、state、
+**総合: B+。** `main.gd`は977行、`hud_manager.gd`は859行だが、state、
 interaction、presentation、HUD、wire adapterの所有者は分離済みで、直ちにgod objectへ戻ったとは
 判断しない。C-16では、thin Godot decode/outcome seam、canonical inbound delivery、debug fixtureを
 `server_message_gd.rs`、`inbound_delivery.rs`、`server_message_fixture.rs`へ分離し、world messageは
 必要なstate commit後に`main.gd`の最終handlerへ一度だけ到達する構造へ整理した。
-現在、`world_presentation.gd`は695行で、floating origin、navigation LOD、space environment、
+現在、`world_presentation.gd`は580行で、floating origin、navigation LOD、space environment、
 warp/player effectという独立したvisual lifecycleが同じcoordinatorへ集まり始めたためC-20で監視する。
 `starfield.gd`（250行）は統計的star generationとMultiMesh packingが凝集したdeep moduleである。
 
@@ -56,7 +56,7 @@ canonical variantへの明示的な`Option` parseに失敗した場合はrange p
 
 | 観点 | 評価 | 現在の判断 |
 |---|---|---|
-| ファイル分割 | B+ | 19スクリプトへの分割は維持。`main.gd` 967行、`hud_manager.gd` 859行、`world_presentation.gd` 637行をtrigger付きで監視。Rust message adapterはC-16で責務分離済み |
+| ファイル分割 | B+ | 20スクリプト。`main.gd` 977行、`hud_manager.gd` 859行、`world_presentation.gd` 580行をtrigger付きで監視。Rust message adapterはC-16で責務分離済み |
 | `main.gd`責務 | A− | scene lifecycle、node generation、event dispatch、network send、HUD assemblyに限定 |
 | 型境界 | A | wire decode → `ClientFact` → Rust state commit → typed presentationと、input fact → `ClientAction` → typed request/local effectの単一経路。Dictionary再入力なし |
 | 重複 | A | shadow state、JSON往復、adapter内domain policy、二段event dispatchを解消。#200と#342によりrender/warp ruleと`ModuleKind`も単一authority化 |
@@ -74,6 +74,7 @@ Starfieldのrender constructionを呼び出し側が知る点はC-20の観測対
 
 ## State ownership
 
+- `ShipMotion`（core）: 操船対象と移動状態選択、表示上限・他船の表示可否、reset/undock、f64座標を所有。Godotはrole通知とscene反映のみ
 - `ClientState`: server factをsession/loadoutへ適用するwire非依存policy
 - `WorldSessionState`: live world stateと低レベルtyped transition
 - `WorldSession`: Godot adapter。公開write面はreset/client prediction tickに限定
@@ -91,23 +92,23 @@ Starfieldのrender constructionを呼び出し側が知る点はC-20の観測対
 
 navigation map cacheはSector内でwrite-onceに近いpresentation cacheとして許容し、毎frameのRust→Godot再構築は行わない。
 
-## ファイルサイズ（2026-10-31再計測）
+## ファイルサイズ（2026-11-07 doc-sync: 掲載表の行数照合）
 
 ### GDScript（`client/scripts/`）
 
 | ファイル | 行数 | 判定 |
 |---|---:|---|
-| `client/scripts/main.gd` | 976 | 🟡 R-2。scene lifecycle / node registry / event wiring / HUD scene-facts assemblyのorchestration。機械的分割はしない |
+| `client/scripts/main.gd` | 977 | 🟡 R-2。scene lifecycle / node registry / event wiring / HUD scene-facts assemblyのorchestration。機械的分割はしない |
 | `client/scripts/hud_manager.gd` | 859 | 🟡 C-9。typed refsとpanel build/updateが同一責務。独立変更理由が分かれるまで保留 |
-| `client/scripts/ship_controller.gd` | 448 | 🟢 motion adapterとvisual effectの一つのShip presentation boundary |
+| `client/scripts/ship_controller.gd` | 412 | 🟢 motion adapterとvisual effectの一つのShip presentation boundary |
 | `client/scripts/connection.gd` | 295 | 🟢 socket/credential adapter・typed outcome受け渡し。phase/retry/timeoutはRust ConnectionLifecycleが所有（2026-11-05再計測） |
-| `client/scripts/world_presentation.gd` | 588 | 🟡 C-20。純粋な天体投影はRustへ集約。origin/environment/warp/player effectの独立変更理由を監視（2026-11-05再計測） |
+| `client/scripts/world_presentation.gd` | 580 | 🟡 C-20。純粋な天体投影はRustへ集約。origin/environment/warp/player effectの独立変更理由を監視 |
 | `client/scripts/market_surface.gd` | 270 | 🟢 Market panel surface |
 | `client/scripts/hud_surface.gd` | 157 | 🟢 typed snapshot paint・HUD reference ownership |
-| `client/scripts/navigation_marker_renderer.gd` | 287 | 🟢 navigation marker・planet surface・EVE-style bracket rendering |
+| `client/scripts/navigation_marker_renderer.gd` | 230 | 🟢 navigation marker・planet surface・EVE-style bracket rendering |
 | `client/scripts/sky_catalog.gd` | 45 | 🟢 fixed bright-star landmark data |
 | `client/scripts/starfield.gd` | 250 | 🟢 deterministic star distribution・spectral flux・MultiMesh packingの一つのrender-data kernel |
-| `client/scripts/camera_controller.gd` | 145 | 🟢 camera orbit input |
+| `client/scripts/camera_controller.gd` | 154 | 🟢 camera orbit input |
 | `client/scripts/ship_picking.gd` | 135 | 🟢 screen-space picking |
 | `client/scripts/world_interaction.gd` | 125 | 🟢 Godot key/hit-test normalizationとClientInteraction adapter |
 | `client/scripts/tactical_overlay.gd` | 93 | 🟢 tactical overlay |
@@ -116,6 +117,7 @@ navigation map cacheはSector内でwrite-onceに近いpresentation cacheとし�
 | `client/scripts/billboard_ring.gd` | 65 | 🟢 selection/lock ring visual |
 | `client/scripts/billboard_bracket.gd` | 67 | 🟢 fixed-size navigation bracket visual |
 | `client/scripts/warp_tunnel_effect.gd` | 17 | 🟢 warp tunnel visual |
+| `client/scripts/object_callouts.gd` | 74 | 🟢 screen-space引き出し線・label配置。入力を遮らずcamera/sceneから描画する |
 
 ### Rust/GDExtension boundary（client crates、C-16関連と500行以上）
 
@@ -129,14 +131,14 @@ navigation map cacheはSector内でwrite-onceに近いpresentation cacheとし�
 | `crates/dawn-client-core/src/client_action.rs` | 584 | 🟢 engine-independent selection/input policy・typed ClientAction |
 | `crates/dawn-client-core/src/hud.rs` | 555 | 🟢 engine-independent HUD read model・formatting・change decisions |
 | `crates/dawn-client-core/src/station_inventory.rs` | 758 | 🟢 engine-independent Station Inventory policy・typed request construction |
-| `crates/dawn-client-core/src/motion.rs` | 726 | 🟢 client motion/prediction kernel・tests（2026-11-05再計測） |
+| `crates/dawn-client-core/src/motion.rs` | 732 | 🟢 client motion/prediction kernel・tests |
 | `crates/dawn-client-gdext/src/client_command_gd.rs` | 282 | 🟢 remaining direct typed request builders・入力検証・encode結果のGDExtension boundary |
 | `crates/dawn-client-gdext/src/client_action_gd.rs` | 261 | 🟢 ClientAction/ClientInteractionの薄いGodot adapter |
 | `crates/dawn-client-gdext/src/world_session_gd.rs` | 179 | 🟢 typed session read adapter。C-21のtest専用Dictionary投影を削除、core stateは維持 |
-| `crates/dawn-client-gdext/src/ship_motion_gd.rs` | 243 | 🟢 ShipMotionの型変換adapter。位置authorityはcoreのf64 |
+| `crates/dawn-client-gdext/src/ship_motion_gd.rs` | 221 | 🟢 ShipMotionの型変換adapter。位置authorityはcoreのf64 |
 | `crates/dawn-client-core/src/celestial_projection.rs` | 270 | 🟢 statelessな天体/マーカー投影・角サイズ計算とtests |
 | `crates/dawn-client-gdext/src/celestial_projection_gd.rs` | 92 | 🟢 投影結果の型変換adapter。描画資源と移動状態を所有しない |
-| `crates/dawn-client-core/src/ship_motion.rs` | 434 | 🟢 motion lifecycleとabsolute/floating-origin policyの単一owner |
+| `crates/dawn-client-core/src/ship_motion.rs` | 592 | 🟢 motion lifecycleとabsolute/floating-origin policyの単一owner |
 
 ## Issue登録簿
 

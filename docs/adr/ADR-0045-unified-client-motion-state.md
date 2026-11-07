@@ -125,6 +125,8 @@ Godot `Vector3` は描画アダプターの最終境界にだけ残る。
 - [x] GDExtension APIを更新し、旧`MotionPredictor` shimを削除してGodot側は
   `ShipMotion`を使う薄い変換アダプターに戻す
 - [x] ADR-0043の実装チェックリストと`docs/architecture/tick-model.md`を同期する
+- [x] 操船対象・warp開始閾値・reset/undockの状態選択・他船の表示可否を
+  `ShipMotion`へ集約し、Godot/GDExtensionのモード選択分岐を削除する
 
 ## 期待する結果
 
