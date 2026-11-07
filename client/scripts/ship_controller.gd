@@ -37,10 +37,6 @@ var _is_player    : bool    = false
 var _thrust_dir   : Vector3 = Vector3.ZERO
 var _motion       := ShipMotion.new()
 var _motion_ready : bool    = false
-## Hidden while warping faster than VISUAL_SPEED_CAP (ADR-0029 lore pass,
-## non-player ships only). Tracks the last applied visibility so we only
-## toggle `visible` on the actual crossing, not every frame.
-var _in_tunnel    : bool    = false
 
 ## ロック状態: "none" / "locking" / "locked"
 var _lock_state   : String  = "none"
@@ -68,13 +64,6 @@ func _ready() -> void:
 const TICKS_PER_SEC    : float = 10.0  ## Server tick rate
 const ROT_THRESHOLD_SQ : float = 0.02  ## Min speed² before rotating (Godot units²/frame²)
 const ROT_SPEED        : float = 4.0   ## Slerp speed toward velocity direction
-## Cap on the VISUAL integration speed (Godot units/tick). A true-AU warp runs at
-## ~10^8 Godot units/tick; integrating that literally flings the ship past the
-## far plane and jitters in f32 (motion sickness). We instead streak forward at a
-## bounded, renderable speed and let the authoritative PositionSnap (ADR-0029)
-## place the ship at the real arrival point. The true speed is still shown on the
-## HUD (get_speed_server uses the uncapped _velocity).
-const VISUAL_SPEED_CAP : float = 2_000.0
 
 func _process(delta: float) -> void:
 	if not _is_init:
@@ -83,20 +72,11 @@ func _process(delta: float) -> void:
 	if not _motion_ready:
 		return
 
-	## Both local prediction and remote dead reckoning advance through the same
-	## Rust motion track. This adapter only decides how much of that state is
-	## renderable for the current ship.
+	## Rust selects the motion mode and visibility; this adapter paints the result.
 	_motion.advance(delta * TICKS_PER_SEC)
 	_velocity = _motion.render_velocity()
-	var speed := _velocity.length()
 	var predicted_pos := _motion.render_position()
-	if not _is_player:
-		## Remote ships are hidden during the bulk of a warp while their shared
-		## track continues toward the true position.
-		var in_tunnel := speed > VISUAL_SPEED_CAP
-		if in_tunnel != _in_tunnel:
-			visible    = not in_tunnel
-			_in_tunnel = in_tunnel
+	visible = _motion.render_visible()
 	position = predicted_pos
 	_vel_estimate = _velocity
 
@@ -141,7 +121,6 @@ func initialize(
 	position   = _motion.render_position()
 	_velocity  = Vector3.ZERO
 	_is_init   = true
-	_in_tunnel = false
 	visible    = true
 	_motion_ready = true
 
@@ -172,11 +151,6 @@ func configure_motion(
 func set_velocity(server_vel: Vector3, tick: int = 0) -> bool:
 	if not _motion_ready or not _motion.set_velocity(server_vel, tick):
 		return false
-	## Warp velocity is not governed by the normal fitted movement profile.
-	## The shared Rust track owns the capped presentation until PositionSnap
-	## resets it.
-	if _is_player and _motion.render_speed() > VISUAL_SPEED_CAP:
-		_motion.begin_warp(VISUAL_SPEED_CAP)
 	_velocity = _motion.render_velocity()
 	return true
 
@@ -195,14 +169,7 @@ func apply_origin_rebase(new_origin: PackedFloat64Array) -> void:
 func set_as_player() -> void:
 	_is_player    = true
 	if _motion_ready:
-		## A reconnect can materialize a ship that is already in committed warp,
-		## before any later VelocityChanged event gives us the high-speed hint.
-		## Preserve dead reckoning in that case instead of applying the normal
-		## fitted movement profile to the warp velocity on the next tick.
-		if _velocity.length() > VISUAL_SPEED_CAP:
-			_motion.begin_warp(VISUAL_SPEED_CAP)
-		else:
-			_motion.enable_prediction()
+		_motion.set_locally_controlled(true)
 	_vel_instance = _make_indicator(Color(0.0, 1.0, 0.4))
 	_vel_mesh     = _vel_instance.mesh as ImmediateMesh
 	_thr_instance = _make_indicator(Color(1.0, 0.55, 0.0))
@@ -215,7 +182,7 @@ func set_as_player() -> void:
 ## since _process() only redraws them while _is_player is true.
 func clear_as_player() -> void:
 	if _motion_ready:
-		_motion.enable_dead_reckoning()
+		_motion.set_locally_controlled(false)
 	_is_player = false
 	if _vel_instance != null:
 		_vel_instance.queue_free()
@@ -229,7 +196,7 @@ func clear_as_player() -> void:
 ## Apply local prediction input for a MoveCommand.
 func set_thrust_direction(godot_dir: Vector3) -> void:
 	_thrust_dir = godot_dir.normalized() if godot_dir.length_squared() > 0.0 else Vector3.ZERO
-	if _motion_ready and _is_player:
+	if _motion_ready:
 		if _thrust_dir.length_squared() > 0.0:
 			_motion.set_thrust_direction(_thrust_dir)
 		else:
@@ -238,7 +205,7 @@ func set_thrust_direction(godot_dir: Vector3) -> void:
 ## Apply local prediction input for a StopCommand.
 func set_braking() -> void:
 	_thrust_dir = Vector3.ZERO
-	if _motion_ready and _is_player:
+	if _motion_ready:
 		_motion.set_braking()
 
 ## Reconcile normal flight to an authoritative state without discarding local
@@ -257,7 +224,7 @@ func reconcile_motion(server_pos: PackedFloat64Array, server_vel: Vector3, tick:
 func reset_motion(server_pos: PackedFloat64Array, server_vel: Vector3, tick: int) -> void:
 	_thrust_dir = Vector3.ZERO
 	if _motion_ready:
-		_motion.reset(server_pos, server_vel, tick, _is_player)
+		_motion.reset(server_pos, server_vel, tick)
 		position  = _motion.render_position()
 		_velocity = _motion.render_velocity()
 
@@ -271,10 +238,9 @@ func dock_motion(server_pos: PackedFloat64Array, tick: int) -> bool:
 	_thrust_dir = Vector3.ZERO
 	return true
 
-## Leave the explicit docked state and choose prediction/dead-reckoning based
-## on which ship owns this controller.
+## Leave the explicit docked state; Rust retains the current control role.
 func undock_motion(server_pos: PackedFloat64Array, server_vel: Vector3, tick: int) -> bool:
-	if _motion_ready and not _motion.undock(server_pos, server_vel, tick, _is_player):
+	if _motion_ready and not _motion.undock(server_pos, server_vel, tick):
 		return false
 	position  = _motion.render_position()
 	_velocity = _motion.render_velocity()
@@ -284,7 +250,7 @@ func undock_motion(server_pos: PackedFloat64Array, server_vel: Vector3, tick: in
 func get_speed_server() -> float:
 	return _motion.server_speed()
 
-## Godot-space speed in the same units as VISUAL_SPEED_CAP. Used by main.gd
+## Godot-space speed in render units per tick. Used by main.gd
 ## to drive the warp-tunnel overlay (ADR-0029 lore pass).
 func get_speed_godot() -> float:
 	return _motion.render_speed()

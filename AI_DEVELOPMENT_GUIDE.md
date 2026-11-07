@@ -403,8 +403,8 @@ Use this guide as the router, then read the relevant long-form doc:
 - Recovery ADR: `docs/adr/ADR-0049-sector-recovery-state-delta-wal.md`
 - Forbidden changes: `docs/architecture/forbidden-changes.md`
 - Event catalog: `docs/architecture/event-catalog.md`
-- Wire protocol (postcard binary plus the remaining JSON frames at the
-  client/server boundary): `docs/architecture/wire-protocol.md`
+- Wire protocol (postcard binary for every client/server envelope):
+  `docs/architecture/wire-protocol.md`
 - Tick model: `docs/architecture/tick-model.md`
 - Client testing: `docs/process/godot-client-testing.md`
 - Raspberry Pi hardware flow: `docs/process/8d5-hardware-notes.md`
@@ -432,4 +432,4 @@ this guide.
 
 ---
 
-Last updated: 2026-11-03 / Covers ADR-0001 through ADR-0056
+Last updated: 2026-11-07 / Covers ADR-0001 through ADR-0058 (including proposed ADRs)

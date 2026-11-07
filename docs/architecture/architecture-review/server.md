@@ -5,7 +5,7 @@ update   : 大規模リファクタ実施後 / 新クレート追加時 / archit
 related  : AI_DEVELOPMENT_GUIDE.md「Crate Boundaries」, docs/architecture/architecture.md,
            docs/architecture/architecture-review/server-completed.md（完了済みログ）,
            docs/architecture/architecture-review/server-pending.md（未完項目・issue一覧）
-date     : 2026-11-03（R-10実装を反映。全対象再計測は2026-10-31）
+date     : 2026-11-07（doc-sync: 掲載表の行数を照合。再採点なし）
 ---
 
 # Architecture Review — Dawn Codebase（現行構造評価）
@@ -95,7 +95,7 @@ run only after the required projection completes.
 `ClientCommand`外側matchと`StationDispatchCommand`、domain固有の戻り値、process model固有の薄いadapterは
 意図的に維持する。
 
-## ファイルサイズ（2026-10-31再計測、500行以上と追跡対象）
+## ファイルサイズ（2026-11-07 doc-sync: 掲載表の行数照合、500行以上と追跡対象）
 
 | ファイル | 行数 | 判定 |
 |---|---:|---|
@@ -123,7 +123,7 @@ run only after the required projection completes.
 | `crates/dawn-sector/src/client_admission.rs` | 975 | 🟢 admission protocol state machine・tests |
 | `crates/dawn-protocol/src/server_fact.rs` | 806 | 🟢 server fact projection/schema・tests |
 | `crates/dawn-core/src/commands.rs` | 795 | 🟢 domain command types/validation data・tests |
-| `crates/dawn-sector/src/aoi.rs` | 781 | 🟢 AoI index/delta delivery contract・tests |
+| `crates/dawn-sector/src/aoi.rs` | 819 | 🟢 AoI index/delta delivery contract・tests |
 | `crates/dawn-core/src/events.rs` | 777 | 🟢 domain event catalog/type definitions・tests |
 | `crates/dawn-sector/src/node/spawner_logic.rs` | 813 | 🟢 spawn policy・tests |
 | `crates/dawn-sector/src/transit/tests.rs` | 679 | 🟢 transit integration tests |

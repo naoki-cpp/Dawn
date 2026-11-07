@@ -4,7 +4,7 @@ audience : AI Agent / Human Developer
 update   : /architecture-review が issue を解消済みへ移動するたびに追記
 related  : docs/architecture/architecture-review/client.md（構造評価）,
            docs/architecture/architecture-review/client-pending.md（未完項目）
-date     : 2026-11-03
+date     : 2026-11-07
 ---
 
 # Architecture Review — Dawn Client（完了済みログ）
@@ -16,6 +16,14 @@ date     : 2026-11-03
 ---
 
 ## 解消済み issue の詳細
+
+### 2026-11-07 — ShipMotion presentation-state selection
+
+`SetLocallyControlled`と保持したroleで、Rustがmode・reset/undock・他船の表示可否を決める。
+Godot/GDExtensionのwarp開始閾値・モード選択・visibility mirrorを削除し、状態遷移テストを
+Rustへ集約。速度上限2,000 render units/tickは維持。Rust 140件、GdUnit4全230件、
+fmt/clippy成功。実Ship/cameraのオフライン描画を2サイズで確認。人間のlive-server
+プレイテストは未完了のまま（ADR-0045）。
 
 ### 2026-11-03 — Client connection lifecycle
 

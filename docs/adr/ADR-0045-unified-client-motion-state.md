@@ -65,9 +65,13 @@ command-in / frame-out の境界で束ねる。公開する更新経路は `Moti
 
 - `MotionCommand` は server-space の入力、権威サンプル、速度イベント、discontinuity、
   rebaseを受け取る。stale tick、非有限値、無効なwarp値は境界で拒否する。
-- Godotの `VISUAL_SPEED_CAP` のようなrender-spaceの速度上限は、GDExtensionが
-  `WorldSpace` の単位変換を通してserver-spaceへ変換してから `MotionCommand` に渡す。
-  そのためコマンドの `server_speed_cap` は常にサーバー単位である。
+- 表示速度上限（従来の2,000 render units/tick）は`ShipMotion`内部が所有し、
+  `WorldSpace`でserver-spaceへ変換する。GodotやGDExtensionは閾値判定を行わない。
+- `SetLocallyControlled`で操船対象の変更を通知し、`ShipMotion`が通常予測・他船の
+  dead reckoning・ワープ表示を選ぶ。`Reset`/`Undock`にも保持済みの操船情報を使う。
+  ワープ減速はresetまで継続し、操船通知だけでDockedを解除しない。
+- `MotionFrame.visible`が他船の高速移動時の表示可否を返す。Godotの自船フラグは
+  矢印などの描画用途だけに残し、入力の操船判定もRustが行う。
 - `MotionFrame` は権威位置、予測位置、render位置、server/render速度、状態、tickを
   明示的に分ける。warp中の表示位置を権威位置として扱わない。
 - warp中の船体とfloating originは速度上限付きのrender経路を維持する一方、太陽など
@@ -121,6 +125,8 @@ Godot `Vector3` は描画アダプターの最終境界にだけ残る。
 - [x] GDExtension APIを更新し、旧`MotionPredictor` shimを削除してGodot側は
   `ShipMotion`を使う薄い変換アダプターに戻す
 - [x] ADR-0043の実装チェックリストと`docs/architecture/tick-model.md`を同期する
+- [x] 操船対象・warp開始閾値・reset/undockの状態選択・他船の表示可否を
+  `ShipMotion`へ集約し、Godot/GDExtensionのモード選択分岐を削除する
 
 ## 期待する結果
 
