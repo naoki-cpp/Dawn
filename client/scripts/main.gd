@@ -431,7 +431,7 @@ func _handle_position_snap(ship_id: int, server_pos: PackedFloat64Array) -> void
 			server_pos[0] - pg.x / _world.render_scale(),
 			server_pos[1] - pg.y / _world.render_scale(),
 			server_pos[2] + pg.z / _world.render_scale()])
-		_presentation.apply_origin_rebase_components(new_origin, true, _player_ship_id, _ships)
+		_presentation.apply_origin_rebase_components(new_origin, true, _ships)
 	else:
 		(_ships[ship_id] as Node3D).call(
 			"reset_motion", server_pos, Vector3.ZERO, _session.current_tick())

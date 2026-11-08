@@ -34,7 +34,7 @@ node generation / network send / HUD assemblyはcomposition glueとして凝集�
 
 ## C-20（保留）: `WorldPresentation`へのvisual lifecycle集積
 
-`world_presentation.gd`は580行で、floating-origin rebase、navigation marker position/LOD、
+`world_presentation.gd`は570行で、floating-origin rebase、navigation marker position/LOD、
 sky/sun/fog/starfield bake、warp tunnel、player material/tactical overlayを調停する。
 `NavigationMarkerRenderer`と`Starfield`のdeep moduleは既に分離され、現在のcoordinator自体は
 一つのsession visual boundaryとして機能している。
