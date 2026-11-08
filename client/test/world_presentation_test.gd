@@ -477,15 +477,23 @@ func test_origin_rebase_moves_ship_and_motion_track_together() -> void:
 	world.rebase_shift = Vector3(100.0, 2.0, -3.0)
 	presentation._world = world
 
-	var ship := FakeShip.new()
-	presentation.apply_origin_rebase(
-		PackedFloat64Array([100.0, 2.0, -3.0]), false, -1, {7: ship})
-
-	assert_array(ship.motion_rebase_calls[0]).contains_exactly([100.0, 2.0, -3.0])
-	assert_array(ship.motion_rebase_calls).contains_exactly([
-		PackedFloat64Array([100.0, 2.0, -3.0]),
-	])
-	ship.free()
+	var camera: Camera3D = auto_free(load("res://scripts/camera_controller.gd").new())
+	add_child(camera)
+	camera.set_process(false)
+	presentation._camera = camera
+	for keep_fixed: bool in [false, true]:
+		var ship := FakeShip.new()
+		camera.position = Vector3(10, 20, 30)
+		camera._target_pos = Vector3.ZERO
+		presentation.apply_origin_rebase_components(
+			PackedFloat64Array([100.0, 2.0, -3.0]), keep_fixed, {7: ship})
+		assert_array(ship.motion_rebase_calls).contains_exactly([
+			PackedFloat64Array([100.0, 2.0, -3.0]),
+		])
+		var shift := Vector3.ZERO if keep_fixed else world.rebase_shift
+		assert_vector(camera.global_position).is_equal(Vector3(10, 20, 30) + shift)
+		assert_vector(camera._target_pos).is_equal(shift)
+		ship.free()
 
 
 func _present_sun(bodies: Array, observer: PackedFloat64Array) -> ShaderMaterial:

@@ -180,7 +180,7 @@ func send_deactivate_module(p_module_id: int, p_slot: String) -> void:
 ## Market requests use a separate wire envelope from Sector commands
 ## (ADR-0034). The server answers each request with MarketSnapshot.
 func send_market_refresh_command() -> void:
-	_send_market_request(_cmd.market_refresh_command())
+	_send_request(_cmd.market_refresh_command())
 
 func send_market_place_order_command(
 	p_ship_id: int,
@@ -189,11 +189,11 @@ func send_market_place_order_command(
 	p_price: int,
 	p_quantity: int
 ) -> void:
-	_send_market_request(_cmd.market_place_order_command(
+	_send_request(_cmd.market_place_order_command(
 		p_ship_id, p_item_id, p_side, p_price, p_quantity))
 
 func send_market_cancel_order_command(p_order_id: int) -> void:
-	_send_market_request(_cmd.market_cancel_order_command(p_order_id))
+	_send_request(_cmd.market_cancel_order_command(p_order_id))
 
 
 func _accept_client_request_rejected(code: String, message: String) -> void:
@@ -208,10 +208,6 @@ func is_connected_to_server() -> bool:
 ## encoding is reported directly; no empty byte array is interpreted as an
 ## error sentinel.
 func _send_request(result: ClientCommandResult) -> void:
-	_send_result(result, true)
-
-
-func _send_market_request(result: ClientCommandResult) -> void:
 	_send_result(result, true)
 
 

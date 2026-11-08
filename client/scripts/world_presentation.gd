@@ -111,19 +111,9 @@ func respawn_navigation_markers(
 		_bodies_root, stations, _render_scale(), Callable(_world, "to_godot_components"))
 
 
-func apply_origin_rebase(
-	new_origin: PackedFloat64Array,
-	keep_player_fixed: bool,
-	player_ship_id: int,
-	ships: Dictionary
-) -> void:
-	apply_origin_rebase_components(new_origin, keep_player_fixed, player_ship_id, ships)
-
-
 func apply_origin_rebase_components(
 	new_origin: PackedFloat64Array,
 	keep_player_fixed: bool,
-	player_ship_id: int,
 	ships: Dictionary
 ) -> void:
 	if _world == null:
@@ -290,7 +280,7 @@ func _maybe_rebase_origin(player_ship_id: int, ships: Dictionary) -> void:
 	var player_server: PackedFloat64Array = player_ship.call("server_position") as PackedFloat64Array
 	if not _world.should_rebase_components(player_server[0], player_server[1], player_server[2]):
 		return
-	apply_origin_rebase_components(player_server, false, player_ship_id, ships)
+	apply_origin_rebase_components(player_server, false, ships)
 
 
 func _update_sun_direction(player_ship_id: int, ships: Dictionary, bodies: Array) -> void:

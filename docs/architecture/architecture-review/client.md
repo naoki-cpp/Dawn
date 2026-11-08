@@ -20,7 +20,7 @@ interaction、presentation、HUD、wire adapterの所有者は分離済みで、
 判断しない。C-16では、thin Godot decode/outcome seam、canonical inbound delivery、debug fixtureを
 `server_message_gd.rs`、`inbound_delivery.rs`、`server_message_fixture.rs`へ分離し、world messageは
 必要なstate commit後に`main.gd`の最終handlerへ一度だけ到達する構造へ整理した。
-現在、`world_presentation.gd`は580行で、floating origin、navigation LOD、space environment、
+現在、`world_presentation.gd`は570行で、floating origin、navigation LOD、space environment、
 warp/player effectという独立したvisual lifecycleが同じcoordinatorへ集まり始めたためC-20で監視する。
 `starfield.gd`（250行）は統計的star generationとMultiMesh packingが凝集したdeep moduleである。
 
@@ -56,7 +56,7 @@ canonical variantへの明示的な`Option` parseに失敗した場合はrange p
 
 | 観点 | 評価 | 現在の判断 |
 |---|---|---|
-| ファイル分割 | B+ | 20スクリプト。`main.gd` 977行、`hud_manager.gd` 859行、`world_presentation.gd` 580行をtrigger付きで監視。Rust message adapterはC-16で責務分離済み |
+| ファイル分割 | B+ | 20スクリプト。`main.gd` 977行、`hud_manager.gd` 859行、`world_presentation.gd` 570行をtrigger付きで監視。Rust message adapterはC-16で責務分離済み |
 | `main.gd`責務 | A− | scene lifecycle、node generation、event dispatch、network send、HUD assemblyに限定 |
 | 型境界 | A | wire decode → `ClientFact` → Rust state commit → typed presentationと、input fact → `ClientAction` → typed request/local effectの単一経路。Dictionary再入力なし |
 | 重複 | A | shadow state、JSON往復、adapter内domain policy、二段event dispatchを解消。#200と#342によりrender/warp ruleと`ModuleKind`も単一authority化 |
@@ -101,8 +101,8 @@ navigation map cacheはSector内でwrite-onceに近いpresentation cacheとし�
 | `client/scripts/main.gd` | 977 | 🟡 R-2。scene lifecycle / node registry / event wiring / HUD scene-facts assemblyのorchestration。機械的分割はしない |
 | `client/scripts/hud_manager.gd` | 859 | 🟡 C-9。typed refsとpanel build/updateが同一責務。独立変更理由が分かれるまで保留 |
 | `client/scripts/ship_controller.gd` | 412 | 🟢 motion adapterとvisual effectの一つのShip presentation boundary |
-| `client/scripts/connection.gd` | 295 | 🟢 socket/credential adapter・typed outcome受け渡し。phase/retry/timeoutはRust ConnectionLifecycleが所有（2026-11-05再計測） |
-| `client/scripts/world_presentation.gd` | 580 | 🟡 C-20。純粋な天体投影はRustへ集約。origin/environment/warp/player effectの独立変更理由を監視 |
+| `client/scripts/connection.gd` | 291 | 🟢 socket/credential adapter・typed outcome受け渡し。通常送信を一本化、HelloのWelcome前送信は分離（2026-11-08） |
+| `client/scripts/world_presentation.gd` | 570 | 🟡 C-20。純粋な天体投影はRustへ集約。rebaseはproduction/test共通の入口。独立変更理由を監視（2026-11-08） |
 | `client/scripts/market_surface.gd` | 270 | 🟢 Market panel surface |
 | `client/scripts/hud_surface.gd` | 157 | 🟢 typed snapshot paint・HUD reference ownership |
 | `client/scripts/navigation_marker_renderer.gd` | 230 | 🟢 navigation marker・planet surface・EVE-style bracket rendering |

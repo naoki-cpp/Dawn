@@ -12,6 +12,28 @@ func _state() -> Array:
 	return [WorldSession.new(), PlayerLoadout.new()]
 
 
+func test_sector_and_market_requests_share_welcome_gating_without_changing_bytes() -> void:
+	var connection: Node = auto_free(Connection.new())
+	connection.start_connection("ws://127.0.0.1:7878", "")
+	connection.open_socket()
+	var socket: RefCounted = connection.sockets[0]
+	assert_int(socket.sent.size()).is_equal(1)  # Hello is allowed before Welcome.
+	connection.send_move_command(Vector3(1, 2, 3))
+	connection.send_market_refresh_command()
+	assert_int(socket.sent.size()).is_equal(1)
+	connection._accept_welcome(1, 2, PackedByteArray())
+	connection.send_move_command(Vector3(1, 2, 3))
+	connection.send_market_refresh_command()
+	var command := ClientCommand.new()
+	assert_int(socket.sent.size()).is_equal(3)
+	assert_array(socket.sent[1]).contains_exactly(command.move_command(1, 2, 3).bytes)
+	assert_array(socket.sent[2]).contains_exactly(command.market_refresh_command().bytes)
+	connection.cancel_connection()
+	connection.send_move_command(Vector3(1, 2, 3))
+	connection.send_market_refresh_command()
+	assert_int(socket.sent.size()).is_equal(3)
+
+
 func test_cancel_clears_credentials_identity_and_stops_retries() -> void:
 	var connection: Node = auto_free(Connection.new())
 	connection.start_connection("wss://dawn.example", "a".repeat(64))
