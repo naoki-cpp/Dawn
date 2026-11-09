@@ -20,7 +20,7 @@ uniform float flux_scale : hint_range(0.0, 4.0) = 1.0;
 // Half-width of every star's quad, in pixels. One value for the whole field:
 // stars are point sources, so they share a point spread and only their flux
 // differs. Pushed from Starfield.POINT_SPREAD_PIXELS.
-uniform float point_spread_pixels : hint_range(1.0, 8.0) = 2.6;
+uniform float point_spread_pixels : hint_range(1.0, 8.0) = 2.0;
 // Viewport size in pixels, pushed from WorldPresentation every frame.
 // VIEWPORT_SIZE is a FRAGMENT-stage built-in in Godot's spatial shaders: it
 // is silently unusable here in vertex(), which collapses the quad instead of
@@ -29,11 +29,11 @@ uniform vec2 viewport_pixels = vec2(1280.0, 720.0);
 // How fast the point spread falls off inside the quad. Higher concentrates
 // the star into a smaller visible dot for the same peak brightness, which is
 // what keeps a bright star from reading as a ball rather than a point.
-uniform float core_sharpness : hint_range(2.0, 24.0) = 6.0;
+uniform float core_sharpness : hint_range(2.0, 24.0) = 4.0;
 // Where the profile is truncated, in squared quad-relative radius. Pulling
 // this in shortens the tail without shrinking the Gaussian itself, so the
 // dot gets smaller without dropping below the sampling rate.
-uniform vec2 core_cutoff = vec2(0.55, 1.0);
+uniform vec2 core_cutoff = vec2(0.25, 0.85);
 
 varying vec2 corner;
 varying float flux;

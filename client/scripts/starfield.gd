@@ -30,10 +30,12 @@ const SHELL_RADIUS: float = 4_000_000.0
 ## Gaussian above the visible threshold further out. Varying the sprite size
 ## per star on top of that double-counts brightness and turns the bright end
 ## into balls rather than points.
-const POINT_SPREAD_PIXELS: float = 2.6
+## A compact quad and softer Gaussian keep sigma above the sampling floor;
+## the shader trims the outer tail rather than making a sub-pixel core.
+const POINT_SPREAD_PIXELS: float = 2.0
 ## Falloff inside the quad. Together with the quad size this fixes the
 ## Gaussian's sigma at POINT_SPREAD_PIXELS / sqrt(2 * POINT_SHARPNESS).
-const POINT_SHARPNESS: float = 6.0
+const POINT_SHARPNESS: float = 4.0
 ## Sigma must stay at or above roughly this, or the sprite falls below the
 ## pixel grid and flickers as the camera turns -- which would reintroduce the
 ## twinkle ADR-0054 §5 deliberately rejects, by accident.
