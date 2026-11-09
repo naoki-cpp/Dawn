@@ -180,6 +180,24 @@ and lifecycle with `test/fixtures/connection_socket.gd` as the socket adapter;
 they do not maintain a FakeConnection policy or modify lifecycle flags.
 They verify transport effects, credential cleanup/pinning, and UI state.
 
+## Fixed Lighting Review
+
+Open `client/scenes/lighting_study.tscn` and run that scene for an offline visual
+comparison. It uses the production environment and ship scene with deterministic
+rock fixtures; it does not connect to a server or add gameplay asteroids.
+
+With the configured Godot executable, run:
+
+```text
+godot --path client res://scenes/lighting_study.tscn -- --capture
+```
+
+This waits for procedural textures and settled frames, writes
+`.tmp/lighting-study.png`, and exits. Compare the same framing and exposure when
+adjusting background, hull/engine materials, fill lighting, glare or light shafts.
+`ship_material_test.gd` verifies that scene materials are actually bound, the
+hull remains lit/non-emissive, and the engine retains HDR emission.
+
 ## WorldSession test boundary
 
 The server-driven mutation surface is `ClientState::apply`: production
