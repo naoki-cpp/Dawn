@@ -1,67 +1,52 @@
-# Compositor lens effects (Dawn adaptation)
+# Anamorphic Solar Camera Effect
 
-Source: https://github.com/ARez2/compositor-effect-lens-effects
-Pinned commit: `0ce061271f672f05fbb9aed08a61e019a875c1ad`.
-License: MIT, see LICENSE. The base compositor derives from Pink Arcana's
+The base RenderingDevice compositor is adapted from
+https://github.com/ARez2/compositor-effect-lens-effects
+at commit `0ce061271f672f05fbb9aed08a61e019a875c1ad`, under MIT (see LICENSE).
+The base derives from Pink Arcana's
 https://github.com/pink-arcana/godot-distance-field-outlines .
-Shader source attributions to Shadertoy are retained in `lens_flares.glsl`.
 
-Only the three runtime files are vendored; no editor plugin or demo is needed.
-`WorldPresentation` supplies the local star's projected direction, spectral
-color and apparent radius from the same f64-derived state as the physical sun.
+Dawn's lens script and compute shader now use an anisotropic point-spread
+approximation: a narrow horizontal tail and a slightly wider, brighter response
+near the source. A separate warm glare profile joins a steep inner falloff to a
+much weaker extended veil; it is transparent optical scatter, not a solar disc.
+Atlas textures, extra solar cores, reflection sprites, response
+curves have been removed. This is an artistic
+anamorphic response, not a calibrated optical simulation.
 
-Dawn changes:
+`WorldPresentation` supplies projected source position, colour, visibility,
+physical occlusion radius and a bounded distance response. The camera preset
+exposes streak intensity, length, width, squeeze, coating tint, glare strength
+and glare radius. The stellar disc and
+surrounding Environment glow remain separate.
 
-- Remove the fake fixed-size solar disc and always-on rear-facing flare.
-- Keep photosphere and corona in the sky; remove its old optical streak.
-- Fade at screen edges, disable behind the camera, and bound all depth reads
-  and compute dispatches. Occlusion uses nine taps over the apparent solar disc.
-- Share these taps per workgroup and skip optical calculations when occluded.
-- Add a separate faint optical glow with depth-marched shadows, following the
-  God rays section (pages 40-42) of Páll Ragnar Pálsson's
-  [Shaders in Eve Online](https://cadia.ru.is/wiki/_media/public:t-gede-12-1:gede-guest-pall.pdf).
-  This is camera optics, not a simulation of atmospheric scattering in space.
-- Dispatch only a clipped quad around the sun, with a soft circular edge.
-  Default radius is 0.32 viewport heights, with 24 stable-jitter depth samples.
-  Rays do not brighten opaque foreground surfaces. Lens and ray strengths are
-  independent; disabling rays skips their sampling loop without losing flares.
-- Publish changing sun parameters through a mutex-protected render snapshot.
-- Reuse the compute pipeline instead of recreating it on every sun update.
-- Use the actual color-image size instead of Godot's private SceneData UBO
-  include (not available in the standard 4.7.2 distribution).
-- Request resolved color/depth after transparency, preserving opaque occlusion
-  with MSAA. Transparent surfaces without depth writes do not occlude the sun.
-- Remove unused texture creation, SceneData/normal/color-sampler helpers,
-  linear sampler allocation, and sample code from the base implementation.
-  Retain render-thread lifecycle, color/depth bindings, UBO updates, dispatch
-  and RID cleanup. No private texture context is allocated or cleared on resize.
+Occlusion light shafts have independent strength, radius and a bounded 8-96
+sample budget (48 by default). Following ARez's Godray approach, exponentially
+decayed radial integration of depth occlusion creates a squared inverse mask
+over local optical glow. Density controls integration reach and shadow weight
+controls contrast; normalized weights keep unoccluded gain independent of sample
+count. Jitter is pixel-stable rather than time-varying to avoid shimmer.
+Radial integration of the resolved background-depth mask creates
+shadows behind foreground silhouettes. This separate screen-space approximation
+does not add light to foreground surfaces and is not volumetric dust scattering.
+With no occluders it produces a smooth local veil, not procedural radial stripes.
+Zero strength bypasses its depth march and excludes its radius from dispatch.
 
-Forward+ or Mobile is required. Compatibility/headless leaves the physical sun
-intact but does not attach this effect. Only camera-relative rendering data
-crosses this GPU boundary; there is no dependency on the engine's precision mode.
+The compute pass reads resolved reverse-Z depth with nine source-visibility taps
+per workgroup, adds linear HDR light before scene glow and tone mapping, and
+preserves alpha. Its streak can overlay foreground geometry while the source
+is visible: it is a lens artifact, not a world-space light shaft. Dispatch is
+clipped to the finite streak support and actual viewport dimensions. No private
+engine UBO or textures are used.
+
+Forward+ or Mobile with RenderingDevice is required. The physical sun still
+renders without the compositor in Compatibility/headless mode.
 
 ## Verification
 
 Run `scripts/setup-godot.ps1 -RunTests` (or the shell equivalent).
-`sun_flare_render_test.gd` reads actual GPU pixels at 321x241, checking visible,
-occluded, rear-facing and offscreen sources with MSAA disabled and 4x MSAA.
-4x is used as the portable Vulkan framebuffer sample count; 2x is optional.
-It also checks radial shadows from an off-center occluder, unchanged opaque
-surfaces/screen corners, and clipped dispatch bounds.
-The same effect is also exercised across repeated viewport resizes to verify
-buffer updates and source-visibility changes without private texture storage.
-`world_presentation_test.gd` checks camera projection and directional tracking.
-These rendering tests require the normal Forward+ test environment, not the
-headless/Compatibility renderer.
-
-Local verification on 2026-11-02: Godot 4.7.2 / Intel UHD / Forward+,
-231 GdUnit4 cases passed. Main-scene screenshots checked at 1280x720 and
-481x641 with a ship near the solar disc, flares only, rays, and rear view.
-A 40-frame 1280x720 GPU sample measured 34.7 ms off, 35.1 ms flares only,
-and 35.9 ms with rays. These short samples share the GPU with other processes
-and are indicative, not a performance guarantee.
-
-Interactive warp gameplay and a sustained frame-time budget still need playtest.
-
-Cleanup verification on 2026-11-03: all 232 GdUnit4 cases passed under the
-same Windows / Forward+ environment, including repeated viewport resize.
+`sun_flare_render_test.gd` reads GPU pixels to verify horizontal falloff, source
+tracking, squeeze response, disabled effects, source occlusion with MSAA disabled
+and 4x MSAA, foreground overlays, clipped bounds and viewport resize.
+Removed-feature tests were deleted rather than retaining dormant implementations.
+`world_presentation_test.gd` separately covers projection and distance response.

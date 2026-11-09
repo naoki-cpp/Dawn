@@ -133,24 +133,15 @@ static func spawn_gate_markers(gates_root: Node3D, gates: Array, world_scale: fl
 
 
 ## Spawn visual nodes for celestial bodies in the current star system
-## (planets only, ADR-0025 §5 superseded for stars -- see note below).
 ## Re-called on system change. `to_godot_components` converts an absolute f64
 ## position into Godot world space after origin subtraction.
 ##
-## Stars get no marker/mesh here: the sky shader (space_sky.gdshader) already
-## draws the local star as a direction-based disc/corona/glow. WorldPresentation
-## updates that direction from the ship's continuous world-presentation position so it
-## keeps celestial parallax during warp. A finite-distance mesh duplicated the
-## star with a separate projection and created a visible seam. Keeping one sky
-## representation removes that mismatch, at the cost of the star no longer
-## being a clickable warp target (planets are unaffected).
+## Stars get a navigation bracket only; the sky shader owns the stellar disc.
 static func spawn_body_markers(bodies_root: Node3D, bodies: Array, world_scale: float, to_godot_components: Callable) -> void:
 	clear_children(bodies_root)
 
 	for entry: Variant in bodies:
 		var b: CelestialBodyRecord = entry as CelestialBodyRecord
-		if b.kind == "Star":
-			continue
 
 		var b_id    : int     = b.body_id
 		var kind    : String  = b.kind
@@ -170,6 +161,11 @@ static func spawn_body_markers(bodies_root: Node3D, bodies: Array, world_scale: 
 		marker.set_meta("physical_extent", radius)
 		marker.set_meta("nav_pick_radius_px", BRACKET_SCRIPT.PICK_RADIUS_PX)
 		bodies_root.add_child(marker)
+		if kind == "Star":
+			marker.set_meta("callout_text", name_str)
+			marker.set_meta("callout_color", STATION_COLOR)
+			marker.add_child(BRACKET_SCRIPT.build(STATION_COLOR, BRACKET_PIXEL_SIZE))
+			continue
 
 		## Visual sphere. Physical metres are converted once through WorldSpace;
 		## the renderer does not apply a second gameplay or camera-size policy.

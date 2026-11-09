@@ -17,6 +17,8 @@ render_mode unshaded, blend_add, depth_draw_never, cull_disabled, fog_disabled;
 
 // Lets the whole field be dimmed or lifted without rebuilding the MultiMesh.
 uniform float flux_scale : hint_range(0.0, 4.0) = 1.0;
+uniform vec3 sun_direction = vec3(0.0, 0.0, -1.0);
+uniform float sun_angular_radius = 0.0;
 // Half-width of every star's quad, in pixels. One value for the whole field:
 // stars are point sources, so they share a point spread and only their flux
 // differs. Pushed from Starfield.POINT_SPREAD_PIXELS.
@@ -41,6 +43,10 @@ varying float flux;
 void vertex() {
 	// INSTANCE_CUSTOM is packed by Starfield.build_multimesh().
 	flux = INSTANCE_CUSTOM.r * flux_scale;
+	vec3 star_direction = normalize(MODEL_MATRIX[3].xyz - CAMERA_POSITION_WORLD);
+	if (sun_angular_radius > 0.0 && dot(star_direction, sun_direction) > cos(sun_angular_radius)) {
+		flux = 0.0;
+	}
 	float pixels = max(1.0, point_spread_pixels);
 
 	// QuadMesh spans -0.5 .. 0.5, so this is the unit corner offset.

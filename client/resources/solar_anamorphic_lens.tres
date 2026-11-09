@@ -1,0 +1,21 @@
+[gd_resource type="CompositorEffect" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://addons/lens_effects/lens_flare_compositor_effect.gd" id="1_lens"]
+
+[resource]
+resource_name = "Solar Anamorphic Camera"
+enabled = false
+script = ExtResource("1_lens")
+Intensity = 0.28
+Streak_Length = 0.09
+Streak_Width = 0.0028
+Glare_Strength = 1.2
+Glare_Radius = 0.045
+Squeeze = 1.8
+Lens_Tint = Color(1, 0.68, 0.32, 1)
+Rays_Strength = 0.12
+Rays_Radius = 0.45
+Rays_Samples = 48
+Rays_Decay = 0.98
+Rays_Density = 0.96
+Rays_Shadow_Weight = 1.4

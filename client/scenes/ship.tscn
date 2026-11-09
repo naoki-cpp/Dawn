@@ -10,21 +10,18 @@ radial_segments = 3
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_hull"]
 albedo_color = Color(0.22, 0.32, 0.52, 1)
-metallic = 0.92
-roughness = 0.12
-emission_enabled = true
-emission = Color(0.15, 0.35, 0.85, 1)
-emission_energy_multiplier = 0.6
+metallic = 0.35
+roughness = 0.4
 
 [sub_resource type="SphereMesh" id="SphereMesh_glow"]
-radius = 20.0
-height = 40.0
+radius = 8.0
+height = 16.0
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_glow"]
 albedo_color = Color(0.3, 0.6, 1.0, 1)
 emission_enabled = true
 emission = Color(0.3, 0.6, 1.0, 1)
-emission_energy_multiplier = 12.0
+emission_energy_multiplier = 3.0
 shading_mode = 1
 
 [node name="Ship" type="Node3D"]
@@ -33,12 +30,12 @@ script = ExtResource("1_ship")
 [node name="Hull" type="MeshInstance3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, 0, 0, 0)
 mesh = SubResource("CylinderMesh_hull")
-get_surface_override_material/0 = SubResource("StandardMaterial3D_hull")
+surface_material_override/0 = SubResource("StandardMaterial3D_hull")
 
 [node name="EngineGlow" type="MeshInstance3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 105)
 mesh = SubResource("SphereMesh_glow")
-get_surface_override_material/0 = SubResource("StandardMaterial3D_glow")
+surface_material_override/0 = SubResource("StandardMaterial3D_glow")
 
 [node name="EngineLight" type="OmniLight3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 105)

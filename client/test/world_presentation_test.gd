@@ -27,6 +27,16 @@ func test_sun_flare_rejects_rear_and_offscreen_directions() -> void:
 	assert_float(source.visibility as float).is_equal(1.0)
 
 
+func test_optical_distance_response_fades_more_slowly_than_physical_disc_size() -> void:
+	var one_au := WorldPresentationScript.sun_flare_scale(1.0)
+	var ten_au := WorldPresentationScript.sun_flare_scale(10.0)
+	assert_float(one_au).is_greater(ten_au)
+	assert_float(ten_au / one_au).is_greater(0.4)
+	assert_float(ten_au / one_au).is_less(0.7)
+	assert_float(WorldPresentationScript.sun_flare_scale(0.0)).is_less_equal(1.5)
+	assert_bool(is_finite(WorldPresentationScript.sun_flare_scale(INF))).is_true()
+
+
 func test_sun_flare_tracks_direction_and_apparent_radius_not_absolute_distance() -> void:
 	var camera: Camera3D = auto_free(Camera3D.new())
 	add_child(camera)
@@ -36,6 +46,16 @@ func test_sun_flare_tracks_direction_and_apparent_radius_not_absolute_distance()
 	assert_float(moved.radius as float).is_greater(first.radius as float)
 	camera.rotation.y = PI
 	assert_dict(WorldPresentationScript.project_sun_flare(camera, Vector3.FORWARD, 0.005)).is_empty()
+
+
+func test_resolved_stellar_disc_does_not_expand_point_source_flares() -> void:
+	var camera: Camera3D = auto_free(Camera3D.new())
+	add_child(camera)
+	var distant := WorldPresentationScript.project_sun_flare(camera, Vector3.FORWARD, 0.005)
+	var nearby := WorldPresentationScript.project_sun_flare(camera, Vector3.FORWARD, asin(1.0 / 1.5))
+	assert_float(distant.visibility).is_equal(1.0)
+	assert_float(nearby.visibility).is_equal(0.0)
+	assert_float(nearby.radius).is_less_equal(12.0)
 
 func _position(x: float, y: float, z: float) -> PackedFloat64Array:
 	return PackedFloat64Array([x, y, z])
@@ -107,7 +127,7 @@ func test_space_background_uses_a_restrained_galactic_palette() -> void:
 	var highlight: Color = sky_material.get_shader_parameter("nebula_highlight_color") as Color
 
 	assert_float(sky_material.get_shader_parameter("nebula_strength") as float) \
-		.is_equal_approx(0.18, 0.0001)
+		.is_equal_approx(0.24, 0.0001)
 	assert_float(primary.r).is_equal_approx(0.80, 0.0001)
 	assert_float(primary.g).is_equal_approx(0.12, 0.0001)
 	assert_float(secondary.r).is_equal_approx(0.32, 0.0001)
@@ -287,6 +307,30 @@ func test_render_scale_authority_controls_spawned_navigation_geometry() -> void:
 	var station_visual: MeshInstance3D = station_marker.get_child(0) as MeshInstance3D
 	var station_mesh: SphereMesh = station_visual.mesh as SphereMesh
 	assert_float(station_mesh.radius).is_equal_approx(NavigationMarkerRenderer.STATION_VISUAL_RADIUS * 0.25, 0.0001)
+
+
+func test_star_bracket_tracks_the_sky_direction_and_remains_pickable() -> void:
+	var presentation := WorldPresentationScript.new()
+	presentation._world = FakeWorld.new()
+	var camera: Camera3D = auto_free(Camera3D.new())
+	add_child(camera)
+	camera.position = Vector3(120.0, 40.0, 300.0)
+	camera.far = 100_000.0
+	presentation._camera = camera
+	var root: Node3D = auto_free(Node3D.new())
+	add_child(root)
+	NavigationMarkerRenderer.spawn_body_markers(root,
+		[_body(1, "Star", "Helios", _position(0.0, 0.0, 1.0e12), 696_000_000.0, 0.5)],
+		0.25, presentation._world.to_godot_components)
+	var ship: FakeShip = auto_free(FakeShip.new())
+	add_child(ship)
+	for distance: float in [1.0e12, 1_044_000_000.0]:
+		ship.world_presentation_position_value = _position(0.0, 0.0, 1.0e12 - distance)
+		presentation._update_position_markers(root, "nav_pos", 7, {7: ship})
+		var marker := root.get_child(0) as Node3D
+		assert_vector((marker.global_position - camera.global_position).normalized()).is_equal_approx(
+			Vector3.FORWARD, Vector3.ONE * 0.0001)
+		assert_int(ShipPicking.pick_body_at(camera, camera.unproject_position(marker.global_position), root)).is_equal(1)
 
 
 func test_warp_destination_approaches_before_the_arrival_snap() -> void:

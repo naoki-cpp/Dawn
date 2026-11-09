@@ -145,10 +145,7 @@ func test_spawn_gate_markers_builds_one_marker_per_array_entry() -> void:
 
 # -- spawn_body_markers -------------------------------------------------------------
 
-func test_spawn_body_markers_skips_stars_and_only_tags_planet_markers() -> void:
-	## Stars get no marker: WorldPresentation moves the sky shader's single
-	## direction-based disc, so a second finite-distance mesh would duplicate it.
-	## See the doc comment on spawn_body_markers().
+func test_spawn_body_markers_keeps_stars_selectable_without_a_second_disc() -> void:
 	var bodies_root: Node3D = auto_free(Node3D.new())
 	var bodies: Array = [
 		_body(1, "Star", "Helios", _position(0.0, 0.0, 0.0), 1000.0, 0.5),
@@ -157,9 +154,15 @@ func test_spawn_body_markers_skips_stars_and_only_tags_planet_markers() -> void:
 
 	NavigationMarkerRenderer.spawn_body_markers(bodies_root, bodies, 0.1, _to_godot_components)
 
-	assert_int(bodies_root.get_child_count()).is_equal(1)
+	assert_int(bodies_root.get_child_count()).is_equal(2)
+	var star_marker: Node3D = bodies_root.get_child(0) as Node3D
+	assert_int(star_marker.get_meta("body_id")).is_equal(1)
+	assert_str(star_marker.get_meta("callout_text")).is_equal("Helios")
+	assert_bool(star_marker.has_meta("physical_body_mesh")).is_false()
+	assert_int(star_marker.get_child_count()).is_equal(1)
+	assert_bool(star_marker.get_child(0) is Sprite3D).is_true()
 
-	var planet_marker: Node3D = bodies_root.get_child(0) as Node3D
+	var planet_marker: Node3D = bodies_root.get_child(1) as Node3D
 	assert_int(planet_marker.get_meta("body_id") as int).is_equal(2)
 	assert_str(planet_marker.get_meta("body_kind") as String).is_equal("Planet")
 	assert_float(planet_marker.get_meta("nav_pick_radius_px") as float).is_equal(BracketScript.PICK_RADIUS_PX)

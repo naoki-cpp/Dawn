@@ -2,237 +2,110 @@
 extends BaseCompositorEffect
 class_name LensFlareEffect
 
-## Path to your GLSL compute shader
-@export_file_path("*.glsl") var ShaderPath := "res://addons/lens_effects/lens_flares.glsl":
-	set(v):
-		ShaderPath = v
-		_initialize_render()
-		settings_dirty = true
+## Camera-space optical response, independent of the stellar disc radius.
+@export_range(0.0, 4.0, 0.01) var Intensity := 0.28
+@export_range(0.02, 0.3, 0.001) var Streak_Length := 0.09
+@export_range(0.0005, 0.01, 0.0001) var Streak_Width := 0.0028
+@export_range(0.0, 2.0, 0.01) var Glare_Strength := 0.7
+@export_range(0.01, 0.1, 0.001) var Glare_Radius := 0.028
+@export_range(1.0, 3.0, 0.01) var Squeeze := 1.8
+@export var Lens_Tint := Color(1.0, 0.68, 0.32, 1.0)
+@export_group("Occlusion Light Shafts")
+@export_range(0.0, 1.0, 0.01) var Rays_Strength := 0.12
+@export_range(0.05, 0.5, 0.01) var Rays_Radius := 0.3
+@export_range(8, 96, 1) var Rays_Samples := 48
+@export_range(0.8, 1.0, 0.001) var Rays_Decay := 0.98
+@export_range(0.2, 1.0, 0.01) var Rays_Density := 0.96
+@export_range(0.0, 4.0, 0.01) var Rays_Shadow_Weight := 2.0
 
-## Projected position of the sun in screen coordinates. Usually gets set by code.
-var sun_position = Vector2():
-	set(v):
-		sun_position = v
-		settings_dirty = true
-## 1.0 if looking at the sun, -1.0 else. Usually gets set by code.
-var sun_dir_sign := 1.0
-var occlusion_radius := 1.0
 var _sun_mutex := Mutex.new()
 var _pending_sun: Array = []
+var _source := Vector4(0.5, 0.5, 0.0, 1.0)
+var _source_color := Color.WHITE
+var _optical_scale := 1.0
+var _shader: RID
+var _pipeline: RID
+var _uniform_buffer: RID
 
-## Publish one coherent main-thread snapshot to the rendering thread.
-func set_sun(position: Vector2, color: Color, visibility: float, radius: float) -> void:
+
+## Publish one coherent source snapshot to the rendering thread.
+func set_sun(position: Vector2, color: Color, visibility: float, radius: float, optical_scale: float = 1.0) -> void:
 	_sun_mutex.lock()
-	_pending_sun = [position, color, visibility, radius]
+	_pending_sun = [position, color, visibility, radius, optical_scale]
 	_sun_mutex.unlock()
-## Color of the sun, lens flares and god rays. Use the alpha to control strength
-@export var sun_color = Color("635728"):
-	set(v):
-		sun_color = v
-		settings_dirty = true
-@export_group("Sun Settings", "Effect_")
-## How bright the center of the sun is
-@export var Effect_Multiplier := 3.593:
-	set(v):
-		Effect_Multiplier = v
-		settings_dirty = true
-## Controls the blending of the center and the lens flares around it
-@export var Effect_Easing := 0.576:
-	set(v):
-		Effect_Easing = clampf(v, 0.0, 10.0)
-		settings_dirty = true
-@export_group("Anamorphic flares", "Anamorphic_")
-@export var Anamorphic_Threshold := 0.5:
-	set(v):
-		Anamorphic_Threshold = v
-		settings_dirty = true
-## Strength of the anamorphic lens flare
-@export var Anamorphic_Intensity := 400.0:
-	set(v):
-		Anamorphic_Intensity = v
-		settings_dirty = true
-## How much the anamorphic flare is stretched horizontally
-@export var Anamorphic_Stretch := 0.44:
-	set(v):
-		Anamorphic_Stretch = v
-		settings_dirty = true
-## Brightness of the anamorphic flare
-@export var Anamorphic_Brightness := 0.574:
-	set(v):
-		Anamorphic_Brightness = v
-		settings_dirty = true
-@export_group("God rays")
-## Radius of the local optical effect in viewport-height units.
-@export_range(0.02, 0.8, 0.01) var Effect_Radius := 0.32:
-	set(v):
-		Effect_Radius = clampf(v, 0.02, 0.8)
-		settings_dirty = true
-## Per-sample weight decay along the path toward the sun.
-@export_range(0.0, 1.0, 0.001) var Decay := 0.99:
-	set(v):
-		Decay = v
-		settings_dirty = true
-## Fraction of the screen-pixel-to-sun segment sampled for optical occlusion.
-@export_range(0.0, 1.0, 0.001) var Density := 0.99:
-	set(v):
-		Density = v
-		settings_dirty = true
-## Strength of the local depth-occluded optical glow, independent of the flare.
-@export var Weight := 0.137:
-	set(v):
-		Weight = v
-		settings_dirty = true
-## Very important setting. Controls how many radial blur samples are taken. Higher values increase the quality/ resolution of the god rays at the cost of performance.
-@export_range(1, 64, 1) var SampleCount := 24:
-	set(v):
-		SampleCount = clampi(v, 1, 64)
-		settings_dirty = true
 
 
-# Set 0: color image = 1, resolved depth sampler = 2.
-# No private engine SceneData UBO is required by this adaptation.
-
-# Set 1
-const EFFECT_DATA_UBO_BINDING := 0
-
-var shader : RID
-var shader_pipeline : RID
-
-var effect_data_ubo : RID
-var effect_data_ubo_uniform : RDUniform
-
-var settings_dirty := false
-
-
-# Called from _init().
 func _initialize_resource() -> void:
 	effect_callback_type = EFFECT_CALLBACK_TYPE_POST_TRANSPARENT
 	access_resolved_color = true
 	access_resolved_depth = true
 
 
-# Called on render thread after _init().
 func _initialize_render() -> void:
-	shader = create_shader(ShaderPath)
+	_shader = create_shader("res://addons/lens_effects/lens_flares.glsl")
+	if _shader.is_valid():
+		_pipeline = create_pipeline(_shader)
 
 
-# Called at beginning of _render_callback(), after updating render variables
-# and after _render_size_changed().
-# Use this function to setup textures or uniforms.
 func _render_setup() -> void:
-	if not shader.is_valid():
-		return
 	_sun_mutex.lock()
 	var snapshot := _pending_sun
 	_pending_sun = []
 	_sun_mutex.unlock()
 	if not snapshot.is_empty():
-		sun_position = snapshot[0]
-		sun_color = snapshot[1]
-		sun_dir_sign = snapshot[2]
-		occlusion_radius = snapshot[3]
-		settings_dirty = true
-	if not effect_data_ubo.is_valid() or settings_dirty:
-		update_or_recreate_global_uniform_buffer()
-	if not rd.compute_pipeline_is_valid(shader_pipeline):
-		create_shader_pipeline()
+		var position: Vector2 = snapshot[0]
+		_source = Vector4(position.x, position.y, snapshot[2], snapshot[3])
+		_source_color = snapshot[1]
+		_optical_scale = clampf(snapshot[4], 0.1, 1.5) if is_finite(snapshot[4]) else 1.0
+	var tint := Color(_source_color.r * Lens_Tint.r, _source_color.g * Lens_Tint.g,
+		_source_color.b * Lens_Tint.b, _source_color.a)
+	var data: Array = [tint, _source,
+		Vector4(_length(), _width(), maxf(Intensity, 0.0) * _optical_scale / clampf(Squeeze / 1.8, 0.5, 2.0), 0.0),
+		Vector4(_glare_radius(), maxf(Glare_Strength, 0.0) * _optical_scale, 0.0, 0.0),
+		Vector4(_rays_radius(), clampf(Rays_Strength, 0.0, 1.0) * _optical_scale, clampi(Rays_Samples, 8, 96), 0.0),
+		Vector4(clampf(Rays_Decay, 0.8, 1.0), clampf(Rays_Density, 0.2, 1.0), clampf(Rays_Shadow_Weight, 0.0, 4.0), 0.0)]
+	if not _uniform_buffer.is_valid():
+		_uniform_buffer = create_uniform_buffer(data)
+	else:
+		update_uniform_buffer(_uniform_buffer, data)
 
 
-# Called for each view. Run the compute shaders from here.
-func _render_view(p_view : int) -> void:
-	if not shader_pipeline.is_valid():
+func _length() -> float:
+	return clampf(Streak_Length, 0.02, 0.3) * clampf(Squeeze, 1.0, 3.0) / 1.8 * _optical_scale
+
+
+func _width() -> float:
+	return maxf(clampf(Streak_Width, 0.0005, 0.01), 0.75 / maxf(render_size.y, 1.0))
+
+
+func _glare_radius() -> float:
+	return clampf(Glare_Radius, 0.01, 0.1) * _optical_scale
+
+
+func _rays_radius() -> float:
+	return clampf(Rays_Radius, 0.05, 0.5) * _optical_scale if Rays_Strength > 0.0 else 0.0
+
+
+func _render_view(view: int) -> void:
+	if not _pipeline.is_valid() or not _uniform_buffer.is_valid() or _source.z <= 0.0:
 		return
-	var region := effect_region(render_size, sun_position, Effect_Radius)
+	var region := effect_region(render_size, Vector2(_source.x, _source.y), _length(), _width(), _glare_radius(), _rays_radius())
 	if region.size.x <= 0 or region.size.y <= 0:
 		return
-	_workgroups = Vector3i(ceili(float(region.size.x) / 16.0),
-		ceili(float(region.size.y) / 16.0), 1)
-	var scene_uniform_set : Array[RDUniform] = [
-		get_color_image_uniform(p_view),
-		get_depth_sampler_uniform(p_view, nearest_sampler),
-	]
-	var df_uniform_set : Array[RDUniform] = [effect_data_ubo_uniform]
-
-	var uniform_sets : Array[Array] = [
-		scene_uniform_set,
-		df_uniform_set
-	]
-
-	run_compute_shader(
-		"Lens Flares",
-		shader,
-		shader_pipeline,
-		uniform_sets,
-		PackedFloat32Array([region.position.x, region.position.y, region.size.x, region.size.y]),
-	 )
+	_workgroups = Vector3i(ceili(region.size.x / 16.0), ceili(region.size.y / 16.0), 1)
+	run_compute_shader("Solar camera optics", _shader, _pipeline, [
+		[get_color_image_uniform(view), get_depth_sampler_uniform(view, nearest_sampler)],
+		[get_uniform_buffer_uniform(_uniform_buffer, 0)]],
+		PackedFloat32Array([region.position.x, region.position.y, region.size.x, region.size.y]))
 
 
-static func effect_region(size: Vector2i, source: Vector2, radius: float) -> Rect2i:
+## Finite optical support plus the independently bounded shaft radius.
+static func effect_region(size: Vector2i, source: Vector2, length: float, width: float = 0.0028, glare_radius: float = 0.028, rays_radius: float = 0.0) -> Rect2i:
+	if size.x <= 0 or size.y <= 0 or not source.is_finite() or source.x < 0.0 or source.x >= 1.0 or source.y < 0.0 or source.y >= 1.0:
+		return Rect2i()
 	var center := source * Vector2(size)
-	var extent := Vector2.ONE * radius * size.y
+	var extent := Vector2(length * 6.0, maxf(width, 0.75 / size.y) * 1.8 * 6.0).max(Vector2.ONE * glare_radius * 6.0) * size.y
+	extent = extent.max(Vector2.ONE * rays_radius * size.y)
 	var start := Vector2i((center - extent).floor()).clamp(Vector2i.ZERO, size)
 	var end := Vector2i((center + extent).ceil()).clamp(Vector2i.ZERO, size)
 	return Rect2i(start, end - start)
-
-
-# Called before _render_setup() if `render_size` has changed.
-func _render_size_changed() -> void:
-	settings_dirty = true
-
-
-func create_global_uniform_buffer() -> void:
-	if effect_data_ubo.is_valid():
-		free_rid(effect_data_ubo)
-
-	var data := get_global_uniform_data()
-	effect_data_ubo = create_uniform_buffer(data)
-
-	effect_data_ubo_uniform = get_uniform_buffer_uniform(effect_data_ubo, EFFECT_DATA_UBO_BINDING)
-	settings_dirty = false
-
-
-## IMPORTANT: Order must match EffectData (struct) UBO layouts in the glsl shaders.
-## Vector4's must come first or they get misaligned if the smaller 4-byte variables
-## are not in groups of 4 (16 bytes).
-func get_global_uniform_data() -> Array:
-	var pos = sun_position
-	return [
-		sun_color, # vec4
-		pos.x,
-		pos.y,
-		sun_dir_sign,
-		Anamorphic_Threshold,
-		Anamorphic_Intensity,
-		Anamorphic_Stretch,
-		Anamorphic_Brightness,
-		Effect_Multiplier,
-		Effect_Easing,
-		Decay,
-		Density,
-		Weight,
-		float(SampleCount),
-		occlusion_radius,
-		Effect_Radius,
-	]
-
-
-## Tries to update the existing effect_data_ubo but if that throws an error,
-## it recreates it
-func update_or_recreate_global_uniform_buffer():
-	if !effect_data_ubo.is_valid():
-		create_global_uniform_buffer()
-		return
-	var data := get_global_uniform_data()
-	var update_err := update_uniform_buffer(effect_data_ubo, data)
-	if update_err:
-		create_global_uniform_buffer()
-		return
-	effect_data_ubo_uniform = get_uniform_buffer_uniform(effect_data_ubo, EFFECT_DATA_UBO_BINDING)
-	settings_dirty = false
-
-
-
-func create_shader_pipeline():
-	if rd.compute_pipeline_is_valid(shader_pipeline):
-		rd.free_rid(shader_pipeline)
-	shader_pipeline = create_pipeline(shader)
