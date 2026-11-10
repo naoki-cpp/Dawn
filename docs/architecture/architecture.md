@@ -31,6 +31,7 @@ This file is the project's **entry point**. For details, always follow the link 
 | `docs/architecture/recovery-contract.md` | Which state is authoritative/recoverable, what commit/ack means, and crash/failover guarantees |
 | `docs/architecture/durable-journal.md` | #271's fallible journal framing, evidence, compaction, archive, and failure policy |
 | `docs/architecture/database-strategy.md` | Which storage products/repositories serve each role and when to migrate |
+| [Celestial Rendering](celestial-rendering.md) | Current celestial rendering pipeline, ownership and approximation limits |
 | `docs/process/roadmap.md` | What to build, and in what order |
 | `docs/design/game-design.md` | Why a feature exists / lessons from EVE, future candidates |
 | `docs/adr/` | Why a decision was made (immutable decision record, amended forward by later ADRs) |

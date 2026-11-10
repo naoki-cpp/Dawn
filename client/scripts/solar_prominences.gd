@@ -10,9 +10,6 @@ func _init() -> void:
 	visible = false
 	var material := ShaderMaterial.new()
 	material.shader = preload("res://shaders/solar_prominence.gdshader")
-	material.set_shader_parameter("shape_mask", _build_shape_mask())
-	material.set_shader_parameter("layer_one", _flow_texture(6197, 0.035))
-	material.set_shader_parameter("layer_two", _flow_texture(1741, 0.06))
 	var instance := MeshInstance3D.new()
 	instance.mesh = _build_mesh()
 	instance.material_override = material
@@ -40,50 +37,15 @@ func update_view(camera: Camera3D, direction: Vector3, angular_radius: float) ->
 	visible = radius_pixels > 6.0
 
 
-static func _flow_texture(seed_value: int, frequency: float) -> NoiseTexture2D:
-	var noise := FastNoiseLite.new()
-	noise.seed = seed_value
-	noise.frequency = frequency
-	noise.fractal_octaves = 4
-	var texture := NoiseTexture2D.new()
-	texture.width = 512
-	texture.height = 256
-	texture.seamless = true
-	texture.noise = noise
-	return texture
-
-
-static func _build_shape_mask() -> ImageTexture:
-	# Authored envelope: torn edges and uneven knots, independent of scrolling detail.
-	var noise := FastNoiseLite.new()
-	noise.seed = 3407
-	noise.frequency = 0.05
-	var image := Image.create(256, 128, false, Image.FORMAT_L8)
-	for y in range(image.get_height()):
-		var v := float(y) / (image.get_height() - 1) * 2.0 - 1.0
-		for x in range(image.get_width()):
-			var t := float(x) / (image.get_width() - 1)
-			var bend := 0.12 * sin(t * 15.0) + noise.get_noise_2d(x * 0.4, y) * 0.18
-			var width := 0.38 + 0.28 * sin(PI * t) + 0.1 * sin(t * 27.0)
-			var edge := 1.0 - smoothstep(width * 0.45, width, absf(v - bend))
-			var feet := smoothstep(0.0, 0.035, t) * (1.0 - smoothstep(0.965, 1.0, t))
-			var knot := 0.5 + 0.5 * exp(-pow((t - 0.68) / 0.17, 2.0))
-			var holes := smoothstep(-0.65, 0.15, noise.get_noise_2d(x, y * 1.7))
-			var density := edge * feet * knot * holes
-			image.set_pixel(x, y, Color(density, density, density, 1.0))
-	image.generate_mipmaps()
-	return ImageTexture.create_from_image(image)
-
-
 static func _build_mesh() -> ArrayMesh:
 	var vertices := PackedVector3Array()
 	var uv := PackedVector2Array()
 	var colors := PackedColorArray()
 	var indices := PackedInt32Array()
-	for arch in range(6):
-		var seed := fmod(float(arch) * 0.618034 + 0.37, 1.0)
-		var azimuth := float(arch) * 2.39996 + 0.45
-		var latitude := 0.55 + seed * 0.25 if arch % 2 == 0 else -0.08 - seed * 0.15
+	for arch in range(2):
+		var prominence_seed := 0.37 if arch == 0 else 0.79
+		var azimuth := 0.45 if arch == 0 else 2.76
+		var latitude := 0.64 if arch == 0 else -0.42
 		var equator := sqrt(1.0 - latitude * latitude)
 		var normal := Vector3(cos(azimuth) * equator, sin(azimuth) * equator, latitude)
 		# The curtain lies in a surface-tangent/radial plane, with shallow depth layers.
@@ -93,17 +55,21 @@ static func _build_mesh() -> ArrayMesh:
 			var base := vertices.size()
 			for section in range(SECTIONS + 1):
 				var t := float(section) / SECTIONS
-				var arc := lerpf(-0.075, 0.075, pow(t, 1.12))
+				var arc := lerpf(-0.17, 0.17, pow(t, 1.12)) + 0.035 * sin(t * TAU * 1.2 + prominence_seed * TAU) * sin(PI * t)
 				var radial := normal * cos(arc) + tangent * sin(arc)
-				var lift := sin(PI * t)
-				var height := (0.12 + seed * 0.06) * (1.0 - layer * 0.09)
+				var lift := pow(sin(PI * t), 0.86)
+				var height := (0.34 if arch == 0 else 0.17) * (1.0 - layer * 0.08)
 				for strip in range(STRIPS + 1):
 					var v := float(strip) / STRIPS * 2.0 - 1.0
-					var width := 0.035 * lift * (1.0 + 0.18 * sin(t * 21.0 + seed * TAU))
+					var width_scale := 0.085 if arch == 0 else 0.05
+					var width := width_scale * lift * (1.0 + 0.16 * sin(t * 17.0 + prominence_seed * TAU)
+						+ 0.08 * sin(t * 31.0 + prominence_seed * 5.0))
 					vertices.append(radial * (1.0 + lift * height + v * width)
-						+ depth * (layer - 1) * 0.009 * lift)
+						+ depth * (float(layer) - 1.0) * 0.022 * lift)
 					uv.append(Vector2(t, v))
-					colors.append(Color(1.0 if arch == 0 else 0.09, seed, float(layer) / LAYERS, 1.0))
+					var arch_opacity := 0.82 if arch == 0 else 0.07
+					var layer_opacity := 1.0 if layer == 0 else (0.38 if layer == 1 else 0.16)
+					colors.append(Color(arch_opacity * layer_opacity, prominence_seed, float(layer) / LAYERS, 1.0))
 			for section in range(SECTIONS):
 				for strip in range(STRIPS):
 					var a := base + section * (STRIPS + 1) + strip

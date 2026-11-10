@@ -37,20 +37,16 @@ func test_proxy_preserves_angular_radius_and_follows_the_camera_without_rotating
 	assert_bool(prominence.visible).is_false()
 
 
-func test_shape_mask_has_transparent_edges_and_nonuniform_material() -> void:
-	var image := Prominences._build_shape_mask().get_image()
-	assert_float(image.get_pixel(0, 64).r).is_equal(0.0)
-	assert_float(image.get_pixel(128, 0).r).is_equal(0.0)
-	assert_float(image.get_pixel(128, 127).r).is_equal(0.0)
+func test_mesh_has_one_dominant_loop_and_a_faint_secondary_loop() -> void:
+	var arrays := Prominences._build_mesh().surface_get_arrays(0)
+	var colors: PackedColorArray = arrays[Mesh.ARRAY_COLOR]
 	var minimum := 1.0
 	var maximum := 0.0
-	for y in range(32, 96):
-		for x in range(32, 224):
-			var value := image.get_pixel(x, y).r
-			minimum = minf(minimum, value)
-			maximum = maxf(maximum, value)
+	for color in colors:
+		minimum = minf(minimum, color.r)
+		maximum = maxf(maximum, color.r)
 	assert_float(maximum).is_greater(0.4)
-	assert_float(maximum - minimum).is_greater(0.3)
+	assert_float(minimum).is_less(0.1)
 
 
 func test_unresolved_prominences_become_visible_when_the_camera_zooms_in() -> void:

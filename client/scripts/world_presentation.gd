@@ -11,6 +11,7 @@ extends RefCounted
 const NavigationMarkerRendererScript = preload("res://scripts/navigation_marker_renderer.gd")
 const StarfieldScript = preload("res://scripts/starfield.gd")
 const SolarProminencesScript = preload("res://scripts/solar_prominences.gd")
+const StellarSource = preload("res://scripts/stellar_source.gd")
 
 const WARP_TUNNEL_THRESHOLD : float = 2_000.0
 const WARP_TUNNEL_FADE_IN_RATE : float = 3.0
@@ -93,6 +94,24 @@ func refresh(delta: float, player_ship_id: int, ships: Dictionary, bodies: Array
 	_update_position_markers(_gates_root, "nav_pos", player_ship_id, ships)
 	_update_sun_direction(player_ship_id, ships, bodies)
 	_update_warp_tunnel_effect(delta, player_ship_id, ships)
+
+
+func update_stellar_view(direction: Vector3, color: Vector3, angular_radius: float,
+		stellar_radius: float = 696_000_000.0) -> void:
+	if _sky_mat == null:
+		return
+	if _prominences != null:
+		_prominences.update_view(_camera, direction, angular_radius)
+	if _starfield_mat != null:
+		_starfield_mat.set_shader_parameter("sun_direction", direction)
+		_starfield_mat.set_shader_parameter("sun_angular_radius", angular_radius)
+	_sky_mat.set_shader_parameter("sun_direction", direction)
+	_sky_mat.set_shader_parameter("sun_radius_m", stellar_radius)
+	_sky_mat.set_shader_parameter("sun_active", 1.0)
+	_sky_mat.set_shader_parameter("sun_color", color)
+	_sky_mat.set_shader_parameter("sun_angular_radius",
+		maxf(angular_radius, SUN_MIN_RENDER_ANGULAR_RADIUS))
+	_update_sun_flare(direction, color, angular_radius)
 
 
 func respawn_navigation_markers(
@@ -314,21 +333,9 @@ func _update_sun_direction(player_ship_id: int, ships: Dictionary, bodies: Array
 			_directional_light.light_energy = 0.0
 		return
 	var sun_direction := state.direction
-	if _prominences != null:
-		_prominences.update_view(_camera, sun_direction, state.angular_radius)
-	if _starfield_mat != null:
-		_starfield_mat.set_shader_parameter("sun_direction", sun_direction)
-		_starfield_mat.set_shader_parameter("sun_angular_radius", state.angular_radius)
-	_sky_mat.set_shader_parameter("sun_direction", sun_direction)
-	_sky_mat.set_shader_parameter("sun_radius_m", star.radius)
-	_sky_mat.set_shader_parameter("sun_active", 1.0)
 	var color := NavigationMarkerRendererScript.spectral_color(star.spectral_type)
 	var sun_color := Vector3(color.r, color.g, color.b)
-	_sky_mat.set_shader_parameter("sun_color", sun_color)
-	_sky_mat.set_shader_parameter(
-		"sun_angular_radius",
-		maxf(state.angular_radius, SUN_MIN_RENDER_ANGULAR_RADIUS))
-	_update_sun_flare(sun_direction, sun_color, state.angular_radius, star.radius)
+	update_stellar_view(sun_direction, sun_color, state.angular_radius, star.radius)
 	if _directional_light != null:
 		var light_ray := star_light_ray(sun_direction)
 		_directional_light.visible = true
@@ -348,6 +355,9 @@ func _setup_space_environment(parent: Node) -> void:
 	var sky_mat := ShaderMaterial.new()
 	sky_mat.shader = shader
 	_sky_mat = sky_mat
+	sky_mat.set_shader_parameter("sun_radiance", StellarSource.SURFACE_RADIANCE)
+	sky_mat.set_shader_parameter("sun_surface_color_scale", 1.0 / StellarSource.SURFACE_RADIANCE)
+	sky_mat.set_shader_parameter("sun_direct_fraction", 1.0)
 	sky_mat.set_shader_parameter("nebula_strength", 0.24)
 	sky_mat.set_shader_parameter("milkyway_strength", 0.11)
 	sky_mat.set_shader_parameter("milkyway_core_color", Color(0.88, 0.80, 0.66))
@@ -422,27 +432,20 @@ func _setup_space_environment(parent: Node) -> void:
 	parent.add_child(_prominences)
 
 
-func _update_sun_flare(direction: Vector3, color: Vector3, angular_radius: float, stellar_radius: float) -> void:
+func _update_sun_flare(direction: Vector3, color: Vector3, angular_radius: float) -> void:
 	if _sun_flare == null:
 		return
 	if _camera == null:
 		_sun_flare.enabled = false
 		return
+	_sky_mat.set_shader_parameter("sun_direct_fraction", _sun_flare.direct_fraction())
 	var source := project_sun_flare(_camera, direction, angular_radius)
 	if source.is_empty() or source.visibility <= 0.0:
 		_sun_flare.enabled = false
 		return
-	var distance_au := stellar_radius / sin(angular_radius) / 149_597_870_700.0
 	_sun_flare.set_sun(source.position, Color(color.x, color.y, color.z, 1.0),
-		source.visibility, source.radius, sun_flare_scale(distance_au))
+		source.visibility, source.radius, source.projected_radius)
 	_sun_flare.enabled = true
-
-
-## Trinity's logarithmic distance response applies only to camera optics.
-static func sun_flare_scale(distance_au: float) -> float:
-	if not is_finite(distance_au):
-		return 0.1
-	return clampf(1.5 / log(maxf(distance_au, 0.0) + 2.71), 0.1, 1.5)
 
 
 ## Project a direction near the camera, never a narrowed absolute star position.
@@ -466,10 +469,8 @@ static func project_sun_flare(camera: Camera3D, direction: Vector3, angular_radi
 	var tangent := camera.global_basis.y.slide(ray).normalized()
 	var limb := point + tangent * distance * tan(angular_radius)
 	var radius := camera.unproject_position(limb).distance_to(pixel)
-	# Suppress point-source camera optics as the stellar disc becomes resolved.
-	var point_source_weight := 1.0 - smoothstep(0.01, 0.05, angular_radius)
-	return {"position": uv, "visibility": smoothstep(0.0, 0.04, edge) * point_source_weight,
-		"radius": clampf(radius * 0.7, 1.0, 12.0)}
+	return {"position": uv, "visibility": smoothstep(0.0, 0.04, edge),
+		"radius": maxf(radius, 1.0), "projected_radius": radius / size.y}
 
 
 func _build_player_material() -> void:

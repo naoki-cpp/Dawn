@@ -1,18 +1,19 @@
 shader_type spatial;
+#include "res://shaders/stellar_plasma.gdshaderinc"
 render_mode unshaded, blend_mix, depth_draw_never, cull_disabled, fog_disabled;
 
-uniform sampler2D shape_mask : filter_linear_mipmap, repeat_disable;
-uniform sampler2D layer_one : filter_linear_mipmap, repeat_enable;
-uniform sampler2D layer_two : filter_linear_mipmap, repeat_enable;
 uniform float detail_visibility = 1.0;
 uniform vec3 sun_direction = vec3(0.0, 0.0, -1.0);
 uniform float sun_angular_radius = 0.0;
 varying vec3 world_position;
 
 void vertex() {
-	// Keep both feet attached while neighbouring sheets move independently.
+	// Keep both feet anchored while shared plasma noise distorts the arch.
 	float anchored = sin(PI * UV.x);
-	VERTEX *= 1.0 + anchored * 0.003 * sin(UV.x * 18.0 + COLOR.g * 9.0 + TIME * 0.018);
+	float motion = fbm(vec3(UV.x * 8.0 + COLOR.g * 11.0, UV.y * 2.5,
+		COLOR.g * 23.0 + TIME * 0.025)) - 0.5;
+	VERTEX *= 1.0 + anchored * (0.008 * sin(UV.x * 18.0 + COLOR.g * 9.0 + TIME * 0.018)
+		+ motion * 0.035);
 	world_position = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 }
 
@@ -22,16 +23,32 @@ void fragment() {
 	if (dot(ray, sun_direction) > cos(sun_angular_radius)) {
 		discard;
 	}
-	vec2 mask_uv = vec2(UV.x, UV.y * 0.5 + 0.5);
-	float envelope = texture(shape_mask, mask_uv).r;
-	vec2 flow_one = vec2(UV.x * 0.08 - TIME * 0.0012, UV.y * 0.13 + COLOR.b * 0.73);
-	vec2 flow_two = vec2(UV.x * 0.19 + TIME * 0.0005, UV.y * 0.24 - COLOR.g);
-	float filaments = texture(layer_one, flow_one).r;
-	float fine = texture(layer_two, flow_two + vec2(0.0, (filaments - 0.5) * 0.14)).r;
-	float density = envelope * mix(0.2, 1.0, smoothstep(0.25, 0.75, filaments))
-		* mix(0.35, 1.0, smoothstep(0.25, 0.75, fine));
-	// Layered optical-depth approximation, not an additive glowing outline.
-	ALPHA = (1.0 - exp(-density * 3.0)) * COLOR.r * detail_visibility;
-	ALBEDO = vec3(0.12, 0.001, 0.0002);
-	EMISSION = mix(vec3(0.9, 0.02, 0.002), vec3(2.8, 0.12, 0.008), fine) * (0.4 + filaments);
+	float seed = COLOR.g;
+	float layer = COLOR.b;
+	vec3 drift = solar_surface_drift();
+	float broad = fbm(vec3(UV.x * 4.0 + seed * 7.0, UV.y * 1.8, seed * 19.0 + layer * 11.0) + drift * 0.08);
+	float turbulence = fbm(vec3(UV.x * 7.0 + seed * 13.0,
+		UV.y * 5.0 + (broad - 0.5) * 1.2, seed * 23.0 + layer * 7.0) + drift * 2.0);
+	float fibers = fbm(vec3(UV.x * 12.0 + seed * 31.0,
+		UV.y * 8.0 + (turbulence - 0.5) * 1.4, seed * 37.0 + layer * 17.0) + drift * 4.0);
+	float bend = 0.16 * sin(UV.x * 13.0 + seed * TAU) + (broad - 0.5) * 0.28
+		+ (fibers - 0.5) * 0.05;
+	float width = 0.43 + 0.30 * sin(PI * UV.x) + 0.11 * sin(UV.x * 17.0 + seed * TAU)
+		+ (turbulence - 0.5) * 0.16;
+	float envelope = 1.0 - smoothstep(width * 0.40, width, abs(UV.y - bend));
+	float feet = smoothstep(0.0, 0.035, UV.x) * (1.0 - smoothstep(0.965, 1.0, UV.x));
+	float knot_center = 0.66 + (seed - 0.5) * 0.16;
+	float knot = 0.56 + 0.44 * exp(-pow((UV.x - knot_center) / 0.24, 2.0));
+	float cores = smoothstep(0.26, 0.64, fibers);
+	float spine = exp(-pow((UV.y - (broad - 0.5) * 0.18) * 3.4, 2.0));
+	float strand_phase = UV.y * 8.5 + (broad - 0.5) * 2.4
+		+ (turbulence - 0.5) * 1.8 + 0.14 * sin(UV.x * 11.0 + seed * TAU) + seed * TAU;
+	float strand_wave = 0.5 + 0.5 * sin(strand_phase * TAU);
+	float threads = smoothstep(0.20, 0.78, strand_wave);
+	float plasma_mass = smoothstep(0.27, 0.70, mix(broad, turbulence, 0.45));
+	float density = envelope * feet * knot * (0.36 + threads * 0.18 + cores * 0.28)
+		* mix(0.58, 1.12, plasma_mass);
+	float emission = 0.22 + cores * 0.50 + spine * 0.20;
+	ALPHA = solar_optical_alpha(density, 0.62) * COLOR.r * detail_visibility;
+	ALBEDO = solar_h_alpha_palette(emission) * (0.66 + cores * 0.92 + spine * 0.52);
 }
