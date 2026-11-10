@@ -27,14 +27,20 @@ func test_sun_flare_rejects_rear_and_offscreen_directions() -> void:
 	assert_float(source.visibility as float).is_equal(1.0)
 
 
-func test_optical_distance_response_fades_more_slowly_than_physical_disc_size() -> void:
-	var one_au := WorldPresentationScript.sun_flare_scale(1.0)
-	var ten_au := WorldPresentationScript.sun_flare_scale(10.0)
-	assert_float(one_au).is_greater(ten_au)
-	assert_float(ten_au / one_au).is_greater(0.4)
-	assert_float(ten_au / one_au).is_less(0.7)
-	assert_float(WorldPresentationScript.sun_flare_scale(0.0)).is_less_equal(1.5)
-	assert_bool(is_finite(WorldPresentationScript.sun_flare_scale(INF))).is_true()
+func test_close_resolved_disc_keeps_the_same_camera_energy_partition() -> void:
+	var root: Node3D = auto_free(Node3D.new())
+	add_child(root)
+	var camera := Camera3D.new()
+	root.add_child(camera)
+	var presentation := WorldPresentationScript.new()
+	presentation._camera = camera
+	presentation._world = FakeWorld.new()
+	presentation._setup_space_environment(root)
+	presentation._update_sun_flare(Vector3.FORWARD, Vector3.ONE, 0.005)
+	assert_float(presentation._sky_mat.get_shader_parameter("sun_direct_fraction")).is_less(1.0)
+	presentation._update_sun_flare(Vector3.FORWARD, Vector3.ONE, 0.7)
+	assert_float(presentation._sky_mat.get_shader_parameter("sun_direct_fraction")).is_equal_approx(presentation._sun_flare.direct_fraction(), 0.0001)
+	assert_bool(presentation._sun_flare.enabled).is_true()
 
 
 func test_sun_flare_tracks_direction_and_apparent_radius_not_absolute_distance() -> void:
@@ -48,14 +54,14 @@ func test_sun_flare_tracks_direction_and_apparent_radius_not_absolute_distance()
 	assert_dict(WorldPresentationScript.project_sun_flare(camera, Vector3.FORWARD, 0.005)).is_empty()
 
 
-func test_resolved_stellar_disc_does_not_expand_point_source_flares() -> void:
+func test_resolved_stellar_disc_expands_the_same_source_footprint() -> void:
 	var camera: Camera3D = auto_free(Camera3D.new())
 	add_child(camera)
 	var distant := WorldPresentationScript.project_sun_flare(camera, Vector3.FORWARD, 0.005)
 	var nearby := WorldPresentationScript.project_sun_flare(camera, Vector3.FORWARD, asin(1.0 / 1.5))
 	assert_float(distant.visibility).is_equal(1.0)
-	assert_float(nearby.visibility).is_equal(0.0)
-	assert_float(nearby.radius).is_less_equal(12.0)
+	assert_float(nearby.visibility).is_equal(1.0)
+	assert_float(nearby.radius).is_greater(12.0)
 
 func _position(x: float, y: float, z: float) -> PackedFloat64Array:
 	return PackedFloat64Array([x, y, z])

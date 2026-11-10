@@ -182,6 +182,10 @@ They verify transport effects, credential cleanup/pinning, and UI state.
 
 ## Fixed Lighting Review
 
+Rendering ownership and approximation limits are documented in
+[Celestial Rendering](../architecture/celestial-rendering.md); architectural
+rationale remains in [ADR-0053](../adr/ADR-0053-celestial-presentation-boundary.md).
+
 Open `client/scenes/lighting_study.tscn` and run that scene for an offline visual
 comparison. It uses the production environment and ship scene with deterministic
 rock fixtures; it does not connect to a server or add gameplay asteroids.
@@ -197,6 +201,13 @@ This waits for procedural textures and settled frames, writes
 adjusting background, hull/engine materials, fill lighting, glare or light shafts.
 `ship_material_test.gd` verifies that scene materials are actually bound, the
 hull remains lit/non-emissive, and the engine retains HDR emission.
+
+The stellar-source tests check projected-area flux and finite-disc variance.
+Dim-source GPU readback checks the normalized lens PSF's absolute integrated
+energy (before saturation), radius-squared scaling, and invariance under squeeze
+and resolution changes. Projection tests cover FOV and unclamped source radius;
+the bounded depth-occlusion footprint is tested independently. These checks do
+not assert a particular number of white pixels for every stellar distance.
 
 ## WorldSession test boundary
 

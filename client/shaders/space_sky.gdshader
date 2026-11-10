@@ -26,6 +26,7 @@
 //                       SII  671.6 nm → (0.87, 0.06, 0.05)
 
 shader_type sky;
+#include "res://shaders/stellar_plasma.gdshaderinc"
 
 // ── Uniforms ─────────────────────────────────────────────────────────────────
 
@@ -59,60 +60,13 @@ uniform vec3  sun_color : source_color = vec3(1.00, 0.95, 0.80);
 // size until the first body record is available.
 uniform float sun_angular_radius      = 0.0261799;
 uniform float sun_radius_m = 696000000.0;
+// Set from the shared StellarSource model; no second brightness authority.
+uniform float sun_radiance = 0.0;
+uniform float sun_surface_color_scale = 0.0;
+uniform float sun_direct_fraction = 1.0;
 
 // ── Hash / Noise ──────────────────────────────────────────────────────────────
 // Note: PI and TAU are Godot 4 built-in shader constants.
-
-// Integer lattice hash. The previous construction -- multiply by a large
-// irrational and take fract() -- loses its entropy as the input grows, because
-// the spacing between representable 32-bit floats grows with magnitude. At a
-// cell index near 800, index * 443.8975 lands around 3.5e5 where that spacing
-// is 0.0625, so fract() kept only a handful of bits: measured over the finest
-// star layer it produced ~5.6k distinct values for 353k cells, and the deep fbm
-// octaves (whose coordinates pass 1600) collapsed to ~2.9k values across 2.9M
-// lattice points. Mixing the integer coordinates has no magnitude dependence
-// and measures flat (chi-square/dof ~1.0, neighbour correlation ~2e-4).
-//
-// One output per call, which is all a noise lattice consumes. A three-output
-// mix such as PCG3D costs about twice as much, and fbm reaches this ~280 times
-// per pixel, which measured as a 1.7x whole-shader regression.
-float hash_lattice(ivec3 c) {
-	uvec3 v = uvec3(c);
-	uint h = v.x * 73856093u ^ v.y * 19349663u ^ v.z * 83492791u;
-	h ^= h >> 13u;
-	h *= 0x5bd1e995u;
-	h ^= h >> 15u;
-	return float(h) * (1.0 / 4294967296.0);
-}
-
-float snoise(vec3 p) {
-	vec3 i = floor(p);
-	vec3 f = p - i;
-	vec3 u = f * f * (3.0 - 2.0 * f);
-	ivec3 c = ivec3(i);
-	float a = hash_lattice(c);
-	float b = hash_lattice(c + ivec3(1, 0, 0));
-	float d = hash_lattice(c + ivec3(0, 1, 0));
-	float e = hash_lattice(c + ivec3(1, 1, 0));
-	float g = hash_lattice(c + ivec3(0, 0, 1));
-	float k = hash_lattice(c + ivec3(1, 0, 1));
-	float m = hash_lattice(c + ivec3(0, 1, 1));
-	float n = hash_lattice(c + ivec3(1, 1, 1));
-	return mix(mix(mix(a, b, u.x), mix(d, e, u.x), u.y),
-	           mix(mix(g, k, u.x), mix(m, n, u.x), u.y), u.z);
-}
-
-float fbm(vec3 p) {
-	float v = 0.0;
-	float a = 0.5;
-	vec3  s = vec3(100.0);
-	for (int i = 0; i < 5; i++) {
-		v += a * snoise(p);
-		p  = p * 2.07 + s;
-		a *= 0.5;
-	}
-	return v;
-}
 
 // ── Galactic coordinate transform ─────────────────────────────────────────────
 //
@@ -222,19 +176,26 @@ float solar_granulation(vec3 surface_normal) {
 	return mix(1.0, mix(0.74, hot_centre, interior), resolved);
 }
 
+float filtered_solar_detail(vec3 p) {
+	float footprint = max(length(dFdx(p)), length(dFdy(p)));
+	float resolved = 1.0 - smoothstep(0.3, 1.2, footprint);
+	if (resolved <= 0.0) return 0.48;
+	return mix(0.48, fbm(p), resolved);
+}
+
 vec3 sun_surface_color(vec3 surface_normal, float mu) {
 	// Limb darkening is the visible consequence of looking through less of the
 	// photosphere near its edge.
 	float limb_darkening = mix(0.68, 1.0, mu);
-	vec3 drift = vec3(TIME * 0.00015, 0.0, -TIME * 0.0001);
+	vec3 drift = solar_surface_drift();
 	float activity = fbm(surface_normal * 32.0 + drift);
-	float filaments = fbm(surface_normal * 160.0 + drift);
+	float filaments = filtered_solar_detail(surface_normal * 160.0 + drift);
 	float heat = clamp(0.42 + (activity - 0.48) * 0.65
 		+ (filaments - 0.48) * 1.1
 		+ (solar_granulation(surface_normal) - 1.0) * 0.65, 0.0, 1.0);
 	// False-colour solar-observation palette, not a blackbody temperature map.
-	vec3 surface = mix(vec3(0.23, 0.004, 0.0002), vec3(1.7, 0.21, 0.003), heat);
-	surface *= mix(0.6, 1.0, smoothstep(0.30, 0.58, activity));
+	vec3 surface = solar_surface_palette(heat);
+	surface *= mix(0.78, 1.0, smoothstep(0.30, 0.58, activity));
 	// A shared, warped field relates dark channels, bright ribbons and knots.
 	// This is a visual field, not a magnetic or plasma simulation.
 	vec3 field_pos = surface_normal * 4.3 + drift;
@@ -246,7 +207,7 @@ vec3 sun_surface_color(vec3 surface_normal, float mu) {
 	float field_width = max(fwidth(field), 0.008);
 	float channel = 1.0 - smoothstep(0.004, 0.020 + field_width, abs(field));
 	float filament = channel * smoothstep(0.30, 0.58, envelope);
-	surface *= 1.0 - filament * 0.22;
+	surface *= solar_filament_transmission(filament, 0.42);
 	float region = smoothstep(0.56, 0.78, envelope);
 	float ribbon_distance = abs(abs(field) - 0.23);
 	float ribbon = 1.0 - smoothstep(0.008, 0.035 + field_width, ribbon_distance);
@@ -255,7 +216,7 @@ vec3 sun_surface_color(vec3 surface_normal, float mu) {
 		* mix(0.25, 1.0, smoothstep(0.22, 0.78, filaments));
 	float active = region * (ribbon * 0.25 + knots) * structure;
 	surface += vec3(3.2, 1.05, 0.13) * active;
-	return surface * limb_darkening * 1.7;
+	return surface * limb_darkening * 2.0;
 }
 
 // Equirectangular layout of RenderingServer.sky_bake_panorama(), measured
@@ -271,21 +232,26 @@ vec2 panorama_uv(vec3 dir) {
 vec3 solar_corona(vec3 ray, vec3 sun_dir, float angle, float radius) {
 	// Angular extent is bounded independently of a close, screen-filling disc.
 	float height = (angle - radius) / min(radius, 0.22);
+	float outer_height = max(height, 0.0);
 	vec3 radial = normalize(ray - sun_dir * dot(ray, sun_dir));
 	// Slowly bend streamers; preserve long radial structure instead of noisy teeth.
 	float broad = snoise(radial * 5.3 + vec3(4.0, 1.0, 9.0));
 	float bend = snoise(radial * 8.0 + vec3(17.0)) - 0.5;
-	vec3 flow = normalize(radial + cross(sun_dir, radial) * (height * bend * 0.6));
+	vec3 flow = normalize(radial + cross(sun_dir, radial) * (outer_height * bend * 0.6));
 	float reach = mix(0.10, 0.45, pow(smoothstep(0.2, 0.8, broad), 2.0));
 	vec3 fibre_pos = flow * 52.0 + vec3(height * 1.8 + TIME * 0.0007);
 	float footprint = max(length(dFdx(fibre_pos)), length(dFdy(fibre_pos)));
 	float fibres = mix(snoise(fibre_pos), 0.5, smoothstep(0.4, 1.2, footprint));
 	float strands = mix(0.65, 1.0, smoothstep(0.28, 0.76, fibres));
-	float streamers = exp(-height / reach * 3.5) * strands * (0.25 + broad);
-	float inner = exp(-height * 35.0) * 0.08;
-	float diffuse = exp(-height * 9.0) * 0.025;
-	float fade = 1.0 - smoothstep(0.60, 0.85, height);
-	return (vec3(0.9, 0.055, 0.003) * (streamers * 0.08 + inner)
+	float streamers = exp(-outer_height / reach * 3.5) * strands * (0.25 + broad);
+	// A continuous narrow chromospheric envelope straddles the silhouette.
+	float rim_width = max(fwidth(height) * 1.5, 0.008);
+	float rim = exp(-abs(height) / rim_width) * (0.8 + broad * 0.4);
+	float inner = exp(-outer_height * 35.0) * 0.08;
+	float diffuse = exp(-outer_height * 9.0) * 0.025;
+	float fade = smoothstep(-0.03, 0.0, height) * (1.0 - smoothstep(0.60, 0.85, height));
+	return vec3(1.6, 0.38, 0.025) * rim
+		+ (vec3(0.9, 0.055, 0.003) * (streamers * 0.08 + inner)
 		+ vec3(0.65, 0.013, 0.001) * diffuse) * fade;
 }
 
@@ -384,23 +350,23 @@ void sky() {
 			float edge_width = max(fwidth(disc_radius), 0.0001);
 			float disc_mask = 1.0 - smoothstep(1.0 - edge_width, 1.0, disc_radius);
 			vec3 surface = sun_surface_color(surface_normal, sqrt(discriminant));
-			float bright_limb = exp(-max(1.0 - disc_radius, 0.0) * 100.0);
-			surface += vec3(0.22, 0.025, 0.001) * bright_limb;
-			col = mix(col, surface, disc_mask * resolved);
+			col = mix(col, surface * sun_radiance * sun_surface_color_scale
+				* sun_direct_fraction, disc_mask * resolved);
 		}
 		// Exposure/display approximation for an unresolved bright source. The
 		// integrated kernel scales with apparent disc area, not a fixed halo size.
 		float psf_variance = pixel_angle * pixel_angle * 0.64;
 		float variance = disc_radius_angle * disc_radius_angle * 0.25 + psf_variance;
-		if (resolved < 1.0 && sun_angle * sun_angle < variance * 25.0) {
+		if (resolved < 1.0 && sun_angle * sun_angle < variance * 100.0) {
 			float flux = disc_radius_angle * disc_radius_angle / (2.0 * variance);
-			float source = flux * exp(-sun_angle * sun_angle / (2.0 * variance));
-			vec3 point_tint = mix(sun_color, vec3(1.0), 0.85);
-			col += point_tint * source * 24.0 * (1.0 - resolved);
+			float separation = sun_angle * sun_angle / (2.0 * variance);
+			float source = flux * exp(-separation);
+			vec3 point_tint = sun_color;
+			col += point_tint * source * sun_radiance * sun_direct_fraction * (1.0 - resolved);
 		}
 
 		// A structured corona, separate from camera optics and prominence meshes.
-		if (sun_angle >= disc_radius_angle && sun_angle < disc_radius_angle + min(disc_radius_angle, 0.22) * 0.85) {
+		if (sun_angle > disc_radius_angle - min(disc_radius_angle, 0.22) * 0.03 && sun_angle < disc_radius_angle + min(disc_radius_angle, 0.22) * 0.85) {
 			col += solar_corona(dir, sun_dir, sun_angle, disc_radius_angle);
 		}
 
