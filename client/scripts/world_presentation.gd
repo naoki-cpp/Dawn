@@ -10,6 +10,7 @@ extends RefCounted
 
 const NavigationMarkerRendererScript = preload("res://scripts/navigation_marker_renderer.gd")
 const StarfieldScript = preload("res://scripts/starfield.gd")
+const GalacticModelScript = preload("res://scripts/galactic_model.gd")
 const SolarProminencesScript = preload("res://scripts/solar_prominences.gd")
 const StellarSource = preload("res://scripts/stellar_source.gd")
 
@@ -355,16 +356,11 @@ func _setup_space_environment(parent: Node) -> void:
 	var sky_mat := ShaderMaterial.new()
 	sky_mat.shader = shader
 	_sky_mat = sky_mat
+	GalacticModelScript.configure_material(sky_mat)
 	sky_mat.set_shader_parameter("sun_radiance", StellarSource.SURFACE_RADIANCE)
 	sky_mat.set_shader_parameter("sun_surface_color_scale", 1.0 / StellarSource.SURFACE_RADIANCE)
 	sky_mat.set_shader_parameter("sun_direct_fraction", 1.0)
-	sky_mat.set_shader_parameter("nebula_strength", 0.24)
-	sky_mat.set_shader_parameter("milkyway_strength", 0.11)
-	sky_mat.set_shader_parameter("milkyway_core_color", Color(0.88, 0.80, 0.66))
-	sky_mat.set_shader_parameter("milkyway_outer_color", Color(0.62, 0.68, 0.78))
-	sky_mat.set_shader_parameter("nebula_primary_color", Color(0.80, 0.12, 0.18))
-	sky_mat.set_shader_parameter("nebula_secondary_color", Color(0.32, 0.38, 0.48))
-	sky_mat.set_shader_parameter("nebula_highlight_color", Color(0.28, 0.48, 0.52))
+	sky_mat.set_shader_parameter("extinction_scale", 1.0)
 	sky_mat.set_shader_parameter("ambient_color", Color(0.0003, 0.0004, 0.0006))
 
 	var sky := Sky.new()
@@ -511,10 +507,16 @@ func _setup_starfield(parent: Node) -> void:
 
 	var material := ShaderMaterial.new()
 	material.shader = shader
+	GalacticModelScript.configure_material(material)
 	material.set_shader_parameter(
 		"point_spread_pixels", StarfieldScript.POINT_SPREAD_PIXELS)
 	material.set_shader_parameter(
-		"core_sharpness", StarfieldScript.POINT_SHARPNESS)
+		"core_sigma_pixels", StarfieldScript.POINT_CORE_SIGMA_PIXELS)
+	material.set_shader_parameter(
+		"halo_sigma_pixels", StarfieldScript.POINT_HALO_SIGMA_PIXELS)
+	material.set_shader_parameter(
+		"halo_peak_ratio", StarfieldScript.POINT_HALO_PEAK_RATIO)
+	material.set_shader_parameter("extinction_scale", 1.0)
 	_starfield_mat = material
 
 	var instance := MultiMeshInstance3D.new()
@@ -553,15 +555,12 @@ func _update_starfield() -> void:
 
 
 ## Generates the nebula and Milky Way once into an equirectangular panorama and
-## switches the sky over to sampling it (ADR-0055). They are direction-only
-## functions, so one texture fetch replaces roughly 280 hash evaluations per
-## pixel. Godot bakes the same Sky the environment already uses, which also
-## feeds ambient light and reflections, so the background, the ambient and the
-## ship reflections keep agreeing with each other.
+## switches the sky over to sampling it (ADR-0055). Godot bakes the same Sky
+## the environment already uses, keeping background, ambient light and ship
+## reflections in agreement. Dust attenuation is shared with the star sprites.
 ##
-## Runs in two steps because a uniform written this frame is not yet visible to
-## the bake. Arming `bake_pass` and baking in one call captures the presentation
-## vignette into the texture, and the runtime then applies it a second time.
+## Arming and baking are separate because the renderer reads previously
+## processed shader state.
 func _maybe_bake_nebula() -> void:
 	if _nebula_bake_done or _sky == null or _sky_mat == null:
 		return
@@ -587,8 +586,8 @@ func _maybe_bake_nebula() -> void:
 		_sky.get_rid(), 1.0, false, NEBULA_PANORAMA_SIZE)
 	_sky_mat.set_shader_parameter("bake_pass", false)
 
-	## Headless and dummy renderers return nothing here. That is not an error:
-	## the procedural path stays in the shader precisely so this can fail.
+	## Headless and dummy renderers return nothing here. The procedural path
+	## remains available when panorama baking is unsupported.
 	if panorama == null or panorama.is_empty():
 		return
 	_sky_mat.set_shader_parameter(

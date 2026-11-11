@@ -18,35 +18,29 @@
 //                      around a bright star is left to Environment.glow
 //   Milky Way tilt  : Galactic plane ~63° from celestial equator
 //   Galactic center : Sagittarius direction, ~8 kpc from Sun, dense bulge
-//   Spiral arms     : Logarithmic spiral pitch angle ~12.5° (Reid et al. 2014)
-//   Nebula colors   : Emission line wavelengths
-//                       Hα  656.3 nm → (1.00, 0.11, 0.08)
-//                       Hβ  486.1 nm → (0.22, 0.46, 1.00)
-//                       OIII 500.7 nm → (0.14, 0.82, 0.70)
-//                       SII  671.6 nm → (0.87, 0.06, 0.05)
+//   Background      : Axisymmetric stellar disk, triaxial bulge, turbulent dust
+//   Galactic light  : unresolved stellar continuum attenuated by a turbulent
+//                      3D dust disk; no unobserved emission sources are invented.
 
 shader_type sky;
 #include "res://shaders/stellar_plasma.gdshaderinc"
+#include "res://shaders/galactic_dust.gdshaderinc"
 
 // ── Uniforms ─────────────────────────────────────────────────────────────────
 
-uniform float nebula_strength   : hint_range(0.0,  1.0)   = 0.50;
-uniform float milkyway_strength : hint_range(0.0,  1.0)   = 0.20;
+// Diagnostic only: production materials keep extinction_scale at one. The
+// shared physical model owns emissivity and radiance display calibration.
+uniform float extinction_scale : hint_range(0.0, 1.0) = 1.0;
 uniform vec3  ambient_color     : source_color             = vec3(0.002, 0.002, 0.006);
 // Baked background (ADR-0055). The nebula and Milky Way are direction-only
 // functions, so they are generated once into an equirectangular panorama and
-// sampled from then on: one texture fetch replaces ~280 hash evaluations per
-// pixel. The local star is NOT baked -- it moves with the ship.
+// sampled from then on: one texture fetch replaces the full line-of-sight
+// integration and its correlated density fields. The local star is NOT baked.
 uniform sampler2D nebula_panorama : filter_linear, repeat_enable;
 uniform bool  use_baked_nebula = false;
 // True only while generating that panorama: drops the presentation vignette
 // so it is applied once at runtime rather than burned into the texture.
 uniform bool  bake_pass = false;
-uniform vec3  milkyway_core_color : source_color         = vec3(0.52, 0.62, 0.92);
-uniform vec3  milkyway_outer_color : source_color        = vec3(0.72, 0.68, 0.58);
-uniform vec3  nebula_primary_color : source_color       = vec3(1.00, 0.11, 0.08);
-uniform vec3  nebula_secondary_color : source_color     = vec3(0.55, 0.18, 0.06);
-uniform vec3  nebula_highlight_color : source_color     = vec3(1.00, 0.38, 0.12);
 
 // ── Local star (ADR-0025) ─────────────────────────────────────────────────────
 // sun_direction: normalised world-space direction from ship toward the star.
@@ -67,57 +61,6 @@ uniform float sun_direct_fraction = 1.0;
 
 // ── Hash / Noise ──────────────────────────────────────────────────────────────
 // Note: PI and TAU are Godot 4 built-in shader constants.
-
-// ── Galactic coordinate transform ─────────────────────────────────────────────
-//
-// The Milky Way's galactic plane is tilted ~63 degrees from the celestial
-// equator.  We apply a rotation so that the band appears at a realistic angle
-// rather than lying flat along the equator.
-//
-// Galactic north pole: RA 12h 51m, Dec +27.1° (B1950)
-// We approximate this with a simple rotation around the X axis.
-
-vec3 to_galactic(vec3 d) {
-	// ~60° tilt of galactic plane + ~90° longitude offset
-	float tilt  = 1.05;   // radians (~60°)
-	float lon   = 1.57;   // radians (~90°) — orients galactic center direction
-	float ct = cos(tilt), st = sin(tilt);
-	float cl = cos(lon),  sl = sin(lon);
-	// First rotate around Y (longitude), then around X (tilt)
-	vec3 r;
-	r.x =  d.x * cl + d.z * sl;
-	r.z = -d.x * sl + d.z * cl;
-	r.y =  d.y;
-	return vec3(r.x, r.y * ct - r.z * st, r.y * st + r.z * ct);
-}
-
-// ── Milky Way + galactic structure ───────────────────────────────────────────
-
-float milkyway_density(vec3 gal) {
-	// Galactic latitude (distance from the plane)
-	float lat  = abs(gal.y);
-
-	// --- Band (thin disk) ---
-	// Angular falloff is an artistic approximation, not a distance survey.
-	float disk  = exp(-lat * 11.0);
-
-	// --- Galactic bulge ---
-	// The galactic center is ~8 kpc away, appearing as a bright bulge
-	// in one direction.  We model it as a Gaussian in galactic coordinates.
-	// Direction of galactic center in our rotated frame: positive X.
-	float bulge_dist = length(gal - vec3(1.0, 0.0, 0.0));
-	float bulge      = exp(-bulge_dist * bulge_dist * 9.0) * 1.4;
-
-	// --- Unresolved stellar cloud modulation ---
-	// An inside-galaxy view has irregular star clouds, not a face-on spiral.
-	float arms = smoothstep(0.22, 0.78,
-		fbm(gal * 6.0 + vec3(3.0, -2.0, 1.0)));
-
-	// --- Disk clumping (molecular cloud patchiness) ---
-	float clump = fbm(gal * 2.5 + vec3(0.0, 0.0, 3.0)) * 0.5 + 0.5;
-
-	return disk * (0.25 + 0.55 * arms + 0.2 * clump) + bulge * (1.0 - lat);
-}
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
@@ -263,61 +206,8 @@ void sky() {
 	} else {
 		col = ambient_color;
 
-		// Convert to galactic frame for Milky Way / nebula calculations.
-		vec3 gal = to_galactic(dir);
-		float gal_lat = abs(gal.y);   // 0 = in the plane, 1 = toward pole
-
-		// ── Milky Way ────────────────────────────────────────────────────────
-		float mw  = milkyway_density(gal);
-		// Warm unresolved bulge light and a cooler, fainter outer band.
-		vec3 mw_core  = milkyway_core_color;
-		// Outer disk: slightly warmer (older K/G stars dominate by count)
-		vec3 mw_outer = milkyway_outer_color;
-		float mw_mix  = smoothstep(0.0, 1.5, mw);
-		vec3 mw_col   = mix(mw_outer, mw_core, mw_mix);
-		col += mw_col * mw * milkyway_strength;
-
-		// ── Emission nebulae ──────────────────────────────────────────────────
-		//
-		// Real nebulae are concentrated near the galactic plane.
-		// Plane concentration factor: drops off with galactic latitude.
-		float plane_weight = exp(-gal_lat * 14.0);
-
-		// Faint diffuse light stays near the galactic plane; high latitude stays black.
-		float broad_cloud_noise = fbm(dir * 0.95 + vec3(-0.8, 1.4, 2.1));
-		float broad_cloud = pow(max(0.0, broad_cloud_noise - 0.27), 1.45)
-			* plane_weight;
-		float cloud_highlight = pow(max(0.0, broad_cloud_noise - 0.48), 2.0)
-			* plane_weight;
-		col += nebula_secondary_color * broad_cloud * nebula_strength * 0.08;
-		col += nebula_highlight_color * cloud_highlight * nebula_strength * 0.06;
-
-		// Three FBM regions at different scales + offsets.
-		// Spectral line colors (wavelength → linear RGB approximation):
-		//   Hα  656.3 nm : (1.00, 0.11, 0.08)
-		//   OIII 500.7 nm : (0.14, 0.82, 0.70)
-		//   SII  671.6 nm : (0.87, 0.06, 0.05)
-		float n1 = fbm(dir * 1.70 + vec3( 0.5,  0.3,  0.7));
-		float n2 = fbm(dir * 2.10 + vec3( 2.1, -1.4,  0.8));
-		float n3 = fbm(dir * 1.50 + vec3(-1.2,  0.6,  2.4));
-
-		float neb1 = pow(max(0.0, n1 - 0.36), 2.2) * nebula_strength * plane_weight;
-		float neb2 = pow(max(0.0, n2 - 0.40), 2.0) * nebula_strength * plane_weight * 0.75;
-		float neb3 = pow(max(0.0, n3 - 0.43), 2.5) * nebula_strength * plane_weight * 0.55;
-
-		col += nebula_primary_color * neb1;
-		col += nebula_secondary_color * neb2;
-		col += nebula_highlight_color * neb3;
-
-		// Dust absorption (dark lanes inside dense regions)
-		float dust      = fbm(dir * 3.5 + vec3(0.0, 1.0, 0.3));
-		// Dust attenuates unresolved starlight, even where no gas emits light.
-		// A warped narrow lane breaks the band into irregular dark filaments.
-		float lane_offset = (fbm(gal * 5.0 + vec3(7.0, 2.0, -4.0)) - 0.5) * 0.10;
-		float lane = exp(-pow((gal.y + lane_offset) / 0.045, 2.0));
-		float optical_depth = lane * (0.6 + 3.0 * smoothstep(0.30, 0.68, dust));
-		col = ambient_color + (col - ambient_color)
-			* exp(-optical_depth * vec3(0.78, 1.0, 1.25));
+		vec3 galactic_direction = to_galactic(dir);
+		col += galactic_integrated_radiance(galactic_direction, extinction_scale);
 	}
 
 	// ── Local star disc + corona (ADR-0025) ──────────────────────────────

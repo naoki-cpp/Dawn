@@ -10,6 +10,8 @@
 // camera rotation the way an analytically drawn sub-pixel Gaussian does.
 
 shader_type spatial;
+#include "res://shaders/stellar_plasma.gdshaderinc"
+#include "res://shaders/galactic_dust.gdshaderinc"
 // fog_disabled matters: the sprite shell sits 4,000,000 units out, far past
 // the aerial-perspective fog's end distance, so without opting out every
 // star would render as solid fog colour.
@@ -17,33 +19,34 @@ render_mode unshaded, blend_add, depth_draw_never, cull_disabled, fog_disabled;
 
 // Lets the whole field be dimmed or lifted without rebuilding the MultiMesh.
 uniform float flux_scale : hint_range(0.0, 4.0) = 1.0;
+uniform float extinction_scale : hint_range(0.0, 1.0) = 1.0;
 uniform vec3 sun_direction = vec3(0.0, 0.0, -1.0);
 uniform float sun_angular_radius = 0.0;
-// Half-width of every star's quad, in pixels. One value for the whole field:
-// stars are point sources, so they share a point spread and only their flux
-// differs. Pushed from Starfield.POINT_SPREAD_PIXELS.
-uniform float point_spread_pixels : hint_range(1.0, 8.0) = 2.0;
+// Half-width of every star's quad, in pixels. It contains both the point core
+// and its faint halo; it does not represent the physical size of a star.
+uniform float point_spread_pixels : hint_range(1.0, 12.0) = 10.0;
 // Viewport size in pixels, pushed from WorldPresentation every frame.
 // VIEWPORT_SIZE is a FRAGMENT-stage built-in in Godot's spatial shaders: it
 // is silently unusable here in vertex(), which collapses the quad instead of
 // raising a compile error, so the size has to arrive as a uniform.
 uniform vec2 viewport_pixels = vec2(1280.0, 720.0);
-// How fast the point spread falls off inside the quad. Higher concentrates
-// the star into a smaller visible dot for the same peak brightness, which is
-// what keeps a bright star from reading as a ball rather than a point.
-uniform float core_sharpness : hint_range(2.0, 24.0) = 4.0;
-// Where the profile is truncated, in squared quad-relative radius. Pulling
-// this in shortens the tail without shrinking the Gaussian itself, so the
-// dot gets smaller without dropping below the sampling rate.
-uniform vec2 core_cutoff = vec2(0.25, 0.85);
+uniform float core_sigma_pixels = 0.72;
+uniform float halo_sigma_pixels = 3.0;
+uniform float halo_peak_ratio = 0.02;
 
 varying vec2 corner;
 varying float flux;
+varying vec3 dust_transmission;
+varying float distance_kpc;
 
 void vertex() {
 	// INSTANCE_CUSTOM is packed by Starfield.build_multimesh().
 	flux = INSTANCE_CUSTOM.r * flux_scale;
+	distance_kpc = INSTANCE_CUSTOM.g * 22.0;
 	vec3 star_direction = normalize(MODEL_MATRIX[3].xyz - CAMERA_POSITION_WORLD);
+	vec3 galaxy = to_galactic(star_direction);
+	dust_transmission = extinction_transmission(
+		galactic_visual_extinction(galaxy, distance_kpc) * extinction_scale);
 	if (sun_angular_radius > 0.0 && dot(star_direction, sun_direction) > cos(sun_angular_radius)) {
 		flux = 0.0;
 	}
@@ -60,10 +63,11 @@ void vertex() {
 }
 
 void fragment() {
-	// Gaussian core, faded out before the quad edge so no square shows.
-	float r2 = dot(corner, corner);
-	float core = exp(-r2 * core_sharpness)
-		* (1.0 - smoothstep(core_cutoff.x, core_cutoff.y, r2));
-	ALBEDO = COLOR.rgb * flux * core;
+	float radius_pixels = length(corner * point_spread_pixels);
+	float radius_squared = radius_pixels * radius_pixels;
+	float core = exp(-0.5 * radius_squared / (core_sigma_pixels * core_sigma_pixels));
+	float halo = halo_peak_ratio
+		* exp(-0.5 * radius_squared / (halo_sigma_pixels * halo_sigma_pixels));
+	ALBEDO = COLOR.rgb * dust_transmission * flux * (core + halo);
 	ALPHA = 1.0;
 }
