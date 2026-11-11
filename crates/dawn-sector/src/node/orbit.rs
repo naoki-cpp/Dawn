@@ -21,13 +21,13 @@ use super::{
 };
 
 impl SimulationNode {
-    /// Begin orbiting a Ship or a Jump Gate at `radius` (ADR-0031). Falls back
+    /// Begin orbiting a maneuver target at `radius` (ADR-0031). Falls back
     /// to the ship's fitted weapon range, or `DEFAULT_MANEUVER_RADIUS` if
     /// unarmed, when `radius` is `None`.
     ///
     /// Rejected (returns `false`, no component attached) if the ship is
     /// unknown or in transit, a `Ship` target is unknown or the ship itself,
-    /// or a `Gate` target does not originate in this Sector.
+    /// or a static target does not originate in this Sector.
     pub(crate) fn apply_orbit_command(
         &mut self,
         ship_id: ShipId,
@@ -58,7 +58,7 @@ impl SimulationNode {
         self.apply_orbit_command(ship_id, cmd.target, cmd.radius)
     }
 
-    /// Begin holding at least `range` away from a Ship or a Jump Gate
+    /// Begin holding at least `range` away from a maneuver target
     /// (ADR-0031). Falls back to the ship's fitted weapon range, or
     /// `DEFAULT_MANEUVER_RADIUS` if unarmed, when `range` is `None`.
     ///
@@ -95,13 +95,15 @@ impl SimulationNode {
 
     /// Shared target validation for Orbit / Keep at Range / Approach
     /// (ADR-0031/ADR-0015): a `Ship` target must exist and not be the
-    /// maneuvering ship itself; a `Gate` target must originate in this Sector.
+    /// maneuvering ship itself; static targets must originate in this Sector.
     pub(super) fn validate_maneuver_target(&self, ship_id: ShipId, target: ApproachTarget) -> bool {
         match target {
             ApproachTarget::Ship(target_id) => {
                 ship_id != target_id && self.simulation.ships.index.contains_key(&target_id)
             }
             ApproachTarget::Gate(gate_id) => self.jump_gate(gate_id).is_some(),
+            ApproachTarget::Body(body_id) => self.topology.sector_map.bodies.contains_key(&body_id),
+            ApproachTarget::Station(station_id) => self.station(station_id).is_some(),
         }
     }
 
@@ -120,6 +122,25 @@ impl SimulationNode {
             f64::from(weapon_range)
         } else {
             DEFAULT_MANEUVER_RADIUS
+        }
+    }
+
+    /// Keep static-target maneuvers outside the target's physical or interaction radius.
+    fn minimum_maneuver_radius(&self, target: ApproachTarget) -> f64 {
+        match target {
+            ApproachTarget::Ship(_) => 0.0,
+            ApproachTarget::Gate(gate_id) => self
+                .jump_gate(gate_id)
+                .map_or(0.0, |gate| gate.activation_radius * 1.2),
+            ApproachTarget::Body(body_id) => self
+                .topology
+                .sector_map
+                .bodies
+                .get(&body_id)
+                .map_or(0.0, |body| body.radius * super::BODY_WARP_ARRIVAL_FACTOR),
+            ApproachTarget::Station(station_id) => self
+                .station(station_id)
+                .map_or(0.0, |station| station.docking_radius * 1.2),
         }
     }
 
@@ -153,7 +174,9 @@ impl SimulationNode {
         if !self.validate_maneuver_target(ship_id, target) {
             return None;
         }
-        let distance = distance.unwrap_or_else(|| self.default_maneuver_radius(entity));
+        let distance = distance
+            .unwrap_or_else(|| self.default_maneuver_radius(entity))
+            .max(self.minimum_maneuver_radius(target));
         self.clear_steering_modes(entity);
         Some((entity, distance))
     }
@@ -186,6 +209,14 @@ impl SimulationNode {
             ApproachTarget::Gate(gate_id) => {
                 let gate = self.jump_gate(gate_id)?;
                 Some(self.dest_in_ship_frame_abs(entity, gate.abs_m))
+            }
+            ApproachTarget::Body(body_id) => {
+                let body = self.topology.sector_map.bodies.get(&body_id)?;
+                Some(self.dest_in_ship_frame_abs(entity, body.abs_m))
+            }
+            ApproachTarget::Station(station_id) => {
+                let station = self.station(station_id)?;
+                Some(self.dest_in_ship_frame_abs(entity, station.abs_m))
             }
         }
     }
@@ -591,6 +622,42 @@ mod tests {
             .unwrap()
             .radius;
         assert_eq!(radius, super::super::DEFAULT_MANEUVER_RADIUS);
+    }
+
+    #[test]
+    fn body_maneuvers_clamp_ranges_outside_the_surface() {
+        let mut node = mem_node();
+        let (_player, chaser) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        let body = node
+            .topology
+            .sector_map
+            .bodies
+            .values()
+            .next()
+            .expect("demo sector contains a celestial body");
+        let target = dawn_core::ApproachTarget::Body(body.id);
+        let safe_radius = body.radius * super::super::BODY_WARP_ARRIVAL_FACTOR;
+
+        assert!(node.apply_orbit_command(chaser, target, Some(1.0)));
+        let entity = *node.simulation.ships.index.get(&chaser).unwrap();
+        assert_eq!(
+            node.simulation
+                .world
+                .get::<OrbitComp>(entity)
+                .unwrap()
+                .radius,
+            safe_radius
+        );
+
+        assert!(node.apply_keep_at_range_command(chaser, target, Some(1.0)));
+        assert_eq!(
+            node.simulation
+                .world
+                .get::<KeepAtRangeComp>(entity)
+                .unwrap()
+                .range,
+            safe_radius
+        );
     }
 
     #[test]

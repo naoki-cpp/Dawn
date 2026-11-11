@@ -42,7 +42,7 @@ Orbit と Keep at Range は異なる操船意図（回る／距離を保つ）�
 ### 1. Orbit — 対象の周りを指定半径で周回する
 
 ```
-OrbitCommand { ship_id, target, radius: Option<f32> }
+OrbitCommand { ship_id, target, radius: Option<f64> }
   → OrbitComp { target, radius } を ship に付与
   → 毎 Tick process_orbit() が「対象から radius だけ離れた円周上、
      接線方向にやや先回りした点」へ thrust を向け直す
@@ -69,7 +69,7 @@ steer_thrust_toward(ship_pos, target_point)
 ### 2. Keep at Range — 対象から最低指定距離を保つ
 
 ```
-KeepAtRangeCommand { ship_id, target, range: Option<f32> }
+KeepAtRangeCommand { ship_id, target, range: Option<f64> }
   → KeepAtRangeComp { target, range } を ship に付与
   → 毎 Tick process_keep_at_range() が:
      |距離 - range| <= deadband → brake_thrust（range 付近で揺れない）
@@ -90,8 +90,11 @@ Orbit（回りながら射程を保つ）とはプレイヤーが選ぶ意図が
 
 ### 3. 対象とパラメータ
 
-`target` は ADR-0015 の `ApproachTarget`（`Ship | Gate`）をそのまま再利用する
+`target` は ADR-0015 の `ApproachTarget`（`Ship | Gate | Body | Station`）をそのまま再利用する
 （型を増やさない・既存の `dest_in_ship_frame_abs` 経由の位置解決をそのまま使える）。
+Body と Station を対象にする場合、指定値が天体表面や対象の操作境界に入り込まないよう、
+サーバー側で安全な最小半径を適用する。Body は通常の接近停止距離、Gate と Station は
+それぞれ有効化半径・ドッキング半径より外側を下限とする。
 `radius`/`range` 省略時の既定値は `ShipStatsComp.weapon_range`
 （フィット済み武器の最適射程。武器なしなら定数フォールバック）から導出する —
 「射程内で回る／距離を保つ」が最も典型的な使い方であるため、デフォルトのまま

@@ -29,7 +29,7 @@
 //! (for example admission, Transit Saga, or Market settlement identities).
 
 use crate::fitting::{ModuleId, SlotKind};
-use crate::navigation::{JumpGateId, StationId, WarpTarget};
+use crate::navigation::{CelestialBodyId, JumpGateId, StationId, WarpTarget};
 use crate::{ItemId, PlayerId, Position, SectorId, ShipId, ShipTypeId};
 #[cfg(feature = "schema")]
 use schemars::JsonSchema;
@@ -278,20 +278,22 @@ pub struct SelectActiveShipCommand {
     pub ship_id: ShipId,
 }
 
-/// What an approaching Ship is steering toward (ADR-0015).
+/// What a ship steers toward for Approach, Orbit, and Keep at Range.
 ///
 /// A `Ship` target is dynamic (its position is read from the ECS each tick);
-/// a `Gate` target is a static Jump Gate position, letting players fly back
-/// into a gate's `activation_radius` to jump.
+/// celestial, station, and gate targets are static navigation objects in the
+/// current Sector.
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum ApproachTarget {
     Ship(ShipId),
     Gate(JumpGateId),
+    Body(CelestialBodyId),
+    Station(StationId),
 }
 
-/// Request to begin approaching a Ship or a Jump Gate with the caller's
-/// active ship (semi-automatic piloting).
+/// Request to begin approaching a Ship or a static navigation object with the
+/// caller's active ship (semi-automatic piloting).
 ///
 /// Unlike `MoveCommand` (a one-shot thrust direction), an accepted approach
 /// is a persistent steering mode: each tick the movement pipeline re-aims
@@ -301,7 +303,7 @@ pub enum ApproachTarget {
 /// May be rejected if:
 /// - The active Ship does not exist or is in transit between Sectors.
 /// - A `Ship` target does not exist or is the approaching Ship itself.
-/// - A `Gate` target does not originate in the Ship's current Sector.
+/// - A static target does not originate in the Ship's current Sector.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct ApproachCommand {
     pub target: ApproachTarget,
@@ -409,7 +411,7 @@ pub struct WarpCommand {
     pub target: WarpTarget,
 }
 
-/// Request to begin orbiting a Ship or a Jump Gate at `radius` with the
+/// Request to begin orbiting a Ship or static navigation object at `radius` with the
 /// caller's active ship (ADR-0031).
 ///
 /// Like `ApproachCommand`, an accepted orbit is a persistent steering mode:
@@ -421,14 +423,16 @@ pub struct WarpCommand {
 /// May be rejected if:
 /// - The active Ship does not exist or is in transit between Sectors.
 /// - A `Ship` target does not exist or is the orbiting Ship itself.
-/// - A `Gate` target does not originate in the Ship's current Sector.
+/// - A static target does not originate in the Ship's current Sector.
+/// - For static targets, the effective radius is clamped outside their safe
+///   interaction boundary.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct OrbitCommand {
     pub target: ApproachTarget,
     pub radius: Option<f64>,
 }
 
-/// Request to hold at least `range` away from a Ship or a Jump Gate with the
+/// Request to hold at least `range` away from a Ship or static navigation object with the
 /// caller's active ship (ADR-0031).
 ///
 /// Like `ApproachCommand`, an accepted keep-at-range is a persistent steering
@@ -440,7 +444,9 @@ pub struct OrbitCommand {
 /// May be rejected if:
 /// - The active Ship does not exist or is in transit between Sectors.
 /// - A `Ship` target does not exist or is the Ship itself.
-/// - A `Gate` target does not originate in the Ship's current Sector.
+/// - A static target does not originate in the Ship's current Sector.
+/// - For static targets, the effective range is clamped outside their safe
+///   interaction boundary.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct KeepAtRangeCommand {
     pub target: ApproachTarget,

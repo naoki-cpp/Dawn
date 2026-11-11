@@ -16,12 +16,12 @@ use dawn_ecs::{
 use super::SimulationNode;
 
 impl SimulationNode {
-    /// Begin approaching a Ship or a Jump Gate (semi-automatic piloting, ADR-0015).
+    /// Begin approaching a Ship or a static navigation object (ADR-0015).
     ///
     /// Attaches an `ApproachComp` so `process_approach()` re-aims thrust at the
     /// target each tick. Rejected (returns `false`, no component attached) if
     /// the ship is unknown or in transit, a `Ship` target is unknown or the
-    /// ship itself, or a `Gate` target does not originate in this Sector.
+    /// ship itself, or a static target does not originate in this Sector.
     pub(crate) fn apply_approach_command(
         &mut self,
         ship_id: ShipId,
@@ -136,6 +136,20 @@ impl SimulationNode {
                     (
                         self.dest_in_ship_frame_abs(entity, g.abs_m),
                         g.activation_radius * 0.8,
+                    )
+                }),
+                ApproachTarget::Body(body_id) => {
+                    self.topology.sector_map.bodies.get(&body_id).map(|body| {
+                        (
+                            self.dest_in_ship_frame_abs(entity, body.abs_m),
+                            body.radius * super::BODY_WARP_ARRIVAL_FACTOR,
+                        )
+                    })
+                }
+                ApproachTarget::Station(station_id) => self.station(station_id).map(|station| {
+                    (
+                        self.dest_in_ship_frame_abs(entity, station.abs_m),
+                        station.docking_radius * 0.8,
                     )
                 }),
             };
@@ -289,6 +303,70 @@ mod tests {
         assert_eq!(
             node.approach_target(chaser),
             Some(dawn_core::ApproachTarget::Ship(target))
+        );
+    }
+
+    #[test]
+    fn approach_uses_safe_arrival_distances_for_bodies_and_stations() {
+        let mut node = mem_node();
+        let (player, chaser) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        let body = node
+            .topology
+            .sector_map
+            .bodies
+            .values()
+            .next()
+            .expect("demo sector has a celestial")
+            .clone();
+        let body_arrival = body.radius * super::super::BODY_WARP_ARRIVAL_FACTOR;
+        node.set_spawn_anchor_abs(
+            chaser,
+            [
+                body.abs_m[0] - body_arrival * 0.9,
+                body.abs_m[1],
+                body.abs_m[2],
+            ],
+        );
+        assert!(node.apply_approach_command_owned(
+            player,
+            chaser,
+            dawn_core::ApproachCommand {
+                target: dawn_core::ApproachTarget::Body(body.id),
+            }
+        ));
+        node.process_approach();
+        let entity = *node.simulation.ships.index.get(&chaser).unwrap();
+        assert!(
+            node.simulation
+                .world
+                .get::<ThrustComp>(entity)
+                .unwrap()
+                .is_braking
+        );
+
+        let station = node.station(dawn_core::StationId(0)).unwrap().clone();
+        node.set_spawn_anchor_abs(
+            chaser,
+            [
+                station.abs_m[0] - station.docking_radius * 0.7,
+                station.abs_m[1],
+                station.abs_m[2],
+            ],
+        );
+        assert!(node.apply_approach_command_owned(
+            player,
+            chaser,
+            dawn_core::ApproachCommand {
+                target: dawn_core::ApproachTarget::Station(station.id),
+            }
+        ));
+        node.process_approach();
+        assert!(
+            node.simulation
+                .world
+                .get::<ThrustComp>(entity)
+                .unwrap()
+                .is_braking
         );
     }
 

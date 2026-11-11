@@ -1,13 +1,8 @@
 ## main_test.gd
 ##
-## Unit tests for the pure-math helpers still in main.gd: coordinate
-## conversion and module-deactivation bookkeeping. These are the only parts of main.gd
-## testable without a running scene tree -- HUD construction and input
-## routing depend on @onready scene paths and need the Godot editor to
-## verify (see docs/architecture/architecture-review/client.md C-1). Picking math lives
-## in ship_picking.gd (client/test/ship_picking_test.gd); marker spawning
-## and spectral colour live in navigation_marker_renderer.gd
-## (client/test/navigation_marker_renderer_test.gd).
+## Tests for scene-independent policy and projection helpers in main.gd.
+## Fixtures attach only the Node3D values whose global transforms are needed;
+## full input routing still requires an interactive playtest.
 extends GdUnitTestSuite
 
 const __source: String = "res://scripts/main.gd"
@@ -1076,3 +1071,97 @@ func _station(station_id: int, name: String, pos: PackedFloat64Array, docking_ra
 	st.position = pos
 	st.docking_radius = docking_radius
 	return st
+
+
+func _body(
+	body_id: int,
+	kind: String,
+	name: String,
+	pos: PackedFloat64Array,
+	radius: float
+) -> CelestialBodyRecord:
+	var body := CelestialBodyRecord.new()
+	body.body_id = body_id
+	body.kind = kind
+	body.name = name
+	body.position = pos
+	body.radius = radius
+	return body
+
+
+func test_radial_menu_offers_warp_only_when_a_celestial_is_in_range() -> void:
+	var ship := FakeShip.new()
+	add_child(ship)
+	_main._ships = {1: ship}
+	_main._player_ship_id = 1
+	var body_id := 9
+	var body := _body(body_id, "Planet", "Test", PackedFloat64Array([0.0, 0.0, 0.0]), 100.0)
+	_main._bodies = [body]
+	var target := {"ship_id": -1, "gate_id": -1, "body_id": body_id, "station_id": -1}
+
+	var close_actions := _radial_entries_for_actions(_main._radial_entries_for_target(target))
+	assert_bool(close_actions.has(WorldInteraction.TARGET_APPROACH)).is_true()
+	assert_bool(close_actions.has(WorldInteraction.TARGET_WARP)).is_false()
+
+	body.position = PackedFloat64Array([
+		ClientRules.new().min_warp_distance() * 2.0, 0.0, 0.0,
+	])
+	var distant_actions := _radial_entries_for_actions(_main._radial_entries_for_target(target))
+	assert_bool(distant_actions.has(WorldInteraction.TARGET_WARP)).is_true()
+	ship.free()
+
+
+func test_radial_menu_prioritizes_dock_and_only_offers_lock_for_ships() -> void:
+	var ship := FakeShip.new()
+	var target_ship := FakeShip.new()
+	add_child(ship)
+	add_child(target_ship)
+	_main._ships = {1: ship, 2: target_ship}
+	_main._player_ship_id = 1
+	_main._stations = [_station(6, "Test Station", PackedFloat64Array([0.0, 0.0, 0.0]), 500.0)]
+	_main._nearby_station_ids = [6] as Array[int]
+	var station_target := {"ship_id": -1, "gate_id": -1, "body_id": -1, "station_id": 6}
+	var station_entries: Array[Dictionary] = _main._radial_entries_for_target(station_target)
+	assert_int(int(station_entries[0].action)).is_equal(WorldInteraction.TARGET_DOCK)
+
+	var ship_target := {"ship_id": 2, "gate_id": -1, "body_id": -1, "station_id": -1}
+	var ship_actions := _radial_entries_for_actions(_main._radial_entries_for_target(ship_target))
+	assert_bool(ship_actions.has(WorldInteraction.TARGET_LOCK)).is_true()
+	assert_bool(ship_actions.has(WorldInteraction.TARGET_WARP)).is_false()
+	ship.free()
+	target_ship.free()
+
+
+func test_radial_actions_have_distinct_icons() -> void:
+	var actions: Array[int] = [
+		WorldInteraction.TARGET_APPROACH,
+		WorldInteraction.TARGET_WARP,
+		WorldInteraction.TARGET_ORBIT,
+		WorldInteraction.TARGET_KEEP_AT_RANGE,
+		WorldInteraction.TARGET_LOCK,
+		WorldInteraction.TARGET_DOCK,
+		WorldInteraction.TARGET_JUMP,
+	]
+	var icons: Array[String] = []
+	for action: int in actions:
+		var icon: String = _main._radial_icon_for_action(action)
+		assert_bool(icon.is_empty()).is_false()
+		assert_bool(icons.has(icon)).is_false()
+		icons.append(icon)
+
+
+func test_radial_actions_keep_their_compass_positions() -> void:
+	assert_float(_main._radial_angle_for_action(WorldInteraction.TARGET_APPROACH)).is_equal(3.0 * PI / 4.0)
+	assert_float(_main._radial_angle_for_action(WorldInteraction.TARGET_WARP)).is_equal(-3.0 * PI / 4.0)
+	assert_float(_main._radial_angle_for_action(WorldInteraction.TARGET_DOCK)).is_equal(-PI / 2.0)
+	assert_float(_main._radial_angle_for_action(WorldInteraction.TARGET_JUMP)).is_equal(-PI / 4.0)
+	assert_float(_main._radial_angle_for_action(WorldInteraction.TARGET_LOCK)).is_equal(0.0)
+	assert_float(_main._radial_angle_for_action(WorldInteraction.TARGET_KEEP_AT_RANGE)).is_equal(PI / 4.0)
+	assert_float(_main._radial_angle_for_action(WorldInteraction.TARGET_ORBIT)).is_equal(PI / 2.0)
+
+
+func _radial_entries_for_actions(entries: Array[Dictionary]) -> Array[int]:
+	var actions: Array[int] = []
+	for entry: Dictionary in entries:
+		actions.append(int(entry.action))
+	return actions

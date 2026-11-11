@@ -39,12 +39,14 @@ ApproachCommand { ship_id, target }
   → 一定距離（到着半径）まで詰めたら is_braking = true で停止
 ```
 
-対象（`ApproachTarget`）は **Ship または Jump Gate** を取れる:
+対象（`ApproachTarget`）は Ship、Jump Gate、天体、Station を取れる:
 
 - `Ship(ShipId)`  : 対象船の最新位置へ接近。到着半径 500u。対象消失で解除＋ブレーキ。
 - `Gate(JumpGateId)`: ジャンプゲートの静的座標へ接近。到着半径 = ゲートの
   `activation_radius × 0.8`（射程内で停止し、ジャンプ可能になる）。
   ゲートが自 Sector に属さない場合はコマンドを拒否する。
+- `Body(CelestialBodyId)`: 天体中心へ接近し、半径の 1.5 倍で停止する。
+- `Station(StationId)`: Station 中心へ接近し、`docking_radius × 0.8` で停止する。
 
 ### 2. 新規型定義
 
@@ -53,10 +55,11 @@ ApproachCommand { ship_id, target }
 pub enum ApproachTarget {
     Ship(ShipId),
     Gate(JumpGateId),
+    Body(CelestialBodyId),
+    Station(StationId),
 }
 pub struct ApproachCommand {
-    pub ship_id: ShipId,
-    pub target : ApproachTarget,
+    pub target: ApproachTarget,
 }
 
 // dawn-ecs/src/components/movement.rs
@@ -104,12 +107,27 @@ Movement System から自然に発行される。**Approach 専用のイベン�
 
 ### 6. 対象の選択はクライアント側で行う
 
-ロックオンとは独立に、プレイヤーが**クリックで選択した船またはゲート**を対象にする。
-クライアントは選択中の対象を保持し、A キーで
-`ClientMessage::Command(ClientCommandWire::ApproachCommand { target })` を
-postcard エンコードした binary frame として送る。`target` は船なら
-`NavigationTargetWire::Ship`、ゲートなら `NavigationTargetWire::Gate` である。
-サーバーは所有権（`ship_owners`）を確認してから `ApproachComp` を付与する。
+ロックオンとは独立に、プレイヤーがクリックで選択したワールド対象を操船対象にする。
+短いクリックは選択を維持し、A キーまたはラジアルメニューの Approach から
+`ClientRequest::Approach { target }` を postcard で送る。Godot はキーと hit-test 結果を
+正規化し、入力意図と typed request の解決は `dawn-client-core::ClientInteraction` が担う。
+サーバーは active ship と対象の Sector 所属を検証してから `ApproachComp` を付与する。
+
+### 7. ワールド対象のラジアルメニュー
+
+左クリックの短押しは対象選択、左ボタン長押しはカーソル位置にラジアルメニューを開く。
+押した対象はメニューを開いている間固定し、リリースした方向の項目を実行する。
+ドラッグ中はカメラ操作を優先し、メニュー表示中の Escape または中央・外側での
+リリースはキャンセルする。独立した `Align` 操作は設けず、同じ操船動作を行う
+`Approach` に統一する。
+
+- Ship: Approach、Orbit、Keep at Range、Lock。
+- Gate: Approach、Warp（最小距離以上）、Orbit、Keep at Range。起動範囲内では Jump。
+- Body: Approach、Warp（最小距離以上）、Orbit、Keep at Range。
+- Station: Approach、Warp（最小距離以上）、Orbit、Keep at Range。入港範囲内では Dock。
+
+Orbit / Keep at Range の静的対象への距離は対象中心から測るが、天体表面や
+ゲートの起動範囲、Station の docking 範囲を侵さないようサーバー側で下限を適用する。
 
 ---
 

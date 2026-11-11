@@ -19,6 +19,14 @@ const LOCAL_TOGGLE_TACTICAL_OVERLAY: int = 5
 const LOCAL_DOUBLE_CLICK_MOVE: int = 6
 const LOCAL_SELECTION_CHANGED: int = 7
 
+const TARGET_APPROACH: int = 1
+const TARGET_ORBIT: int = 2
+const TARGET_KEEP_AT_RANGE: int = 3
+const TARGET_LOCK: int = 4
+const TARGET_WARP: int = 5
+const TARGET_JUMP: int = 6
+const TARGET_DOCK: int = 7
+
 var _core: ClientInteraction = ClientInteraction.new()
 
 
@@ -92,6 +100,26 @@ func interpret_primary_click(
 
 func interpret_lock_click(player_ship_id: int, hit_ship_id: int) -> ClientAction:
 	return _core.lock_click(player_ship_id, hit_ship_id)
+
+
+func interpret_target_action(
+	action_code: int,
+	player_ship_id: int,
+	hit_ship_id: int,
+	hit_gate_id: int,
+	hit_body_id: int,
+	hit_station_id: int,
+	nearby_gate_id: int,
+	nearby_station_id: int,
+	keep_at_range_m: float
+) -> ClientAction:
+	return _core.target_action(
+		action_code, player_ship_id, hit_ship_id, hit_gate_id, hit_body_id,
+		hit_station_id, nearby_gate_id, nearby_station_id, keep_at_range_m)
+
+
+func clear_click_sequence() -> void:
+	_core.clear_click_sequence()
 
 
 ## Godot's Key enum is an engine concern. The resulting small integer is the
