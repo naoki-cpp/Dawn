@@ -1,12 +1,17 @@
 ## Fixed, offline art-review scene. Uses production sky, optics and ship assets.
 extends Node3D
 
+const GalacticModelScript = preload("res://scripts/galactic_model.gd")
+
 var _presentation := WorldPresentation.new()
 var _capture := false
+var _capture_layers := false
 
 
 func _ready() -> void:
-	_capture = OS.get_cmdline_user_args().has("--capture") or OS.get_cmdline_user_args().has("--sweep") or OS.get_cmdline_user_args().has("--close")
+	_capture_layers = OS.get_cmdline_user_args().has("--layers")
+	var args := OS.get_cmdline_user_args()
+	_capture = _capture_layers or args.has("--capture") or args.has("--sweep") or args.has("--close")
 	get_window().size = Vector2i(1280, 720)
 	var camera := Camera3D.new()
 	camera.near = 10.0
@@ -93,6 +98,9 @@ func _rock_mesh(noise: FastNoiseLite) -> ArrayMesh:
 
 
 func _capture_image(textures: Array[NoiseTexture2D], sunlight: DirectionalLight3D) -> void:
+	if _capture_layers:
+		await _capture_nebula_layers(sunlight)
+		return
 	for texture in textures:
 		if texture.get_image() == null:
 			await texture.changed
@@ -116,4 +124,39 @@ func _capture_image(textures: Array[NoiseTexture2D], sunlight: DirectionalLight3
 	else:
 		var filename := "stellar-close.png" if OS.get_cmdline_user_args().has("--close") else "lighting-study.png"
 		get_viewport().get_texture().get_image().save_png(output.path_join(filename))
+	get_tree().quit()
+
+
+func _capture_nebula_layers(sunlight: DirectionalLight3D) -> void:
+	var output := ProjectSettings.globalize_path("res://").path_join("../.tmp").simplify_path()
+	DirAccess.make_dir_recursive_absolute(output)
+	for geometry: Node in find_children("*", "GeometryInstance3D", true, false):
+		(geometry as GeometryInstance3D).visible = false
+	sunlight.visible = false
+	if _presentation._prominences != null:
+		_presentation._prominences.visible = false
+	if _presentation._sun_flare != null:
+		_presentation._sun_flare.enabled = false
+
+	var sky_material: ShaderMaterial = _presentation._sky_mat
+	sky_material.set_shader_parameter("sun_active", 0.0)
+	sky_material.set_shader_parameter("use_baked_nebula", false)
+	var star_instance := _presentation._starfield_root.get_child(0) as GeometryInstance3D
+	var stages: Array[Dictionary] = [
+		{"name": "01-stellar-density", "display_scale": GalacticModelScript.DISPLAY_RADIANCE_SCALE, "extinction": 0.0, "stars": false},
+		{"name": "02-stellar-extinction", "display_scale": GalacticModelScript.DISPLAY_RADIANCE_SCALE, "extinction": 1.0, "stars": false},
+		{"name": "03-starfield-clear", "display_scale": 0.0, "extinction": 0.0, "stars": true},
+		{"name": "04-starfield-extinction", "display_scale": 0.0, "extinction": 1.0, "stars": true},
+		{"name": "05-combined", "display_scale": GalacticModelScript.DISPLAY_RADIANCE_SCALE, "extinction": 1.0, "stars": true},
+	]
+	for stage: Dictionary in stages:
+		sky_material.set_shader_parameter("display_radiance_scale", stage["display_scale"])
+		sky_material.set_shader_parameter("extinction_scale", stage["extinction"])
+		_presentation._starfield_mat.set_shader_parameter("extinction_scale", stage["extinction"])
+		star_instance.visible = stage["stars"] as bool
+		for _frame: int in range(8):
+			await get_tree().process_frame
+		await RenderingServer.frame_post_draw
+		get_viewport().get_texture().get_image().save_png(
+			output.path_join(stage["name"] as String + ".png"))
 	get_tree().quit()

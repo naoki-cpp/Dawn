@@ -17,6 +17,8 @@ func test_generation_is_deterministic_for_a_seed() -> void:
 			.is_equal(again[i]["direction"] as Vector3)
 		assert_float(first[i]["flux"] as float) \
 			.is_equal_approx(again[i]["flux"] as float, 0.0000001)
+		assert_float(first[i]["distance_kpc"] as float) \
+			.is_equal_approx(again[i]["distance_kpc"] as float, 0.0000001)
 	assert_vector(other[0]["direction"] as Vector3) \
 		.is_not_equal(first[0]["direction"] as Vector3)
 
@@ -24,6 +26,65 @@ func test_generation_is_deterministic_for_a_seed() -> void:
 func test_directions_are_unit_length() -> void:
 	for star: Dictionary in StarfieldScript.generate(7, 64):
 		assert_float((star["direction"] as Vector3).length()).is_equal_approx(1.0, 0.0001)
+
+
+func test_star_distances_follow_local_and_galactic_sampling_ranges() -> void:
+	for star: Dictionary in StarfieldScript.generate(41, 128, 0.0):
+		var distance: float = star["distance_kpc"] as float
+		assert_float(distance).is_greater(0.0)
+		assert_float(distance).is_less_equal(StarfieldScript.LOCAL_FIELD_MAX_DISTANCE_KPC)
+
+	var far_galactic_stars: int = 0
+	for star: Dictionary in StarfieldScript.generate(41, 1024, 1.0):
+		var distance: float = star["distance_kpc"] as float
+		assert_float(distance).is_greater(0.0)
+		assert_float(distance).is_less_equal(StarfieldScript.MAX_STAR_DISTANCE_KPC)
+		if distance > StarfieldScript.LOCAL_FIELD_MAX_DISTANCE_KPC:
+			far_galactic_stars += 1
+	assert_int(far_galactic_stars).is_greater(0)
+
+
+func test_galactic_center_projects_from_the_suns_position() -> void:
+	var projection: Dictionary = StarfieldScript._project_position(Vector3.ZERO)
+	var expected_distance: float = StarfieldScript.GALACTIC_CENTER_DISTANCE_KPC
+	assert_float(projection["distance_kpc"] as float) \
+		.is_equal_approx(expected_distance, 0.01)
+	var expected_galactic_direction: Vector3 = \
+		(-StarfieldScript.SUN_GALACTIC_POSITION_KPC).normalized()
+	assert_vector(projection["direction"] as Vector3).is_equal(
+		StarfieldScript.from_galactic(expected_galactic_direction))
+
+
+func test_equatorial_and_galactic_frames_share_the_catalogue_orientation() -> void:
+	var north_galactic_pole: Vector3 = SkyCatalogScript._direction(
+		192.859481 / 15.0, 27.128251)
+	var galactic_center: Vector3 = SkyCatalogScript._direction(
+		266.4051 / 15.0, -28.936175)
+	assert_vector(StarfieldScript.to_galactic(north_galactic_pole)) \
+		.is_equal_approx(Vector3.UP, Vector3.ONE * 0.0001)
+	assert_vector(StarfieldScript.to_galactic(galactic_center)) \
+		.is_equal_approx(Vector3.RIGHT, Vector3.ONE * 0.001)
+	for direction: Vector3 in [Vector3.RIGHT, Vector3.UP, Vector3.BACK,
+		Vector3(0.32, -0.71, 0.62).normalized()]:
+		assert_vector(StarfieldScript.from_galactic(
+			StarfieldScript.to_galactic(direction))).is_equal_approx(
+				direction, Vector3.ONE * 0.0001)
+
+
+func test_disk_samples_have_the_expected_thin_and_thick_scale_height() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 813
+	var height_sum: float = 0.0
+	var radius_sum: float = 0.0
+	var samples: int = 4000
+	for _i: int in range(samples):
+		var position: Vector3 = StarfieldScript._sample_disk_position(rng, false)
+		height_sum += absf(position.y)
+		radius_sum += Vector2(position.x, position.z).length()
+	var mean_height: float = height_sum / float(samples)
+	var mean_radius: float = radius_sum / float(samples)
+	assert_float(mean_height).is_between(0.22, 0.30)
+	assert_float(mean_radius).is_between(4.25, 4.95)
 
 
 func test_uniform_sampling_spreads_evenly_instead_of_bunching_at_the_poles() -> void:
@@ -71,14 +132,18 @@ func test_disc_stars_concentrate_on_the_galactic_plane_and_run_fainter() -> void
 	assert_float(disc_flux).is_less(uniform_flux)
 
 
-## Height above the galactic plane, undoing Starfield.from_galactic().
+func test_default_field_keeps_a_dense_galactic_band() -> void:
+	var samples: int = 4000
+	var near_plane: int = 0
+	for star: Dictionary in StarfieldScript.generate(5, samples):
+		if absf(_galactic_height(star["direction"] as Vector3)) < 0.2:
+			near_plane += 1
+	assert_float(float(near_plane) / float(samples)).is_greater(0.43)
+
+
+## Galactic latitude in the same frame used by the sky shader.
 func _galactic_height(direction: Vector3) -> float:
-	var ct: float = cos(StarfieldScript.GALACTIC_TILT)
-	var st: float = sin(StarfieldScript.GALACTIC_TILT)
-	var cl: float = cos(StarfieldScript.GALACTIC_LON)
-	var sl: float = sin(StarfieldScript.GALACTIC_LON)
-	var rz: float = -direction.x * sl + direction.z * cl
-	return direction.y * ct - rz * st
+	return StarfieldScript.to_galactic(direction).y
 
 
 func test_star_records_carry_no_twinkle_state() -> void:
@@ -88,7 +153,7 @@ func test_star_records_carry_no_twinkle_state() -> void:
 	var star: Dictionary = StarfieldScript.generate(3, 1)[0]
 	var keys: Array = star.keys()
 	keys.sort()
-	assert_array(keys).contains_exactly(["color", "direction", "flux"])
+	assert_array(keys).contains_exactly(["color", "direction", "distance_kpc", "flux"])
 
 
 func test_brightest_named_star_outshines_the_generated_field() -> void:
@@ -105,7 +170,7 @@ func test_brightest_named_star_outshines_the_generated_field() -> void:
 	# Sirius is the brightest star in the real sky, so the generated field must
 	# not be able to out-shine the named landmarks.
 	assert_float(catalog_peak).is_greater(field_peak)
-	assert_float(field_peak).is_less_equal(StarfieldScript.FLUX_SCALE)
+	assert_float(field_peak).is_less_equal(StarfieldScript.MAX_GENERATED_FLUX)
 
 
 func test_flux_follows_the_visual_magnitude_scale() -> void:
@@ -113,6 +178,29 @@ func test_flux_follows_the_visual_magnitude_scale() -> void:
 	var sirius: float = StarfieldScript.flux_for_magnitude(-1.46)
 	var vega: float = StarfieldScript.flux_for_magnitude(0.03)
 	assert_float(sirius / vega).is_equal_approx(pow(10.0, -0.4 * (-1.46 - 0.03)), 0.001)
+
+
+func test_generated_brightness_has_a_sparse_pareto_tail() -> void:
+	var median_rank: float = StarfieldScript.flux_from_rank(0.5)
+	var bright_rank: float = StarfieldScript.flux_from_rank(0.99)
+	var capped_rank: float = StarfieldScript.flux_from_rank(0.9999)
+	var expected_median := (StarfieldScript.LUMINOSITY_BASELINE
+		+ StarfieldScript.LUMINOSITY_PARETO_SCALE
+		* (pow(2.0, 1.0 / StarfieldScript.LUMINOSITY_PARETO_SHAPE) - 1.0)) \
+		* StarfieldScript.LUMINOSITY_RENDER_GAIN
+	assert_float(median_rank).is_equal_approx(expected_median, 0.000001)
+	assert_float(bright_rank).is_greater(median_rank)
+	assert_float(capped_rank).is_equal(StarfieldScript.MAX_GENERATED_FLUX)
+
+	var low_flux_count: int = 0
+	var bright_flux_count: int = 0
+	for star: Dictionary in StarfieldScript.generate(73, 4000):
+		var flux: float = star["flux"] as float
+		if flux < 1.0:
+			low_flux_count += 1
+		if flux > 2.0:
+			bright_flux_count += 1
+	assert_int(low_flux_count).is_greater(bright_flux_count)
 
 
 func test_faint_stars_wash_toward_white_and_bright_stars_keep_their_tint() -> void:
@@ -131,6 +219,10 @@ func test_point_spread_stays_above_the_pixel_grid() -> void:
 	# arriving by accident through the sampling rate.
 	assert_float(StarfieldScript.point_spread_sigma_pixels()) \
 		.is_greater_equal(StarfieldScript.MIN_STABLE_SIGMA_PIXELS)
+	assert_float(StarfieldScript.POINT_CORE_SIGMA_PIXELS).is_equal_approx(0.72, 0.0001)
+	assert_float(StarfieldScript.POINT_SPREAD_PIXELS).is_greater(
+		StarfieldScript.POINT_HALO_SIGMA_PIXELS)
+	assert_float(StarfieldScript.POINT_HALO_PEAK_RATIO).is_between(0.0, 0.03)
 
 
 func test_every_star_shares_one_point_spread() -> void:
@@ -151,6 +243,8 @@ func test_multimesh_is_configured_to_carry_per_star_colour_and_custom_data() -> 
 	assert_bool(multimesh.use_custom_data).is_true()
 	assert_int(multimesh.transform_format).is_equal(MultiMesh.TRANSFORM_3D)
 	assert_object(multimesh.mesh).is_instanceof(QuadMesh)
+	assert_float(stars[0]["distance_kpc"] as float) \
+		.is_between(0.0, StarfieldScript.MAX_STAR_DISTANCE_KPC)
 
 	# The per-instance transforms/colours/custom data deliberately go unasserted.
 	# MultiMesh stores them in the RenderingServer, and the headless dummy

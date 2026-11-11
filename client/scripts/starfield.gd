@@ -15,6 +15,7 @@ extends RefCounted
 
 const NavigationMarkerRendererScript = preload("res://scripts/navigation_marker_renderer.gd")
 const SkyCatalogScript = preload("res://scripts/sky_catalog.gd")
+const GalacticModelScript = preload("res://scripts/galactic_model.gd")
 
 ## Radius of the sprite shell. Inside the camera's 5,000,000 far plane but
 ## beyond anything the scene places, so ordinary depth testing keeps ships in
@@ -30,51 +31,60 @@ const SHELL_RADIUS: float = 4_000_000.0
 ## Gaussian above the visible threshold further out. Varying the sprite size
 ## per star on top of that double-counts brightness and turns the bright end
 ## into balls rather than points.
-## A compact quad and softer Gaussian keep sigma above the sampling floor;
-## the shader trims the outer tail rather than making a sub-pixel core.
-const POINT_SPREAD_PIXELS: float = 2.0
-## Falloff inside the quad. Together with the quad size this fixes the
-## Gaussian's sigma at POINT_SPREAD_PIXELS / sqrt(2 * POINT_SHARPNESS).
-const POINT_SHARPNESS: float = 4.0
+## The shared core remains near one pixel while the quad carries a faint,
+## photographic halo. These are screen-space optical parameters, not star size.
+const POINT_SPREAD_PIXELS: float = 10.0
+const POINT_CORE_SIGMA_PIXELS: float = 0.72
+const POINT_HALO_SIGMA_PIXELS: float = 3.0
+const POINT_HALO_PEAK_RATIO: float = 0.02
 ## Sigma must stay at or above roughly this, or the sprite falls below the
 ## pixel grid and flickers as the camera turns -- which would reintroduce the
 ## twinkle ADR-0054 §5 deliberately rejects, by accident.
 const MIN_STABLE_SIGMA_PIXELS: float = 0.7
 
 const DEFAULT_SEED: int = 0x5DA0
-const DEFAULT_COUNT: int = 8000
+const DEFAULT_COUNT: int = 32000
 
 ## Share of the field drawn from the galactic disc rather than uniformly.
 ## A perfectly uniform field reads as flat wallpaper; the depth in a real sky
 ## comes from the Milky Way being a dense wall of distant stars behind a
 ## sparse scatter of near ones.
-const DISC_FRACTION: float = 0.55
-## Matches the sky shader's `disk = exp(-lat * 4.5)`, so the star density and
-## the painted band agree on where the plane is.
-const DISC_CONCENTRATION: float = 4.5
+const DISC_FRACTION: float = 0.66
+## The synthetic field combines a local foreground with distant Galactic
+## populations; it is a rendering sample, not a volume-complete catalogue.
+const GALACTIC_CENTER_DISTANCE_KPC: float = GalacticModelScript.GALACTIC_CENTER_RADIUS_KPC
+const SUN_GALACTIC_POSITION_KPC := GalacticModelScript.SUN_POSITION_KPC
+const MAX_STAR_DISTANCE_KPC: float = 22.0
+const LOCAL_FIELD_MAX_DISTANCE_KPC: float = 2.5
+const THIN_DISK_RADIAL_SCALE_KPC: float = GalacticModelScript.THIN_DISK_RADIAL_SCALE_KPC
+const THICK_DISK_RADIAL_SCALE_KPC: float = GalacticModelScript.THICK_DISK_RADIAL_SCALE_KPC
+const THIN_DISK_SCALE_HEIGHT_KPC: float = GalacticModelScript.THIN_DISK_SCALE_HEIGHT_KPC
+const THICK_DISK_SCALE_HEIGHT_KPC: float = GalacticModelScript.THICK_DISK_SCALE_HEIGHT_KPC
+const THICK_DISK_SHARE: float = GalacticModelScript.THICK_DISK_LOCAL_WEIGHT
+const SPIRAL_ARM_SHARE: float = 0.28
+const SPIRAL_ARM_COUNT: int = GalacticModelScript.SPIRAL_ARM_COUNT
+const SPIRAL_ARM_PITCH_RADIANS: float = GalacticModelScript.SPIRAL_ARM_PITCH_RADIANS
+const SPIRAL_ARM_WIDTH_KPC: float = GalacticModelScript.SPIRAL_ARM_WIDTH_KPC
+const SPIRAL_ARM_MIN_RADIUS_KPC: float = GalacticModelScript.SPIRAL_ARM_MIN_RADIUS_KPC
+const SPIRAL_ARM_MAX_RADIUS_KPC: float = GalacticModelScript.SPIRAL_ARM_MAX_RADIUS_KPC
 ## Disc stars stand in for a more distant population, so they run fainter.
 ## This is what makes the band read as haze instead of a bright stripe.
 const DISC_FLUX_FACTOR: float = 0.42
-## Share of the disc population piled onto the galactic bulge. The sky shader
-## already paints a bulge toward galactic +X; concentrating stars there too
-## gives the band a centre to fall away from instead of an even stripe.
+## A visual sampling share, not the Milky Way's bulge-to-disk mass ratio.
 const BULGE_SHARE: float = 0.24
-## Matches the shader's `exp(-bulge_dist * bulge_dist * 5.0)`.
-const BULGE_CONCENTRATION: float = 5.0
-## The bulge is the most distant population in view.
 const BULGE_FLUX_FACTOR: float = 0.30
-
-## Galactic frame, same rotation the sky shader's to_galactic() applies:
-## a longitude spin then the ~60 degree tilt of the plane.
-const GALACTIC_TILT: float = 1.05
-const GALACTIC_LON: float = 1.57
+const BAR_ANGLE_RADIANS: float = GalacticModelScript.BULGE_ANGLE_RADIANS
+const BAR_SEMI_AXES_KPC := GalacticModelScript.BULGE_SIGMA_AXES_KPC
 
 ## Apparent flux follows a steep power law because a magnitude distribution is
 ## steep: one step of visual magnitude is a flux ratio of about 2.5, so a
 ## handful of bright stars sit over a dense field of faint ones and a long tail
 ## falls below visibility entirely.
-const FLUX_EXPONENT: float = 4.5
-const FLUX_SCALE: float = 3.8
+const LUMINOSITY_PARETO_SHAPE: float = 1.8
+const LUMINOSITY_PARETO_SCALE: float = 0.12
+const LUMINOSITY_BASELINE: float = 0.035
+const LUMINOSITY_RENDER_GAIN: float = 3.8
+const MAX_GENERATED_FLUX: float = 8.0
 
 
 ## Area-preserving direction on the unit sphere. `u` is the SINE of the
@@ -87,48 +97,89 @@ static func direction_for(u: float, theta: float) -> Vector3:
 	return Vector3(ring * cos(theta), clamped, ring * sin(theta))
 
 
-## Galactic direction back to world space -- the inverse of the sky shader's
-## to_galactic(), so a latitude sampled in the galactic frame lands on the
-## band that space_sky.gdshader paints.
+## Transform between the catalogue's equatorial Cartesian axes and the IAU
+## Galactic frame. The middle component is latitude/height above the plane.
+static func to_galactic(equatorial: Vector3) -> Vector3:
+	var standard_equatorial := Vector3(equatorial.x, equatorial.z, equatorial.y)
+	var standard_galactic := Vector3(
+		Vector3(-0.05487556, -0.87343709, -0.48383502).dot(standard_equatorial),
+		Vector3(0.49410943, -0.44482963, 0.74698224).dot(standard_equatorial),
+		Vector3(-0.86766615, -0.19807637, 0.45598378).dot(standard_equatorial))
+	return Vector3(standard_galactic.x, standard_galactic.z, standard_galactic.y)
+
+
+## Inverse of the IAU equatorial-to-Galactic rotation used by the sky shader.
 static func from_galactic(galactic: Vector3) -> Vector3:
-	var ct: float = cos(GALACTIC_TILT)
-	var st: float = sin(GALACTIC_TILT)
-	var cl: float = cos(GALACTIC_LON)
-	var sl: float = sin(GALACTIC_LON)
-	var ry: float = galactic.y * ct + galactic.z * st
-	var rz: float = -galactic.y * st + galactic.z * ct
-	return Vector3(galactic.x * cl - rz * sl, ry, galactic.x * sl + rz * cl)
+	var standard_galactic := Vector3(galactic.x, galactic.z, galactic.y)
+	var standard_equatorial := Vector3(
+		Vector3(-0.05487556, 0.49410943, -0.86766615).dot(standard_galactic),
+		Vector3(-0.87343709, -0.44482963, -0.19807637).dot(standard_galactic),
+		Vector3(-0.48383502, 0.74698224, 0.45598378).dot(standard_galactic))
+	return Vector3(standard_equatorial.x, standard_equatorial.z, standard_equatorial.y)
 
 
-## A direction concentrated toward the galactic plane. The height above the
-## plane is drawn from an exponential so the density in solid angle follows
-## exp(-|height| * DISC_CONCENTRATION), matching the painted band.
-static func disc_direction(rng: RandomNumberGenerator) -> Vector3:
-	var height: float = 1.0
-	# Rejection: an exponential is unbounded but a direction's height is not.
-	# Acceptance is ~99% at this concentration, and the bound keeps it finite.
-	for _attempt: int in range(8):
-		height = -log(maxf(1.0 - rng.randf(), 1e-9)) / DISC_CONCENTRATION
-		if height <= 1.0:
-			break
-		height = rng.randf()
+## An area-weighted exponential disk has radial density proportional to
+## R * exp(-R / scale_length), i.e. a gamma distribution with shape two.
+static func _sample_disk_radius(rng: RandomNumberGenerator, scale_length: float) -> float:
+	var first: float = maxf(rng.randf(), 1e-9)
+	var second: float = maxf(rng.randf(), 1e-9)
+	return -scale_length * (log(first) + log(second))
+
+
+static func _sample_standard_normal(rng: RandomNumberGenerator) -> float:
+	var radius: float = sqrt(-2.0 * log(maxf(rng.randf(), 1e-9)))
+	return radius * cos(TAU * rng.randf())
+
+
+static func _sample_disk_position(
+	rng: RandomNumberGenerator, in_spiral_arm: bool
+) -> Vector3:
+	var thick: bool = rng.randf() < THICK_DISK_SHARE
+	var scale_length: float = THICK_DISK_RADIAL_SCALE_KPC if thick \
+		else THIN_DISK_RADIAL_SCALE_KPC
+	var scale_height: float = THICK_DISK_SCALE_HEIGHT_KPC if thick \
+		else THIN_DISK_SCALE_HEIGHT_KPC
+	var radius: float = _sample_disk_radius(rng, scale_length)
+	if in_spiral_arm:
+		for _attempt: int in range(16):
+			radius = _sample_disk_radius(rng, scale_length)
+			if radius >= SPIRAL_ARM_MIN_RADIUS_KPC \
+				and radius <= SPIRAL_ARM_MAX_RADIUS_KPC:
+				break
+		radius = clampf(radius, SPIRAL_ARM_MIN_RADIUS_KPC, SPIRAL_ARM_MAX_RADIUS_KPC)
+	var angle: float = rng.randf() * TAU
+	if in_spiral_arm:
+		var arm: int = rng.randi_range(0, SPIRAL_ARM_COUNT - 1)
+		var arm_angle: float = GalacticModelScript.SPIRAL_ARM_BASE_ANGLE_RADIANS \
+			+ float(arm) * TAU / float(SPIRAL_ARM_COUNT) \
+			+ log(radius / GalacticModelScript.SPIRAL_ARM_REFERENCE_RADIUS_KPC) \
+			/ tan(SPIRAL_ARM_PITCH_RADIANS)
+		angle = arm_angle + _sample_standard_normal(rng) * SPIRAL_ARM_WIDTH_KPC / radius
+	var height: float = -log(maxf(rng.randf(), 1e-9)) * scale_height
 	if rng.randf() < 0.5:
 		height = -height
-	return from_galactic(direction_for(height, rng.randf() * TAU))
+	return Vector3(radius * cos(angle), height, radius * sin(angle))
 
 
-## A direction concentrated on the galactic bulge, which sits toward +X in the
-## galactic frame. The angle off centre is Rayleigh-distributed, which is what
-## a Gaussian in solid angle looks like once the sin(theta) area factor is
-## folded in.
-static func bulge_direction(rng: RandomNumberGenerator) -> Vector3:
-	var angle: float = sqrt(
-		-log(maxf(1.0 - rng.randf(), 1e-9)) / BULGE_CONCENTRATION)
-	angle = minf(angle, PI)
-	var phi: float = rng.randf() * TAU
-	var galactic := Vector3(
-		cos(angle), sin(angle) * cos(phi), sin(angle) * sin(phi))
-	return from_galactic(galactic)
+static func _sample_bulge_position(rng: RandomNumberGenerator) -> Vector3:
+	var local := Vector3(
+		_sample_standard_normal(rng) * BAR_SEMI_AXES_KPC.x,
+		_sample_standard_normal(rng) * BAR_SEMI_AXES_KPC.y,
+		_sample_standard_normal(rng) * BAR_SEMI_AXES_KPC.z)
+	var c: float = cos(BAR_ANGLE_RADIANS)
+	var s: float = sin(BAR_ANGLE_RADIANS)
+	return Vector3(local.x * c + local.z * s, local.y, -local.x * s + local.z * c)
+
+
+## Convert a physical Galactic position into an observer-relative direction
+## and path length so foreground dust is integrated only to that source.
+static func _project_position(position_kpc: Vector3) -> Dictionary:
+	var offset: Vector3 = position_kpc - SUN_GALACTIC_POSITION_KPC
+	var distance: float = maxf(offset.length(), 0.01)
+	return {
+		"direction": from_galactic(offset / distance),
+		"distance_kpc": minf(distance, MAX_STAR_DISTANCE_KPC),
+	}
 
 
 ## Spectral mix for the stars an observer actually sees. The underlying initial
@@ -173,6 +224,15 @@ static func flux_for_magnitude(magnitude: float) -> float:
 	return pow(10.0, -0.4 * magnitude) * 2.2
 
 
+## Capped Pareto-like brightness sample: many dim points, sparse bright stars.
+## The distribution is a visual population prior, not a luminosity function.
+static func flux_from_rank(rank: float) -> float:
+	var tail_probability := maxf(1.0 - clampf(rank, 0.0, 1.0), 1e-9)
+	var pareto := pow(tail_probability, -1.0 / LUMINOSITY_PARETO_SHAPE) - 1.0
+	var relative_luminosity := LUMINOSITY_BASELINE + LUMINOSITY_PARETO_SCALE * pareto
+	return minf(relative_luminosity * LUMINOSITY_RENDER_GAIN, MAX_GENERATED_FLUX)
+
+
 ## Deterministic star records for a seed. Pure: no scene tree, no rendering.
 ## `disc_fraction` of the field is concentrated on the galactic plane and runs
 ## fainter; pass 0.0 for a plain uniform sphere.
@@ -185,17 +245,33 @@ static func generate(
 	for _i: int in range(maxi(0, count)):
 		var structured: bool = rng.randf() < disc_fraction
 		var in_bulge: bool = structured and rng.randf() < BULGE_SHARE
+		var in_arm: bool = structured and not in_bulge \
+			and rng.randf() < SPIRAL_ARM_SHARE
+		var position: Vector3
 		var direction: Vector3
+		var distance_kpc: float
+		var projection: Dictionary
 		if in_bulge:
-			direction = bulge_direction(rng)
+			position = _sample_bulge_position(rng)
+			projection = _project_position(position)
+			direction = projection["direction"] as Vector3
+			distance_kpc = projection["distance_kpc"] as float
 		elif structured:
-			direction = disc_direction(rng)
+			position = _sample_disk_position(rng, in_arm)
+			projection = _project_position(position)
+			direction = projection["direction"] as Vector3
+			distance_kpc = projection["distance_kpc"] as float
 		else:
 			direction = direction_for(rng.randf() * 2.0 - 1.0, rng.randf() * TAU)
+			distance_kpc = LOCAL_FIELD_MAX_DISTANCE_KPC * pow(rng.randf(), 1.0 / 3.0)
 
 		var rarity: float = rng.randf()
 		var spectral: float = spectral_t(rng.randf())
-		var flux: float = pow(rarity, FLUX_EXPONENT) * FLUX_SCALE
+		# Spiral arms host young, luminous stars; keep them a minority of the
+		# sampled arm population rather than tinting every arm star blue.
+		if in_arm and rng.randf() < 0.08:
+			spectral = rng.randf() * 0.40
+		var flux: float = flux_from_rank(rarity)
 		if in_bulge:
 			flux *= BULGE_FLUX_FACTOR
 		elif structured:
@@ -204,6 +280,7 @@ static func generate(
 			"direction": direction,
 			"color": apparent_color(spectral, rarity),
 			"flux": flux,
+			"distance_kpc": distance_kpc,
 		})
 	return stars
 
@@ -218,6 +295,9 @@ static func catalog_stars() -> Array[Dictionary]:
 			"direction": entry["direction"] as Vector3,
 			"color": entry["color"] as Color,
 			"flux": flux,
+			# Named bright stars are explicit sky landmarks; a short local
+			# foreground path avoids pretending their catalogue distances exist.
+			"distance_kpc": 0.25,
 		})
 	return stars
 
@@ -241,12 +321,15 @@ static func build_multimesh(stars: Array[Dictionary]) -> MultiMesh:
 		var origin: Vector3 = (star["direction"] as Vector3) * SHELL_RADIUS
 		multimesh.set_instance_transform(i, Transform3D(Basis.IDENTITY, origin))
 		multimesh.set_instance_color(i, star["color"] as Color)
-		multimesh.set_instance_custom_data(
-			i, Color(star["flux"] as float, 0.0, 0.0, 0.0))
+		multimesh.set_instance_custom_data(i, Color(
+			star["flux"] as float,
+			clampf((star["distance_kpc"] as float) / MAX_STAR_DISTANCE_KPC, 0.0, 1.0),
+			0.0,
+			0.0))
 	return multimesh
 
 
-## Standard deviation of the rendered point spread, in pixels. Exposed so the
-## sampling guarantee above can be asserted rather than just asserted about.
+## Standard deviation of the Gaussian core, in pixels. Exposed so its sampling
+## stability guarantee can be asserted rather than just asserted about.
 static func point_spread_sigma_pixels() -> float:
-	return POINT_SPREAD_PIXELS / sqrt(2.0 * POINT_SHARPNESS)
+	return POINT_CORE_SIGMA_PIXELS

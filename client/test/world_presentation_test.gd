@@ -7,6 +7,7 @@ extends GdUnitTestSuite
 
 const WorldPresentationScript = preload("res://scripts/world_presentation.gd")
 const StarfieldScript = preload("res://scripts/starfield.gd")
+const GalacticModelScript = preload("res://scripts/galactic_model.gd")
 
 
 func test_projection_adapter_rejects_invalid_coordinate_shapes() -> void:
@@ -119,7 +120,7 @@ func test_render_scale_is_queried_from_world_space_authority() -> void:
 	assert_float(presentation._render_scale()).is_equal_approx(0.25, 0.0001)
 
 
-func test_space_background_uses_a_restrained_galactic_palette() -> void:
+func test_space_background_uses_the_shared_galactic_model() -> void:
 	var presentation := WorldPresentationScript.new()
 	var root: Node3D = auto_free(Node3D.new()) as Node3D
 	add_child(root)
@@ -128,17 +129,36 @@ func test_space_background_uses_a_restrained_galactic_palette() -> void:
 
 	var world_environment: WorldEnvironment = root.get_child(0) as WorldEnvironment
 	var sky_material: ShaderMaterial = world_environment.environment.sky.sky_material as ShaderMaterial
-	var primary: Color = sky_material.get_shader_parameter("nebula_primary_color") as Color
-	var secondary: Color = sky_material.get_shader_parameter("nebula_secondary_color") as Color
-	var highlight: Color = sky_material.get_shader_parameter("nebula_highlight_color") as Color
-
-	assert_float(sky_material.get_shader_parameter("nebula_strength") as float) \
-		.is_equal_approx(0.24, 0.0001)
-	assert_float(primary.r).is_equal_approx(0.80, 0.0001)
-	assert_float(primary.g).is_equal_approx(0.12, 0.0001)
-	assert_float(secondary.r).is_equal_approx(0.32, 0.0001)
-	assert_float(secondary.g).is_equal_approx(0.38, 0.0001)
-	assert_float(highlight.g).is_equal_approx(0.48, 0.0001)
+	assert_float(sky_material.get_shader_parameter("display_radiance_scale") as float) \
+		.is_equal_approx(GalacticModelScript.DISPLAY_RADIANCE_SCALE, 0.0001)
+	assert_float(sky_material.get_shader_parameter("extinction_scale") as float) \
+		.is_equal_approx(1.0, 0.0001)
+	assert_float(sky_material.get_shader_parameter("dust_scale_length_kpc") as float) \
+		.is_equal_approx(GalacticModelScript.DUST_RADIAL_SCALE_KPC, 0.0001)
+	assert_float(sky_material.get_shader_parameter("dust_scale_height_kpc") as float) \
+		.is_equal_approx(GalacticModelScript.DUST_SCALE_HEIGHT_KPC, 0.0001)
+	assert_float(sky_material.get_shader_parameter("thin_disk_scale_height_kpc") as float) \
+		.is_equal_approx(GalacticModelScript.THIN_DISK_SCALE_HEIGHT_KPC, 0.0001)
+	assert_float(sky_material.get_shader_parameter("bulge_density_normalization") as float) \
+		.is_equal_approx(GalacticModelScript.bulge_density_normalization(), 0.0001)
+	assert_vector(sky_material.get_shader_parameter("dust_turbulence_octave_weights") as Vector3) \
+		.is_equal_approx(GalacticModelScript.DUST_TURBULENCE_OCTAVE_WEIGHTS, Vector3.ONE * 0.0001)
+	assert_float(sky_material.get_shader_parameter("dust_turbulence_normalization") as float) \
+		.is_equal_approx(GalacticModelScript.dust_turbulence_normalization(), 0.0001)
+	assert_float(sky_material.get_shader_parameter("dust_projected_turbulence_normalization") as float) \
+		.is_equal_approx(GalacticModelScript.dust_turbulence_normalization(), 0.0001)
+	assert_float(sky_material.get_shader_parameter("dust_volume_log_density_sigma") as float) \
+		.is_equal_approx(GalacticModelScript.dust_volume_log_density_sigma(), 0.0001)
+	assert_float(sky_material.get_shader_parameter("dust_projected_log_density_sigma") as float) \
+		.is_equal_approx(GalacticModelScript.dust_projected_log_density_sigma(), 0.0001)
+	assert_vector(sky_material.get_shader_parameter("dust_cloud_angular_scales_radians") as Vector3) \
+		.is_equal_approx(GalacticModelScript.DUST_CLOUD_ANGULAR_SCALES_RADIANS, Vector3.ONE * 0.0001)
+	assert_vector(sky_material.get_shader_parameter("stellar_mottle_weights") as Vector2) \
+		.is_equal_approx(GalacticModelScript.STELLAR_MOTTLE_WEIGHTS, Vector2.ONE * 0.0001)
+	assert_vector(sky_material.get_shader_parameter("stellar_mottle_angular_scales_radians") as Vector2) \
+		.is_equal_approx(GalacticModelScript.STELLAR_MOTTLE_ANGULAR_SCALES_RADIANS, Vector2.ONE * 0.0001)
+	assert_float(sky_material.get_shader_parameter("stellar_mottle_noise_normalization") as float) \
+		.is_equal_approx(GalacticModelScript.stellar_mottle_noise_normalization(), 0.0001)
 
 
 func test_starfield_is_built_and_pinned_to_the_camera() -> void:
@@ -153,6 +173,32 @@ func test_starfield_is_built_and_pinned_to_the_camera() -> void:
 	var starfield: Node3D = root.get_node("Starfield") as Node3D
 	var instance: MultiMeshInstance3D = starfield.get_child(0) as MultiMeshInstance3D
 	assert_int(instance.multimesh.instance_count).is_greater(1000)
+	assert_float(presentation._starfield_mat.get_shader_parameter(
+		"core_sigma_pixels") as float) \
+		.is_equal_approx(StarfieldScript.POINT_CORE_SIGMA_PIXELS, 0.0001)
+	assert_float(presentation._starfield_mat.get_shader_parameter(
+		"halo_sigma_pixels") as float) \
+		.is_equal_approx(StarfieldScript.POINT_HALO_SIGMA_PIXELS, 0.0001)
+	assert_float(presentation._starfield_mat.get_shader_parameter(
+		"halo_peak_ratio") as float) \
+		.is_equal_approx(StarfieldScript.POINT_HALO_PEAK_RATIO, 0.0001)
+	var star_uniforms: Array[String] = []
+	for uniform: Dictionary in presentation._starfield_mat.shader.get_shader_uniform_list():
+		star_uniforms.append(uniform["name"] as String)
+	for uniform_name: String in [
+		"point_spread_pixels",
+		"core_sigma_pixels",
+		"halo_sigma_pixels",
+		"halo_peak_ratio",
+	]:
+		assert_bool(star_uniforms.has(uniform_name)) \
+			.override_failure_message("starfield shader declares no uniform " + uniform_name) \
+			.is_true()
+	assert_float(presentation._starfield_mat.get_shader_parameter(
+		"extinction_scale") as float).is_equal_approx(1.0, 0.0001)
+	assert_float(presentation._starfield_mat.get_shader_parameter(
+		"dust_projected_log_density_sigma") as float) \
+		.is_equal_approx(GalacticModelScript.dust_projected_log_density_sigma(), 0.0001)
 
 	# Stars are at infinity: the shell tracks where the camera is but never how
 	# it is turned, so the field cannot parallax as the ship crosses AU.
@@ -263,13 +309,33 @@ func test_sky_material_only_sets_uniforms_the_shader_declares() -> void:
 	# setting with it and report nothing. An empty list also catches a shader
 	# that failed to parse at all.
 	for uniform_name: String in [
-		"nebula_strength",
-		"milkyway_strength",
-		"milkyway_core_color",
-		"milkyway_outer_color",
-		"nebula_primary_color",
-		"nebula_secondary_color",
-		"nebula_highlight_color",
+		"display_radiance_scale",
+		"extinction_scale",
+		"galactic_sun_position_kpc",
+		"galactic_center_radius_kpc",
+		"thin_disk_radial_scale_kpc",
+		"thick_disk_radial_scale_kpc",
+		"thin_disk_scale_height_kpc",
+		"thick_disk_scale_height_kpc",
+		"thick_disk_local_weight",
+		"bulge_angle_radians",
+		"bulge_sigma_axes_kpc",
+		"bulge_density_normalization",
+		"dust_scale_length_kpc",
+		"dust_scale_height_kpc",
+		"local_av_extinction_mag_per_kpc",
+		"local_v_luminosity_density_lsun_pc3",
+		"dust_turbulence_octave_weights",
+		"dust_turbulence_normalization",
+		"dust_volume_log_density_sigma",
+		"dust_projected_log_density_sigma",
+		"dust_cloud_angular_scales_radians",
+		"dust_projected_turbulence_normalization",
+		"stellar_mottle_weights",
+		"stellar_mottle_angular_scales_radians",
+		"stellar_mottle_noise_normalization",
+		"magnitude_to_optical_depth",
+		"rgb_extinction_over_av",
 		"ambient_color",
 		"nebula_panorama",
 		"use_baked_nebula",
