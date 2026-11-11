@@ -62,7 +62,7 @@ summed, while leaving the integrated bulge component and 3D dust transfer
 unchanged. Its 0.24/0.08-radian coherence lengths and 0.20/0.11 amplitudes are
 rendering priors adapted from the supplied 2D procedural reference; they are
 not measured Galactic power-spectrum values and do not encode star positions.
-The star sprites use the smooth mean dust profile so the 32,000-point catalogue
+The star sprites use the smooth mean dust profile so the 16,000-point catalogue
 does not require per-star volumetric noise integration.
 
 For each point along a ray, optical depth accumulates only from foreground

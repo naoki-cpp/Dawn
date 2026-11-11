@@ -223,6 +223,8 @@ func test_point_spread_stays_above_the_pixel_grid() -> void:
 	assert_float(StarfieldScript.POINT_SPREAD_PIXELS).is_greater(
 		StarfieldScript.POINT_HALO_SIGMA_PIXELS)
 	assert_float(StarfieldScript.POINT_HALO_PEAK_RATIO).is_between(0.0, 0.03)
+	assert_float(StarfieldScript.POINT_HALO_PEAK_RATIO).is_less_equal(0.01)
+	assert_int(StarfieldScript.DEFAULT_COUNT).is_less_equal(16000)
 
 
 func test_every_star_shares_one_point_spread() -> void:

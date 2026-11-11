@@ -33,17 +33,17 @@ const SHELL_RADIUS: float = 4_000_000.0
 ## into balls rather than points.
 ## The shared core remains near one pixel while the quad carries a faint,
 ## photographic halo. These are screen-space optical parameters, not star size.
-const POINT_SPREAD_PIXELS: float = 10.0
+const POINT_SPREAD_PIXELS: float = 8.0
 const POINT_CORE_SIGMA_PIXELS: float = 0.72
-const POINT_HALO_SIGMA_PIXELS: float = 3.0
-const POINT_HALO_PEAK_RATIO: float = 0.02
+const POINT_HALO_SIGMA_PIXELS: float = 2.4
+const POINT_HALO_PEAK_RATIO: float = 0.008
 ## Sigma must stay at or above roughly this, or the sprite falls below the
 ## pixel grid and flickers as the camera turns -- which would reintroduce the
 ## twinkle ADR-0054 §5 deliberately rejects, by accident.
 const MIN_STABLE_SIGMA_PIXELS: float = 0.7
 
 const DEFAULT_SEED: int = 0x5DA0
-const DEFAULT_COUNT: int = 32000
+const DEFAULT_COUNT: int = 16000
 
 ## Share of the field drawn from the galactic disc rather than uniformly.
 ## A perfectly uniform field reads as flat wallpaper; the depth in a real sky
