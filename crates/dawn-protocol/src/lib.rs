@@ -474,15 +474,19 @@ mod tests {
 
     #[test]
     fn navigation_target_round_trips_as_domain_typed_value() {
-        let message = ClientMessage::Command(ClientRequest::Approach {
-            target: ApproachTarget::Ship(ship_id(7)),
-        });
-        assert!(matches!(
-            roundtrip(&message),
-            ClientMessage::Command(ClientRequest::Approach {
-                target: ApproachTarget::Ship(target),
-            }) if target == ship_id(7)
-        ));
+        for target in [
+            ApproachTarget::Ship(ship_id(7)),
+            ApproachTarget::Gate(dawn_core::JumpGateId(8)),
+            ApproachTarget::Body(dawn_core::CelestialBodyId(9)),
+            ApproachTarget::Station(dawn_core::StationId(10)),
+        ] {
+            let message = ClientMessage::Command(ClientRequest::Approach { target });
+            assert!(matches!(
+                roundtrip(&message),
+                ClientMessage::Command(ClientRequest::Approach { target: decoded })
+                    if decoded == target
+            ));
+        }
     }
 
     #[test]

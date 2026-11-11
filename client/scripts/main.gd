@@ -29,8 +29,10 @@ const HudSurfaceScript = preload("res://scripts/hud_surface.gd")
 const MarketSurfaceScript = preload("res://scripts/market_surface.gd")
 const WorldPresentationScript = preload("res://scripts/world_presentation.gd")
 const WorldInteractionScript = preload("res://scripts/world_interaction.gd")
+const RadialMenuScript = preload("res://scripts/radial_menu.gd")
 const InventoryRow = preload("res://scripts/inventory_row.gd")
 const CLIENT_TICKS_PER_SEC : float = 10.0
+const WORLD_RADIAL_HOLD_SEC: float = 0.36
 
 const BUILDABLE_SHIP_TYPE_ID : int = 7
 
@@ -73,6 +75,13 @@ var _drag_row : InventoryRow = null
 var _drag_start_pos : Vector2 = Vector2.ZERO
 var _drag_ghost : Label = null
 const DRAG_THRESHOLD_PX : float = 6.0
+
+var _world_press_pending: bool = false
+var _world_press_started_sec: float = 0.0
+var _world_press_position: Vector2 = Vector2.ZERO
+var _world_press_target: Dictionary = {}
+var _radial_open: bool = false
+var _radial_menu: Control = null
 
 ## PlayerLoadout is a GDExtension class (dawn-client-gdext, ADR-0039/ADR-0040)
 ## -- no preload needed, same as any other globally registered class.
@@ -135,6 +144,9 @@ func _ready() -> void:
 	_connection.connection_changed.connect(_on_connection_changed)
 	_presentation.build(self, _camera, _warp_tunnel, _gates_root, _bodies_root, _world, _directional_light)
 	_hud_surface.build(self, _hud, _stats_label)
+	_radial_menu = RadialMenuScript.new()
+	_radial_menu.z_index = 100
+	_hud.add_child(_radial_menu)
 	_market_surface.build(
 		_hud,
 		Callable(self, "_on_market_refresh"),
@@ -149,6 +161,12 @@ func _ready() -> void:
 	_connection_dialog.build(_connection)
 
 func _process(delta: float) -> void:
+	_update_radial_hold()
+	if _radial_open:
+		if not _world_target_exists(_world_press_target):
+			_cancel_radial_menu()
+		else:
+			_radial_menu.call("update_pointer", get_viewport().get_mouse_position())
 	_presentation.refresh(delta, _player_ship_id, _ships, _bodies)
 	_update_gate_proximity()
 	_update_station_proximity()
@@ -208,9 +226,13 @@ func _input(event: InputEvent) -> void:
 	## Input meaning is decided by the engine-independent client policy. This
 	## adapter only performs the resulting network or presentation effect.
 	if event is InputEventKey and event.pressed and not event.echo:
+		var key: InputEventKey = event as InputEventKey
+		if _radial_open:
+			if key.keycode == KEY_ESCAPE:
+				_cancel_radial_menu()
+			return
 		if _market_surface.keyboard_consumes():
 			return
-		var key: InputEventKey = event as InputEventKey
 		var nearest_station_id: int = _nearby_station_ids[0] if not _nearby_station_ids.is_empty() else -1
 		var action: ClientAction = _interaction.resolve_key_action(
 			key.keycode,
@@ -223,9 +245,14 @@ func _input(event: InputEvent) -> void:
 		_execute_client_action(action)
 		return
 
-	if event is InputEventMouseMotion and _drag_row != null:
-		_update_drag_ghost((event as InputEventMouseMotion).position)
-		return
+	if event is InputEventMouseMotion:
+		var motion: InputEventMouseMotion = event as InputEventMouseMotion
+		if _radial_open:
+			_radial_menu.call("update_pointer", motion.position)
+			return
+		if _drag_row != null:
+			_update_drag_ghost(motion.position)
+			return
 
 	if event is InputEventMouseButton:
 		var mb: InputEventMouseButton = event as InputEventMouseButton
@@ -233,9 +260,17 @@ func _input(event: InputEvent) -> void:
 			if _drag_row != null:
 				_end_inventory_drag(mb.position)
 				return
+			if _radial_open:
+				_finish_radial_menu(mb.position)
+				return
+			if _world_press_pending:
+				_finish_world_click()
+				return
 			_camera.call("end_orbit_drag")
 			return
 		if mb.pressed:
+			if _radial_open:
+				return
 			if _market_surface.panel_consumes(mb.position):
 				return
 			## A click on the open inventory panel fits/unfits (row hit) or is
@@ -262,26 +297,7 @@ func _input(event: InputEvent) -> void:
 			match mb.button_index:
 				MOUSE_BUTTON_LEFT:
 					_camera.call("begin_orbit_drag", mb.position)
-					var hit_ship: int = _pick_ship_at(mb.position)
-					var hit_gate: int = -1
-					var hit_body: int = -1
-					var hit_station: int = -1
-					if hit_ship < 0:
-						hit_gate = _pick_gate_at(mb.position)
-						if hit_gate < 0:
-							hit_station = _pick_station_at(mb.position)
-							if hit_station < 0:
-								hit_body = _pick_body_at(mb.position)
-					var click_action: ClientAction = _interaction.interpret_primary_click(
-						mb.position,
-						Time.get_ticks_msec() / 1000.0,
-						(_camera as Node).call("is_dragging") as bool,
-						_player_ship_id,
-						hit_ship,
-						hit_gate,
-						hit_body,
-						hit_station)
-					_execute_client_action(click_action)
+					_begin_world_press(mb.position)
 				MOUSE_BUTTON_RIGHT:
 					var lock_action: ClientAction = _interaction.interpret_lock_click(
 						_player_ship_id,
@@ -353,6 +369,276 @@ func _pick_station_at(screen_pos: Vector2) -> int:
 	if _player_ship_id < 0:
 		return -1
 	return ShipPicking.pick_station_at(_camera, screen_pos, _bodies_root)
+
+
+func _begin_world_press(screen_pos: Vector2) -> void:
+	_world_press_pending = true
+	_world_press_started_sec = float(Time.get_ticks_msec()) / 1000.0
+	_world_press_position = screen_pos
+	_world_press_target = _pick_world_target(screen_pos)
+
+
+func _pick_world_target(screen_pos: Vector2) -> Dictionary:
+	var hit_ship_id := _pick_ship_at(screen_pos)
+	if hit_ship_id >= 0:
+		return {"ship_id": hit_ship_id, "gate_id": -1, "body_id": -1, "station_id": -1}
+	var hit_gate_id := _pick_gate_at(screen_pos)
+	if hit_gate_id >= 0:
+		return {"ship_id": -1, "gate_id": hit_gate_id, "body_id": -1, "station_id": -1}
+	var hit_station_id := _pick_station_at(screen_pos)
+	if hit_station_id >= 0:
+		return {"ship_id": -1, "gate_id": -1, "body_id": -1, "station_id": hit_station_id}
+	var hit_body_id := _pick_body_at(screen_pos)
+	return {"ship_id": -1, "gate_id": -1, "body_id": hit_body_id, "station_id": -1}
+
+
+func _target_kind(target: Dictionary) -> String:
+	if int(target.get("ship_id", -1)) >= 0:
+		return "ship"
+	if int(target.get("gate_id", -1)) >= 0:
+		return "gate"
+	if int(target.get("station_id", -1)) >= 0:
+		return "station"
+	if int(target.get("body_id", -1)) >= 0:
+		return "body"
+	return ""
+
+
+func _world_target_exists(target: Dictionary) -> bool:
+	match _target_kind(target):
+		"ship":
+			return _ships.has(int(target.ship_id))
+		"gate":
+			for entry: Variant in _gates:
+				if (entry as GateRecord).gate_id == int(target.gate_id):
+					return true
+		"station":
+			for entry: Variant in _stations:
+				if (entry as StationRecord).station_id == int(target.station_id):
+					return true
+		"body":
+			for entry: Variant in _bodies:
+				if (entry as CelestialBodyRecord).body_id == int(target.body_id):
+					return true
+	return false
+
+
+func _target_distance_m(target: Dictionary) -> float:
+	if _player_ship_id < 0 or not _ships.has(_player_ship_id):
+		return -1.0
+	var ship_position := _world.to_server_components(
+		(_ships[_player_ship_id] as Node3D).global_position)
+	match _target_kind(target):
+		"ship":
+			var target_id: int = int(target.ship_id)
+			if _ships.has(target_id):
+				var target_position := _world.to_server_components(
+					(_ships[target_id] as Node3D).global_position)
+				return _world.distance_components(ship_position, target_position)
+		"gate":
+			for entry: Variant in _gates:
+				var gate := entry as GateRecord
+				if gate.gate_id == int(target.gate_id):
+					return _world.distance_components(ship_position, gate.position)
+		"station":
+			for entry: Variant in _stations:
+				var station := entry as StationRecord
+				if station.station_id == int(target.station_id):
+					return _world.distance_components(ship_position, station.position)
+		"body":
+			for entry: Variant in _bodies:
+				var body := entry as CelestialBodyRecord
+				if body.body_id == int(target.body_id):
+					return _world.distance_components(ship_position, body.position)
+	return -1.0
+
+
+func _radial_entries_for_target(target: Dictionary) -> Array[Dictionary]:
+	var entries: Array[Dictionary] = []
+	var kind := _target_kind(target)
+	if kind.is_empty() or not _world_target_exists(target) or _player_ship_id < 0:
+		return entries
+
+	var warpable: bool = kind != "ship"
+	var warp_in_range: bool = warpable and _target_distance_m(target) >= ClientRules.new().min_warp_distance()
+	var primary_action := WorldInteractionScript.TARGET_APPROACH
+	var primary_label := "Approach"
+	if kind == "gate" and int(target.gate_id) == _nearby_gate_id:
+		primary_action = WorldInteractionScript.TARGET_JUMP
+		primary_label = "Jump"
+	elif kind == "station" and _nearby_station_ids.has(int(target.station_id)):
+		primary_action = WorldInteractionScript.TARGET_DOCK
+		primary_label = "Dock"
+	elif warp_in_range:
+		primary_action = WorldInteractionScript.TARGET_WARP
+		primary_label = "Warp"
+
+	entries.append(_radial_entry(primary_action, primary_label))
+	if primary_action != WorldInteractionScript.TARGET_APPROACH:
+		entries.append(_radial_entry(WorldInteractionScript.TARGET_APPROACH, "Approach"))
+	if warp_in_range and primary_action != WorldInteractionScript.TARGET_WARP:
+		entries.append(_radial_entry(WorldInteractionScript.TARGET_WARP, "Warp"))
+	entries.append(_radial_entry(WorldInteractionScript.TARGET_ORBIT, "Orbit"))
+	entries.append(_radial_entry(
+		WorldInteractionScript.TARGET_KEEP_AT_RANGE, "Keep at range"))
+	if kind == "ship":
+		entries.append(_radial_entry(WorldInteractionScript.TARGET_LOCK, "Lock"))
+	return entries
+
+
+func _radial_entry(action: int, label: String) -> Dictionary:
+	return {
+		"action": action,
+		"label": label,
+		"icon": _radial_icon_for_action(action),
+		"angle": _radial_angle_for_action(action),
+	}
+
+
+func _radial_icon_for_action(action: int) -> String:
+	match action:
+		WorldInteractionScript.TARGET_APPROACH:
+			return "approach"
+		WorldInteractionScript.TARGET_WARP:
+			return "warp"
+		WorldInteractionScript.TARGET_ORBIT:
+			return "orbit"
+		WorldInteractionScript.TARGET_KEEP_AT_RANGE:
+			return "range"
+		WorldInteractionScript.TARGET_LOCK:
+			return "lock"
+		WorldInteractionScript.TARGET_DOCK:
+			return "dock"
+		WorldInteractionScript.TARGET_JUMP:
+			return "jump"
+	return ""
+
+
+func _radial_angle_for_action(action: int) -> float:
+	match action:
+		WorldInteractionScript.TARGET_APPROACH:
+			return 3.0 * PI / 4.0
+		WorldInteractionScript.TARGET_WARP:
+			return -3.0 * PI / 4.0
+		WorldInteractionScript.TARGET_DOCK:
+			return -PI / 2.0
+		WorldInteractionScript.TARGET_JUMP:
+			return -PI / 4.0
+		WorldInteractionScript.TARGET_LOCK:
+			return 0.0
+		WorldInteractionScript.TARGET_KEEP_AT_RANGE:
+			return PI / 4.0
+		WorldInteractionScript.TARGET_ORBIT:
+			return PI / 2.0
+	return 0.0
+
+
+func _target_title(target: Dictionary) -> String:
+	match _target_kind(target):
+		"ship":
+			return "SHIP #%d" % int(target.ship_id)
+		"gate":
+			return "GATE #%d" % int(target.gate_id)
+		"station":
+			for entry: Variant in _stations:
+				var station := entry as StationRecord
+				if station.station_id == int(target.station_id):
+					return station.name
+		"body":
+			for entry: Variant in _bodies:
+				var body := entry as CelestialBodyRecord
+				if body.body_id == int(target.body_id):
+					return body.name
+	return "Target"
+
+
+func _update_radial_hold() -> void:
+	if not _world_press_pending or _radial_open or not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+		return
+	if float(Time.get_ticks_msec()) / 1000.0 - _world_press_started_sec < WORLD_RADIAL_HOLD_SEC:
+		return
+	var hovered_control := get_viewport().gui_get_hovered_control()
+	if hovered_control != null and hovered_control.mouse_filter != Control.MOUSE_FILTER_IGNORE:
+		return
+	if _camera.call("is_dragging") or _session.is_docked() or not _world_target_exists(_world_press_target):
+		return
+	var entries := _radial_entries_for_target(_world_press_target)
+	if entries.is_empty():
+		return
+	_interaction.clear_click_sequence()
+	_camera.call("end_orbit_drag")
+	_radial_menu.call("open_menu", _world_press_position, _target_title(_world_press_target), entries)
+	_radial_menu.call("update_pointer", get_viewport().get_mouse_position())
+	_radial_open = true
+
+
+func _finish_world_click() -> void:
+	var camera_dragging: bool = _camera.call("is_dragging")
+	var elapsed_sec := float(Time.get_ticks_msec()) / 1000.0 - _world_press_started_sec
+	var target := _world_press_target
+	_world_press_pending = false
+	_world_press_target = {}
+	_camera.call("end_orbit_drag")
+	if camera_dragging or _session.is_docked():
+		_interaction.clear_click_sequence()
+		return
+	if elapsed_sec >= WORLD_RADIAL_HOLD_SEC:
+		_interaction.clear_click_sequence()
+		return
+	if not _world_target_exists(target) and _target_kind(target) != "":
+		_interaction.clear_click_sequence()
+		return
+	var action: ClientAction = _interaction.interpret_primary_click(
+		_world_press_position,
+		float(Time.get_ticks_msec()) / 1000.0,
+		false,
+		_player_ship_id,
+		int(target.get("ship_id", -1)),
+		int(target.get("gate_id", -1)),
+		int(target.get("body_id", -1)),
+		int(target.get("station_id", -1)))
+	_execute_client_action(action)
+
+
+func _finish_radial_menu(screen_pos: Vector2) -> void:
+	var action_code: int = _radial_menu.call("selected_action", screen_pos)
+	var target := _world_press_target
+	_radial_menu.call("close_menu")
+	_radial_open = false
+	_world_press_pending = false
+	_world_press_target = {}
+	_camera.call("end_orbit_drag")
+	if action_code == 0 or not _world_target_exists(target) or _session.is_docked():
+		_interaction.clear_click_sequence()
+		return
+	var target_gate_id: int = int(target.get("gate_id", -1))
+	var nearby_gate_id: int = _nearby_gate_id if target_gate_id == _nearby_gate_id else -1
+	var target_station_id: int = int(target.get("station_id", -1))
+	var nearby_station_id: int = target_station_id if _nearby_station_ids.has(target_station_id) else -1
+	var action: ClientAction = _interaction.interpret_target_action(
+		action_code,
+		_player_ship_id,
+		int(target.get("ship_id", -1)),
+		int(target.get("gate_id", -1)),
+		int(target.get("body_id", -1)),
+		int(target.get("station_id", -1)),
+		nearby_gate_id,
+		nearby_station_id,
+		_keep_at_range_km * 1000.0)
+	if action_code == WorldInteractionScript.TARGET_LOCK:
+		_try_lock_on(action)
+	else:
+		_execute_client_action(action)
+	_interaction.clear_click_sequence()
+
+
+func _cancel_radial_menu() -> void:
+	_radial_menu.call("close_menu")
+	_radial_open = false
+	_world_press_pending = false
+	_world_press_target = {}
+	_camera.call("end_orbit_drag")
+	_interaction.clear_click_sequence()
 
 ## Server-unit distance from the player ship to the selected gate, or -1 if
 ## there is no player ship or no selected gate (ADR-0022 warp gating / HUD).

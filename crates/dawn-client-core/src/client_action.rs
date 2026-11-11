@@ -142,6 +142,8 @@ impl Selection {
         match self {
             Self::Ship(id) => Some(ApproachTarget::Ship(id)),
             Self::Gate(id) => Some(ApproachTarget::Gate(id)),
+            Self::Body(id) => Some(ApproachTarget::Body(id)),
+            Self::Station(id) => Some(ApproachTarget::Station(id)),
             _ => None,
         }
     }
@@ -374,6 +376,67 @@ impl ClientInteraction {
         }
     }
 
+    /// Resolve a radial-menu action against the object captured at pointer-down.
+    /// Codes are the small adapter protocol used by the Godot presentation.
+    #[must_use]
+    pub fn resolve_target_action(
+        &self,
+        action_code: i64,
+        target: Selection,
+        player_ship_id: Option<ShipId>,
+        nearby_gate_id: Option<JumpGateId>,
+        nearby_station_id: Option<StationId>,
+        keep_at_range_m: f64,
+    ) -> ClientAction {
+        if player_ship_id.is_none() {
+            return ClientAction::None;
+        }
+
+        match action_code {
+            1 => target
+                .approach_target()
+                .map(|target| ClientAction::Request(ClientRequest::Approach { target }))
+                .unwrap_or(ClientAction::None),
+            2 => target
+                .approach_target()
+                .map(|target| {
+                    ClientAction::Request(ClientRequest::Orbit {
+                        target,
+                        radius: None,
+                    })
+                })
+                .unwrap_or(ClientAction::None),
+            3 => target
+                .approach_target()
+                .map(|target| {
+                    ClientAction::Request(ClientRequest::KeepAtRange {
+                        target,
+                        range: finite_positive(keep_at_range_m),
+                    })
+                })
+                .unwrap_or(ClientAction::None),
+            4 => target
+                .ship_id()
+                .map(|target| ClientAction::Request(ClientRequest::LockOn { target }))
+                .unwrap_or(ClientAction::None),
+            5 => target
+                .warp_target()
+                .map(|target| ClientAction::Request(ClientRequest::Warp { target }))
+                .unwrap_or(ClientAction::None),
+            6 => target
+                .gate_id()
+                .filter(|gate| nearby_gate_id == Some(*gate))
+                .map(|gate| ClientAction::Request(ClientRequest::Jump { gate }))
+                .unwrap_or(ClientAction::None),
+            7 => target
+                .station_id()
+                .filter(|station| nearby_station_id == Some(*station))
+                .map(|station| ClientAction::Request(ClientRequest::Dock { station }))
+                .unwrap_or(ClientAction::None),
+            _ => ClientAction::None,
+        }
+    }
+
     #[must_use]
     pub fn lock_click(
         &self,
@@ -388,6 +451,10 @@ impl ClientInteraction {
 
     pub fn clear_selection(&mut self) {
         self.selection = Selection::None;
+    }
+
+    pub fn clear_click_sequence(&mut self) {
+        self.last_click = None;
     }
 
     pub fn clear_navigation_selection(&mut self) {
@@ -578,6 +645,125 @@ mod tests {
         );
         assert_eq!(
             interaction.lock_click(None, Some(ship(99))),
+            ClientAction::None
+        );
+    }
+
+    #[test]
+    fn radial_actions_target_the_pressed_object_without_requiring_selection() {
+        let interaction = ClientInteraction::default();
+        let player = Some(ship(1));
+        let nearby_gate = Some(gate(8));
+        let nearby_station = Some(station(4));
+
+        assert_eq!(
+            interaction.resolve_target_action(
+                1,
+                Selection::Body(body(3)),
+                player,
+                None,
+                nearby_station,
+                10_000.0,
+            ),
+            ClientAction::Request(ClientRequest::Approach {
+                target: ApproachTarget::Body(body(3)),
+            })
+        );
+        assert_eq!(
+            interaction.resolve_target_action(
+                5,
+                Selection::Station(station(4)),
+                player,
+                None,
+                nearby_station,
+                10_000.0,
+            ),
+            ClientAction::Request(ClientRequest::Warp {
+                target: WarpTarget::Station(station(4)),
+            })
+        );
+        assert_eq!(
+            interaction.resolve_target_action(
+                7,
+                Selection::Station(station(4)),
+                player,
+                None,
+                nearby_station,
+                10_000.0,
+            ),
+            ClientAction::Request(ClientRequest::Dock {
+                station: station(4),
+            })
+        );
+        assert_eq!(
+            interaction.resolve_target_action(
+                7,
+                Selection::Station(station(5)),
+                player,
+                None,
+                nearby_station,
+                10_000.0,
+            ),
+            ClientAction::None
+        );
+        assert_eq!(interaction.selection(), Selection::None);
+
+        assert_eq!(
+            interaction.resolve_target_action(
+                6,
+                Selection::Gate(gate(8)),
+                player,
+                nearby_gate,
+                None,
+                10_000.0,
+            ),
+            ClientAction::Request(ClientRequest::Jump { gate: gate(8) })
+        );
+        assert_eq!(
+            interaction.resolve_target_action(
+                6,
+                Selection::Gate(gate(8)),
+                player,
+                None,
+                None,
+                10_000.0,
+            ),
+            ClientAction::None
+        );
+    }
+
+    #[test]
+    fn radial_maneuver_actions_support_ships_gates_bodies_and_stations() {
+        let interaction = ClientInteraction::default();
+        let player = Some(ship(1));
+        for target in [
+            Selection::Ship(ship(2)),
+            Selection::Gate(gate(3)),
+            Selection::Body(body(4)),
+            Selection::Station(station(5)),
+        ] {
+            assert!(matches!(
+                interaction.resolve_target_action(1, target, player, None, None, 10_000.0),
+                ClientAction::Request(ClientRequest::Approach { .. })
+            ));
+            assert!(matches!(
+                interaction.resolve_target_action(2, target, player, None, None, 10_000.0),
+                ClientAction::Request(ClientRequest::Orbit { .. })
+            ));
+            assert!(matches!(
+                interaction.resolve_target_action(3, target, player, None, None, 10_000.0),
+                ClientAction::Request(ClientRequest::KeepAtRange { .. })
+            ));
+        }
+        assert_eq!(
+            interaction.resolve_target_action(
+                4,
+                Selection::Body(body(4)),
+                player,
+                None,
+                None,
+                10_000.0,
+            ),
             ClientAction::None
         );
     }

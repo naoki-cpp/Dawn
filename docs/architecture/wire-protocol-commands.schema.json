@@ -26,7 +26,7 @@
   ],
   "$defs": {
     "ApproachTarget": {
-      "description": "What an approaching Ship is steering toward (ADR-0015).\n\nA `Ship` target is dynamic (its position is read from the ECS each tick);\na `Gate` target is a static Jump Gate position, letting players fly back\ninto a gate's `activation_radius` to jump.",
+      "description": "What a ship steers toward for Approach, Orbit, and Keep at Range.\n\nA `Ship` target is dynamic (its position is read from the ECS each tick);\ncelestial, station, and gate targets are static navigation objects in the\ncurrent Sector.",
       "oneOf": [
         {
           "type": "object",
@@ -50,6 +50,30 @@
           "additionalProperties": false,
           "required": [
             "Gate"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Body": {
+              "$ref": "#/$defs/CelestialBodyId"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Body"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Station": {
+              "$ref": "#/$defs/StationId"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Station"
           ]
         }
       ]

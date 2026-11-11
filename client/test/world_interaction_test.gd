@@ -92,6 +92,38 @@ func test_lock_click_returns_a_network_action_with_a_typed_target() -> void:
 	assert_int(action.target_ship_id()).is_equal(99)
 
 
+func test_radial_action_resolves_approach_for_a_body_without_selecting_it() -> void:
+	var action := _interaction.interpret_target_action(
+		WorldInteraction.TARGET_APPROACH, 7, -1, -1, 23, -1,
+		-1, -1, 10_000.0)
+
+	assert_int(action.kind()).is_equal(WorldInteraction.ACTION_REQUEST)
+	assert_bool(action.request_result().ok).is_true()
+	assert_int(_interaction.selected_body_id()).is_equal(-1)
+
+
+func test_radial_dock_action_requires_the_pressed_station_to_be_in_range() -> void:
+	var outside_range := _interaction.interpret_target_action(
+		WorldInteraction.TARGET_DOCK, 7, -1, -1, -1, 23,
+		-1, 24, 10_000.0)
+	var in_range := _interaction.interpret_target_action(
+		WorldInteraction.TARGET_DOCK, 7, -1, -1, -1, 24,
+		-1, 24, 10_000.0)
+
+	assert_int(outside_range.kind()).is_equal(WorldInteraction.ACTION_NONE)
+	assert_int(in_range.kind()).is_equal(WorldInteraction.ACTION_REQUEST)
+	assert_bool(in_range.request_result().ok).is_true()
+
+	var gate_outside_range := _interaction.interpret_target_action(
+		WorldInteraction.TARGET_JUMP, 7, -1, 25, -1, -1,
+		-1, -1, 10_000.0)
+	var gate_in_range := _interaction.interpret_target_action(
+		WorldInteraction.TARGET_JUMP, 7, -1, 25, -1, -1,
+		25, -1, 10_000.0)
+	assert_int(gate_outside_range.kind()).is_equal(WorldInteraction.ACTION_NONE)
+	assert_int(gate_in_range.kind()).is_equal(WorldInteraction.ACTION_REQUEST)
+
+
 func test_invalid_ids_are_rejected_at_the_engine_boundary() -> void:
 	var action := _interaction.resolve_key_action(KEY_A, 7, -1, -1, -1, 10_000.0, 7)
 	assert_int(action.kind()).is_equal(WorldInteraction.ACTION_NONE)

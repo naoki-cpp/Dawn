@@ -10,6 +10,25 @@ use crate::id_boundary::{
     ship_type_id_from_godot, station_id_from_godot,
 };
 
+fn selection_from_godot(
+    hit_ship_id: i64,
+    hit_gate_id: i64,
+    hit_body_id: i64,
+    hit_station_id: i64,
+) -> Selection {
+    if let Some(id) = ship_id_from_godot(hit_ship_id) {
+        Selection::Ship(id)
+    } else if let Some(id) = jump_gate_id_from_godot(hit_gate_id) {
+        Selection::Gate(id)
+    } else if let Some(id) = station_id_from_godot(hit_station_id) {
+        Selection::Station(id)
+    } else if let Some(id) = celestial_body_id_from_godot(hit_body_id) {
+        Selection::Body(id)
+    } else {
+        Selection::None
+    }
+}
+
 const ACTION_NONE: i64 = 0;
 const ACTION_REQUEST: i64 = 1;
 const ACTION_LOCAL: i64 = 2;
@@ -181,24 +200,37 @@ impl ClientInteraction {
         hit_body_id: i64,
         hit_station_id: i64,
     ) -> Gd<ClientAction> {
-        let hit = if let Some(id) = ship_id_from_godot(hit_ship_id) {
-            Selection::Ship(id)
-        } else if let Some(id) = jump_gate_id_from_godot(hit_gate_id) {
-            Selection::Gate(id)
-        } else if let Some(id) = station_id_from_godot(hit_station_id) {
-            Selection::Station(id)
-        } else if let Some(id) = celestial_body_id_from_godot(hit_body_id) {
-            Selection::Body(id)
-        } else {
-            Selection::None
-        };
         ClientAction::from_core(self.core.primary_click(
             f64::from(screen_pos.x),
             f64::from(screen_pos.y),
             now_sec,
             camera_dragging,
             ship_id_from_godot(player_ship_id),
-            hit,
+            selection_from_godot(hit_ship_id, hit_gate_id, hit_body_id, hit_station_id),
+        ))
+    }
+
+    #[func]
+    #[allow(clippy::too_many_arguments)]
+    fn target_action(
+        &self,
+        action_code: i64,
+        player_ship_id: i64,
+        hit_ship_id: i64,
+        hit_gate_id: i64,
+        hit_body_id: i64,
+        hit_station_id: i64,
+        nearby_gate_id: i64,
+        nearby_station_id: i64,
+        keep_at_range_m: f64,
+    ) -> Gd<ClientAction> {
+        ClientAction::from_core(self.core.resolve_target_action(
+            action_code,
+            selection_from_godot(hit_ship_id, hit_gate_id, hit_body_id, hit_station_id),
+            ship_id_from_godot(player_ship_id),
+            jump_gate_id_from_godot(nearby_gate_id),
+            station_id_from_godot(nearby_station_id),
+            keep_at_range_m,
         ))
     }
 
@@ -245,6 +277,11 @@ impl ClientInteraction {
     #[func]
     fn clear_selection(&mut self) {
         self.core.clear_selection();
+    }
+
+    #[func]
+    fn clear_click_sequence(&mut self) {
+        self.core.clear_click_sequence();
     }
 
     #[func]
