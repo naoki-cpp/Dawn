@@ -4,7 +4,6 @@ const INNER_RADIUS: float = 34.0
 const OUTER_RADIUS: float = 136.0
 const ICON_RADIUS: float = 92.0
 const HALF_WEDGE: float = PI / 8.0
-const PICK_HALF_WEDGE: float = PI / 7.0
 const WEDGE_STEPS: int = 8
 const ICON_LINE_WIDTH: float = 1.8
 const TITLE_FONT_SIZE: int = 12
@@ -71,11 +70,18 @@ func _action_at(screen_position: Vector2) -> int:
 	if offset.length() < INNER_RADIUS or offset.length() > OUTER_RADIUS:
 		return 0
 	var pointer_angle := offset.angle()
+	var winner_action := 0
+	var closest_difference := HALF_WEDGE
 	for entry: Dictionary in _entries:
-		var difference := wrapf(pointer_angle - float(entry.angle), -PI, PI)
-		if absf(difference) <= PICK_HALF_WEDGE:
-			return int(entry.action)
-	return 0
+		var difference := absf(wrapf(pointer_angle - float(entry.angle), -PI, PI))
+		if difference > HALF_WEDGE:
+			continue
+		if difference < closest_difference and not is_equal_approx(difference, closest_difference):
+			closest_difference = difference
+			winner_action = int(entry.action)
+		elif is_equal_approx(difference, closest_difference):
+			winner_action = 0
+	return winner_action
 
 
 func _draw() -> void:

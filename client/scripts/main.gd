@@ -459,31 +459,41 @@ func _radial_entries_for_target(target: Dictionary) -> Array[Dictionary]:
 	if kind.is_empty() or not _world_target_exists(target) or _player_ship_id < 0:
 		return entries
 
-	var warpable: bool = kind != "ship"
-	var warp_in_range: bool = warpable and _target_distance_m(target) >= ClientRules.new().min_warp_distance()
-	var primary_action := WorldInteractionScript.TARGET_APPROACH
-	var primary_label := "Approach"
-	if kind == "gate" and int(target.gate_id) == _nearby_gate_id:
-		primary_action = WorldInteractionScript.TARGET_JUMP
-		primary_label = "Jump"
-	elif kind == "station" and _nearby_station_ids.has(int(target.station_id)):
-		primary_action = WorldInteractionScript.TARGET_DOCK
-		primary_label = "Dock"
-	elif warp_in_range:
-		primary_action = WorldInteractionScript.TARGET_WARP
-		primary_label = "Warp"
-
-	entries.append(_radial_entry(primary_action, primary_label))
-	if primary_action != WorldInteractionScript.TARGET_APPROACH:
-		entries.append(_radial_entry(WorldInteractionScript.TARGET_APPROACH, "Approach"))
-	if warp_in_range and primary_action != WorldInteractionScript.TARGET_WARP:
-		entries.append(_radial_entry(WorldInteractionScript.TARGET_WARP, "Warp"))
-	entries.append(_radial_entry(WorldInteractionScript.TARGET_ORBIT, "Orbit"))
-	entries.append(_radial_entry(
-		WorldInteractionScript.TARGET_KEEP_AT_RANGE, "Keep at range"))
-	if kind == "ship":
-		entries.append(_radial_entry(WorldInteractionScript.TARGET_LOCK, "Lock"))
+	var target_gate_id: int = int(target.get("gate_id", -1))
+	var target_station_id: int = int(target.get("station_id", -1))
+	var nearby_gate_id: int = _nearby_gate_id if target_gate_id == _nearby_gate_id else -1
+	var nearby_station_id: int = target_station_id if _nearby_station_ids.has(target_station_id) else -1
+	var action_codes: Array[int] = _interaction.available_target_actions(
+		_player_ship_id,
+		int(target.get("ship_id", -1)),
+		target_gate_id,
+		int(target.get("body_id", -1)),
+		target_station_id,
+		nearby_gate_id,
+		nearby_station_id,
+		_target_distance_m(target))
+	for action: int in action_codes:
+		entries.append(_radial_entry(action, _radial_label_for_action(action)))
 	return entries
+
+
+func _radial_label_for_action(action: int) -> String:
+	match action:
+		WorldInteractionScript.TARGET_APPROACH:
+			return "Approach"
+		WorldInteractionScript.TARGET_WARP:
+			return "Warp"
+		WorldInteractionScript.TARGET_ORBIT:
+			return "Orbit"
+		WorldInteractionScript.TARGET_KEEP_AT_RANGE:
+			return "Keep at range"
+		WorldInteractionScript.TARGET_LOCK:
+			return "Lock"
+		WorldInteractionScript.TARGET_DOCK:
+			return "Dock"
+		WorldInteractionScript.TARGET_JUMP:
+			return "Jump"
+	return ""
 
 
 func _radial_entry(action: int, label: String) -> Dictionary:
@@ -611,6 +621,8 @@ func _finish_radial_menu(screen_pos: Vector2) -> void:
 	if action_code == 0 or not _world_target_exists(target) or _session.is_docked():
 		_interaction.clear_click_sequence()
 		return
+	_update_gate_proximity()
+	_update_station_proximity()
 	var target_gate_id: int = int(target.get("gate_id", -1))
 	var nearby_gate_id: int = _nearby_gate_id if target_gate_id == _nearby_gate_id else -1
 	var target_station_id: int = int(target.get("station_id", -1))
@@ -624,7 +636,8 @@ func _finish_radial_menu(screen_pos: Vector2) -> void:
 		int(target.get("station_id", -1)),
 		nearby_gate_id,
 		nearby_station_id,
-		_keep_at_range_km * 1000.0)
+		_keep_at_range_km * 1000.0,
+		_target_distance_m(target))
 	if action_code == WorldInteractionScript.TARGET_LOCK:
 		_try_lock_on(action)
 	else:

@@ -4,12 +4,12 @@ audience : AI Agent / Human Developer
 update   : /architecture-review で状態が変わるたびに更新
 related  : docs/architecture/architecture-review/client.md（構造評価）,
            docs/architecture/architecture-review/client-completed.md（完了済みログ）
-date     : 2026-11-07（doc-sync: ShipMotionとC-20の現状を反映）
+date     : 2026-11-12（doc-sync / architecture review: #397のradial menu policyを反映）
 ---
 
 # Architecture Review — Dawn Client（未完項目）
 
-C-1〜C-8、C-10〜C-19は解消済み。C-9とC-20はtrigger付きで保留し、C-21は実装済み。
+C-1〜C-8、C-10〜C-19、C-21〜C-22は解消済み。C-9とC-20はtrigger付きで保留。
 実装詳細と完了条件は各GitHub Issueに置き、ここでは判断だけを保持する。
 
 ## C-9（保留）: `hud_manager.gd` watch帯
@@ -24,18 +24,20 @@ C-1〜C-8、C-10〜C-19は解消済み。C-9とC-20はtrigger付きで保留し�
 `WorldSpace::render_scale()`と`ClientRules::min_warp_distance()`へ一本化済み。詳細は
 [client-completed.md](./client-completed.md)を参照する。
 
-## R-2（保留）: `main.gd`追加分割
+## R-2（保留）: `main.gd` scene compositionの追加分割
 
-`main.gd`は967行だが、live state、interaction、presentationは既に分離済み。残るscene lifecycle /
-node generation / network send / HUD assemblyはcomposition glueとして凝集している。
+`main.gd`は1276行。live state、interaction、presentationは既に分離済みで、radial action policyも
+`ClientInteraction`へ移行済み。残るscene lifecycle / node generation / network send / HUD assemblyは
+composition glueとして扱う。
 **根本原因:** 残る処理はscene-tree構築とsession lifecycleを共有し、独立した変更境界をまだ持たないため。
 **判断: Defer。** pass-through surfaceを増やさず、下記triggerが発火するまで現在のcomposition rootを維持する。
-**再評価:** scene-tree構成を自動検証できるようになるか、独立した変更理由が再び混在する場合。
+**再評価:** scene-tree構成を自動検証できるようになるか、新しい独立した変更理由がcomposition rootへ再流入する場合。
 
 ## C-20（保留）: `WorldPresentation`へのvisual lifecycle集積
 
-`world_presentation.gd`は570行で、floating-origin rebase、navigation marker position/LOD、
+`world_presentation.gd`は595行で、floating-origin rebase、navigation marker position/LOD、
 sky/sun/fog/starfield bake、warp tunnel、player material/tactical overlayを調停する。
+恒星光源モデルとprominence geometryは`StellarSource` / `SolarProminences`へ分離済み。
 `NavigationMarkerRenderer`と`Starfield`のdeep moduleは既に分離され、現在のcoordinator自体は
 一つのsession visual boundaryとして機能している。
 **根本原因:** graphics feature追加のたびに、独立して変わるsetup/update lifecycleが同じ
@@ -56,6 +58,10 @@ Godotのcoordinatorは588行。状態を複製せず、observer選択はShipMoti
 
 2026-11-07 doc-sync: 580行。ラベルを`ObjectCallouts`へ移し、planet labelのLOD追従を削除。
 ShipMotionのrole/mode/visibilityもRustへ集約済み。C-20の分割triggerは未発火。
+
+2026-11-12: 595行。#395/#396で光源・prominenceのleaf moduleは分離され、#398で銀河背景のmodel/render dataが
+`GalacticModel` / `Starfield`へ整理された。700行trigger未満で、残るcoordinatorは一つのsession visual lifecycle。
+environment familyの分割は引き続きDefer。
 
 ## C-21 解消済み: test専用のsystem-name Dictionary投影
 

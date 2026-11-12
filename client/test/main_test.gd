@@ -1111,7 +1111,7 @@ func test_radial_menu_offers_warp_only_when_a_celestial_is_in_range() -> void:
 	ship.free()
 
 
-func test_radial_menu_prioritizes_dock_and_only_offers_lock_for_ships() -> void:
+func test_radial_menu_offers_contextual_actions_without_priority() -> void:
 	var ship := FakeShip.new()
 	var target_ship := FakeShip.new()
 	add_child(ship)
@@ -1122,12 +1122,19 @@ func test_radial_menu_prioritizes_dock_and_only_offers_lock_for_ships() -> void:
 	_main._nearby_station_ids = [6] as Array[int]
 	var station_target := {"ship_id": -1, "gate_id": -1, "body_id": -1, "station_id": 6}
 	var station_entries: Array[Dictionary] = _main._radial_entries_for_target(station_target)
-	assert_int(int(station_entries[0].action)).is_equal(WorldInteraction.TARGET_DOCK)
+	var station_actions := _radial_entries_for_actions(station_entries)
+	assert_array(station_actions).is_equal([
+		WorldInteraction.TARGET_APPROACH,
+		WorldInteraction.TARGET_ORBIT,
+		WorldInteraction.TARGET_KEEP_AT_RANGE,
+		WorldInteraction.TARGET_DOCK,
+	])
 
 	var ship_target := {"ship_id": 2, "gate_id": -1, "body_id": -1, "station_id": -1}
 	var ship_actions := _radial_entries_for_actions(_main._radial_entries_for_target(ship_target))
 	assert_bool(ship_actions.has(WorldInteraction.TARGET_LOCK)).is_true()
 	assert_bool(ship_actions.has(WorldInteraction.TARGET_WARP)).is_false()
+	assert_bool(ship_actions.has(WorldInteraction.TARGET_DOCK)).is_false()
 	ship.free()
 	target_ship.free()
 

@@ -54,6 +54,7 @@ pub use celestial_projection::{
 };
 pub use client_action::{
     ClientAction, ClientActionContext, ClientInteraction, ClientKey, ClientLocalAction, Selection,
+    TargetActionContext,
 };
 pub use client_rules::ClientRules;
 pub use client_state::{ClientFact, ClientState, ClientStateError, ShipLeaveReason};
