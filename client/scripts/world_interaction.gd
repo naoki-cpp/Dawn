@@ -111,11 +111,38 @@ func interpret_target_action(
 	hit_station_id: int,
 	nearby_gate_id: int,
 	nearby_station_id: int,
-	keep_at_range_m: float
+	keep_at_range_m: float,
+	target_distance_m: float
 ) -> ClientAction:
 	return _core.target_action(
 		action_code, player_ship_id, hit_ship_id, hit_gate_id, hit_body_id,
-		hit_station_id, nearby_gate_id, nearby_station_id, keep_at_range_m)
+		hit_station_id, nearby_gate_id, nearby_station_id, keep_at_range_m,
+		target_distance_m)
+
+
+func available_target_actions(
+	player_ship_id: int,
+	hit_ship_id: int,
+	hit_gate_id: int,
+	hit_body_id: int,
+	hit_station_id: int,
+	nearby_gate_id: int,
+	nearby_station_id: int,
+	target_distance_m: float
+) -> Array[int]:
+	var actions: Array[int] = []
+	for action: int in _core.available_target_actions(
+		player_ship_id,
+		hit_ship_id,
+		hit_gate_id,
+		hit_body_id,
+		hit_station_id,
+		nearby_gate_id,
+		nearby_station_id,
+		target_distance_m
+	):
+		actions.append(action)
+	return actions
 
 
 func clear_click_sequence() -> void:

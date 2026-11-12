@@ -1,6 +1,7 @@
 use dawn_client_core::{
     ClientAction as CoreClientAction, ClientActionContext,
     ClientInteraction as CoreClientInteraction, ClientKey, ClientLocalAction, Selection,
+    TargetActionContext,
 };
 use godot::prelude::*;
 
@@ -26,6 +27,20 @@ fn selection_from_godot(
         Selection::Body(id)
     } else {
         Selection::None
+    }
+}
+
+fn target_action_context_from_godot(
+    player_ship_id: i64,
+    nearby_gate_id: i64,
+    nearby_station_id: i64,
+    target_distance_m: f64,
+) -> TargetActionContext {
+    TargetActionContext {
+        player_ship_id: ship_id_from_godot(player_ship_id),
+        nearby_gate_id: jump_gate_id_from_godot(nearby_gate_id),
+        nearby_station_id: station_id_from_godot(nearby_station_id),
+        target_distance_m,
     }
 }
 
@@ -223,15 +238,46 @@ impl ClientInteraction {
         nearby_gate_id: i64,
         nearby_station_id: i64,
         keep_at_range_m: f64,
+        target_distance_m: f64,
     ) -> Gd<ClientAction> {
         ClientAction::from_core(self.core.resolve_target_action(
             action_code,
             selection_from_godot(hit_ship_id, hit_gate_id, hit_body_id, hit_station_id),
-            ship_id_from_godot(player_ship_id),
-            jump_gate_id_from_godot(nearby_gate_id),
-            station_id_from_godot(nearby_station_id),
+            target_action_context_from_godot(
+                player_ship_id,
+                nearby_gate_id,
+                nearby_station_id,
+                target_distance_m,
+            ),
             keep_at_range_m,
         ))
+    }
+
+    #[func]
+    #[allow(clippy::too_many_arguments)]
+    fn available_target_actions(
+        &self,
+        player_ship_id: i64,
+        hit_ship_id: i64,
+        hit_gate_id: i64,
+        hit_body_id: i64,
+        hit_station_id: i64,
+        nearby_gate_id: i64,
+        nearby_station_id: i64,
+        target_distance_m: f64,
+    ) -> Array<i64> {
+        self.core
+            .available_target_actions(
+                selection_from_godot(hit_ship_id, hit_gate_id, hit_body_id, hit_station_id),
+                target_action_context_from_godot(
+                    player_ship_id,
+                    nearby_gate_id,
+                    nearby_station_id,
+                    target_distance_m,
+                ),
+            )
+            .into_iter()
+            .collect()
     }
 
     #[func]

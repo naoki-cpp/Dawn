@@ -1,10 +1,11 @@
 use dawn_core::{
     ApproachTarget, CelestialBodyId, ClientRequest, JumpGateId, ShipId, ShipTypeId, StationId,
-    WarpTarget,
+    WarpTarget, MIN_WARP_DISTANCE,
 };
 
 const DOUBLE_CLICK_SEC: f64 = 0.4;
 const DOUBLE_CLICK_PX_SQUARED: f64 = 100.0;
+const RADIAL_ACTION_CODES: [i64; 7] = [1, 2, 3, 4, 5, 6, 7];
 
 /// Keyboard meanings normalized by the engine adapter.
 ///
@@ -188,6 +189,15 @@ pub struct ClientActionContext {
     pub docked_station_id: Option<StationId>,
     pub keep_at_range_m: f64,
     pub buildable_ship_type_id: ShipTypeId,
+}
+
+/// Current facts used to project and resolve one radial target action.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TargetActionContext {
+    pub player_ship_id: Option<ShipId>,
+    pub nearby_gate_id: Option<JumpGateId>,
+    pub nearby_station_id: Option<StationId>,
+    pub target_distance_m: f64,
 }
 
 impl ClientAction {
@@ -383,12 +393,10 @@ impl ClientInteraction {
         &self,
         action_code: i64,
         target: Selection,
-        player_ship_id: Option<ShipId>,
-        nearby_gate_id: Option<JumpGateId>,
-        nearby_station_id: Option<StationId>,
+        context: TargetActionContext,
         keep_at_range_m: f64,
     ) -> ClientAction {
-        if player_ship_id.is_none() {
+        if !radial_action_is_available(action_code, target, context) {
             return ClientAction::None;
         }
 
@@ -425,16 +433,31 @@ impl ClientInteraction {
                 .unwrap_or(ClientAction::None),
             6 => target
                 .gate_id()
-                .filter(|gate| nearby_gate_id == Some(*gate))
+                .filter(|gate| context.nearby_gate_id == Some(*gate))
                 .map(|gate| ClientAction::Request(ClientRequest::Jump { gate }))
                 .unwrap_or(ClientAction::None),
             7 => target
                 .station_id()
-                .filter(|station| nearby_station_id == Some(*station))
+                .filter(|station| context.nearby_station_id == Some(*station))
                 .map(|station| ClientAction::Request(ClientRequest::Dock { station }))
                 .unwrap_or(ClientAction::None),
             _ => ClientAction::None,
         }
+    }
+
+    /// Project the radial actions currently available for a world target.
+    /// Target distance and proximity are facts supplied by the engine adapter;
+    /// the same policy is checked again when the selected action is resolved.
+    #[must_use]
+    pub fn available_target_actions(
+        &self,
+        target: Selection,
+        context: TargetActionContext,
+    ) -> Vec<i64> {
+        RADIAL_ACTION_CODES
+            .into_iter()
+            .filter(|action_code| radial_action_is_available(*action_code, target, context))
+            .collect()
     }
 
     #[must_use]
@@ -467,6 +490,33 @@ impl ClientInteraction {
         if self.selection.ship_id() == Some(ship_id) {
             self.clear_selection();
         }
+    }
+}
+
+fn radial_action_is_available(
+    action_code: i64,
+    target: Selection,
+    context: TargetActionContext,
+) -> bool {
+    if context.player_ship_id.is_none() {
+        return false;
+    }
+
+    match action_code {
+        1..=3 => target.approach_target().is_some(),
+        4 => target.ship_id().is_some(),
+        5 => {
+            target.warp_target().is_some()
+                && context.target_distance_m.is_finite()
+                && context.target_distance_m >= MIN_WARP_DISTANCE
+        }
+        6 => target
+            .gate_id()
+            .is_some_and(|gate| context.nearby_gate_id == Some(gate)),
+        7 => target
+            .station_id()
+            .is_some_and(|station| context.nearby_station_id == Some(station)),
+        _ => false,
     }
 }
 
@@ -519,6 +569,20 @@ mod tests {
             docked_station_id,
             keep_at_range_m: 10_000.0,
             buildable_ship_type_id,
+        }
+    }
+
+    fn target_context(
+        player_ship_id: Option<ShipId>,
+        nearby_gate_id: Option<JumpGateId>,
+        nearby_station_id: Option<StationId>,
+        target_distance_m: f64,
+    ) -> TargetActionContext {
+        TargetActionContext {
+            player_ship_id,
+            nearby_gate_id,
+            nearby_station_id,
+            target_distance_m,
         }
     }
 
@@ -653,16 +717,13 @@ mod tests {
     fn radial_actions_target_the_pressed_object_without_requiring_selection() {
         let interaction = ClientInteraction::default();
         let player = Some(ship(1));
-        let nearby_gate = Some(gate(8));
-        let nearby_station = Some(station(4));
+        let station_context = target_context(player, None, Some(station(4)), 10_000.0);
 
         assert_eq!(
             interaction.resolve_target_action(
                 1,
                 Selection::Body(body(3)),
-                player,
-                None,
-                nearby_station,
+                station_context,
                 10_000.0,
             ),
             ClientAction::Request(ClientRequest::Approach {
@@ -673,9 +734,7 @@ mod tests {
             interaction.resolve_target_action(
                 5,
                 Selection::Station(station(4)),
-                player,
-                None,
-                nearby_station,
+                station_context,
                 10_000.0,
             ),
             ClientAction::Request(ClientRequest::Warp {
@@ -686,9 +745,7 @@ mod tests {
             interaction.resolve_target_action(
                 7,
                 Selection::Station(station(4)),
-                player,
-                None,
-                nearby_station,
+                station_context,
                 10_000.0,
             ),
             ClientAction::Request(ClientRequest::Dock {
@@ -699,9 +756,7 @@ mod tests {
             interaction.resolve_target_action(
                 7,
                 Selection::Station(station(5)),
-                player,
-                None,
-                nearby_station,
+                station_context,
                 10_000.0,
             ),
             ClientAction::None
@@ -712,9 +767,7 @@ mod tests {
             interaction.resolve_target_action(
                 6,
                 Selection::Gate(gate(8)),
-                player,
-                nearby_gate,
-                None,
+                target_context(player, Some(gate(8)), None, 10_000.0),
                 10_000.0,
             ),
             ClientAction::Request(ClientRequest::Jump { gate: gate(8) })
@@ -723,9 +776,7 @@ mod tests {
             interaction.resolve_target_action(
                 6,
                 Selection::Gate(gate(8)),
-                player,
-                None,
-                None,
+                target_context(player, None, None, 10_000.0),
                 10_000.0,
             ),
             ClientAction::None
@@ -743,15 +794,30 @@ mod tests {
             Selection::Station(station(5)),
         ] {
             assert!(matches!(
-                interaction.resolve_target_action(1, target, player, None, None, 10_000.0),
+                interaction.resolve_target_action(
+                    1,
+                    target,
+                    target_context(player, None, None, 0.0),
+                    10_000.0,
+                ),
                 ClientAction::Request(ClientRequest::Approach { .. })
             ));
             assert!(matches!(
-                interaction.resolve_target_action(2, target, player, None, None, 10_000.0),
+                interaction.resolve_target_action(
+                    2,
+                    target,
+                    target_context(player, None, None, 0.0),
+                    10_000.0,
+                ),
                 ClientAction::Request(ClientRequest::Orbit { .. })
             ));
             assert!(matches!(
-                interaction.resolve_target_action(3, target, player, None, None, 10_000.0),
+                interaction.resolve_target_action(
+                    3,
+                    target,
+                    target_context(player, None, None, 0.0),
+                    10_000.0,
+                ),
                 ClientAction::Request(ClientRequest::KeepAtRange { .. })
             ));
         }
@@ -759,12 +825,96 @@ mod tests {
             interaction.resolve_target_action(
                 4,
                 Selection::Body(body(4)),
-                player,
-                None,
-                None,
+                target_context(player, None, None, 0.0),
                 10_000.0,
             ),
             ClientAction::None
         );
+    }
+
+    #[test]
+    fn radial_action_availability_uses_target_kind_and_current_facts() {
+        let interaction = ClientInteraction::default();
+        let player = Some(ship(1));
+
+        assert_eq!(
+            interaction.available_target_actions(
+                Selection::Ship(ship(2)),
+                target_context(player, None, None, MIN_WARP_DISTANCE),
+            ),
+            vec![1, 2, 3, 4]
+        );
+        assert_eq!(
+            interaction.available_target_actions(
+                Selection::Gate(gate(3)),
+                target_context(player, Some(gate(3)), None, MIN_WARP_DISTANCE),
+            ),
+            vec![1, 2, 3, 5, 6]
+        );
+        assert_eq!(
+            interaction.available_target_actions(
+                Selection::Body(body(4)),
+                target_context(player, None, None, MIN_WARP_DISTANCE - 0.01),
+            ),
+            vec![1, 2, 3]
+        );
+        assert_eq!(
+            interaction.available_target_actions(
+                Selection::Body(body(4)),
+                target_context(player, None, None, MIN_WARP_DISTANCE),
+            ),
+            vec![1, 2, 3, 5]
+        );
+        assert_eq!(
+            interaction.available_target_actions(
+                Selection::Station(station(5)),
+                target_context(player, None, Some(station(5)), MIN_WARP_DISTANCE),
+            ),
+            vec![1, 2, 3, 5, 7]
+        );
+        assert!(interaction
+            .available_target_actions(
+                Selection::Body(body(4)),
+                target_context(None, None, None, MIN_WARP_DISTANCE),
+            )
+            .is_empty());
+        assert!(interaction
+            .available_target_actions(
+                Selection::Body(body(4)),
+                target_context(player, None, None, f64::INFINITY),
+            )
+            .iter()
+            .all(|action| *action != 5));
+    }
+
+    #[test]
+    fn warp_is_revalidated_against_distance_when_the_radial_action_is_resolved() {
+        let interaction = ClientInteraction::default();
+        let target = Selection::Body(body(4));
+        let player = Some(ship(1));
+        let available = interaction.available_target_actions(
+            target,
+            target_context(player, None, None, MIN_WARP_DISTANCE),
+        );
+        assert!(available.contains(&5));
+
+        assert_eq!(
+            interaction.resolve_target_action(
+                5,
+                target,
+                target_context(player, None, None, MIN_WARP_DISTANCE - 0.01),
+                10_000.0,
+            ),
+            ClientAction::None
+        );
+        assert!(matches!(
+            interaction.resolve_target_action(
+                5,
+                target,
+                target_context(player, None, None, MIN_WARP_DISTANCE),
+                10_000.0,
+            ),
+            ClientAction::Request(ClientRequest::Warp { .. })
+        ));
     }
 }

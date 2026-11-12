@@ -199,3 +199,12 @@ final handler, all typed Market `ItemIdentity` variants, state commit with a
 missing final handler, and ShipDocked's accepted effect and station name from
 inside the callback. Focused Rust/GDExtension and parse checks passed; full
 GdUnit execution remains for the parent verification pass.
+
+### 2026-11-12 — C-22 radial target action policy
+
+`ClientInteraction` now owns candidate availability and release-time validation for radial target actions.
+Godot supplies target identity, distance, and proximity facts, while retaining labels, icons, fixed action angles,
+and drawing. Candidate actions stay fixed while the menu is open; releasing on a wedge rechecks the latest facts.
+The menu has no default or primary action, and pointer hit testing uses the visible wedge bounds without entry-order
+priority. Rust client-core/GDExtension tests and focused GdUnit suites passed (main 45, radial menu 3,
+world interaction 13). Manual in-window pointer interaction was not performed.
