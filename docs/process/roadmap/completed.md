@@ -32,6 +32,7 @@ related  : ./README.md, ../roadmap-history.md, ../../adr/
 - 10-2/10-4: `InitialState` / `PlayerLoadout` / `AoiEnter` 固定型移行とpostcard WebSocket移行の段階2を完了（ADR-0042）。`register_ship`のJSON往復排除（#178）、`connection.gd`のdead text-frame fallback削除（#179）。
 - 10-6: 絶対座標・floating origin・client motionの再評価と `ShipMotion` への統合完了。Godot editorでの実機確認は pending に残す。
 - ShipMotion deepening: 操船対象・モード選択・表示可否をRustへ集約し、Godotの重複分岐と状態遷移テストを整理（ADR-0045）。
+- World interaction: Rustの`ClientInteraction`が対象別のradial action availabilityと実行時再検証を所有。Godotは対象事実の提供とメニュー表示を担当し、選択肢は表示中固定、既定選択なし（#399）。
 - Godotの自動テスト環境は固定版導入・拡張ビルド・importを共通setupに集約済み。
   手動プレイテストは [pending.md](./pending.md) に残す。
 
@@ -45,7 +46,10 @@ related  : ./README.md, ../roadmap-history.md, ../../adr/
 - 11-6: Filmic tonemapping、HDR glow / Bloom、星光に連動した環境調整を実装。
 - 11-8: 星野をCPU生成のスプライトgeometryへ移行（ADR-0054）。
 - 11-9: ネビュラとMilky Wayを起動時にパノラマへベイクする表現へ移行
-  （ADR-0055、sky パス 42.4ms→19.0ms）。
+  （ADR-0055、sky パス 42.4ms→19.0ms）。2026-11-11には銀河面の恒星・塵密度を用いた
+  物理ベースの視線積分へ更新。
+- 恒星表現: 距離をまたぐ連続した光源・レンズ応答、恒星面、コロナ、プロミネンスを整備
+  （#395/#396、詳細は[celestial-rendering.md](../../architecture/celestial-rendering.md)）。
 
 ## 記録先
 

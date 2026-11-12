@@ -5,7 +5,7 @@ update   : クライアント側で大規模リファクタ実施後 / architect
 related  : docs/architecture/architecture-review/server.md（サーバー側）,
            docs/architecture/architecture-review/client-completed.md（完了済みログ）,
            docs/architecture/architecture-review/client-pending.md（未完項目）
-date     : 2026-11-12（doc-sync / architecture review: #397 radial menuと描画境界を反映、全行数を再計測）
+date     : 2026-11-12（doc-sync: #399でC-22を反映し、現行行数を照合）
 ---
 
 # Architecture Review — Dawn Client（現行構造評価）
@@ -99,7 +99,7 @@ Godotは候補一覧をmenu open時に固定し、release時に更新した距�
 
 navigation map cacheはSector内でwrite-onceに近いpresentation cacheとして許容し、毎frameのRust→Godot再構築は行わない。
 
-## ファイルサイズ（2026-11-07 doc-sync: 掲載表の行数照合）
+## ファイルサイズ（2026-11-12 doc-sync: 掲載表の行数照合）
 
 ### GDScript（`client/scripts/`）
 
@@ -122,7 +122,7 @@ navigation map cacheはSector内でwrite-onceに近いpresentation cacheとし�
 | `client/scripts/connection_dialog.gd` | 103 | 🟢 connection formの表示と接続状態に応じたdialog lifecycle |
 | `client/scripts/galactic_model.gd` | 196 | 🟢 星・塵の銀河分布を決定論的に評価するmodel |
 | `client/scripts/lighting_study.gd` | 162 | 🟢 手動capture用の独立したlighting study scene。runtime presentationから分離 |
-| `client/scripts/radial_menu.gd` | 190 | 🟢 radial menuの描画、pointer selection、hover label |
+| `client/scripts/radial_menu.gd` | 196 | 🟢 radial menuの描画、pointer selection、hover label |
 | `client/scripts/solar_prominences.gd` | 86 | 🟢 camera-relative prominence geometryとvisibility |
 | `client/scripts/stellar_source.gd` | 30 | 🟢 stellar radiance / disc varianceの共有image-plane model |
 | `client/scripts/inventory_row.gd` | 22 | 🟢 rendered Panelとtyped Station Inventory policy rowの対 |

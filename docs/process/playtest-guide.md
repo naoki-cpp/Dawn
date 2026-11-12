@@ -77,7 +77,10 @@ Phase 6 の主目標は「ゲームが実際に面白いか」を人間から検
 - 左ダブルクリックで移動（推力方向の指定）
 - 左シングルクリックで船 / ゲート / 天体 / Station を選択（接近対象の指定・ADR-0015）
 - ワールド対象を左ボタン長押ししてラジアルメニューを表示し、項目へドラッグして
-  リリースすると Approach / Warp / Jump / Dock などを実行する。Align はなく、Approach に統一。
+  リリースすると Approach / Warp / Jump / Dock などを実行する。表示直後は未選択で、
+  操作記号は扇形の位置に対応する（Approachは左下、Warpは左上、Dockは上）。
+  選択中だけ操作名が表示される。選択肢は表示中固定、
+  実行時に距離・接近状態を再判定する。Align はなく、Approach に統一。
 - Ship では Lock、Gate では起動範囲内の Jump、Station では入港範囲内の Dock が表示される。
   天体・Station への Orbit / Keep at Range は対象の安全半径より内側へ入らない。
 - 船・惑星・ゲート・Stationの名前は画面上の引き出し線で表示する。

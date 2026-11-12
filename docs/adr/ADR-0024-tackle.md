@@ -80,7 +80,7 @@ pub struct TackleReleased {
 }
 ```
 
-### 5. Tick Step 4.5 — Tackle System（dawn-ecs / dawn-simulation）
+### 5. Tick Step 4.5 — Tackle System（dawn-ecs / dawn-sector）
 
 処理順: Capacitor System（Step 4）の後、Lock System（Step 5）の前。
 
@@ -109,25 +109,14 @@ for each ship NOT holding an active Tackle module
 
 ShipDestroyed 時: tackler または tackled が破壊されたら TackleReleased を発行しコンポーネントを除去。
 
-### 6. バリデーション変更（dawn-simulation）
+### 6. バリデーション変更（dawn-sector）
 
-```rust
-pub fn can_propose_warp(&self, ship_id: ShipId, gate_id: JumpGateId) -> bool {
-    // ...既存チェック...
-    // NEW: tackled ships cannot warp
-    if self.world.is_tackled(ship_id) { return false; }
-    // ...
-}
-
-pub fn can_propose_jump(&self, ship_id: ShipId, gate_id: JumpGateId) -> bool {
-    // ...既存チェック...
-    // NEW: tackled ships cannot jump
-    if self.world.is_tackled(ship_id) { return false; }
-    // ...
-}
-
-// propose_transit (Raft 経由) も同様に拒否
-```
+`SimulationNode::can_propose_warp(ship_id, target: WarpTarget)` と
+`can_propose_jump(ship_id, gate_id)` は、対象検証の前に `SimWorld::is_tackled()`
+を確認する。通常 Jump と auto-jump はそれぞれこの検証を通るため、tackled 中は
+Raft proposal 前に拒否される。汎用 `SectorRuntimeDriver::transit` は内部 adapter
+であり、`ClientRequest` からは呼ばれない。player-facing の汎用 Transit を追加する
+場合は、Raft proposal 前に同等の tackle 検証を行う。
 
 ### 7. ShipStatsComp 拡張（dawn-ecs）
 
@@ -182,11 +171,11 @@ tackle_range_add = 20000.0
 - [x] `SimWorld::is_tackled()` ヘルパー追加（dawn-ecs）
 - [x] `TackleApplied` / `TackleReleased` イベント追加（dawn-core）
 - [x] `DomainEvent` enum に追加（dawn-core）
-- [x] `ShipSnapshot` に `tackled_by: Vec<ShipId>` 追加（dawn-simulation、フィールド名 `tackled_by`）
-- [x] `take_snapshot()` / `restore_ship_from_snapshot()` で TackledComp を永続化（dawn-simulation）
-- [x] `process_tackle()` 実装（dawn-simulation、Step 4.5 — HashMap desired-state diff、単一 ECS スキャン）
-- [x] `can_propose_warp()` / `can_propose_jump()` に is_tackled チェック追加（dawn-simulation）
-- [ ] `propose_transit()` に is_tackled チェック追加（未実装 — Raft 経由の Transit は can_propose_jump で upstream 拒否済みのため実害なし。別途検討）
+- [x] `ShipSnapshot` に `tackled_by: Vec<ShipId>` 追加（dawn-sector、フィールド名 `tackled_by`）
+- [x] `take_snapshot()` / `restore_ship_from_snapshot()` で TackledComp を永続化（dawn-sector）
+- [x] `process_tackle()` 実装（dawn-sector、Step 4.5 — HashMap desired-state diff、単一 ECS スキャン）
+- [x] `can_propose_warp()` / `can_propose_jump()` に is_tackled チェック追加（dawn-sector）
+- [x] Player-facing の通常 Gate Jump / auto-jump は `can_propose_jump()` / `resolve_auto_jump()` で tackle を拒否する。汎用 Transit adapter は内部専用で、将来 player-facing にする場合は Raft proposal 前の tackle 検証を追加する（現行の `propose_transit()` は test-only）。
 - [x] ShipDestroyed 時の tackle 解除処理（`apply_event` で TackleApplied/TackleReleased を処理）
 - [x] `data/modules.toml` に `Fold Disruptor I`（id=12）追加
 - [x] `docs/architecture/event-catalog.md` を更新（TackleApplied / TackleReleased 追記）

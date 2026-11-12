@@ -138,7 +138,7 @@ Conditionally attached components:
 |---|---|
 | `CapacitorComp` | player ships and bot ships (subject to Capacitor management) |
 | `IsBotComp` | bot ships (target marker for `process_bots()`) |
-| `ApproachComp` | approaching a target Ship / Jump Gate (semi-auto approach; removed by Move/Stop; ADR-0015) |
+| `ApproachComp` | approaching a Ship / Gate / Body / Station (semi-auto approach; removed by Move/Stop; ADR-0015) |
 | `OrbitComp` | orbiting a target at a set radius (mutually exclusive with Approach/KeepAtRange; ADR-0031) |
 | `KeepAtRangeComp` | holding distance from a target (mutually exclusive with Approach/Orbit; ADR-0031) |
 | `WarpComp` | warping (align -> warping two-phase, intra-Sector short-range Fold; ADR-0022) |
@@ -201,17 +201,21 @@ at the anchor boundary. Client-authored movement targets use the typed f64 `Posi
 
 ---
 
-## 4. Entity: Node (logical concept)
+## 4. Entity: Node
 
-Today, a Node is only a logical partition within one process; it's designed to later map onto a physically distributed node.
+`NodeId` is the configured logical identity and ID-issuance domain. Development
+and in-process cluster modes may host several logical Nodes in one process;
+production `dawn-server --bin sector-node` runs as a physical process with a
+configured Node/Sector assignment.
 
 | Attribute | Current | Future |
 |---|---|---|
-| Identity | in-process logical identifier | independent process / machine |
-| Communication | in-memory channel | between Nodes: network RaftTransport + gossip (wire format reuses postcard); client boundary: WebSocket, postcard binary for fixed-type messages (ADR-0007, ADR-0042); gRPC/protobuf not adopted |
-| Failure | none | Node crash / network partition |
+| Identity | Configured `NodeId` and static Sector assignment | Dynamic Sector placement and membership |
+| Communication | In-process messages within a process; shared versioned TCP peer transport between processes (ADR-0050). Client boundary is WebSocket with postcard binary messages (ADR-0007, ADR-0042) | TLS / QUIC transport |
+| Failure | Raft peer/leader failure handling and checkpoint-plus-recovery-tail reconstruction are implemented baseline behavior | Dynamic placement and deployment-specific recovery SLOs |
 
-`NodeId`'s role (unit of ID issuance) is unaffected by how Node is physically implemented.
+`NodeId`'s role (unit of ID issuance) is independent of whether a Node shares a
+process with other Nodes.
 
 ---
 
@@ -227,7 +231,7 @@ The unit by which Ships are spatially partitioned.
 
 **Current constraints:**
 - Sector count is fixed (MVP: 3)
-- Sector size is fixed (100,000 per side = DEFAULT_HALF x 2, centered at origin)
+- Sector spawn-placement bounds are fixed (1,400,000 units per side = `2 * DEFAULT_HALF`, centered at origin)
 - Dynamic split/merge not implemented
 
 ---
