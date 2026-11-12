@@ -5,7 +5,7 @@ update   : 大規模リファクタ実施後 / 新クレート追加時 / archit
 related  : AI_DEVELOPMENT_GUIDE.md「Crate Boundaries」, docs/architecture/architecture.md,
            docs/architecture/architecture-review/server-completed.md（完了済みログ）,
            docs/architecture/architecture-review/server-pending.md（未完項目・issue一覧）
-date     : 2026-11-07（doc-sync: 掲載表の行数を照合。再採点なし）
+date     : 2026-11-12（doc-sync: 行数再計測、新規WebSocket境界を評価。総合評価は据え置き）
 ---
 
 # Architecture Review — Dawn Codebase（現行構造評価）
@@ -95,7 +95,7 @@ run only after the required projection completes.
 `ClientCommand`外側matchと`StationDispatchCommand`、domain固有の戻り値、process model固有の薄いadapterは
 意図的に維持する。
 
-## ファイルサイズ（2026-11-07 doc-sync: 掲載表の行数照合、500行以上と追跡対象）
+## ファイルサイズ（2026-11-12 doc-sync: 掲載表の行数照合、500行以上と追跡対象）
 
 | ファイル | 行数 | 判定 |
 |---|---:|---|
@@ -115,14 +115,14 @@ run only after the required projection completes.
 | `crates/dawn-distributed/src/catch_up.rs` | 1115 | 🟢 catch-up / snapshot-tail policy・tests |
 | `crates/dawn-market/src/order_book.rs` | 1044 | 🟢 pure order/matching/SettlementIntent policy。SQLは`repository.rs`へ分離済み（#279） |
 | `crates/dawn-sector/src/transit.rs` | 845 | 🟢 runtime consensus / durable transition policy。Ship handoff state mutationとは分離済み |
-| `crates/dawn-sector/src/node/orbit.rs` | 990 | 🟢 Orbit / Keep-at-Range steering kernel・tests |
+| `crates/dawn-sector/src/node/orbit.rs` | 1057 | 🟢 Orbit / Keep-at-Range steering kernel・tests |
 | `crates/dawn-distributed/src/peer_transport.rs` | 963 | 🟡 shared peer framing/lifecycle・control/bulk isolation・tests。adapter surfaceが増えたらprotocol/framing分割 |
 | `crates/dawn-sector/src/transit/handoff.rs` | 944 | 🟢 Transit Saga request/commit/ack policy・retry/idempotency/recovery |
 | `crates/dawn-sector/src/node/snapshot_io.rs` | 961 | 🟢 snapshot/checkpoint/restore seam・tests |
 | `crates/dawn-sector/src/node/inventory.rs` | 925 | 🟢 fitting mutation boundary・tests。cargo操作は`ship_cargo.rs`へ分離済み |
 | `crates/dawn-sector/src/client_admission.rs` | 975 | 🟢 admission protocol state machine・tests |
 | `crates/dawn-protocol/src/server_fact.rs` | 806 | 🟢 server fact projection/schema・tests |
-| `crates/dawn-core/src/commands.rs` | 795 | 🟢 domain command types/validation data・tests |
+| `crates/dawn-core/src/commands.rs` | 801 | 🟢 domain command types/validation data・tests |
 | `crates/dawn-sector/src/aoi.rs` | 819 | 🟢 AoI index/delta delivery contract・tests |
 | `crates/dawn-core/src/events.rs` | 777 | 🟢 domain event catalog/type definitions・tests |
 | `crates/dawn-sector/src/node/spawner_logic.rs` | 813 | 🟢 spawn policy・tests |
@@ -132,16 +132,17 @@ run only after the required projection completes.
 | `crates/dawn-sector/src/node/station_materialization.rs` | 661 | 🟢 station assemble/disassemble materialization・tests |
 | `crates/dawn-server/src/cluster.rs` | 670 | 🟢 in-process cluster wiring・fault tests |
 | `crates/dawn-server/src/serve/cluster.rs` | 689 | 🟢 clustered serve composition・admission/jump tests |
-| `crates/dawn-sector/src/node/approach.rs` | 631 | 🟢 approach steering state machine・tests |
+| `crates/dawn-sector/src/node/approach.rs` | 709 | 🟢 approach steering state machine・tests |
 | `crates/dawn-sector/src/node/ship_cargo.rs` | 715 | 🟢 ship cargo ownership/bridge boundary・tests |
 | `crates/dawn-market/src/repository.rs` | 1748 | 🟢 SQLite order/Currency/outbox persistence。command別bounded working set、差分書き込み、配送cursorを保持しないbounded SQL reads |
 | `crates/dawn-distributed/src/state.rs` | 594 | 🟢 Raft state transition/persistence boundary・tests |
 | `crates/dawn-ecs/src/systems/combat.rs` | 584 | 🟢 combat system・tests |
 | `crates/dawn-server/src/bin/sector-node.rs` | 632 | 🟢 production node bootstrap/config・public tail rebuild wiring |
 | `crates/dawn-sector/src/transition.rs` | 753 | 🟢 durable transition preparation / output boundary |
-| `crates/dawn-protocol/src/lib.rs` | 579 | 🟢 wire envelope/schema exports・tests |
+| `crates/dawn-protocol/src/lib.rs` | 583 | 🟢 wire envelope/schema exports・tests |
 | `crates/dawn-server/src/sector_runtime_driver.rs` | 549 | 🟢 in-process Sector actor/runtime adapter・tests |
 | `crates/dawn-server/src/serve/single.rs` | 556 | 🟢 single-sector serve composition・admission tests |
+| `crates/dawn-server/src/ws_server.rs` | 595 | 🟢 WebSocket framing・handshake・invite admission・client session lifecycleの一つのtransport boundary |
 | `crates/dawn-sector/src/node/serialization.rs` | 555 | 🟢 observer-scoped state projection |
 | `crates/dawn-sector/src/node/player_loadout_projection.rs` | 646 | 🟢 PlayerLoadout wire projection |
 | `crates/dawn-server/src/runtime_frame.rs` | 1338 | 🟡 596行のshared one-Sector frame hostとtests。typed frame input/output、admission/checkpointへ集約済み。追加のauthorityやdeployment policyが混入したら再評価 |
@@ -150,7 +151,7 @@ run only after the required projection completes.
 | `crates/dawn-sector/src/persistence/recovery.rs` | 509 | 🟢 checkpoint後のjournal tail検証・RecoveryDelta適用・repository reconciliationとtests |
 | `crates/dawn-sector/src/node/station_lifecycle.rs` | 428 | 🟢 station operation validation/planning |
 
-測定対象はRust 189ファイル、GDScript 19ファイル。既存表にない500行以上のserverファイルや削除済み行はなし。
+測定対象はRust 195ファイル、GDScript 26ファイル。既存表にない500行以上のserverファイルや削除済み行はなし。
 Identity、peer transport、runtime frameの黄判定は[server-pending.md](./server-pending.md)のtrigger付き監視を維持する。
 
 全体の再計測ではテストコードが行数の大きな割合を占めるファイルが多かった。総行数だけでは

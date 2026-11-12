@@ -31,7 +31,7 @@ related  : entity-model.md, event-catalog.md, recovery-contract.md, ../adr/ADR-0
 
 Ownership means **exactly one authority has the right to mutate a given entity's state.** Concurrent mutation by multiple authorities causes conflicts; ownership rules are encoded in code now so the same rules hold as the system distributes (ADR-0021: single ownership means CRDTs are unnecessary).
 
-| | Single Process (current) | Distributed |
+| | In-process simulation | Multi-process cluster (current) |
 |---|---|---|
 | Conflicts | Impossible in-process when APIs are obeyed | Can arise from network latency/failures |
 | Enforcement | Code convention / engine boundaries | Consensus + recovery/promotion invariants |

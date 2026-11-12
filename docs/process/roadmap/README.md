@@ -30,8 +30,8 @@ related  : ./pending.md, ./completed.md, ./deferred.md, ../roadmap.md, ../roadma
 - 9E-1 は手順準備済み、人間によるプレイテストと結果記録が未完了。
 - Phase 10 はGDExtension・wire移行・`ShipMotion`によるClient-Side Prediction /
   reconciliationまで実装済み。Godotエディタでの手動プレイテストのみ残る。
-- Phase 11 は天体表示、ワープ演出、Filmic/Bloom、星野geometry、
-  起動時ネビュラベイクまで実装済み。船モデルと戦闘フィードバックが残る。
+- Phase 11 は天体・恒星表現、レンズ応答、ワープ演出、Filmic/Bloom、星野geometry、
+  銀河面の視線積分と起動時ベイクまで実装済み。船モデルと戦闘フィードバックが残る。
 
 ### 次の1件
 

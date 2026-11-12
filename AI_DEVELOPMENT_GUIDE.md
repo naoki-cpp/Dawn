@@ -251,11 +251,11 @@ workspace DAG and relevant ADR first.
 
 - `dawn-core`: domain types, commands, events. No network, ECS, storage, or IO.
 - `dawn-client-core`: Godot-independent client-side domain model (loadout,
-  wire row types, WorldSession state, motion policy, ClientInteraction input
-  policy, and Station Inventory interaction policy). It owns pure client state,
-  simulation, and typed
-  `ClientAction` construction; it depends only on `dawn-core` (ADR-0039,
-  ADR-0041, ADR-0045, ADR-0046).
+  wire row types, WorldSession state, motion policy, ClientInteraction
+  selection/key/radial action policy, and Station Inventory interaction
+  policy). It owns pure client state, simulation, and typed `ClientAction`
+  construction; it depends only on `dawn-core` (ADR-0039, ADR-0041, ADR-0045,
+  ADR-0046).
 - `dawn-client-gdext`: GDExtension binding (cdylib) exposing `dawn-client-core`
   to the Godot client. Thin type-conversion adapter only, including typed
   Station Inventory rows/actions (ADR-0040, ADR-0041, ADR-0046).
@@ -432,4 +432,4 @@ this guide.
 
 ---
 
-Last updated: 2026-11-07 / Covers ADR-0001 through ADR-0058 (including proposed ADRs)
+Last updated: 2026-11-12 / Covers ADR-0001 through ADR-0058 (including proposed ADRs)

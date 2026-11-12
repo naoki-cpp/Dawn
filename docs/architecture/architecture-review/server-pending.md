@@ -4,7 +4,7 @@ audience : AI Agent / Human Developer
 update   : /architecture-review で issue を起票・状態更新するたびに更新
 related  : docs/architecture/architecture-review/server.md（構造評価）,
            docs/architecture/architecture-review/server-completed.md（完了済みログ）
-date     : 2026-11-03（R-10実装・検証結果を反映）
+date     : 2026-11-12（R-2のclient scopeをC-22と切り分け）
 ---
 
 # Architecture Review — Dawn Codebase（未完項目）
@@ -13,12 +13,12 @@ date     : 2026-11-03（R-10実装・検証結果を反映）
 
 ## リファクタロードマップ
 
-### R-2（保留）: client `main.gd`追加分割
+### R-2（保留）: client `main.gd` scene compositionの追加分割
 
-live state、interaction、presentationは分離済み。残るscene lifecycle / node generation / network send / HUD assemblyは凝集している。
+`main.gd`は1276行。radial action availabilityはclient側C-22でRustへ移行済みで、このR-2は残るscene lifecycle / node generation / network send / HUD assemblyだけを扱う。
 **根本原因:** 残る処理はscene-tree構築とsession lifecycleを共有し、独立した変更境界をまだ持たないため。
 **判断: Defer。** pass-through surfaceを増やさず、下記triggerが発火するまで現在のcomposition rootを維持する。
-**再評価:** scene-tree構成を自動検証できるようになるか、独立した変更理由が再び混在する場合。
+**再評価:** scene-tree構成を自動検証できるようになるか、C-22以外の独立した変更理由がcomposition rootへ再流入する場合。
 
 ### R-3（保留・warp trigger）: `node/`系ファイルの再肥大
 
