@@ -16,7 +16,7 @@ mod inbound_delivery;
 mod item_identity_gd;
 mod item_row_gd;
 mod loadout_gd;
-mod module_activation_intent_gd;
+mod module_activation_decision_gd;
 mod module_row_gd;
 mod owned_ship_row_gd;
 mod presentation_gd;
@@ -49,7 +49,7 @@ pub use hud_gd::{
 pub use item_identity_gd::ItemIdentity;
 pub use item_row_gd::ItemRow;
 pub use loadout_gd::PlayerLoadout;
-pub use module_activation_intent_gd::ModuleActivationIntent;
+pub use module_activation_decision_gd::ModuleActivationDecision;
 pub use module_row_gd::ModuleRow;
 pub use owned_ship_row_gd::OwnedShipRow;
 pub use presentation_gd::{

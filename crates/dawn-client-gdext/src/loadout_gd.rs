@@ -1,14 +1,14 @@
-use dawn_client_core::PlayerLoadoutMsg;
+use dawn_client_core::{
+    ModuleActivationDecision as CoreModuleActivationDecision, PlayerLoadoutMsg,
+};
 use dawn_core::{ModuleId, ShipTypeId, StationId};
 use godot::prelude::*;
 
 #[cfg(test)]
 use crate::client_outcome::validate_player_loadout_godot_ranges;
-#[cfg(debug_assertions)]
-use crate::id_boundary::ship_id_from_godot;
-use crate::id_boundary::{ship_id_from_wire, ship_id_to_godot};
+use crate::id_boundary::{ship_id_from_godot, ship_id_from_wire, ship_id_to_godot};
 use crate::item_row_gd::ItemRow;
-use crate::module_activation_intent_gd::ModuleActivationIntent;
+use crate::module_activation_decision_gd::ModuleActivationDecision;
 use crate::module_row_gd::{parse_kind, ModuleRow};
 use crate::owned_ship_row_gd::OwnedShipRow;
 
@@ -238,14 +238,33 @@ impl PlayerLoadout {
         loadout.apply_module_activation(module_id, active, forced_reason.to_string());
     }
 
+    /// `has_target_distance` is false when either ship is unavailable in the
+    /// current local world projection. Distances use server units, matching
+    /// the world interaction facts.
     #[func]
-    fn toggle_at(&self, active_index: i64) -> Gd<ModuleActivationIntent> {
-        let intent = self.loadout.as_ref().and_then(|loadout| {
-            usize::try_from(active_index)
-                .ok()
-                .and_then(|index| loadout.toggle_at(index))
-        });
-        ModuleActivationIntent::from_core(intent)
+    fn resolve_activation(
+        &self,
+        active_index: i64,
+        has_player_ship: bool,
+        locked_target_id: i64,
+        has_target_distance: bool,
+        target_distance_units: f64,
+    ) -> Gd<ModuleActivationDecision> {
+        let decision = self
+            .loadout
+            .as_ref()
+            .and_then(|loadout| {
+                usize::try_from(active_index).ok().map(|index| {
+                    loadout.resolve_activation(
+                        index,
+                        has_player_ship,
+                        ship_id_from_godot(locked_target_id),
+                        has_target_distance.then_some(target_distance_units),
+                    )
+                })
+            })
+            .unwrap_or(CoreModuleActivationDecision::Noop);
+        ModuleActivationDecision::from_core(decision)
     }
 
     #[func]

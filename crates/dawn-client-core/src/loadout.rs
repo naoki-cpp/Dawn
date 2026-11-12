@@ -1,3 +1,5 @@
+//! Player loadout projection, activation policy, and client-side capacitor simulation.
+
 use serde::Deserialize;
 
 use dawn_core::{ModuleId, ModuleKind, ShipId, ShipTypeId, StationId};
@@ -62,16 +64,28 @@ pub struct PlayerLoadoutMsg {
     pub owned_ships: Vec<OwnedShipRow>,
 }
 
-/// What activating a given module index would do (mirrors the old
-/// `player_loadout.gd::toggle_at`'s return dictionary).
+/// The resolved result of one player module-toggle request.
 #[derive(Debug, Clone, PartialEq)]
-pub struct ActivationIntent {
-    pub module_id: ModuleId,
-    pub slot: String,
-    pub kind: ModuleKind,
-    pub is_active: bool,
-    pub requires_target: bool,
-    pub effective_range: Option<f64>,
+pub enum ModuleActivationDecision {
+    Noop,
+    Activate {
+        module_id: ModuleId,
+        slot: String,
+        target_ship_id: Option<ShipId>,
+    },
+    Deactivate {
+        module_id: ModuleId,
+        slot: String,
+    },
+    Rejected(ModuleActivationRejection),
+}
+
+/// Why a requested module activation cannot be sent without server rejection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModuleActivationRejection {
+    NoLockedTarget,
+    TargetUnavailable,
+    OutOfRange,
 }
 
 /// Which range family a [`ModuleKind`] belongs to, for aggregating
@@ -143,22 +157,67 @@ impl PlayerLoadoutMsg {
         Some(total)
     }
 
-    /// The `active_index`-th currently-active-capable module (0-based,
-    /// counting only `is_active_module` rows), or `None` if out of range.
-    /// Mirrors the old `player_loadout.gd::toggle_at`.
-    pub fn toggle_at(&self, active_index: usize) -> Option<ActivationIntent> {
-        self.modules
+    /// Resolve one module toggle using the current loadout and client world facts.
+    /// `target_distance` is measured in server units. A missing distance means
+    /// either ship is unavailable in the local world projection. The server
+    /// remains authoritative for the command.
+    pub fn resolve_activation(
+        &self,
+        active_index: usize,
+        has_player_ship: bool,
+        locked_target_id: Option<ShipId>,
+        target_distance: Option<f64>,
+    ) -> ModuleActivationDecision {
+        if !has_player_ship {
+            return ModuleActivationDecision::Noop;
+        }
+
+        let Some(row) = self
+            .modules
             .iter()
             .filter(|row| row.is_active_module)
             .nth(active_index)
-            .map(|row| ActivationIntent {
+        else {
+            return ModuleActivationDecision::Noop;
+        };
+
+        if row.is_active {
+            return ModuleActivationDecision::Deactivate {
                 module_id: row.module_id,
                 slot: row.slot.clone(),
-                kind: row.kind,
-                is_active: row.is_active,
-                requires_target: range_family(row.kind).is_some(),
-                effective_range: self.effective_range_for_activation(row.kind, row.module_id),
-            })
+            };
+        }
+
+        let requires_target = range_family(row.kind).is_some();
+        let target_ship_id = if requires_target {
+            let Some(target_ship_id) = locked_target_id else {
+                return ModuleActivationDecision::Rejected(
+                    ModuleActivationRejection::NoLockedTarget,
+                );
+            };
+            let Some(distance) =
+                target_distance.filter(|distance| distance.is_finite() && *distance >= 0.0)
+            else {
+                return ModuleActivationDecision::Rejected(
+                    ModuleActivationRejection::TargetUnavailable,
+                );
+            };
+            if self
+                .effective_range_for_activation(row.kind, row.module_id)
+                .is_some_and(|range| distance > range)
+            {
+                return ModuleActivationDecision::Rejected(ModuleActivationRejection::OutOfRange);
+            }
+            Some(target_ship_id)
+        } else {
+            None
+        };
+
+        ModuleActivationDecision::Activate {
+            module_id: row.module_id,
+            slot: row.slot.clone(),
+            target_ship_id,
+        }
     }
 
     /// Applies a server-confirmed activation state to the module matching
@@ -336,13 +395,119 @@ mod tests {
     }
 
     #[test]
-    fn toggle_at_counts_only_active_capable_modules() {
+    fn resolve_activation_ignores_non_active_modules_when_selecting_an_index() {
         let mut passive = weapon_row(2, false, 0.0, 0.0);
         passive.is_active_module = false;
         let loadout = empty_loadout(vec![passive, weapon_row(3, false, 40.0, 0.0)]);
-        let intent = loadout.toggle_at(0).expect("one active-capable module");
-        assert_eq!(intent.module_id, ModuleId(3));
-        assert!(intent.requires_target);
+        assert_eq!(
+            loadout.resolve_activation(0, true, Some(ship_id(9)), Some(1.0)),
+            ModuleActivationDecision::Activate {
+                module_id: ModuleId(3),
+                slot: "High".to_string(),
+                target_ship_id: Some(ship_id(9)),
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_activation_deactivates_an_active_module_without_target_facts() {
+        let loadout = empty_loadout(vec![weapon_row(3, true, 40.0, 0.0)]);
+
+        assert_eq!(
+            loadout.resolve_activation(0, true, None, None),
+            ModuleActivationDecision::Deactivate {
+                module_id: ModuleId(3),
+                slot: "High".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_activation_rejects_targeted_modules_without_a_locked_target() {
+        let loadout = empty_loadout(vec![weapon_row(3, false, 40.0, 0.0)]);
+
+        assert_eq!(
+            loadout.resolve_activation(0, true, None, None),
+            ModuleActivationDecision::Rejected(ModuleActivationRejection::NoLockedTarget)
+        );
+    }
+
+    #[test]
+    fn resolve_activation_rejects_a_locked_target_without_local_position_data() {
+        let loadout = empty_loadout(vec![weapon_row(3, false, 40.0, 0.0)]);
+
+        assert_eq!(
+            loadout.resolve_activation(0, true, Some(ship_id(9)), None),
+            ModuleActivationDecision::Rejected(ModuleActivationRejection::TargetUnavailable)
+        );
+    }
+
+    #[test]
+    fn resolve_activation_rejects_targets_beyond_effective_range() {
+        let loadout = empty_loadout(vec![weapon_row(3, false, 50.0, 10.0)]);
+
+        assert_eq!(
+            loadout.resolve_activation(0, true, Some(ship_id(9)), Some(60.1)),
+            ModuleActivationDecision::Rejected(ModuleActivationRejection::OutOfRange)
+        );
+    }
+
+    #[test]
+    fn resolve_activation_allows_targets_at_the_effective_range_boundary() {
+        let loadout = empty_loadout(vec![weapon_row(3, false, 50.0, 10.0)]);
+
+        assert_eq!(
+            loadout.resolve_activation(0, true, Some(ship_id(9)), Some(60.0)),
+            ModuleActivationDecision::Activate {
+                module_id: ModuleId(3),
+                slot: "High".to_string(),
+                target_ship_id: Some(ship_id(9)),
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_activation_activates_self_targeted_modules_without_a_target() {
+        let mut propulsion = weapon_row(3, false, 0.0, 0.0);
+        propulsion.kind = ModuleKind::Propulsion;
+        let loadout = empty_loadout(vec![propulsion]);
+
+        assert_eq!(
+            loadout.resolve_activation(0, true, None, None),
+            ModuleActivationDecision::Activate {
+                module_id: ModuleId(3),
+                slot: "High".to_string(),
+                target_ship_id: None,
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_activation_is_a_noop_without_a_player_ship_or_matching_module() {
+        let loadout = empty_loadout(vec![weapon_row(3, false, 40.0, 0.0)]);
+
+        assert_eq!(
+            loadout.resolve_activation(0, false, None, None),
+            ModuleActivationDecision::Noop
+        );
+        assert_eq!(
+            loadout.resolve_activation(1, true, None, None),
+            ModuleActivationDecision::Noop
+        );
+    }
+
+    #[test]
+    fn resolve_activation_rejects_invalid_target_distance() {
+        let loadout = empty_loadout(vec![weapon_row(3, false, 40.0, 0.0)]);
+
+        assert_eq!(
+            loadout.resolve_activation(0, true, Some(ship_id(9)), Some(f64::NAN)),
+            ModuleActivationDecision::Rejected(ModuleActivationRejection::TargetUnavailable)
+        );
+        assert_eq!(
+            loadout.resolve_activation(0, true, Some(ship_id(9)), Some(-0.1)),
+            ModuleActivationDecision::Rejected(ModuleActivationRejection::TargetUnavailable)
+        );
     }
 
     #[test]
