@@ -257,6 +257,16 @@ func _setup_pending_docked_switch() -> FakeShip:
 	return old_ship
 
 
+func test_distance_in_server_units_converts_by_render_scale() -> void:
+	assert_float(MainScript._distance_in_server_units(
+		Vector3.ZERO, Vector3(3.0, 4.0, 0.0), 0.1)).is_equal_approx(50.0, 0.001)
+
+
+func test_distance_in_server_units_rejects_non_positive_render_scale() -> void:
+	assert_float(MainScript._distance_in_server_units(
+		Vector3.ZERO, Vector3(3.0, 4.0, 0.0), 0.0)).is_equal(-1.0)
+
+
 func test_warp_hud_guidance_uses_shared_minimum_distance_boundary() -> void:
 	var connection := FakeConnection.new()
 	_main._connection = connection

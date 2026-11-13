@@ -188,7 +188,7 @@ impl PlayerLoadoutMsg {
             };
         }
 
-        let requires_target = range_family(row.kind).is_some();
+        let requires_target = row.kind.requires_target();
         let target_ship_id = if requires_target {
             let Some(target_ship_id) = locked_target_id else {
                 return ModuleActivationDecision::Rejected(
@@ -425,6 +425,18 @@ mod tests {
     #[test]
     fn resolve_activation_rejects_targeted_modules_without_a_locked_target() {
         let loadout = empty_loadout(vec![weapon_row(3, false, 40.0, 0.0)]);
+
+        assert_eq!(
+            loadout.resolve_activation(0, true, None, None),
+            ModuleActivationDecision::Rejected(ModuleActivationRejection::NoLockedTarget)
+        );
+    }
+
+    #[test]
+    fn resolve_activation_requires_a_target_for_remote_repair_modules() {
+        let mut module = weapon_row(3, false, 40.0, 0.0);
+        module.kind = ModuleKind::RemoteArmorRepairer;
+        let loadout = empty_loadout(vec![module]);
 
         assert_eq!(
             loadout.resolve_activation(0, true, None, None),
