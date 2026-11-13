@@ -1052,12 +1052,14 @@ func _toggle_module_by_index(f_index: int) -> void:
 	## F1-F8 map to active module indices 0-7 (High/Mid slots).
 	## Godot supplies current world facts; ClientLoadout owns the decision.
 	var has_target_distance := false
-	var target_distance_units := 0.0
-	if _player_lock_target >= 0 \
-		and _ships.has(_player_lock_target) \
-		and _ships.has(_player_ship_id):
-		target_distance_units = (_ships[_player_ship_id] as Node3D).global_position.distance_to(
-			(_ships[_player_lock_target] as Node3D).global_position) / _world.render_scale()
+	var target_distance_units := -1.0
+	if _player_lock_target >= 0 and _player_ship_id >= 0:
+		if _ships.has(_player_lock_target) and _ships.has(_player_ship_id):
+			target_distance_units = _distance_in_server_units(
+				(_ships[_player_ship_id] as Node3D).global_position,
+				(_ships[_player_lock_target] as Node3D).global_position,
+				_world.render_scale())
+	if target_distance_units >= 0.0:
 		has_target_distance = true
 	var decision: ModuleActivationDecision = _loadout.resolve_activation(
 		f_index, _player_ship_id >= 0, _player_lock_target,
@@ -1083,6 +1085,13 @@ func _toggle_module_by_index(f_index: int) -> void:
 			_connection.send_activate_module(mid, slot, decision.target_ship_id())
 		_:
 			return
+
+static func _distance_in_server_units(
+	from_position: Vector3, to_position: Vector3, render_scale: float
+) -> float:
+	if not is_finite(render_scale) or render_scale <= 0.0:
+		return -1.0
+	return from_position.distance_to(to_position) / render_scale
 
 func _set_as_player_ship(p_ship_id: int, ship: Node3D) -> void:
 	_player_ship_id = p_ship_id
@@ -1178,9 +1187,13 @@ func _update_hud() -> void:
 		facts.player_speed_units = (_ships[_player_ship_id] as Node3D).call("get_speed_server") as float
 	facts.target_known = _ships.has(_player_lock_target)
 	if _ships.has(_player_lock_target) and _player_ship_id >= 0 and _ships.has(_player_ship_id):
-		facts.has_target_distance = true
-		facts.target_distance_units = (_ships[_player_ship_id] as Node3D).global_position.distance_to(
-			(_ships[_player_lock_target] as Node3D).global_position) / _world.render_scale()
+		var target_distance := _distance_in_server_units(
+			(_ships[_player_ship_id] as Node3D).global_position,
+			(_ships[_player_lock_target] as Node3D).global_position,
+			_world.render_scale())
+		if target_distance >= 0.0:
+			facts.has_target_distance = true
+			facts.target_distance_units = target_distance
 	facts.nearby_gate_id = _nearby_gate_id
 	facts.nearby_station_ids = _nearby_station_ids
 	facts.jump_notice = _jump_notice
