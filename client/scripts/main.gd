@@ -1049,62 +1049,40 @@ func _handle_inventory_row_drop(row: InventoryRow, target_column: int, release_p
 
 
 func _toggle_module_by_index(f_index: int) -> void:
-	if _player_ship_id < 0:
-		return
-	## F1-F8 map to active module indices 0-7 (High/Mid slots)
-	var toggle: ModuleActivationIntent = _loadout.toggle_at(f_index)
-	if toggle.is_none():
-		return
-	var mid: int = toggle.module_id() as int
-	var slot: String = toggle.slot()
-	if toggle.is_active():
-		_apply_player_module_activation(mid, false, "")
-		_connection.send_deactivate_module(mid, slot)
-	else:
-		## Weapon/Tackle/Remote-repair require a Locked target (ADR-0035/0036);
-		## other kinds (self-only Active modules) must not carry one.
-		var requires_target: bool = toggle.requires_target()
-		if requires_target and _player_lock_target < 0:
-			## Sending this without a target is rejected server-side outright
-			## (ADR-0035: requires_target() vs target.is_some() mismatch),
-			## which the client can only observe as an instant on-then-off
-			## flicker (the PlayerFitting resync correcting the optimistic
-			## toggle). Refuse client-side instead so the player gets a
-			## clear reason rather than a confusing flicker.
-			_jump_notice = "No target locked"
+	## F1-F8 map to active module indices 0-7 (High/Mid slots).
+	## Godot supplies current world facts; ClientLoadout owns the decision.
+	var has_target_distance := false
+	var target_distance_units := 0.0
+	if _player_lock_target >= 0 \
+		and _ships.has(_player_lock_target) \
+		and _ships.has(_player_ship_id):
+		target_distance_units = (_ships[_player_ship_id] as Node3D).global_position.distance_to(
+			(_ships[_player_lock_target] as Node3D).global_position) / _world.render_scale()
+		has_target_distance = true
+	var decision: ModuleActivationDecision = _loadout.resolve_activation(
+		f_index, _player_ship_id >= 0, _player_lock_target,
+		has_target_distance, target_distance_units)
+	var mid: int = decision.module_id() as int
+	var slot: String = decision.slot()
+	match decision.action():
+		"noop":
+			return
+		"rejected":
+			match decision.rejection_reason():
+				"no_locked_target":
+					_jump_notice = "No target locked"
+				"target_unavailable", "out_of_range":
+					_jump_notice = "Target out of range"
 			_jump_notice_timer = 2.0
 			return
-		var target_id: int = _player_lock_target if requires_target else -1
-		if requires_target and target_id >= 0 and _player_ship_id >= 0:
-			if not _ships.has(target_id) or not _ships.has(_player_ship_id):
-				## Locked target has left AoI (ADR-0019: Lock survives AoI
-				## leave via WorldSession.remove_ship(clear_lock=false))
-				## -- its node is gone so there is no position to check range
-				## against. A target outside AoI is certain to be beyond any
-				## module's effective range, so refuse here too rather than
-				## falling through to an optimistic send that the server
-				## rejects a moment later (the same on-then-off flicker the
-				## visible-target check below exists to prevent).
-				_jump_notice = "Target out of range"
-				_jump_notice_timer = 2.0
-				return
-			## Same idea as the missing-lock guard above, but for range
-			## (ADR-0035): the server rejects activation against a Locked
-			## but out-of-range target outright, which otherwise shows the
-			## exact same instant on-then-off flicker. Mirrors
-			## range_gate.rs's effective_range_from_stats(), using the
-			## module's own contribution (not yet active) plus every
-			## already-active module of the same family.
-			if toggle.has_effective_range():
-				var effective_range: float = toggle.effective_range()
-				var dist_u: float = (_ships[_player_ship_id] as Node3D).global_position.distance_to(
-					(_ships[target_id] as Node3D).global_position) / _world.render_scale()
-				if dist_u > effective_range:
-					_jump_notice = "Target out of range"
-					_jump_notice_timer = 2.0
-					return
-		_apply_player_module_activation(mid, true, "")
-		_connection.send_activate_module(mid, slot, target_id)
+		"deactivate":
+			_apply_player_module_activation(mid, false, "")
+			_connection.send_deactivate_module(mid, slot)
+		"activate":
+			_apply_player_module_activation(mid, true, "")
+			_connection.send_activate_module(mid, slot, decision.target_ship_id())
+		_:
+			return
 
 func _set_as_player_ship(p_ship_id: int, ship: Node3D) -> void:
 	_player_ship_id = p_ship_id

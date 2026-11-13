@@ -506,6 +506,7 @@ func test_module_toggle_marks_module_active_before_server_echo() -> void:
 	assert_bool(mod_dict.is_active).is_true()
 	assert_str(mod_dict.forced_reason).is_equal("")
 	assert_int(connection.activate_calls.size()).is_equal(1)
+	assert_int(connection.activate_calls[0].target_ship_id).is_equal(-1)
 	connection.free()
 
 
@@ -526,6 +527,7 @@ func test_module_toggle_of_a_targeted_kind_without_a_locked_target_is_refused_cl
 	var mod_dict: ModuleRow = _main._loadout.modules()[0]
 	assert_bool(mod_dict.is_active).is_false()
 	assert_int(connection.activate_calls.size()).is_equal(0)
+	assert_str(_main._jump_notice).is_equal("No target locked")
 	connection.free()
 
 
@@ -551,6 +553,66 @@ func test_module_toggle_of_a_targeted_kind_against_a_locked_but_out_of_aoi_targe
 
 	var mod_dict: ModuleRow = _main._loadout.modules()[0]
 	assert_bool(mod_dict.is_active).is_false()
+	assert_int(connection.activate_calls.size()).is_equal(0)
+	assert_str(_main._jump_notice).is_equal("Target out of range")
+	connection.free()
+
+
+func test_module_toggle_rejects_a_visible_locked_target_beyond_range() -> void:
+	var connection := FakeConnection.new()
+	_main._connection = connection
+	_main._player_ship_id = 1
+	_main._player_lock_target = 2
+	var player := FakeShip.new()
+	var target := FakeShip.new()
+	add_child(player)
+	add_child(target)
+	target.position = Vector3(0.1, 0.0, 0.0)
+	_main._ships = {1: player, 2: target}
+	_set_loadout_modules([_module_fixture(5, "High", false, "Weapon")])
+
+	_main._toggle_module_by_index(0)
+
+	var mod_dict: ModuleRow = _main._loadout.modules()[0]
+	assert_bool(mod_dict.is_active).is_false()
+	assert_int(connection.activate_calls.size()).is_equal(0)
+	assert_str(_main._jump_notice).is_equal("Target out of range")
+	player.free()
+	target.free()
+	connection.free()
+
+
+func test_module_toggle_allows_a_target_at_the_range_boundary() -> void:
+	var connection := FakeConnection.new()
+	_main._connection = connection
+	_main._player_ship_id = 1
+	_main._player_lock_target = 2
+	var player := FakeShip.new()
+	var target := FakeShip.new()
+	add_child(player)
+	add_child(target)
+	_main._ships = {1: player, 2: target}
+	_set_loadout_modules([_module_fixture(5, "High", false, "Weapon")])
+
+	_main._toggle_module_by_index(0)
+
+	var mod_dict: ModuleRow = _main._loadout.modules()[0]
+	assert_bool(mod_dict.is_active).is_true()
+	assert_int(connection.activate_calls.size()).is_equal(1)
+	assert_int(connection.activate_calls[0].target_ship_id).is_equal(2)
+	player.free()
+	target.free()
+	connection.free()
+
+
+func test_module_toggle_without_a_player_ship_is_a_noop() -> void:
+	var connection := FakeConnection.new()
+	_main._connection = connection
+	_set_loadout_modules([_module_fixture(5, "High", false)])
+
+	_main._toggle_module_by_index(0)
+
+	assert_bool((_main._loadout.modules()[0] as ModuleRow).is_active).is_false()
 	assert_int(connection.activate_calls.size()).is_equal(0)
 	connection.free()
 

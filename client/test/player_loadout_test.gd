@@ -43,13 +43,12 @@ func test_owned_ships_cross_the_boundary_as_typed_rows() -> void:
 	assert_bool(loadout.is_docked()).is_true()
 
 
-func test_module_toggle_uses_a_typed_intent_record() -> void:
+func test_module_toggle_returns_a_typed_activation_decision() -> void:
 	var loadout := PlayerLoadout.new()
 	assert_bool(loadout.has_method("hud_snapshot")).is_false()
 	assert_bool(loadout.has_method("dock_status")).is_false()
 	assert_bool(loadout.has_method("weapon_ranges")).is_false()
-	assert_bool(loadout.has_method("toggle_at")).is_true()
-	assert_bool(loadout.toggle_at(0).is_none()).is_true()
+	assert_bool(loadout.has_method("resolve_activation")).is_true()
 
 	var module := ModuleRow.test_fixture(
 		"High", 0, 42, "Test Laser", "Weapon", false, true, 10.0, 5)
@@ -57,12 +56,13 @@ func test_module_toggle_uses_a_typed_intent_record() -> void:
 		0, [module], -1, "", -1, [])
 	).is_true()
 
-	var intent: ModuleActivationIntent = loadout.toggle_at(0)
-	assert_bool(intent.is_none()).is_false()
-	assert_int(intent.module_id()).is_equal(42)
-	assert_str(intent.slot()).is_equal("High")
-	assert_bool(intent.is_active()).is_false()
-	assert_bool(intent.requires_target()).is_true()
-	assert_bool(intent.has_effective_range()).is_true()
-	assert_float(intent.effective_range()).is_equal_approx(0.0, 0.0001)
-	assert_bool(loadout.toggle_at(1).is_none()).is_true()
+	var decision: ModuleActivationDecision = loadout.resolve_activation(0, true, 77, true, 0.0)
+	assert_str(decision.action()).is_equal("activate")
+	assert_int(decision.module_id()).is_equal(42)
+	assert_str(decision.slot()).is_equal("High")
+	assert_int(decision.target_ship_id()).is_equal(77)
+	assert_str(decision.rejection_reason()).is_equal("")
+	assert_str(loadout.resolve_activation(0, true, -1, false, 0.0).rejection_reason()).is_equal(
+		"no_locked_target"
+	)
+	assert_str(loadout.resolve_activation(1, true, -1, false, 0.0).action()).is_equal("noop")

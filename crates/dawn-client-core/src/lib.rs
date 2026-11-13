@@ -66,8 +66,8 @@ pub use hud::{
 };
 pub use item_row::ItemRow;
 pub use loadout::{
-    simulate_modules_capacitor_ticks, ActivationIntent, OwnedShipRow, PlayerLoadoutMsg,
-    SlotCapacity,
+    simulate_modules_capacitor_ticks, ModuleActivationDecision, ModuleActivationRejection,
+    OwnedShipRow, PlayerLoadoutMsg, SlotCapacity,
 };
 pub use module_row::ModuleRow;
 pub use motion::{MotionInput, MotionPredictor, MotionProfile, MotionState};
