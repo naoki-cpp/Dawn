@@ -15,6 +15,7 @@ import zipfile
 
 
 ROOT = Path(__file__).resolve().parent.parent
+GODOT_MCP_VERSION = "2026.10.20.1"
 
 
 def patch_text(text, old, new):
@@ -141,7 +142,29 @@ def install_addon(root, directory):
         shutil.copytree(candidates[0], directory)
 
 
+def install_godot_mcp_addon(directory):
+    if addon_version(directory) == GODOT_MCP_VERSION:
+        return
+    if directory.exists():
+        raise RuntimeError(f"Godot MCP addon version mismatch at {directory}; move the existing addon aside and rerun")
+    with tempfile.TemporaryDirectory() as temporary:
+        staging = Path(temporary)
+        archive = staging / "godot_mcp_addon.zip"
+        url = (
+            "https://github.com/hybridindie/godot-mcp/releases/download/"
+            f"{GODOT_MCP_VERSION}/godot_mcp_addon.zip"
+        )
+        download(url, archive)
+        extract_zip(archive, staging / "unpacked")
+        candidate = staging / "unpacked/addons/godot_mcp"
+        if not candidate.is_dir() or addon_version(candidate) != GODOT_MCP_VERSION:
+            raise RuntimeError("Downloaded Godot MCP addon does not match the pinned version")
+        directory.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(candidate, directory)
+
+
 def prepare(root, executable, run=subprocess.run):
+    install_godot_mcp_addon(root / "client/addons/godot_mcp")
     addon = root / "client/addons/gdUnit4"
     install_addon(root, addon)
     patch_addon(addon)
@@ -174,6 +197,7 @@ def main():
         install_addon(ROOT, Path(os.environ.get("GDUNIT4_DIR", ROOT / "client/addons/gdUnit4")).resolve())
         return
     executable = install_godot(ROOT)
+    install_godot_mcp_addon(ROOT / "client/addons/godot_mcp")
     if args.skip_gdunit:
         print(f"Godot installed: {executable} (test preparation skipped)")
         return

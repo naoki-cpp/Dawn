@@ -16,16 +16,23 @@ Python 3.10+ and Cargo are required. `scripts/godot_setup.py` owns preparation;
 the PowerShell/Bash scripts are thin entry points. Set `PYTHON` to an explicit
 interpreter path if Python is not available under its normal command name.
 Preparation validates the pinned Godot version (SHA512 on download), installs
-the pinned GdUnit4 addon when absent, validates/applies runner log patches,
-builds `dawn-client-gdext`, then waits for `--headless --editor --import`.
+the pinned GdUnit4 and Godot Editor MCP addons when absent, validates/applies
+runner log patches, builds `dawn-client-gdext`, then waits for
+`--headless --editor --import`.
 The import log is `client/.godot-test-logs/import.log`; a nonzero exit or
 script/import error in that log prevents readiness and test execution.
 
 Editor addons under `client/addons/` are `.gitignore`d; the runtime
 `lens_effects` addon is vendored with its license. Local setup and CI both
-install the version in `.gdunit4-version` automatically. An existing addon with
-a different version is rejected, not overwritten: move it aside and rerun.
-The plugin enablement in `project.godot` is already committed.
+install the version in `.gdunit4-version` automatically. Godot Editor MCP is
+pinned in `scripts/godot_setup.py` and restored the same way. An existing addon
+with a different version is rejected, not overwritten: move it aside and rerun.
+Plugin enablement is recorded in `project.godot`.
+
+Codex loads the project-scoped MCP server from `.codex/config.toml` for trusted
+workspaces. Install `uv` so `uvx` can run the pinned server package; Codex asks
+before each tool call. Restart Codex after setup, then open this project in
+Godot; the editor addon connects to the local MCP server over `127.0.0.1`.
 
 Tests live under `client/test/` as `<target-file>_test.gd`
 (e.g. `client/test/main_test.gd`).
