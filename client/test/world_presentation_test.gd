@@ -8,6 +8,7 @@ extends GdUnitTestSuite
 const WorldPresentationScript = preload("res://scripts/world_presentation.gd")
 const StarfieldScript = preload("res://scripts/starfield.gd")
 const GalacticModelScript = preload("res://scripts/galactic_model.gd")
+const LensFlareEffectScript = preload("res://addons/lens_effects/lens_flare_compositor_effect.gd")
 
 
 func test_projection_adapter_rejects_invalid_coordinate_shapes() -> void:
@@ -16,14 +17,17 @@ func test_projection_adapter_rejects_invalid_coordinate_shapes() -> void:
 		Vector3.ZERO, null, 0.1, false, false, 0.0)).is_null()
 
 
-func test_sun_flare_rejects_rear_and_offscreen_directions() -> void:
+func test_sun_flare_projection_uses_camera_and_rejects_invalid_directions() -> void:
 	var camera: Camera3D = auto_free(Camera3D.new())
 	add_child(camera)
-	assert_dict(WorldPresentationScript.project_sun_flare(camera, Vector3.BACK, 0.005)).is_empty()
-	assert_dict(WorldPresentationScript.project_sun_flare(camera, Vector3(10, 0, -1), 0.005)).is_empty()
-	assert_dict(WorldPresentationScript.project_sun_flare(camera, Vector3.ZERO, 0.005)).is_empty()
-	assert_dict(WorldPresentationScript.project_sun_flare(camera, Vector3.FORWARD, 0.0)).is_empty()
-	var source := WorldPresentationScript.project_sun_flare(camera, Vector3.FORWARD, 0.005)
+	var projection := camera.get_camera_projection()
+	var size := Vector2i(camera.get_viewport().get_visible_rect().size)
+	var camera_transform := camera.global_transform
+	assert_dict(LensFlareEffectScript.project_sun_direction(Vector3.BACK, 0.005, camera_transform, projection, size)).is_empty()
+	assert_dict(LensFlareEffectScript.project_sun_direction(Vector3(10, 0, -1), 0.005, camera_transform, projection, size)).is_empty()
+	assert_dict(LensFlareEffectScript.project_sun_direction(Vector3.ZERO, 0.005, camera_transform, projection, size)).is_empty()
+	assert_dict(LensFlareEffectScript.project_sun_direction(Vector3.FORWARD, 0.0, camera_transform, projection, size)).is_empty()
+	var source := LensFlareEffectScript.project_sun_direction(Vector3.FORWARD, 0.005, camera_transform, projection, size)
 	assert_vector(source.position as Vector2).is_equal_approx(Vector2(0.5, 0.5), Vector2(0.001, 0.001))
 	assert_float(source.visibility as float).is_equal(1.0)
 
@@ -44,25 +48,31 @@ func test_close_resolved_disc_keeps_the_same_camera_energy_partition() -> void:
 	assert_bool(presentation._sun_flare.enabled).is_true()
 
 
-func test_sun_flare_tracks_direction_and_apparent_radius_not_absolute_distance() -> void:
+func test_sun_flare_tracks_direction_and_apparent_radius() -> void:
 	var camera: Camera3D = auto_free(Camera3D.new())
 	add_child(camera)
-	var first := WorldPresentationScript.project_sun_flare(camera, Vector3.FORWARD, 0.005)
-	var moved := WorldPresentationScript.project_sun_flare(camera, Vector3(0.2, 0, -1), 0.01)
+	var projection := camera.get_camera_projection()
+	var size := Vector2i(camera.get_viewport().get_visible_rect().size)
+	var first := LensFlareEffectScript.project_sun_direction(Vector3.FORWARD, 0.005, camera.global_transform, projection, size)
+	var moved := LensFlareEffectScript.project_sun_direction(Vector3(0.2, 0, -1), 0.01, camera.global_transform, projection, size)
 	assert_float((moved.position as Vector2).x).is_greater((first.position as Vector2).x)
 	assert_float(moved.radius as float).is_greater(first.radius as float)
 	camera.rotation.y = PI
-	assert_dict(WorldPresentationScript.project_sun_flare(camera, Vector3.FORWARD, 0.005)).is_empty()
+	assert_dict(LensFlareEffectScript.project_sun_direction(Vector3.FORWARD, 0.005, camera.global_transform,
+		camera.get_camera_projection(), size)).is_empty()
 
 
 func test_resolved_stellar_disc_expands_the_same_source_footprint() -> void:
 	var camera: Camera3D = auto_free(Camera3D.new())
 	add_child(camera)
-	var distant := WorldPresentationScript.project_sun_flare(camera, Vector3.FORWARD, 0.005)
-	var nearby := WorldPresentationScript.project_sun_flare(camera, Vector3.FORWARD, asin(1.0 / 1.5))
+	var size := Vector2i(camera.get_viewport().get_visible_rect().size)
+	var distant := LensFlareEffectScript.project_sun_direction(Vector3.FORWARD, 0.005,
+		camera.global_transform, camera.get_camera_projection(), size)
+	var nearby := LensFlareEffectScript.project_sun_direction(Vector3.FORWARD, asin(1.0 / 1.5),
+		camera.global_transform, camera.get_camera_projection(), size)
 	assert_float(distant.visibility).is_equal(1.0)
 	assert_float(nearby.visibility).is_equal(1.0)
-	assert_float(nearby.radius).is_greater(12.0)
+	assert_float(nearby.projected_radius).is_greater(0.02)
 
 func _position(x: float, y: float, z: float) -> PackedFloat64Array:
 	return PackedFloat64Array([x, y, z])

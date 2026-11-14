@@ -27,7 +27,11 @@ const Source = preload("res://scripts/stellar_source.gd")
 @export_range(0.0, 4.0, 0.01) var Rays_Shadow_Weight := 2.0
 
 var _sun_mutex := Mutex.new()
-var _pending_sun: Array = []
+var _pending_source: Array = []
+var _pending_is_direction := false
+var _source_is_direction := false
+var _sun_direction := Vector3.ZERO
+var _angular_radius := 0.0
 var _source := Vector4(0.5, 0.5, 0.0, 1.0)
 var _source_color := Color.WHITE
 var _radius := 0.0
@@ -40,7 +44,16 @@ var _uniform_buffer: RID
 ## Occlusion radius remains a separate depth-sampling footprint in pixels.
 func set_sun(position: Vector2, color: Color, visibility: float, occlusion_radius: float, projected_radius: float) -> void:
 	_sun_mutex.lock()
-	_pending_sun = [position, color, visibility, occlusion_radius, projected_radius]
+	_pending_source = [position, color, visibility, occlusion_radius, projected_radius]
+	_pending_is_direction = false
+	_sun_mutex.unlock()
+
+
+## The direction is projected with each view's render-frame camera matrices.
+func set_sun_direction(direction: Vector3, color: Color, angular_radius: float) -> void:
+	_sun_mutex.lock()
+	_pending_source = [direction, color, angular_radius]
+	_pending_is_direction = true
 	_sun_mutex.unlock()
 
 
@@ -76,14 +89,24 @@ func _initialize_render() -> void:
 
 func _render_setup() -> void:
 	_sun_mutex.lock()
-	var snapshot := _pending_sun
-	_pending_sun = []
+	var snapshot := _pending_source
+	var is_direction := _pending_is_direction
+	_pending_source = []
 	_sun_mutex.unlock()
 	if not snapshot.is_empty():
-		var position: Vector2 = snapshot[0]
-		_source = Vector4(position.x, position.y, snapshot[2], snapshot[3])
+		_source_is_direction = is_direction
 		_source_color = snapshot[1]
-		_radius = snapshot[4] if is_finite(snapshot[4]) and snapshot[4] > 0.0 else 0.0
+		if is_direction:
+			_sun_direction = snapshot[0]
+			_angular_radius = snapshot[2]
+		else:
+			var position: Vector2 = snapshot[0]
+			_source = Vector4(position.x, position.y, snapshot[2], snapshot[3])
+			_radius = snapshot[4] if is_finite(snapshot[4]) and snapshot[4] > 0.0 else 0.0
+	_update_uniform_buffer()
+
+
+func _update_uniform_buffer() -> void:
 	var tint := Color(clampf(Lens_Tint.r, 0.0, 1.0), clampf(Lens_Tint.g, 0.0, 1.0), clampf(Lens_Tint.b, 0.0, 1.0))
 	var reflections := _reflection_fractions()
 	var data: Array = [_source_color, tint, _source,
@@ -115,6 +138,14 @@ func _rays_radius() -> float:
 
 
 func _render_view(view: int) -> void:
+	if _source_is_direction:
+		var projected := _project_direction_for_view(view)
+		if projected.is_empty():
+			return
+		var position: Vector2 = projected.position
+		_source = Vector4(position.x, position.y, projected.visibility, projected.occlusion_radius)
+		_radius = projected.projected_radius
+		_update_uniform_buffer()
 	if not _pipeline.is_valid() or not _uniform_buffer.is_valid() or _source.z <= 0.0:
 		return
 	var variance := Source.variance(_radius)
@@ -134,6 +165,53 @@ func _render_view(view: int) -> void:
 		[get_color_image_uniform(view), get_depth_sampler_uniform(view, nearest_sampler)],
 		[get_uniform_buffer_uniform(_uniform_buffer, 0)]],
 		PackedFloat32Array([region.position.x, region.position.y, region.size.x, region.size.y]))
+
+
+func _project_direction_for_view(view: int) -> Dictionary:
+	if render_scene_data == null:
+		return {}
+	return project_sun_direction(_sun_direction, _angular_radius,
+		render_scene_data.get_cam_transform(), render_scene_data.get_view_projection(view), render_size)
+
+
+## Project a distant source and its angular radius through the render-frame view.
+static func project_sun_direction(
+	direction: Vector3,
+	angular_radius: float,
+	camera_transform: Transform3D,
+	projection: Projection,
+	viewport_size: Vector2i
+) -> Dictionary:
+	if direction.is_zero_approx() or not direction.is_finite() or not is_finite(angular_radius) \
+			or angular_radius <= 0.0 or viewport_size.x <= 0 or viewport_size.y <= 0 \
+			or projection.is_orthogonal():
+		return {}
+	var ray := direction.normalized()
+	var world_up := camera_transform.basis.y.normalized()
+	var tangent := world_up.slide(ray)
+	if tangent.length_squared() < 0.000001:
+		tangent = camera_transform.basis.x.normalized().slide(ray)
+	if tangent.length_squared() < 0.000001:
+		return {}
+	tangent = tangent.normalized()
+	var world_limb := (ray * cos(angular_radius) + tangent * sin(angular_radius)).normalized()
+	var camera_basis_inverse := camera_transform.basis.inverse()
+	var camera_ray := camera_basis_inverse * ray
+	var camera_limb := camera_basis_inverse * world_limb
+	var source_clip := projection * Vector4(camera_ray.x, camera_ray.y, camera_ray.z, 0.0)
+	var limb_clip := projection * Vector4(camera_limb.x, camera_limb.y, camera_limb.z, 0.0)
+	if source_clip.w <= 0.0 or limb_clip.w <= 0.0 or not source_clip.is_finite() or not limb_clip.is_finite():
+		return {}
+	var position := Vector2(source_clip.x, -source_clip.y) / source_clip.w * 0.5 + Vector2(0.5, 0.5)
+	var limb_position := Vector2(limb_clip.x, -limb_clip.y) / limb_clip.w * 0.5 + Vector2(0.5, 0.5)
+	if not position.is_finite() or not limb_position.is_finite() \
+			or position.x <= 0.0 or position.x >= 1.0 or position.y <= 0.0 or position.y >= 1.0:
+		return {}
+	var pixel_radius := ((limb_position - position) * Vector2(viewport_size)).length()
+	var edge := minf(minf(position.x, 1.0 - position.x), minf(position.y, 1.0 - position.y))
+	return {"position": position, "visibility": smoothstep(0.0, 0.04, edge),
+		"radius": pixel_radius, "occlusion_radius": maxf(pixel_radius, 1.0),
+		"projected_radius": pixel_radius / viewport_size.y}
 
 
 ## Six PSF standard deviations plus independently bounded shaft support.
