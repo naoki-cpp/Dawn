@@ -373,4 +373,5 @@ func test_motion_correction_calls_main_handler_directly() -> void:
 	])
 	assert_vector(call["velocity"]).is_equal(Vector3(4.0, 5.0, -6.0))
 	assert_int(call["tick"]).is_equal(42)
+	main._presentation.free()
 	main.free()

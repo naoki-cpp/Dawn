@@ -157,10 +157,12 @@ Testable (pure functions/logic with no scene-tree dependency):
   - instantiating a script with .new() without adding it to the scene tree
     never calls _ready(), so functions that avoid @onready variables are
     safe to test
+  - targeted frame-order behavior in a minimal offline scene; for example,
+    client/test/world_presentation_frame_test.gd verifies that the warp shader
+    receives the CameraController transform and FOV from the same frame
 
 Not testable / out of scope (left to visual checks in the Godot editor):
-  - HUD construction/updates, input handling, marker (node) creation, the
-    picking loop itself
+  - final visual quality, full HUD layout, input handling, marker picking
   - anything depending on @onready scene-tree path references
   - WebSocket communication (the live connection part of connection.gd)
   -> matches the areas marked "needs Godot editor verification" as C-1/C-3

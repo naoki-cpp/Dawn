@@ -139,12 +139,14 @@ func _assert_scene_tree_refs() -> void:
 var _connection_dialog: CanvasLayer
 
 func _ready() -> void:
-	# Screen-space effects sample the camera after its transform has updated.
-	process_priority = _camera.process_priority + 1
 	_assert_scene_tree_refs()
 	_connection.bind_client_state(_session, _loadout, self)
 	_connection.connection_changed.connect(_on_connection_changed)
-	_presentation.build(self, _camera, _warp_tunnel, _gates_root, _bodies_root, _world, _directional_light)
+	_presentation.build(
+		self, _camera, _warp_tunnel, _gates_root, _bodies_root,
+		_world, _session, _ships, _bodies, _directional_light)
+	add_child(_presentation)
+	process_priority = _presentation.process_priority + 1
 	_hud_surface.build(self, _hud, _stats_label)
 	_radial_menu = RadialMenuScript.new()
 	_radial_menu.z_index = 100
@@ -169,7 +171,6 @@ func _process(delta: float) -> void:
 			_cancel_radial_menu()
 		else:
 			_radial_menu.call("update_pointer", get_viewport().get_mouse_position())
-	_presentation.refresh(delta, _player_ship_id, _ships, _bodies)
 	_update_gate_proximity()
 	_update_station_proximity()
 	_advance_client_cap_ticks(delta)
@@ -850,7 +851,8 @@ func _ingest_star_map() -> void:
 	_sync_session_state()
 	_gates = _session.gates()
 	_stations = _session.stations()
-	_bodies = _session.bodies()
+	_bodies.clear()
+	_bodies.append_array(_session.bodies())
 	_buildable_ship_types = _session.buildable_ship_types()
 	_presentation.respawn_navigation_markers(
 		_gates,
@@ -1249,7 +1251,7 @@ func _clear_all_ships() -> void:
 	## data sitting until the next InitialState's _ingest_star_map() call.
 	_gates = []
 	_stations = []
-	_bodies = []
+	_bodies.clear()
 	_buildable_ship_types = []
 	_interaction.clear_selection()
 	_loadout.reset()

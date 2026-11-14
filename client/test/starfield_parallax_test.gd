@@ -9,7 +9,7 @@ const GalacticModelScript = preload("res://scripts/galactic_model.gd")
 
 
 func test_starfield_depth_and_pixel_spread_are_configured() -> void:
-	var presentation := WorldPresentationScript.new()
+	var presentation: WorldPresentation = auto_free(WorldPresentationScript.new())
 	var root: Node3D = auto_free(Node3D.new()) as Node3D
 	add_child(root)
 	var camera: Camera3D = auto_free(Camera3D.new()) as Camera3D
@@ -49,7 +49,7 @@ func test_starfield_depth_and_pixel_spread_are_configured() -> void:
 
 
 func test_starfield_is_centered_on_the_player_not_the_orbiting_camera() -> void:
-	var presentation := WorldPresentationScript.new()
+	var presentation: WorldPresentation = auto_free(WorldPresentationScript.new())
 	var root: Node3D = auto_free(Node3D.new()) as Node3D
 	add_child(root)
 	var camera: Camera3D = auto_free(Camera3D.new()) as Camera3D

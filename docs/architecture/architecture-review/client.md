@@ -93,23 +93,23 @@ Godotは候補一覧をmenu open時に固定し、release時に更新した距�
 - `main.gd`: scene node registry、short-lived optimistic state、radial menu lifecycle。action availability projectionは`ClientInteraction`が所有
 - `ClientInteraction`（core）: selection、double-click、input facts → `ClientAction`
 - `WorldInteraction`（Godot）: Key/hit-test normalizationとcore adapter
-- `WorldPresentation`: floating originとvisual effects
+- `WorldPresentation`: floating originとvisual effects。camera-dependent更新のNode owner（camera → presentation → main）
 - `HudReadModel`（core）: HUD panel projection、display text、value-based dirty decision
 - `HudSurface` / `HudManager`: Control参照とtyped snapshotのpaint・panel構築
 
 navigation map cacheはSector内でwrite-onceに近いpresentation cacheとして許容し、毎frameのRust→Godot再構築は行わない。
 
-## ファイルサイズ（2026-11-12 doc-sync: 掲載表の行数照合）
+## ファイルサイズ（2026-11-15 doc-sync: 掲載表の行数照合）
 
 ### GDScript（`client/scripts/`）
 
 | ファイル | 行数 | 判定 |
 |---|---:|---|
-| `client/scripts/main.gd` | 1276 | 🟡 R-2。scene orchestrationとradial menu lifecycle。action availabilityはRustへ集約済み。compositionを機械分割しない |
+| `client/scripts/main.gd` | 1271 | 🟡 R-2。scene orchestrationとradial menu lifecycle。action availabilityはRustへ集約済み。compositionを機械分割しない |
 | `client/scripts/hud_manager.gd` | 859 | 🟡 C-9。typed refsとpanel build/updateが同一責務。独立変更理由が分かれるまで保留 |
 | `client/scripts/ship_controller.gd` | 412 | 🟢 motion adapterとvisual effectの一つのShip presentation boundary |
 | `client/scripts/connection.gd` | 291 | 🟢 socket/credential adapter・typed outcome受け渡し。通常送信を一本化、HelloのWelcome前送信は分離（2026-11-08） |
-| `client/scripts/world_presentation.gd` | 595 | 🟡 C-20。celestial projectionはRustへ集約、恒星光源とprominenceは別module。environment/warp/player effectを調停し、700行trigger未発火 |
+| `client/scripts/world_presentation.gd` | 586 | 🟡 C-20。celestial projectionはRustへ集約、恒星光源とprominenceは別module。Nodeがcamera後のframe更新を所有。visual familyの700行trigger未発火 |
 | `client/scripts/market_surface.gd` | 270 | 🟢 Market panel surface |
 | `client/scripts/hud_surface.gd` | 157 | 🟢 typed snapshot paint・HUD reference ownership |
 | `client/scripts/navigation_marker_renderer.gd` | 226 | 🟢 navigation marker・planet surface・EVE-style bracket rendering |

@@ -6,7 +6,7 @@
 ## navigation-marker placement, sky/sun updates, warp-tunnel intensity, and
 ## player-ship presentation setup.
 class_name WorldPresentation
-extends RefCounted
+extends Node
 
 const NavigationMarkerRendererScript = preload("res://scripts/navigation_marker_renderer.gd")
 const StarfieldScript = preload("res://scripts/starfield.gd")
@@ -38,6 +38,9 @@ const FOG_BEGIN_METRES : float = 2_000.0
 const FOG_END_METRES : float = 120_000.0
 
 var _world: RefCounted = null
+var _session: RefCounted = null
+var _ships: Dictionary = {}
+var _bodies: Array = []
 var _camera: Camera3D = null
 var _warp_tunnel: ColorRect = null
 var _gates_root: Node3D = null
@@ -62,6 +65,17 @@ var _camera_base_fov: float = 60.0
 var _warp_tunnel_amount: float = 0.0
 
 
+func _ready() -> void:
+	if _camera != null:
+		process_priority = _camera.process_priority + 1
+
+
+func _process(delta: float) -> void:
+	if _session == null:
+		return
+	_refresh_frame(delta, _session.call("player_ship_id") as int)
+
+
 func build(
 	parent: Node,
 	camera: Camera3D,
@@ -69,6 +83,9 @@ func build(
 	gates_root: Node3D,
 	bodies_root: Node3D,
 	world: RefCounted,
+	session: RefCounted,
+	ships: Dictionary,
+	bodies: Array,
 	directional_light: DirectionalLight3D = null
 ) -> void:
 	_camera = camera
@@ -76,6 +93,9 @@ func build(
 	_gates_root = gates_root
 	_bodies_root = bodies_root
 	_world = world
+	_session = session
+	_ships = ships
+	_bodies = bodies
 	_directional_light = directional_light
 	if _camera != null:
 		_camera_base_fov = _camera.fov
@@ -87,14 +107,14 @@ func _render_scale() -> float:
 	return _world.call("render_scale") as float
 
 
-func refresh(delta: float, player_ship_id: int, ships: Dictionary, bodies: Array) -> void:
-	_maybe_rebase_origin(player_ship_id, ships)
-	_update_starfield(player_ship_id, ships)
+func _refresh_frame(delta: float, player_ship_id: int) -> void:
+	_maybe_rebase_origin(player_ship_id, _ships)
+	_update_starfield(player_ship_id, _ships)
 	_maybe_bake_nebula()
-	_update_position_markers(_bodies_root, "nav_pos", player_ship_id, ships)
-	_update_position_markers(_gates_root, "nav_pos", player_ship_id, ships)
-	_update_sun_direction(player_ship_id, ships, bodies)
-	_update_warp_tunnel_effect(delta, player_ship_id, ships)
+	_update_position_markers(_bodies_root, "nav_pos", player_ship_id, _ships)
+	_update_position_markers(_gates_root, "nav_pos", player_ship_id, _ships)
+	_update_sun_direction(player_ship_id, _ships, _bodies)
+	_update_warp_tunnel_effect(delta, player_ship_id, _ships)
 
 
 func update_stellar_view(direction: Vector3, color: Vector3, angular_radius: float,
