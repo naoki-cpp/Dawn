@@ -22,6 +22,11 @@ class PreparationTests(unittest.TestCase):
         (self.root / ".gdunit4-version").write_text("6.1.3\n")
         (self.root / ".godot-version").write_text("4.7.2-stable\n")
         self.addon = self.root / "client/addons/gdUnit4"
+        self.mcp_addon = self.root / "client/addons/godot_mcp"
+        self.mcp_addon.mkdir(parents=True)
+        (self.mcp_addon / "plugin.cfg").write_text(
+            f'[plugin]\nversion="{setup.GODOT_MCP_VERSION}"\n'
+        )
 
     def fixture(self, newline="\n"):
         files = {}
@@ -67,6 +72,31 @@ class PreparationTests(unittest.TestCase):
             setup.install_addon(self.root, self.addon)
             setup.install_addon(self.root, self.addon)
         self.assertEqual(fetch.call_count, 1)
+
+    def test_missing_godot_mcp_addon_installs_pinned_release_and_reuses_it(self):
+        addon = self.root / "fresh-client/addons/godot_mcp"
+
+        def download(_, destination):
+            with zipfile.ZipFile(destination, "w") as archive:
+                archive.writestr(
+                    "addons/godot_mcp/plugin.cfg",
+                    f'[plugin]\nversion="{setup.GODOT_MCP_VERSION}"\n',
+                )
+
+        with patch.object(setup, "download", side_effect=download) as fetch:
+            setup.install_godot_mcp_addon(addon)
+            setup.install_godot_mcp_addon(addon)
+        self.assertEqual(fetch.call_count, 1)
+        self.assertEqual(setup.addon_version(addon), setup.GODOT_MCP_VERSION)
+
+    def test_wrong_godot_mcp_addon_version_is_not_overwritten(self):
+        (self.mcp_addon / "plugin.cfg").write_text('[plugin]\nversion="0.0.0"\n')
+        with (
+            self.assertRaisesRegex(RuntimeError, "version mismatch"),
+            patch.object(setup, "download") as fetch,
+        ):
+            setup.install_godot_mcp_addon(self.mcp_addon)
+        fetch.assert_not_called()
 
     def test_build_precedes_import_and_runs_even_without_existing_library(self):
         self.fixture()

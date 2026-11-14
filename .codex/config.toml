@@ -1,0 +1,5 @@
+[mcp_servers.godot]
+command = "uvx"
+args = ["--from", "godot-editor-mcp==2026.10.20.1", "godot-editor-mcp"]
+env = { GODOT_MCP_DEFAULT_TOOLSETS = "runtime,debug,code_intel" }
+default_tools_approval_mode = "prompt"
