@@ -139,6 +139,8 @@ func _assert_scene_tree_refs() -> void:
 var _connection_dialog: CanvasLayer
 
 func _ready() -> void:
+	# Screen-space effects sample the camera after its transform has updated.
+	process_priority = _camera.process_priority + 1
 	_assert_scene_tree_refs()
 	_connection.bind_client_state(_session, _loadout, self)
 	_connection.connection_changed.connect(_on_connection_changed)
