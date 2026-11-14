@@ -431,42 +431,9 @@ func _setup_space_environment(parent: Node) -> void:
 func _update_sun_flare(direction: Vector3, color: Vector3, angular_radius: float) -> void:
 	if _sun_flare == null:
 		return
-	if _camera == null:
-		_sun_flare.enabled = false
-		return
 	_sky_mat.set_shader_parameter("sun_direct_fraction", _sun_flare.direct_fraction())
-	var source := project_sun_flare(_camera, direction, angular_radius)
-	if source.is_empty() or source.visibility <= 0.0:
-		_sun_flare.enabled = false
-		return
-	_sun_flare.set_sun(source.position, Color(color.x, color.y, color.z, 1.0),
-		source.visibility, source.radius, source.projected_radius)
+	_sun_flare.set_sun_direction(direction, Color(color.x, color.y, color.z, 1.0), angular_radius)
 	_sun_flare.enabled = true
-
-
-## Project a direction near the camera, never a narrowed absolute star position.
-static func project_sun_flare(camera: Camera3D, direction: Vector3, angular_radius: float) -> Dictionary:
-	if direction.is_zero_approx() or angular_radius <= 0.0:
-		return {}
-	var forward := -camera.global_basis.z.normalized()
-	var ray := direction.normalized()
-	if forward.dot(ray) <= 0.001:
-		return {}
-	var size := camera.get_viewport().get_visible_rect().size
-	if size.x <= 0.0 or size.y <= 0.0:
-		return {}
-	var distance := maxf(camera.near * 2.0, 1.0)
-	var point := camera.global_position + ray * distance
-	var pixel := camera.unproject_position(point)
-	var uv := pixel / size
-	if uv.x <= 0.0 or uv.x >= 1.0 or uv.y <= 0.0 or uv.y >= 1.0:
-		return {}
-	var edge := minf(minf(uv.x, 1.0 - uv.x), minf(uv.y, 1.0 - uv.y))
-	var tangent := camera.global_basis.y.slide(ray).normalized()
-	var limb := point + tangent * distance * tan(angular_radius)
-	var radius := camera.unproject_position(limb).distance_to(pixel)
-	return {"position": uv, "visibility": smoothstep(0.0, 0.04, edge),
-		"radius": maxf(radius, 1.0), "projected_radius": radius / size.y}
 
 
 func _build_player_material() -> void:

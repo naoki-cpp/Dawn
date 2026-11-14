@@ -1,5 +1,7 @@
 extends GdUnitTestSuite
 
+const LensFlareEffectScript = preload("res://addons/lens_effects/lens_flare_compositor_effect.gd")
+
 
 func before_test() -> void:
 	assert_object(RenderingServer.get_rendering_device()) \
@@ -79,6 +81,18 @@ func _capture(viewport: SubViewport) -> float:
 		for x in range(0, image.get_width(), 4):
 			luminance += image.get_pixel(x, y).get_luminance()
 	return luminance
+
+
+func _brightest_pixel(image: Image) -> Vector2i:
+	var brightest := Vector2i.ZERO
+	var brightest_luminance := -1.0
+	for y in image.get_height():
+		for x in image.get_width():
+			var luminance := image.get_pixel(x, y).get_luminance()
+			if luminance > brightest_luminance:
+				brightest = Vector2i(x, y)
+				brightest_luminance = luminance
+	return brightest
 
 
 func _scene() -> Dictionary:
@@ -191,6 +205,31 @@ func test_streak_follows_source_without_reflections_and_can_be_disabled() -> voi
 	assert_float(await _capture(viewport)).is_less(0.0001)
 
 
+func test_world_direction_is_projected_with_the_current_render_camera() -> void:
+	var scene := _scene()
+	var viewport: SubViewport = scene.viewport
+	var camera: Camera3D = scene.camera
+	var effect: CompositorEffect = scene.effect
+	(scene.blocker as MeshInstance3D).hide()
+	effect.Streak_Fraction = 0.0
+	effect.Glare_Fraction = 1.0
+	var sun_direction := camera.project_ray_normal(Vector2(200.0, 120.0))
+	effect.set_sun_direction(sun_direction, Color(1, 1, 1, 40), 0.01)
+	var initial_image := await _capture_image(viewport)
+	var initial_peak := _brightest_pixel(initial_image)
+	var initial_expected := camera.unproject_position(camera.global_position + sun_direction * 100.0)
+	assert_float(absf(float(initial_peak.x) - initial_expected.x)).is_less(8.0)
+
+	camera.rotation.y = 0.2
+	var rotated_image := await _capture_image(viewport)
+	var rotated_peak := _brightest_pixel(rotated_image)
+	var rotated_expected := camera.unproject_position(camera.global_position + sun_direction * 100.0)
+	assert_float(absf(float(rotated_peak.x) - rotated_expected.x)).is_less(8.0)
+	assert_float(absf(float(rotated_peak.x - initial_peak.x) - (rotated_expected.x - initial_expected.x))) \
+		.is_less(2.0)
+	assert_int(abs(rotated_peak.x - initial_peak.x)).is_greater(10)
+
+
 func test_ray_occlusion_weight_controls_shadows_without_dimming_clear_side() -> void:
 	var scene := _scene()
 	var viewport: SubViewport = scene.viewport
@@ -279,13 +318,15 @@ func test_projected_source_radius_is_resolution_independent_and_follows_fov() ->
 	var scene := _scene()
 	var viewport: SubViewport = scene.viewport
 	var camera: Camera3D = scene.camera
-	var presentation := preload("res://scripts/world_presentation.gd")
-	var first := presentation.project_sun_flare(camera, Vector3.FORWARD, 0.00465)
+	var first := LensFlareEffectScript.project_sun_direction(Vector3.FORWARD, 0.00465,
+		camera.global_transform, camera.get_camera_projection(), viewport.size)
 	viewport.size = Vector2i(642, 482)
-	var resized := presentation.project_sun_flare(camera, Vector3.FORWARD, 0.00465)
+	var resized := LensFlareEffectScript.project_sun_direction(Vector3.FORWARD, 0.00465,
+		camera.global_transform, camera.get_camera_projection(), viewport.size)
 	assert_float(resized.projected_radius / first.projected_radius).is_equal_approx(1.0, 0.01)
 	camera.fov = 35.0
-	var zoomed := presentation.project_sun_flare(camera, Vector3.FORWARD, 0.00465)
+	var zoomed := LensFlareEffectScript.project_sun_direction(Vector3.FORWARD, 0.00465,
+		camera.global_transform, camera.get_camera_projection(), viewport.size)
 	assert_float(zoomed.projected_radius).is_greater(resized.projected_radius)
 
 
