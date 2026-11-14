@@ -68,3 +68,8 @@ func test_initial_state_planet_keeps_true_radius_with_distant_marker() -> void:
 		ship.world_presentation_position(), planet.position)
 	assert_float(radius / distance).is_equal_approx(planet.radius / world_distance, 0.0000001)
 	assert_float(distance + radius).is_less(_main._camera.far)
+
+
+func test_main_presents_after_camera_updates_for_screen_space_effects() -> void:
+	var camera: Camera3D = _main.get_node("World/Camera3D") as Camera3D
+	assert_int(_main.process_priority).is_greater(camera.process_priority)
