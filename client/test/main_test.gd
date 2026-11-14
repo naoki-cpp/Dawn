@@ -207,18 +207,27 @@ func _initialize_main_dependencies() -> void:
 
 
 func _replace_with_testable_main() -> void:
-	_main.free()
+	_free_main()
 	## The replacement root is intentionally outside the scene tree so its
-	## _ready() hook does not run. Register it with GdUnit4 nevertheless, so
-	## its child test ships are released even if a test exits before cleanup.
+	## _ready() hook does not run. Register it with GdUnit4 so child test ships
+	## are released even if a test exits before its cleanup hook.
 	_main = auto_free(TestableMain.new())
+	(_main._presentation as Node).free()
 	_main._presentation = FakeWorldPresentation.new()
 	_initialize_main_dependencies()
 
 
 func after_test() -> void:
-	if is_instance_valid(_main):
-		_main.free()
+	_free_main()
+
+
+func _free_main() -> void:
+	if not is_instance_valid(_main):
+		return
+	var presentation := _main._presentation as Node
+	if is_instance_valid(presentation) and presentation.get_parent() != _main:
+		presentation.free()
+	_main.free()
 	_main = null
 
 
@@ -762,6 +771,7 @@ func test_pending_docked_switch_reapplies_dock_after_aoi_enter() -> void:
 	assert_int(new_ship.dock_calls.size()).is_equal(1)
 	assert_int(new_ship.dock_calls[0]["tick"] as int).is_equal(13)
 	assert_int(old_ship.clear_as_player_calls).is_equal(1)
+	_free_main()
 
 
 func test_pending_docked_switch_reapplies_dock_after_ship_spawned() -> void:
@@ -778,6 +788,7 @@ func test_pending_docked_switch_reapplies_dock_after_ship_spawned() -> void:
 	assert_int(new_ship.dock_calls.size()).is_equal(1)
 	assert_int(new_ship.dock_calls[0]["tick"] as int).is_equal(13)
 	assert_int(old_ship.clear_as_player_calls).is_equal(1)
+	_free_main()
 
 
 ## Disembarking is also applied by the typed PlayerLoadout outcome before the

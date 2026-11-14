@@ -32,6 +32,15 @@ Navigation markers are not geometry authority.
 
 ## Processing Order
 
+The camera-dependent presentation update is owned by `WorldPresentation` as a
+scene-tree `Node`. Each idle frame runs `CameraController` first,
+`WorldPresentation` second, then `main.gd`. This lets warp-screen effects read
+the camera transform and FOV produced for that same frame; `main.gd` remains
+later in the frame for proximity checks and HUD updates. `WorldPresentation`
+holds the session, ship-node map and cached body array supplied during setup.
+The body array is updated in place when the sector map changes, not rebuilt
+per frame. The schedule is `CameraController -> WorldPresentation -> main.gd`.
+
 ```text
 body record + observer absolute f64 position
   -> observer-relative direction and angular radius

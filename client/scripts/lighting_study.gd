@@ -22,6 +22,7 @@ func _ready() -> void:
 	_presentation._camera = camera
 	_presentation._world = WorldSpace.new()
 	_presentation._setup_space_environment(self)
+	add_child(_presentation)
 	var direction := Vector3(0.0, 0.12, -1.0).normalized()
 	var angular_radius := 0.32 if OS.get_cmdline_user_args().has("--close") else 0.00465
 	_presentation.update_stellar_view(direction, Vector3(1, 0.95, 0.8), angular_radius)

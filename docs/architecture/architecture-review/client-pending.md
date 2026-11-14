@@ -4,7 +4,7 @@ audience : AI Agent / Human Developer
 update   : /architecture-review で状態が変わるたびに更新
 related  : docs/architecture/architecture-review/client.md（構造評価）,
            docs/architecture/architecture-review/client-completed.md（完了済みログ）
-date     : 2026-11-12（doc-sync / architecture review: #397のradial menu policyを反映）
+date     : 2026-11-15（camera依存presentationのframe ownerを反映）
 ---
 
 # Architecture Review — Dawn Client（未完項目）
@@ -62,6 +62,10 @@ ShipMotionのrole/mode/visibilityもRustへ集約済み。C-20の分割trigger�
 2026-11-12: 595行。#395/#396で光源・prominenceのleaf moduleは分離され、#398で銀河背景のmodel/render dataが
 `GalacticModel` / `Starfield`へ整理された。700行trigger未満で、残るcoordinatorは一つのsession visual lifecycle。
 environment familyの分割は引き続きDefer。
+
+2026-11-15: `WorldPresentation`をNode化し、camera-dependent effect更新を
+`CameraController -> WorldPresentation -> main.gd`の順に同一idle frameで所有する。
+これは画面効果の同期境界であり、C-20のvisual family分割triggerとは別。追加抽出は引き続きDefer。
 
 ## C-21 解消済み: test専用のsystem-name Dictionary投影
 

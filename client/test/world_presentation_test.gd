@@ -37,7 +37,7 @@ func test_close_resolved_disc_keeps_the_same_camera_energy_partition() -> void:
 	add_child(root)
 	var camera := Camera3D.new()
 	root.add_child(camera)
-	var presentation := WorldPresentationScript.new()
+	var presentation: WorldPresentation = auto_free(WorldPresentationScript.new())
 	presentation._camera = camera
 	presentation._world = FakeWorld.new()
 	presentation._setup_space_environment(root)
@@ -125,7 +125,7 @@ class FakeShip:
 
 
 func test_render_scale_is_queried_from_world_space_authority() -> void:
-	var presentation := WorldPresentationScript.new()
+	var presentation: WorldPresentation = auto_free(WorldPresentationScript.new())
 	var world := FakeWorld.new()
 	world.render_scale_value = 0.25
 	presentation._world = world
@@ -134,7 +134,7 @@ func test_render_scale_is_queried_from_world_space_authority() -> void:
 
 
 func test_space_background_uses_the_shared_galactic_model() -> void:
-	var presentation := WorldPresentationScript.new()
+	var presentation: WorldPresentation = auto_free(WorldPresentationScript.new())
 	var root: Node3D = auto_free(Node3D.new()) as Node3D
 	add_child(root)
 	presentation._world = FakeWorld.new()
@@ -175,7 +175,7 @@ func test_space_background_uses_the_shared_galactic_model() -> void:
 
 
 func test_nebula_bake_is_deferred_and_degrades_to_the_procedural_sky() -> void:
-	var presentation := WorldPresentationScript.new()
+	var presentation: WorldPresentation = auto_free(WorldPresentationScript.new())
 	var root: Node3D = auto_free(Node3D.new()) as Node3D
 	add_child(root)
 	presentation._world = FakeWorld.new()
@@ -200,7 +200,7 @@ func test_nebula_bake_is_deferred_and_degrades_to_the_procedural_sky() -> void:
 
 
 func test_nebula_bake_refuses_to_paint_the_local_star_into_the_background() -> void:
-	var presentation := WorldPresentationScript.new()
+	var presentation: WorldPresentation = auto_free(WorldPresentationScript.new())
 	var root: Node3D = auto_free(Node3D.new()) as Node3D
 	add_child(root)
 	presentation._world = FakeWorld.new()
@@ -217,7 +217,7 @@ func test_nebula_bake_refuses_to_paint_the_local_star_into_the_background() -> v
 
 
 func test_distant_objects_wash_toward_the_background_but_close_combat_does_not() -> void:
-	var presentation := WorldPresentationScript.new()
+	var presentation: WorldPresentation = auto_free(WorldPresentationScript.new())
 	var world := FakeWorld.new()
 	world.render_scale_value = 0.1
 	presentation._world = world
@@ -254,7 +254,7 @@ func test_starfield_opts_out_of_fog() -> void:
 
 
 func test_sky_material_only_sets_uniforms_the_shader_declares() -> void:
-	var presentation := WorldPresentationScript.new()
+	var presentation: WorldPresentation = auto_free(WorldPresentationScript.new())
 	var root: Node3D = auto_free(Node3D.new()) as Node3D
 	add_child(root)
 	presentation._world = FakeWorld.new()
@@ -311,7 +311,7 @@ func test_sky_material_only_sets_uniforms_the_shader_declares() -> void:
 
 
 func test_render_scale_authority_controls_spawned_navigation_geometry() -> void:
-	var presentation := WorldPresentationScript.new()
+	var presentation: WorldPresentation = auto_free(WorldPresentationScript.new())
 	var world := FakeWorld.new()
 	world.render_scale_value = 0.25
 	presentation._world = world
@@ -344,7 +344,7 @@ func test_render_scale_authority_controls_spawned_navigation_geometry() -> void:
 
 
 func test_star_bracket_tracks_the_sky_direction_and_remains_pickable() -> void:
-	var presentation := WorldPresentationScript.new()
+	var presentation: WorldPresentation = auto_free(WorldPresentationScript.new())
 	presentation._world = FakeWorld.new()
 	var camera: Camera3D = auto_free(Camera3D.new())
 	add_child(camera)
@@ -368,7 +368,7 @@ func test_star_bracket_tracks_the_sky_direction_and_remains_pickable() -> void:
 
 
 func test_warp_destination_approaches_before_the_arrival_snap() -> void:
-	var presentation := WorldPresentationScript.new()
+	var presentation: WorldPresentation = auto_free(WorldPresentationScript.new())
 	presentation._world = FakeWorld.new()
 	var root: Node3D = auto_free(Node3D.new())
 	add_child(root)
@@ -470,7 +470,7 @@ func test_directional_light_uses_the_ray_from_star_to_ship() -> void:
 
 
 func test_sun_direction_uses_world_position_while_warp_render_position_is_fixed() -> void:
-	var presentation := WorldPresentationScript.new()
+	var presentation: WorldPresentation = auto_free(WorldPresentationScript.new())
 	var world := FakeWorld.new()
 	presentation._world = world
 	var sky_material := ShaderMaterial.new()
@@ -499,7 +499,7 @@ func test_sun_direction_uses_world_position_while_warp_render_position_is_fixed(
 
 
 func test_physical_body_marker_keeps_its_true_render_position() -> void:
-	var presentation := WorldPresentationScript.new()
+	var presentation: WorldPresentation = auto_free(WorldPresentationScript.new())
 	var world := FakeWorld.new()
 	world.render_scale_value = 0.1
 	presentation._world = world
@@ -521,7 +521,7 @@ func test_physical_body_marker_keeps_its_true_render_position() -> void:
 
 
 func test_distant_planet_remains_visible_at_its_true_angular_size() -> void:
-	var presentation := WorldPresentationScript.new()
+	var presentation: WorldPresentation = auto_free(WorldPresentationScript.new())
 	var world := FakeWorld.new()
 	world.render_scale_value = 0.1
 	presentation._world = world
@@ -550,7 +550,7 @@ func test_distant_planet_remains_visible_at_its_true_angular_size() -> void:
 
 
 func test_origin_rebase_moves_ship_and_motion_track_together() -> void:
-	var presentation := WorldPresentationScript.new()
+	var presentation: WorldPresentation = auto_free(WorldPresentationScript.new())
 	var world := FakeWorld.new()
 	world.rebase_shift = Vector3(100.0, 2.0, -3.0)
 	presentation._world = world
@@ -575,7 +575,7 @@ func test_origin_rebase_moves_ship_and_motion_track_together() -> void:
 
 
 func _present_sun(bodies: Array, observer: PackedFloat64Array) -> ShaderMaterial:
-	var presentation := WorldPresentationScript.new()
+	var presentation: WorldPresentation = auto_free(WorldPresentationScript.new())
 	presentation._world = FakeWorld.new()
 	var sky := ShaderMaterial.new()
 	sky.shader = load("res://shaders/space_sky.gdshader")
