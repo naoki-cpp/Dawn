@@ -17,10 +17,11 @@ const NavigationMarkerRendererScript = preload("res://scripts/navigation_marker_
 const SkyCatalogScript = preload("res://scripts/sky_catalog.gd")
 const GalacticModelScript = preload("res://scripts/galactic_model.gd")
 
-## Radius of the sprite shell. Inside the camera's 5,000,000 far plane but
-## beyond anything the scene places, so ordinary depth testing keeps ships in
-## front and the starfield needs no depth trickery of its own.
-const SHELL_RADIUS: float = 4_000_000.0
+## Stars use a bounded visual depth range. The far edge stays inside the
+## camera's 5,000,000 far plane even at maximum camera zoom; nearby stars use
+## the foreground edge to produce visible parallax during camera orbit.
+const NEAR_SHELL_RADIUS: float = 2_400_000.0
+const SHELL_RADIUS: float = 3_800_000.0
 
 ## Sprites are expanded to a fixed number of PIXELS in the vertex shader, not
 ## to a fixed angular size. A real point source stays a point however far the
@@ -43,7 +44,7 @@ const POINT_HALO_PEAK_RATIO: float = 0.008
 const MIN_STABLE_SIGMA_PIXELS: float = 0.7
 
 const DEFAULT_SEED: int = 0x5DA0
-const DEFAULT_COUNT: int = 16000
+const DEFAULT_COUNT: int = 2000
 
 ## Share of the field drawn from the galactic disc rather than uniformly.
 ## A perfectly uniform field reads as flat wallpaper; the depth in a real sky
@@ -182,6 +183,15 @@ static func _project_position(position_kpc: Vector3) -> Dictionary:
 	}
 
 
+## Compress astronomical distance into a renderable shell while preserving
+## depth ordering. The square-root curve reserves more visual separation for
+## the nearby stars that contribute most to parallax.
+static func shell_radius_for_distance(distance_kpc: float) -> float:
+	var normalized_distance: float = clampf(
+		distance_kpc / MAX_STAR_DISTANCE_KPC, 0.0, 1.0)
+	return lerpf(NEAR_SHELL_RADIUS, SHELL_RADIUS, sqrt(normalized_distance))
+
+
 ## Spectral mix for the stars an observer actually sees. The underlying initial
 ## mass function is dominated by M dwarfs, but they are far too faint to
 ## appear; a magnitude-limited sample runs roughly B 9% / A 22% / F 14% /
@@ -318,7 +328,8 @@ static func build_multimesh(stars: Array[Dictionary]) -> MultiMesh:
 
 	for i: int in range(stars.size()):
 		var star: Dictionary = stars[i]
-		var origin: Vector3 = (star["direction"] as Vector3) * SHELL_RADIUS
+		var origin: Vector3 = (star["direction"] as Vector3) * shell_radius_for_distance(
+			star["distance_kpc"] as float)
 		multimesh.set_instance_transform(i, Transform3D(Basis.IDENTITY, origin))
 		multimesh.set_instance_color(i, star["color"] as Color)
 		multimesh.set_instance_custom_data(i, Color(

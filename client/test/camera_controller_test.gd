@@ -77,6 +77,28 @@ func test_camera_runs_after_ship_presentation() -> void:
 	assert_int(camera.process_priority).is_equal(10)
 
 
+func test_wheel_zoom_reaches_extended_distance_and_respects_limits() -> void:
+	var target: Node3D = auto_free(Node3D.new())
+	add_child(target)
+	var camera: Camera3D = auto_free(CameraController.new())
+	add_child(camera)
+	camera.set_process(false)
+	camera.set_target(target)
+
+	for _notch: int in range(40):
+		camera._unhandled_input(_wheel_event(MOUSE_BUTTON_WHEEL_DOWN))
+	assert_float(camera._zoom_distance).is_greater(10_000.0)
+	assert_float(camera._zoom_distance).is_less_equal(camera.zoom_max)
+
+	for _notch: int in range(80):
+		camera._unhandled_input(_wheel_event(MOUSE_BUTTON_WHEEL_DOWN))
+	assert_float(camera._zoom_distance).is_equal(camera.zoom_max)
+
+	for _notch: int in range(160):
+		camera._unhandled_input(_wheel_event(MOUSE_BUTTON_WHEEL_UP))
+	assert_float(camera._zoom_distance).is_equal(camera.zoom_min)
+
+
 func test_horizontal_drag_rotates_the_orbit_offset_sideways() -> void:
 	var camera: Camera3D = auto_free(CameraController.new())
 	add_child(camera)
@@ -124,3 +146,10 @@ func test_main_input_can_seed_orbit_drag_before_unhandled_motion() -> void:
 	assert_bool(camera.is_dragging()).is_true()
 	assert_float(absf(after_offset.x - before_offset.x)).is_greater(1.0)
 	assert_float(absf(after_offset.z - before_offset.z)).is_greater(1.0)
+
+
+func _wheel_event(button: MouseButton) -> InputEventMouseButton:
+	var event := InputEventMouseButton.new()
+	event.button_index = button
+	event.pressed = true
+	return event

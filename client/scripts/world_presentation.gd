@@ -89,7 +89,7 @@ func _render_scale() -> float:
 
 func refresh(delta: float, player_ship_id: int, ships: Dictionary, bodies: Array) -> void:
 	_maybe_rebase_origin(player_ship_id, ships)
-	_update_starfield()
+	_update_starfield(player_ship_id, ships)
 	_maybe_bake_nebula()
 	_update_position_markers(_bodies_root, "nav_pos", player_ship_id, ships)
 	_update_position_markers(_gates_root, "nav_pos", player_ship_id, ships)
@@ -497,22 +497,26 @@ func _setup_starfield(parent: Node) -> void:
 		Vector3.ONE * -StarfieldScript.SHELL_RADIUS,
 		Vector3.ONE * (StarfieldScript.SHELL_RADIUS * 2.0))
 
-	## Stars sit at infinity: the root follows the camera's translation but never
-	## its rotation, so the field cannot parallax. Dawn's ships cross AU, and any
-	## finite star distance would streak past them (ADR-0054 §2).
+	## Keep the starfield's visual origin independent of camera rotation. Its
+	## finite per-star depths create parallax as the camera orbits the player.
 	_starfield_root = Node3D.new()
 	_starfield_root.name = "Starfield"
 	_starfield_root.add_child(instance)
 	parent.add_child(_starfield_root)
 
 
-## Keeps the star shell centred on the camera so the field reads as infinitely
-## distant, and keeps the sprite shader's pixel footprint honest across
-## window resizes. Called every frame from refresh().
-func _update_starfield() -> void:
+## Centers finite-depth stars on the active ship rather than the orbit camera,
+## allowing camera translation to create parallax without moving the field
+## during long-distance ship travel. Also updates the sprite pixel footprint.
+func _update_starfield(player_ship_id: int, ships: Dictionary) -> void:
 	if _starfield_root == null or _camera == null:
 		return
-	_starfield_root.global_position = _camera.global_position
+	var center: Vector3 = _camera.global_position
+	if player_ship_id >= 0 and ships.has(player_ship_id):
+		var player_ship: Node3D = ships[player_ship_id] as Node3D
+		if player_ship != null:
+			center = player_ship.global_position
+	_starfield_root.global_position = center
 	if _starfield_mat == null:
 		return
 	var viewport: Viewport = _camera.get_viewport()

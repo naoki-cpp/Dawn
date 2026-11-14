@@ -17,11 +17,11 @@ extends Camera3D
 
 @export var follow_speed   : float = 5.0
 @export var zoom_min       : float = 200.0
-@export var zoom_max       : float = 10000.0
-@export var zoom_step      : float = 300.0
+@export var zoom_max       : float = 1000000.0
 @export var orbit_speed    : float = 0.005  ## ドラッグ 1px あたりの回転量（rad）
 
 const DRAG_THRESHOLD : float = 6.0  ## ドラッグ判定の最小移動量（px）
+const ZOOM_FACTOR : float = 1.2
 
 # ── 内部状態 ─────────────────────────────────────────────────────────────────
 
@@ -72,11 +72,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		var mb : InputEventMouseButton = event as InputEventMouseButton
 		if mb.pressed:
 			if mb.button_index == MOUSE_BUTTON_WHEEL_UP:
-				_zoom_distance = maxf(_zoom_distance - zoom_step, zoom_min)
+				_zoom_distance = maxf(_zoom_distance / ZOOM_FACTOR, zoom_min)
 				get_viewport().set_input_as_handled()
 				return
 			elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-				_zoom_distance = minf(_zoom_distance + zoom_step, zoom_max)
+				_zoom_distance = minf(_zoom_distance * ZOOM_FACTOR, zoom_max)
 				get_viewport().set_input_as_handled()
 				return
 

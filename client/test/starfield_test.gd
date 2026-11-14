@@ -44,6 +44,19 @@ func test_star_distances_follow_local_and_galactic_sampling_ranges() -> void:
 	assert_int(far_galactic_stars).is_greater(0)
 
 
+func test_visual_shell_preserves_order_and_spreads_near_star_parallax() -> void:
+	var near_radius: float = StarfieldScript.shell_radius_for_distance(0.0)
+	var local_radius: float = StarfieldScript.shell_radius_for_distance(0.25)
+	var far_radius: float = StarfieldScript.shell_radius_for_distance(
+		StarfieldScript.MAX_STAR_DISTANCE_KPC)
+	assert_float(near_radius).is_equal(StarfieldScript.NEAR_SHELL_RADIUS)
+	assert_float(local_radius).is_greater(near_radius)
+	assert_float(local_radius).is_less(far_radius)
+	assert_float(far_radius).is_equal(StarfieldScript.SHELL_RADIUS)
+	assert_float(atan2(1_000_000.0, near_radius)).is_greater(
+		atan2(1_000_000.0, far_radius))
+
+
 func test_galactic_center_projects_from_the_suns_position() -> void:
 	var projection: Dictionary = StarfieldScript._project_position(Vector3.ZERO)
 	var expected_distance: float = StarfieldScript.GALACTIC_CENTER_DISTANCE_KPC
@@ -224,7 +237,7 @@ func test_point_spread_stays_above_the_pixel_grid() -> void:
 		StarfieldScript.POINT_HALO_SIGMA_PIXELS)
 	assert_float(StarfieldScript.POINT_HALO_PEAK_RATIO).is_between(0.0, 0.03)
 	assert_float(StarfieldScript.POINT_HALO_PEAK_RATIO).is_less_equal(0.01)
-	assert_int(StarfieldScript.DEFAULT_COUNT).is_less_equal(16000)
+	assert_int(StarfieldScript.DEFAULT_COUNT).is_less_equal(2000)
 
 
 func test_every_star_shares_one_point_spread() -> void:
