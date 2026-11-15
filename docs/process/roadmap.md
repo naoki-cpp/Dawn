@@ -26,7 +26,8 @@ architecture review と同じく、現在地・未完了・完了済み・条件
 
 ## 2. 現在地
 
-**Phase 9 基盤実装完了・9E 経済ループ検証中**。次の1件は **9E-1 — 経済ループのプレイテスト**。
+**Phase 9 基盤実装完了・経済ループ検証前に Item / Station のゲームプレイを深化中**。
+次の1件は **9E-0 — Item / Station のゲームプレイを設計・実装する**。
 詳細は [roadmap/README.md](./roadmap/README.md) を参照する。
 
 ## 3. TODO（未完了のみ）
@@ -59,7 +60,9 @@ ADR-0034の実装順を示す互換性用索引。
 - 9D-1〜9D-3: Market crate、order book、Currency ledger — completed
 - 9D-4: Market `SettlementIntent` outbox、stable ID、Sector bridge delivery — completed (#279)
 - 9D-5: Station限定Market UIとwire/runtime bridge — completed
-- 9E: Economy loop validation — 9E-1 in progress, 9E-2 deferred
+- 9E-0: Item / Station gameplay deepening — NOW
+- 9E-1: Economy loop playtest — after 9E-0; update scenarios before running
+- 9E-2: Passive accumulation regression check — deferred
 
 9D-1〜9D-5の完了記録は [completed.md](./roadmap/completed.md) を参照する。
 9Cと9Eの残作業は [pending.md](./roadmap/pending.md) を参照する。
