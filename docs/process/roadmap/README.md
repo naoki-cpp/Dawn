@@ -20,14 +20,16 @@ related  : ./pending.md, ./completed.md, ./deferred.md, ../roadmap.md, ../roadma
 
 ## 現在地
 
-現在のフェーズ: **Phase 9 基盤実装完了・9E 経済ループ検証中**
+現在のフェーズ: **Phase 9 基盤実装完了・経済ループ検証前に Item / Station のゲームプレイを深化中**
 
 - Godot実行前は `scripts/setup-godot.ps1` または `bash scripts/setup-godot.sh` で
   固定版の導入・拡張ビルド・importまで準備する（Python 3.10+とCargoが必要）。
   Rust変更後に拡張だけ更新する場合は `cargo build -p dawn-client-gdext` を使う。
-- 9A（Scrap Metal）、9B（Station / Ship操作）、9D（Market / Currency）は実装済み。
-- 9C（プレイヤー設置インフラ）は設計未着手。新規ADRが必要。
-- 9E-1 は手順準備済み、人間によるプレイテストと結果記録が未完了。
+- 9A（Scrap Metal）、9B（Station / Ship操作）、9D（Market / Currency）は基盤実装済み。
+- 現状の Item / Station は最小構成であり、経済ループ全体を評価するには用途・供給/消費・サービスの幅が不足している。
+- 9E-0で Item の役割と Station のサービスを設計・実装し、その後に9E-1のプレイテストを行う。
+- 9C（プレイヤー設置インフラ）は別系統のTODO。関連ADR-0057 / ADR-0058は提案中で、採取ルールやFBD-009の変更は承認前提とする。
+- 9E-1 は現行MVP向けの手順があるが、9E-0完了後に実装内容へ合わせて更新してから実施する。
 - Phase 10 はGDExtension・wire移行・`ShipMotion`によるClient-Side Prediction /
   reconciliationまで実装済み。Godotエディタでの手動プレイテストのみ残る。
 - Phase 11 は天体・恒星表現、レンズ応答、ワープ演出、Filmic/Bloom、星野geometry、
@@ -35,11 +37,11 @@ related  : ./pending.md, ./completed.md, ./deferred.md, ../roadmap.md, ../roadma
 
 ### 次の1件
 
-**9E-1 — 経済ループのプレイテスト**
+**9E-0 — Item / Station のゲームプレイを深化する**
 
-`docs/process/playtest-guide.md` の「Phase 9 — 経済ループ検証」を実施し、
-Scrap Metal獲得、Station操作、Market取引が判断や対立を生むかを記録する。
-自動テストだけではこの完了条件を判定しない。
+Item の用途・供給・消費と Station のサービス構成を決め、実際にプレイ可能な内容へ反映する。
+プレイヤー設置構造物（9C）や未承認のルール変更を前提にせず、完了後に9E-1のシナリオを
+更新して人間による経済ループ検証を行う。
 
 ## 参照入口
 

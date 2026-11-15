@@ -24,7 +24,7 @@ related  : ./README.md, ../roadmap-history.md, ../../adr/
 - 9A: `ItemId` 一般化、Scrap Metalの撃破者加算、Snapshot対応完了。
 - 9B: NPC Station、Dock/Undock、Station-local inventory、Assemble / Disassemble、Packaged Ship建造、GodotのStation UI完了。Station inventoryはSQLite projection（SimulationNode内cacheなし）。
 - 9D: `dawn-market`、SQLite order book、Currency台帳、エスクロー、Station限定Market UI、純粋matching policy、SettlementIntent outboxとstable ID配送（#279）完了。
-- 9E: 9E-1のプレイテスト以外は、Phase 9基盤の自動検証を完了。
+- 9E: Phase 9基盤の自動検証は完了。Item / Stationのゲームプレイ深化（9E-0）と人間プレイテスト（9E-1）は未完了。
 
 ### Phase 10 の基盤
 
