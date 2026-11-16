@@ -213,18 +213,22 @@ func test_world_direction_is_projected_with_the_current_render_camera() -> void:
 	(scene.blocker as MeshInstance3D).hide()
 	effect.Streak_Fraction = 0.0
 	effect.Glare_Fraction = 1.0
-	var sun_direction := camera.project_ray_normal(Vector2(200.0, 120.0))
-	effect.set_sun_direction(sun_direction, Color(1, 1, 1, 40), 0.01)
+	var sun_direction := camera.project_ray_normal(Vector2(200.0, 70.0))
+	# Keep the peak below saturation so its position is not a clipped plateau.
+	effect.set_sun_direction(sun_direction, Color(1, 1, 1, 0.01), 0.01)
 	var initial_image := await _capture_image(viewport)
 	var initial_peak := _brightest_pixel(initial_image)
 	var initial_expected := camera.unproject_position(camera.global_position + sun_direction * 100.0)
 	assert_float(absf(float(initial_peak.x) - initial_expected.x)).is_less(8.0)
+	assert_float(absf(float(initial_peak.y) - initial_expected.y)).is_less(8.0)
 
 	camera.rotation.y = 0.2
+	camera.rotation.x = 0.1
 	var rotated_image := await _capture_image(viewport)
 	var rotated_peak := _brightest_pixel(rotated_image)
 	var rotated_expected := camera.unproject_position(camera.global_position + sun_direction * 100.0)
 	assert_float(absf(float(rotated_peak.x) - rotated_expected.x)).is_less(8.0)
+	assert_float(absf(float(rotated_peak.y) - rotated_expected.y)).is_less(8.0)
 	assert_float(absf(float(rotated_peak.x - initial_peak.x) - (rotated_expected.x - initial_expected.x))) \
 		.is_less(2.0)
 	assert_int(abs(rotated_peak.x - initial_peak.x)).is_greater(10)
