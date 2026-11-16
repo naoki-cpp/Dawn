@@ -171,7 +171,7 @@ func _project_direction_for_view(view: int) -> Dictionary:
 	if render_scene_data == null:
 		return {}
 	return project_sun_direction(_sun_direction, _angular_radius,
-		render_scene_data.get_cam_transform(), render_scene_data.get_view_projection(view), render_size)
+		render_scene_data.get_cam_transform(), render_scene_data.get_view_projection(view), render_size, true)
 
 
 ## Project a distant source and its angular radius through the render-frame view.
@@ -180,7 +180,8 @@ static func project_sun_direction(
 	angular_radius: float,
 	camera_transform: Transform3D,
 	projection: Projection,
-	viewport_size: Vector2i
+	viewport_size: Vector2i,
+	ndc_y_down: bool = false
 ) -> Dictionary:
 	if direction.is_zero_approx() or not direction.is_finite() or not is_finite(angular_radius) \
 			or angular_radius <= 0.0 or viewport_size.x <= 0 or viewport_size.y <= 0 \
@@ -202,8 +203,10 @@ static func project_sun_direction(
 	var limb_clip := projection * Vector4(camera_limb.x, camera_limb.y, camera_limb.z, 0.0)
 	if source_clip.w <= 0.0 or limb_clip.w <= 0.0 or not source_clip.is_finite() or not limb_clip.is_finite():
 		return {}
-	var position := Vector2(source_clip.x, -source_clip.y) / source_clip.w * 0.5 + Vector2(0.5, 0.5)
-	var limb_position := Vector2(limb_clip.x, -limb_clip.y) / limb_clip.w * 0.5 + Vector2(0.5, 0.5)
+	# RenderSceneData's GPU projection already flips Y; Camera3D's CPU projection does not.
+	var vertical_sign := 1.0 if ndc_y_down else -1.0
+	var position := Vector2(source_clip.x, source_clip.y * vertical_sign) / source_clip.w * 0.5 + Vector2(0.5, 0.5)
+	var limb_position := Vector2(limb_clip.x, limb_clip.y * vertical_sign) / limb_clip.w * 0.5 + Vector2(0.5, 0.5)
 	if not position.is_finite() or not limb_position.is_finite() \
 			or position.x <= 0.0 or position.x >= 1.0 or position.y <= 0.0 or position.y >= 1.0:
 		return {}
