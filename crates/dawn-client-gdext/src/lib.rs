@@ -10,6 +10,7 @@ mod client_action_gd;
 mod client_command_gd;
 mod client_rules_gd;
 mod connection_gd;
+mod galaxy_background_gd;
 mod hud_gd;
 mod id_boundary;
 mod inbound_delivery;

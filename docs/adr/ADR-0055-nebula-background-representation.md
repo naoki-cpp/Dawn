@@ -4,10 +4,14 @@ title   : Nebula background — bake the procedural sky, then light distance wit
 status  : accepted
 date    : 2026-08-23
 deciders: [human, ai-agent]
-related : ADR-0053 (amends the "procedural Milky Way and nebula approximation" part of §3), ADR-0054 (the star layer, decided separately), ADR-0016 (game vision — per-system identity as a design goal)
+related : ADR-0053 (amends the "procedural Milky Way and nebula approximation" part of §3), ADR-0054 (the star layer, decided separately), ADR-0016 (game vision — per-system identity as a design goal), ADR-0059 (supersedes runtime integration and renderer baking)
 ---
 
 # ADR-0055 — Nebula background representation
+
+> ADR-0059 supersedes renderer-dependent panorama baking and runtime Galactic
+> integration with Rust-generated background data. This document retains the
+> historical rationale; environment fog is not changed by that decision.
 
 ## 背景
 

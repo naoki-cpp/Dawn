@@ -1,8 +1,6 @@
 ## Fixed, offline art-review scene. Uses production sky, optics and ship assets.
 extends Node3D
 
-const GalacticModelScript = preload("res://scripts/galactic_model.gd")
-
 var _presentation := WorldPresentation.new()
 var _capture := false
 var _capture_layers := false
@@ -105,6 +103,9 @@ func _capture_image(textures: Array[NoiseTexture2D], sunlight: DirectionalLight3
 	for texture in textures:
 		if texture.get_image() == null:
 			await texture.changed
+	var deadline := Time.get_ticks_msec() + 120000
+	while not _presentation._background.is_background_ready() and Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
 	for frame in 45:
 		await get_tree().process_frame
 	await RenderingServer.frame_post_draw
@@ -115,9 +116,7 @@ func _capture_image(textures: Array[NoiseTexture2D], sunlight: DirectionalLight3
 			var camera: Camera3D = _presentation._camera
 			var direction := camera.project_ray_normal(uv * Vector2(get_window().size))
 			sunlight.look_at(-direction, Vector3.UP)
-			for material in [_presentation._sky_mat, _presentation._starfield_mat]:
-				material.set_shader_parameter("sun_direction", direction)
-			_presentation._update_sun_flare(direction, Vector3(1, 0.95, 0.8), 0.00465)
+			_presentation.update_stellar_view(direction, Vector3(1, 0.95, 0.8), 0.00465)
 			for frame in 8:
 				await get_tree().process_frame
 			await RenderingServer.frame_post_draw
@@ -139,22 +138,17 @@ func _capture_nebula_layers(sunlight: DirectionalLight3D) -> void:
 	if _presentation._sun_flare != null:
 		_presentation._sun_flare.enabled = false
 
-	var sky_material: ShaderMaterial = _presentation._sky_mat
-	sky_material.set_shader_parameter("sun_active", 0.0)
-	sky_material.set_shader_parameter("use_baked_nebula", false)
-	var star_instance := _presentation._starfield_root.get_child(0) as GeometryInstance3D
+	_presentation._sky_mat.set_shader_parameter("sun_active", 0.0)
+	var deadline := Time.get_ticks_msec() + 120000
+	while not _presentation._background.is_background_ready() and Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
 	var stages: Array[Dictionary] = [
-		{"name": "01-stellar-density", "display_scale": GalacticModelScript.DISPLAY_RADIANCE_SCALE, "extinction": 0.0, "stars": false},
-		{"name": "02-stellar-extinction", "display_scale": GalacticModelScript.DISPLAY_RADIANCE_SCALE, "extinction": 1.0, "stars": false},
-		{"name": "03-starfield-clear", "display_scale": 0.0, "extinction": 0.0, "stars": true},
-		{"name": "04-starfield-extinction", "display_scale": 0.0, "extinction": 1.0, "stars": true},
-		{"name": "05-combined", "display_scale": GalacticModelScript.DISPLAY_RADIANCE_SCALE, "extinction": 1.0, "stars": true},
+		{"name": "01-continuum", "continuum": true, "stars": false},
+		{"name": "02-stars", "continuum": false, "stars": true},
+		{"name": "03-combined", "continuum": true, "stars": true},
 	]
 	for stage: Dictionary in stages:
-		sky_material.set_shader_parameter("display_radiance_scale", stage["display_scale"])
-		sky_material.set_shader_parameter("extinction_scale", stage["extinction"])
-		_presentation._starfield_mat.set_shader_parameter("extinction_scale", stage["extinction"])
-		star_instance.visible = stage["stars"] as bool
+		_presentation._background.set_layer_visibility(stage["continuum"], stage["stars"])
 		for _frame: int in range(8):
 			await get_tree().process_frame
 		await RenderingServer.frame_post_draw

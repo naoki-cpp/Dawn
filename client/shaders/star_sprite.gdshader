@@ -10,16 +10,12 @@
 // camera rotation the way an analytically drawn sub-pixel Gaussian does.
 
 shader_type spatial;
-#include "res://shaders/stellar_plasma.gdshaderinc"
-#include "res://shaders/galactic_dust.gdshaderinc"
-// fog_disabled matters: the sprite shell sits 4,000,000 units out, far past
-// the aerial-perspective fog's end distance, so without opting out every
-// star would render as solid fog colour.
+// Background stars have angular positions, not physical scene depths.
+// Exclude presentation fog and put their final depth behind opaque geometry.
 render_mode unshaded, blend_add, depth_draw_never, cull_disabled, fog_disabled;
 
 // Lets the whole field be dimmed or lifted without rebuilding the MultiMesh.
-uniform float flux_scale : hint_range(0.0, 4.0) = 1.0;
-uniform float extinction_scale : hint_range(0.0, 1.0) = 1.0;
+uniform float flux_scale : hint_range(0.0, 4.0) = 0.75;
 uniform vec3 sun_direction = vec3(0.0, 0.0, -1.0);
 uniform float sun_angular_radius = 0.0;
 // Half-width of every star's quad, in pixels. It contains both the point core
@@ -36,17 +32,12 @@ uniform float halo_peak_ratio = 0.02;
 
 varying vec2 corner;
 varying float flux;
-varying vec3 dust_transmission;
-varying float distance_kpc;
+varying float pixel_solid_angle;
 
 void vertex() {
-	// INSTANCE_CUSTOM is packed by Starfield.build_multimesh().
+	// CPU-generated flux and colour already include foreground dust attenuation.
 	flux = INSTANCE_CUSTOM.r * flux_scale;
-	distance_kpc = INSTANCE_CUSTOM.g * 22.0;
 	vec3 star_direction = normalize(MODEL_MATRIX[3].xyz - CAMERA_POSITION_WORLD);
-	vec3 galaxy = to_galactic(star_direction);
-	dust_transmission = extinction_transmission(
-		galactic_visual_extinction(galaxy, distance_kpc) * extinction_scale);
 	if (sun_angular_radius > 0.0 && dot(star_direction, sun_direction) > cos(sun_angular_radius)) {
 		flux = 0.0;
 	}
@@ -58,7 +49,16 @@ void vertex() {
 	// Project the instance centre, then widen in clip space. NDC spans two
 	// units across the viewport, hence the factor of two.
 	vec4 clip = PROJECTION_MATRIX * MODELVIEW_MATRIX * vec4(0.0, 0.0, 0.0, 1.0);
+	// Convert integrated angular flux to radiance per pixel. Equal flux must
+	// not become brighter simply because the viewport or FOV changes.
+	vec2 ndc = clip.xy / max(abs(clip.w), 0.000001);
+	vec2 slope = ndc / vec2(PROJECTION_MATRIX[0][0], PROJECTION_MATRIX[1][1]);
+	// Vulkan can flip projection Y. Solid angle is a positive area.
+	pixel_solid_angle = 4.0 / (abs(PROJECTION_MATRIX[0][0] * PROJECTION_MATRIX[1][1])
+		* max(viewport_pixels.x * viewport_pixels.y, 1.0))
+		/ pow(1.0 + dot(slope, slope), 1.5);
 	clip.xy += corner * (pixels * 2.0 / max(viewport_pixels, vec2(1.0))) * clip.w;
+	clip.z = CLIP_SPACE_FAR * clip.w;
 	POSITION = clip;
 }
 
@@ -68,6 +68,8 @@ void fragment() {
 	float core = exp(-0.5 * radius_squared / (core_sigma_pixels * core_sigma_pixels));
 	float halo = halo_peak_ratio
 		* exp(-0.5 * radius_squared / (halo_sigma_pixels * halo_sigma_pixels));
-	ALBEDO = COLOR.rgb * dust_transmission * flux * (core + halo);
+	float psf_integral = TAU * (core_sigma_pixels * core_sigma_pixels
+		+ halo_peak_ratio * halo_sigma_pixels * halo_sigma_pixels);
+	ALBEDO = COLOR.rgb * flux * (core + halo) / max(psf_integral * pixel_solid_angle, 1e-12);
 	ALPHA = 1.0;
 }

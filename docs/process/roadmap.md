@@ -40,6 +40,9 @@ architecture review と同じく、現在地・未完了・完了済み・条件
 
 ## 9. 継続的に開発するシステム
 
+背景の生成・描画の分担は [ADR-0059](../adr/ADR-0059-generated-galactic-background.md)
+を参照する。星系ごとの設定選択は将来拡張であり、現時点の通信形式は変更しない。
+
 Combat System と Economy System の継続的な作業は [roadmap/pending.md](./roadmap/pending.md) を参照する。
 
 ## 10. Phase 8 — スケール基盤 / 持続性

@@ -6,8 +6,6 @@
 extends GdUnitTestSuite
 
 const WorldPresentationScript = preload("res://scripts/world_presentation.gd")
-const StarfieldScript = preload("res://scripts/starfield.gd")
-const GalacticModelScript = preload("res://scripts/galactic_model.gd")
 const LensFlareEffectScript = preload("res://addons/lens_effects/lens_flare_compositor_effect.gd")
 
 
@@ -133,89 +131,6 @@ func test_render_scale_is_queried_from_world_space_authority() -> void:
 	assert_float(presentation._render_scale()).is_equal_approx(0.25, 0.0001)
 
 
-func test_space_background_uses_the_shared_galactic_model() -> void:
-	var presentation: WorldPresentation = auto_free(WorldPresentationScript.new())
-	var root: Node3D = auto_free(Node3D.new()) as Node3D
-	add_child(root)
-	presentation._world = FakeWorld.new()
-	presentation._setup_space_environment(root)
-
-	var world_environment: WorldEnvironment = root.get_child(0) as WorldEnvironment
-	var sky_material: ShaderMaterial = world_environment.environment.sky.sky_material as ShaderMaterial
-	assert_float(sky_material.get_shader_parameter("display_radiance_scale") as float) \
-		.is_equal_approx(GalacticModelScript.DISPLAY_RADIANCE_SCALE, 0.0001)
-	assert_float(sky_material.get_shader_parameter("extinction_scale") as float) \
-		.is_equal_approx(1.0, 0.0001)
-	assert_float(sky_material.get_shader_parameter("dust_scale_length_kpc") as float) \
-		.is_equal_approx(GalacticModelScript.DUST_RADIAL_SCALE_KPC, 0.0001)
-	assert_float(sky_material.get_shader_parameter("dust_scale_height_kpc") as float) \
-		.is_equal_approx(GalacticModelScript.DUST_SCALE_HEIGHT_KPC, 0.0001)
-	assert_float(sky_material.get_shader_parameter("thin_disk_scale_height_kpc") as float) \
-		.is_equal_approx(GalacticModelScript.THIN_DISK_SCALE_HEIGHT_KPC, 0.0001)
-	assert_float(sky_material.get_shader_parameter("bulge_density_normalization") as float) \
-		.is_equal_approx(GalacticModelScript.bulge_density_normalization(), 0.0001)
-	assert_vector(sky_material.get_shader_parameter("dust_turbulence_octave_weights") as Vector3) \
-		.is_equal_approx(GalacticModelScript.DUST_TURBULENCE_OCTAVE_WEIGHTS, Vector3.ONE * 0.0001)
-	assert_float(sky_material.get_shader_parameter("dust_turbulence_normalization") as float) \
-		.is_equal_approx(GalacticModelScript.dust_turbulence_normalization(), 0.0001)
-	assert_float(sky_material.get_shader_parameter("dust_projected_turbulence_normalization") as float) \
-		.is_equal_approx(GalacticModelScript.dust_turbulence_normalization(), 0.0001)
-	assert_float(sky_material.get_shader_parameter("dust_volume_log_density_sigma") as float) \
-		.is_equal_approx(GalacticModelScript.dust_volume_log_density_sigma(), 0.0001)
-	assert_float(sky_material.get_shader_parameter("dust_projected_log_density_sigma") as float) \
-		.is_equal_approx(GalacticModelScript.dust_projected_log_density_sigma(), 0.0001)
-	assert_vector(sky_material.get_shader_parameter("dust_cloud_angular_scales_radians") as Vector3) \
-		.is_equal_approx(GalacticModelScript.DUST_CLOUD_ANGULAR_SCALES_RADIANS, Vector3.ONE * 0.0001)
-	assert_vector(sky_material.get_shader_parameter("stellar_mottle_weights") as Vector2) \
-		.is_equal_approx(GalacticModelScript.STELLAR_MOTTLE_WEIGHTS, Vector2.ONE * 0.0001)
-	assert_vector(sky_material.get_shader_parameter("stellar_mottle_angular_scales_radians") as Vector2) \
-		.is_equal_approx(GalacticModelScript.STELLAR_MOTTLE_ANGULAR_SCALES_RADIANS, Vector2.ONE * 0.0001)
-	assert_float(sky_material.get_shader_parameter("stellar_mottle_noise_normalization") as float) \
-		.is_equal_approx(GalacticModelScript.stellar_mottle_noise_normalization(), 0.0001)
-
-
-func test_nebula_bake_is_deferred_and_degrades_to_the_procedural_sky() -> void:
-	var presentation: WorldPresentation = auto_free(WorldPresentationScript.new())
-	var root: Node3D = auto_free(Node3D.new()) as Node3D
-	add_child(root)
-	presentation._world = FakeWorld.new()
-	presentation._setup_space_environment(root)
-	var sky_material: ShaderMaterial = presentation._sky_mat
-
-	# RenderingServer.sky_bake_panorama() reads a sky the renderer has already
-	# processed, so the bake cannot run in the frame the Sky is created.
-	presentation._maybe_bake_nebula()
-	assert_bool(presentation._nebula_bake_done).is_false()
-	assert_object(sky_material.get_shader_parameter("nebula_panorama")).is_null()
-
-	for _tick: int in range(WorldPresentationScript.NEBULA_BAKE_FRAME + 2):
-		presentation._maybe_bake_nebula()
-	assert_bool(presentation._nebula_bake_done).is_true()
-
-	# The headless dummy renderer returns no image. That is a supported outcome:
-	# the shader keeps its procedural path so the sky is never left blank.
-	var baked: Variant = sky_material.get_shader_parameter("use_baked_nebula")
-	if sky_material.get_shader_parameter("nebula_panorama") == null:
-		assert_bool(baked == true).is_false()
-
-
-func test_nebula_bake_refuses_to_paint_the_local_star_into_the_background() -> void:
-	var presentation: WorldPresentation = auto_free(WorldPresentationScript.new())
-	var root: Node3D = auto_free(Node3D.new()) as Node3D
-	add_child(root)
-	presentation._world = FakeWorld.new()
-	presentation._setup_space_environment(root)
-
-	# The star moves with the ship, so a background baked while it is lit would
-	# carry a painted sun forever.
-	presentation._sky_mat.set_shader_parameter("sun_active", 1.0)
-	for _tick: int in range(WorldPresentationScript.NEBULA_BAKE_FRAME + 2):
-		presentation._maybe_bake_nebula()
-
-	assert_bool(presentation._nebula_bake_done).is_true()
-	assert_object(presentation._sky_mat.get_shader_parameter("nebula_panorama")).is_null()
-
-
 func test_distant_objects_wash_toward_the_background_but_close_combat_does_not() -> void:
 	var presentation: WorldPresentation = auto_free(WorldPresentationScript.new())
 	var world := FakeWorld.new()
@@ -249,8 +164,7 @@ func test_starfield_opts_out_of_fog() -> void:
 	# source; the alternative is no coverage of a whole-sky failure.
 	var shader: Shader = load("res://shaders/star_sprite.gdshader") as Shader
 	assert_str(shader.code).contains("fog_disabled")
-	assert_float(StarfieldScript.SHELL_RADIUS).is_greater(
-		WorldPresentationScript.FOG_END_METRES)
+	assert_str(shader.code).not_contains("galactic_visual_extinction")
 
 
 func test_sky_material_only_sets_uniforms_the_shader_declares() -> void:
@@ -271,37 +185,10 @@ func test_sky_material_only_sets_uniforms_the_shader_declares() -> void:
 	# setting with it and report nothing. An empty list also catches a shader
 	# that failed to parse at all.
 	for uniform_name: String in [
-		"display_radiance_scale",
-		"extinction_scale",
-		"galactic_sun_position_kpc",
-		"galactic_center_radius_kpc",
-		"thin_disk_radial_scale_kpc",
-		"thick_disk_radial_scale_kpc",
-		"thin_disk_scale_height_kpc",
-		"thick_disk_scale_height_kpc",
-		"thick_disk_local_weight",
-		"bulge_angle_radians",
-		"bulge_sigma_axes_kpc",
-		"bulge_density_normalization",
-		"dust_scale_length_kpc",
-		"dust_scale_height_kpc",
-		"local_av_extinction_mag_per_kpc",
-		"local_v_luminosity_density_lsun_pc3",
-		"dust_turbulence_octave_weights",
-		"dust_turbulence_normalization",
-		"dust_volume_log_density_sigma",
-		"dust_projected_log_density_sigma",
-		"dust_cloud_angular_scales_radians",
-		"dust_projected_turbulence_normalization",
-		"stellar_mottle_weights",
-		"stellar_mottle_angular_scales_radians",
-		"stellar_mottle_noise_normalization",
-		"magnitude_to_optical_depth",
-		"rgb_extinction_over_av",
 		"ambient_color",
-		"nebula_panorama",
-		"use_baked_nebula",
-		"bake_pass",
+		"background_panorama",
+		"background_ready",
+		"background_visible",
 		"sun_direction",
 		"sun_active",
 		"sun_color",
