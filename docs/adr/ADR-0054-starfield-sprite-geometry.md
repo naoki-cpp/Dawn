@@ -4,10 +4,14 @@ title   : Starfield as CPU-generated sprite geometry
 status  : accepted
 date    : 2026-08-23
 deciders: [human, ai-agent]
-related : ADR-0053 (amends §3 — the sky shader no longer owns the star layer), ADR-0025 (local star direction stays in the sky shader), ADR-0044 (stars are direction-only and take no absolute f64 position), ADR-0055 (the nebula background, decided separately)
+related : ADR-0053 (amends §3 — the sky shader no longer owns the star layer), ADR-0025 (local star direction stays in the sky shader), ADR-0044 (stars are direction-only and take no absolute f64 position), ADR-0055 (the nebula background, decided separately), ADR-0059 (supersedes population generation and artificial parallax)
 ---
 
 # ADR-0054 — Starfield as CPU-generated sprite geometry
+
+> ADR-0059 supersedes Godot-side population generation and finite-depth
+> artificial parallax. CPU-generated sprite rendering remains; the current
+> model and asynchronous lifetime are documented in ADR-0059.
 
 ## 背景
 

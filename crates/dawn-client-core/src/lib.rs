@@ -38,6 +38,7 @@ mod client_action;
 mod client_rules;
 mod client_state;
 mod connection;
+mod galaxy;
 mod hud;
 mod item_row;
 mod loadout;
@@ -60,6 +61,9 @@ pub use client_rules::ClientRules;
 pub use client_state::{ClientFact, ClientState, ClientStateError, ShipLeaveReason};
 pub use connection::{ConnectionEffect, ConnectionLifecycle, ConnectionPhase};
 pub use dawn_core::{ModuleKind, StatDelta};
+pub use galaxy::{
+    generate_background, BackgroundStar, GalaxyBackground, GalaxyConfig, GalaxyError,
+};
 pub use hud::{
     HudChangeSet, HudFrame, HudReadModel, HudSceneFacts, HudShipStatusPanel, HudSnapshot,
     HudStatsPanel, HudStatusPanel, HudTargetPanel,

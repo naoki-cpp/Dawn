@@ -1,46 +1,13 @@
-// space_sky.gdshader
-//
-// Procedural space background grounded in real astronomical data.
-// No external textures required.
-//
-// Astronomical references used:
-//   Star layer      : NOT here. ADR-0054 moved the stars to sprite geometry
-//                      (client/scripts/starfield.gd + star_sprite.gdshader);
-//                      this file draws the nebula, Milky Way and local star.
-//   Star colors     : owned by NavigationMarkerRenderer.spectral_color()
-//                      (blackbody RGB by spectral type, Ballesteros 2012)
-//   Star distribution: Kroupa IMF — M:K:G:F:A:B:O ≈ 75:12:7:3:2:0.6:0.00003%
-//                      A magnitude-limited (naked-eye) sample instead runs
-//                      B:A:F:G:K:M ~= 9:22:14:14:31:9, with O effectively absent
-//   Star rendering  : point sources only. Diffraction spikes come from the
-//                      vanes holding a telescope's secondary mirror, so an
-//                      eye or a ship camera never sees them; the wide halo
-//                      around a bright star is left to Environment.glow
-//   Milky Way tilt  : Galactic plane ~63° from celestial equator
-//   Galactic center : Sagittarius direction, ~8 kpc from Sun, dense bulge
-//   Background      : Axisymmetric stellar disk, triaxial bulge, turbulent dust
-//   Galactic light  : unresolved stellar continuum attenuated by a turbulent
-//                      3D dust disk; no unobserved emission sources are invented.
-
+// Fixed distant background sampled from Rust-generated HDR data; local star stays live.
 shader_type sky;
 #include "res://shaders/stellar_plasma.gdshaderinc"
-#include "res://shaders/galactic_dust.gdshaderinc"
 
 // ── Uniforms ─────────────────────────────────────────────────────────────────
 
-// Diagnostic only: production materials keep extinction_scale at one. The
-// shared physical model owns emissivity and radiance display calibration.
-uniform float extinction_scale : hint_range(0.0, 1.0) = 1.0;
-uniform vec3  ambient_color     : source_color             = vec3(0.002, 0.002, 0.006);
-// Baked background (ADR-0055). The nebula and Milky Way are direction-only
-// functions, so they are generated once into an equirectangular panorama and
-// sampled from then on: one texture fetch replaces the full line-of-sight
-// integration and its correlated density fields. The local star is NOT baked.
-uniform sampler2D nebula_panorama : filter_linear, repeat_enable;
-uniform bool  use_baked_nebula = false;
-// True only while generating that panorama: drops the presentation vignette
-// so it is applied once at runtime rather than burned into the texture.
-uniform bool  bake_pass = false;
+uniform vec3 ambient_color : source_color = vec3(0.0003, 0.0004, 0.0006);
+uniform sampler2D background_panorama : filter_linear, repeat_enable;
+uniform bool background_ready = false;
+uniform bool background_visible = true;
 
 // ── Local star (ADR-0025) ─────────────────────────────────────────────────────
 // sun_direction: normalised world-space direction from ship toward the star.
@@ -162,14 +129,16 @@ vec3 sun_surface_color(vec3 surface_normal, float mu) {
 	return surface * limb_darkening * 2.0;
 }
 
-// Equirectangular layout of RenderingServer.sky_bake_panorama(), measured
+// Equirectangular layout shared with Rust panorama generation, measured
 // rather than assumed: u=0 is -Z, u=0.25 is -X, u=0.5 is +Z, u=0.75 is +X,
 // and v runs from +Y at 0 to -Y at 1. Getting the u sign wrong samples a
 // different part of the sky, which silently misaligns the painted band with
 // the starfield's galactic clustering. Negative u relies on repeat_enable,
 // which also keeps the seam filtering correctly.
 vec2 panorama_uv(vec3 dir) {
-	return vec2(atan(-dir.x, -dir.z) / TAU, acos(clamp(dir.y, -1.0, 1.0)) / PI);
+	float half_texel_v = 0.5 / float(textureSize(background_panorama, 0).y);
+	return vec2(atan(-dir.x, -dir.z) / TAU,
+		clamp(acos(clamp(dir.y, -1.0, 1.0)) / PI, half_texel_v, 1.0 - half_texel_v));
 }
 
 vec3 solar_corona(vec3 ray, vec3 sun_dir, float angle, float radius) {
@@ -200,14 +169,9 @@ vec3 solar_corona(vec3 ray, vec3 sun_dir, float angle, float radius) {
 
 void sky() {
 	vec3 dir = normalize(EYEDIR);
-	vec3 col;
-	if (use_baked_nebula) {
-		col = texture(nebula_panorama, panorama_uv(dir)).rgb;
-	} else {
-		col = ambient_color;
-
-		vec3 galactic_direction = to_galactic(dir);
-		col += galactic_integrated_radiance(galactic_direction, extinction_scale);
+	vec3 col = ambient_color;
+	if (background_ready && background_visible) {
+		col += texture(background_panorama, panorama_uv(dir)).rgb;
 	}
 
 	// ── Local star disc + corona (ADR-0025) ──────────────────────────────

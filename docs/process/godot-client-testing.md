@@ -218,6 +218,23 @@ and resolution changes. Projection tests cover FOV and unclamped source radius;
 the bounded depth-occlusion footprint is tested independently. These checks do
 not assert a particular number of white pixels for every stellar distance.
 
+## Galactic Background Verification
+
+ADR-0059 moves population, dust and light-allocation tests to
+`dawn-client-core::galaxy`. `sky_background_test.gd` covers main-thread resource
+installation, retained output on failure, local-star independence and absence
+of artificial translational parallax. `star_sprite_render_test.gd` requires
+Forward+ and checks bounded angular-flux rendering under Vulkan projection,
+opaque occlusion beyond the construction shell and independent panorama poles;
+headless/dummy rendering cannot validate that guarantee.
+
+The production lighting study's `--layers` capture now produces
+`01-continuum.png`, `02-stars.png`, and `03-combined.png` in `.tmp/`.
+The old extinction-on/off shader diagnostic is removed: extinction is already
+part of Rust-generated data, not a second GPU calculation. Captures wait for
+background completion rather than assuming generation finishes in a fixed
+number of process frames.
+
 ## WorldSession test boundary
 
 The server-driven mutation surface is `ClientState::apply`: production

@@ -20,7 +20,9 @@ settings belong in their source/preset; test commands belong in
 | `CelestialProjection` / `WorldSpace` | f64 observer-relative projection before Godot vector conversion |
 | [WorldPresentation](../../client/scripts/world_presentation.gd) | Connect projected source, navigation, sky, scene illumination and camera optics |
 | [Space sky shader](../../client/shaders/space_sky.gdshader) | Local stellar disc, close surface and corona; direction-only background |
-| [Starfield](../../client/scripts/starfield.gd) | CPU-generated background star sprites, independently of the local stellar disc |
+| [Galactic model](../../crates/dawn-client-core/src/galaxy.rs) | Shared stellar emissivity, dust and angular background generation |
+| [SkyBackground](../../client/scripts/sky_background.gd) | Background resource lifetime, atomic panorama/star installation, camera-relative angular sprites |
+| [Generation adapter](../../crates/dawn-client-gdext/src/galaxy_background_gd.rs) | Bounded cancellable worker and main-thread Godot conversion |
 | [SolarProminences](../../client/scripts/solar_prominences.gd) | Camera-relative prominence geometry and visibility |
 | [StellarSource](../../client/scripts/stellar_source.gd) | Shared distant-source radiance, integrated image-plane flux and disc variance |
 | [Lens compositor](../../client/addons/lens_effects/lens_flare_compositor_effect.gd) | Lens settings, coherent render-thread source snapshot and bounded dispatch |
@@ -31,6 +33,48 @@ Ordinary bodies retain their physical radius after render-scale conversion.
 Navigation markers are not geometry authority.
 
 ## Processing Order
+
+### Distant Background
+
+[ADR-0059](../adr/ADR-0059-generated-galactic-background.md) supersedes the
+renderer-dependent nebula bake and finite-depth stellar parallax. Galaxy
+generation runs once per requested configuration on a cancellable CPU worker.
+System-map arrival currently requests the common configuration; no network
+schema has been added. One completed configuration is cached in memory.
+While generating, the previous background remains visible; initially only the
+minimal background is present. A completed panorama and star mesh are installed
+together on the main thread. Replaced work cannot overwrite the latest request.
+
+The model separates stellar/dust distributions from their angular observation
+and from Godot resources. The panorama contains unresolved radiance; stars carry
+the allocated resolved flux with attenuation already applied. The sprite shader
+normalizes its PSF and converts integrated angular flux using pixel solid angle.
+There is no second per-frame dust integral. This is a synthetic statistical sky,
+not a measured catalogue; see ADR-0059 for approximation limits.
+
+Apparent stellar packet brightness spans ten magnitudes with a faint-dominated
+count prior, normalized to the allocated resolved light. Most packets carry
+less than one fifth of the mean flux; a small bright tail supplies landmarks.
+This count prior is a rendering approximation, not a measured luminosity
+function or a second definition of total Galactic emissivity.
+
+Local Windows x64 release measurement on 2026-11-20: the 512 x 256 panorama,
+64 integration steps and 2,000 stellar samples took 2.46 seconds on one worker.
+The completed RGB buffer is 1.5 MiB, plus about 94 KiB of stellar records;
+temporary integration/sampling buffers and Godot/GPU copies are additional.
+The development panorama has visible angular-resolution limits: this timing
+is not a claim of full-resolution astronomical fidelity or a GPU frame-time
+benchmark. The ignored `default_generation_timing` Rust test reproduces the
+generation measurement.
+
+The angular stars are centered on the camera without inheriting its rotation.
+Orbit distance, translation and floating-origin changes create no distant-star
+parallax. Sprite clip depth is the far depth, so a finite construction shell
+cannot put stars in front of a distant opaque planet. Panorama longitude wraps;
+latitude clamps to the first/last texel centers to keep opposite poles separate.
+Local bodies still use physical observer-relative projection.
+
+### Local Presentation
 
 The camera-dependent presentation update is owned by `WorldPresentation` as a
 scene-tree `Node`. Each idle frame runs `CameraController` first,
