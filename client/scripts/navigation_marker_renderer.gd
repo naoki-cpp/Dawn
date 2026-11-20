@@ -108,6 +108,8 @@ static func spawn_gate_markers(gates_root: Node3D, gates: Array, world_scale: fl
 		marker.set_meta("gate_id",  g.gate_id)
 		marker.set_meta("gate_pos", gate_pos)  ## server coords, kept for per-frame clamping (main.gd)
 		marker.set_meta("nav_pos", gate_pos)
+		marker.set_meta("preserve_physical_position", true)
+		marker.set_meta("physical_extent", radius)
 		marker.set_meta("nav_pick_radius_px", BRACKET_SCRIPT.PICK_RADIUS_PX)
 		gates_root.add_child(marker)
 
@@ -126,6 +128,7 @@ static func spawn_gate_markers(gates_root: Node3D, gates: Array, world_scale: fl
 		ring.material_override = mat
 		ring.rotation_degrees = Vector3(90.0, 0.0, 0.0)
 		marker.add_child(ring)
+		marker.set_meta("physical_visual_mesh", ring)
 
 		marker.set_meta("callout_text", "Gate #%d -> %s" % [g.gate_id, g.to_system_name])
 		marker.set_meta("callout_color", GATE_COLOR)
@@ -176,7 +179,7 @@ static func spawn_body_markers(bodies_root: Node3D, bodies: Array, world_scale: 
 		mesh_inst.material_override = planet_material(b_id, name_str)
 		mesh_inst.mesh = sphere
 		marker.add_child(mesh_inst)
-		marker.set_meta("physical_body_mesh", mesh_inst)
+		marker.set_meta("physical_visual_mesh", mesh_inst)
 
 		marker.set_meta("callout_text", name_str)
 		marker.set_meta("callout_color", PLANET_COLOR)
@@ -184,10 +187,8 @@ static func spawn_body_markers(bodies_root: Node3D, bodies: Array, world_scale: 
 		marker.add_child(BRACKET_SCRIPT.build(PLANET_COLOR, BRACKET_PIXEL_SIZE))
 
 
-## Appends visual markers for NPC stations in the current star system.
-## Stations share the bodies root because they live in the same local spatial
-## context as planets. Their positions remain in physical
-## coordinates; only gate markers use the camera-relative distance policy.
+## Appends station markers. Physical positions are retained when visible within
+## the camera range; distant visual proxies preserve direction and angular size.
 static func spawn_station_markers(bodies_root: Node3D, stations: Array, world_scale: float, to_godot_components: Callable) -> void:
 	for entry: Variant in stations:
 		var station: StationRecord = entry as StationRecord
@@ -220,6 +221,7 @@ static func spawn_station_markers(bodies_root: Node3D, stations: Array, world_sc
 		mesh_inst.material_override = station_mat
 		mesh_inst.mesh = sphere
 		marker.add_child(mesh_inst)
+		marker.set_meta("physical_visual_mesh", mesh_inst)
 
 		marker.set_meta("callout_text", name_str)
 		marker.set_meta("callout_color", STATION_COLOR)

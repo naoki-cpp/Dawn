@@ -20,7 +20,7 @@ func test_warp_translation_does_not_change_camera_distance_or_view_angle() -> vo
 		for frame: int in range(fps * 3):
 			var speed := 20_000.0 * sin(PI * float(frame) / float(fps * 3))
 			target.position += Vector3.FORWARD * speed * delta
-			camera._process(delta)
+			camera.update_view(delta)
 			max_error = maxf(max_error,
 				(camera.global_position - target.global_position - expected).length())
 		assert_float(max_error).is_less(0.02)
@@ -38,11 +38,11 @@ func test_orbit_and_zoom_easing_are_frame_rate_independent() -> void:
 		var before := camera.global_position
 		camera._apply_orbit(150.0, 50.0)
 		camera._zoom_distance = 900.0
-		camera._process(1.0 / float(fps))
+		camera.update_view(1.0 / float(fps))
 		assert_float(camera.global_position.distance_to(before)).is_greater(0.0)
 		assert_float(camera.global_position.distance_to(camera._orbit_offset())).is_greater(1.0)
 		for _frame: int in range(fps - 1):
-			camera._process(1.0 / float(fps))
+			camera.update_view(1.0 / float(fps))
 		if fps == 30:
 			reference = camera.global_position
 		else:
@@ -57,24 +57,29 @@ func test_origin_rebase_preserves_camera_offset_while_orbit_is_easing() -> void:
 	camera.set_process(false)
 	camera.set_target(target)
 	camera._apply_orbit(120.0, 40.0)
-	camera._process(0.1)
+	camera.update_view(0.1)
 	var offset := camera.global_position - target.global_position
 	var view := camera.global_basis
 	var shift := Vector3(10_000.0, 2_000.0, -50_000.0)
 	target.global_position += shift
-	camera.global_position += shift
-	camera.on_origin_rebased(shift)
-	camera._process(0.0)
+	camera.apply_origin_rebase(shift)
+	camera.update_view(0.0)
 	assert_vector(camera.global_position - target.global_position).is_equal_approx(
 		offset, Vector3.ONE * 0.01)
 	assert_vector(camera.global_basis.z).is_equal_approx(view.z, Vector3.ONE * 0.001)
 
 
-func test_camera_runs_after_ship_presentation() -> void:
+func test_camera_does_not_advance_without_its_presentation_owner() -> void:
 	var camera: Camera3D = auto_free(CameraController.new())
 	add_child(camera)
 
-	assert_int(camera.process_priority).is_equal(10)
+	var before := camera.global_transform
+	camera._apply_orbit(120.0, 40.0)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	assert_bool(camera.global_transform.is_equal_approx(before)).is_true()
+	camera.update_view(0.1)
+	assert_bool(camera.global_transform.is_equal_approx(before)).is_false()
 
 
 func test_wheel_zoom_reaches_extended_distance_and_respects_limits() -> void:

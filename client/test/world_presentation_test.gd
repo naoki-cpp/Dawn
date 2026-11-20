@@ -425,7 +425,7 @@ func test_distant_planet_remains_visible_at_its_true_angular_size() -> void:
 	var ship: FakeShip = auto_free(FakeShip.new())
 	add_child(ship)
 	var marker: Node3D = bodies_root.get_child(0)
-	var mesh: MeshInstance3D = marker.get_meta("physical_body_mesh")
+	var mesh: MeshInstance3D = marker.get_meta("physical_visual_mesh")
 	for distance: float in [1.0e9, 1.0e8, 1.0e7]:
 		ship.world_presentation_position_value = _position(0.0, 0.0, 1.0e9 - distance)
 		presentation._update_position_markers(bodies_root, "nav_pos", 7, {7: ship})
@@ -434,6 +434,46 @@ func test_distant_planet_remains_visible_at_its_true_angular_size() -> void:
 		var rendered_distance := marker.global_position.distance_to(camera.global_position)
 		assert_float(radius / rendered_distance).is_equal_approx(6_400_000.0 / distance, 0.00001)
 		assert_float(rendered_distance + radius).is_less(camera.far)
+
+
+func test_far_gate_and_station_preserve_direction_and_visual_angular_size() -> void:
+	var presentation: WorldPresentation = auto_free(WorldPresentationScript.new())
+	var world := FakeWorld.new()
+	world.render_scale_value = 0.1
+	presentation._world = world
+	var camera: Camera3D = auto_free(Camera3D.new())
+	add_child(camera)
+	camera.far = 5000000.0
+	camera.position = Vector3(500000.0, 20000.0, 0.0)
+	presentation._camera = camera
+	var gates: Node3D = auto_free(Node3D.new())
+	var bodies: Node3D = auto_free(Node3D.new())
+	add_child(gates)
+	add_child(bodies)
+	presentation._gates_root = gates
+	presentation._bodies_root = bodies
+	presentation.respawn_navigation_markers(
+		[_gate(1, _position(0, 0, 1.0e12), 1500.0, "Other")], [],
+		[_station(2, "Station", _position(0, 0, 1.0e12), 2000.0)], func() -> void: pass)
+	var ship: FakeShip = auto_free(FakeShip.new())
+	add_child(ship)
+	var physical := Vector3(0, 0, -1.0e11)
+	var physical_distance := camera.global_position.distance_to(physical)
+	var expected_direction := (physical - camera.global_position).normalized()
+	for root: Node3D in [gates, bodies]:
+		presentation._update_position_markers(root, "nav_pos", 7, {7: ship})
+		var marker := root.get_child(0) as Node3D
+		var relative := marker.global_position - camera.global_position
+		assert_vector(relative.normalized()).is_equal_approx(expected_direction, Vector3.ONE * 0.000001)
+		var mesh := marker.get_meta("physical_visual_mesh") as MeshInstance3D
+		assert_float(mesh.scale.x / relative.length() * physical_distance).is_equal_approx(1.0, 0.00001)
+		for child: Node in marker.get_children():
+			if child is Sprite3D:
+				assert_vector((child as Sprite3D).scale).is_equal(Vector3.ONE)
+	assert_int(ShipPicking.pick_gate_at(camera, camera.unproject_position(
+		(gates.get_child(0) as Node3D).global_position), gates)).is_equal(1)
+	assert_int(ShipPicking.pick_station_at(camera, camera.unproject_position(
+		(bodies.get_child(0) as Node3D).global_position), bodies)).is_equal(2)
 
 
 func test_origin_rebase_moves_ship_and_motion_track_together() -> void:

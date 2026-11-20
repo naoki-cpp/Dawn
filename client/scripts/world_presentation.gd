@@ -51,12 +51,14 @@ var _warp_tunnel_amount: float = 0.0
 
 
 func _ready() -> void:
-	if _camera != null:
-		process_priority = _camera.process_priority + 1
+	# Ship presentation runs first; main keeps HUD/proximity after this owner.
+	process_priority = 10
 
 
 func _process(delta: float) -> void:
 	if _session == null:
+		if _camera != null and _camera.has_method("update_view"):
+			_camera.call("update_view", delta)
 		if _background != null:
 			_background.update_frame(_camera)
 		return
@@ -96,12 +98,16 @@ func _render_scale() -> float:
 
 func _refresh_frame(delta: float, player_ship_id: int) -> void:
 	_maybe_rebase_origin(player_ship_id, _ships)
+	var velocity := _update_camera_for_motion(delta, player_ship_id, _ships)
 	if _background != null:
 		_background.update_frame(_camera)
 	_update_position_markers(_bodies_root, "nav_pos", player_ship_id, _ships)
 	_update_position_markers(_gates_root, "nav_pos", player_ship_id, _ships)
 	_update_sun_direction(player_ship_id, _ships, _bodies)
-	_update_warp_tunnel_effect(delta, player_ship_id, _ships)
+	if _warp_tunnel != null:
+		_warp_tunnel.call("set_intensity", _warp_tunnel_amount)
+		if _camera != null:
+			_warp_tunnel.call("set_motion", velocity, _camera.global_basis, _camera.fov)
 
 
 func update_stellar_view(direction: Vector3, color: Vector3, angular_radius: float,
@@ -158,8 +164,7 @@ func apply_origin_rebase_components(
 			## caller selected keep_player_fixed.
 			ship.call("apply_origin_rebase", new_origin)
 	if not keep_player_fixed and _camera != null:
-		_camera.global_position += shift
-		_camera.call("on_origin_rebased", shift)
+		_camera.call("apply_origin_rebase", shift)
 
 
 func attach_player_ship(ship: Node3D, weapon_range: float, weapon_falloff: float) -> void:
@@ -267,11 +272,11 @@ func _update_position_markers(root: Node3D, meta_key: String, player_ship_id: in
 		var projected := CelestialProjection.marker(
 			player_server, marker_server, player_godot, _camera, _render_scale(),
 			bool(marker.get_meta("preserve_physical_position", false)),
-			marker.has_meta("physical_body_mesh"), float(marker.get_meta("physical_extent", 0.0)))
+			marker.has_meta("physical_visual_mesh"), float(marker.get_meta("physical_extent", 0.0)))
 		if projected == null:
 			continue
 		marker.global_position = projected.position
-		_update_body_lod(marker, projected.body_scale)
+		_update_visual_scale(marker, projected.body_scale)
 
 
 func _ship_server_position(ship: Node3D) -> PackedFloat64Array:
@@ -282,16 +287,16 @@ func _ship_server_position(ship: Node3D) -> PackedFloat64Array:
 	return _world.to_server_components(ship.global_position)
 
 
-func _update_body_lod(marker: Node3D, body_scale: float) -> void:
-	if not marker.has_meta("physical_body_mesh"):
+func _update_visual_scale(marker: Node3D, body_scale: float) -> void:
+	if not marker.has_meta("physical_visual_mesh"):
 		return
-	var body_mesh: MeshInstance3D = marker.get_meta("physical_body_mesh") as MeshInstance3D
+	var body_mesh: MeshInstance3D = marker.get_meta("physical_visual_mesh") as MeshInstance3D
 	if body_mesh != null:
 		body_mesh.scale = Vector3.ONE * body_scale
 		body_mesh.visible = true
 
 
-func _update_warp_tunnel_effect(delta: float, player_ship_id: int, ships: Dictionary) -> void:
+func _update_camera_for_motion(delta: float, player_ship_id: int, ships: Dictionary) -> Vector3:
 	var speed_godot := 0.0
 	var velocity := Vector3.ZERO
 	if player_ship_id >= 0 and ships.has(player_ship_id):
@@ -300,12 +305,11 @@ func _update_warp_tunnel_effect(delta: float, player_ship_id: int, ships: Dictio
 		if _camera != null and player_ship.has_method("get_velocity_godot"):
 			velocity = player_ship.call("get_velocity_godot") as Vector3
 	_warp_tunnel_amount = next_warp_tunnel_amount(_warp_tunnel_amount, speed_godot, delta)
-	if _warp_tunnel != null:
-		_warp_tunnel.call("set_intensity", _warp_tunnel_amount)
 	if _camera != null:
 		_camera.fov = _camera_base_fov + WARP_TUNNEL_FOV_BOOST * _warp_tunnel_amount
-		if _warp_tunnel != null:
-			_warp_tunnel.call("set_motion", velocity, _camera.global_basis, _camera.fov)
+		if _camera.has_method("update_view"):
+			_camera.call("update_view", delta)
+	return velocity
 
 
 func _maybe_rebase_origin(player_ship_id: int, ships: Dictionary) -> void:

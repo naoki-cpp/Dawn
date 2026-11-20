@@ -32,6 +32,13 @@ The sky draws the star; its selectable bracket adds no duplicate stellar mesh.
 Ordinary bodies retain their physical radius after render-scale conversion.
 Navigation markers are not geometry authority.
 
+Distant navigation proxies are compressed along the camera-to-physical-target
+ray, not along a ship-centered display shell. Gates and stations keep physical
+placement while they fit the camera range; beyond it, their visual geometry is
+scaled with proxy distance to preserve angular size. Fixed-screen brackets and
+their pick area are not scaled with that geometry. Camera orbit must therefore
+not create the parallax of a nearby marker for an AU-distant target.
+
 ## Processing Order
 
 ### Distant Background
@@ -76,14 +83,25 @@ Local bodies still use physical observer-relative projection.
 
 ### Local Presentation
 
-The camera-dependent presentation update is owned by `WorldPresentation` as a
-scene-tree `Node`. Each idle frame runs `CameraController` first,
-`WorldPresentation` second, then `main.gd`. This lets warp-screen effects read
-the camera transform and FOV produced for that same frame; `main.gd` remains
-later in the frame for proximity checks and HUD updates. `WorldPresentation`
-holds the session, ship-node map and cached body array supplied during setup.
-The body array is updated in place when the sector map changes, not rebuilt
-per frame. The schedule is `CameraController -> WorldPresentation -> main.gd`.
+`WorldPresentation` owns the camera-dependent presentation frame as a scene-tree
+`Node`. Ship render transforms advance first. WorldPresentation then rebases the
+origin if needed, advances warp intensity and sets the final FOV, calls
+`CameraController.update_view()` once, and updates the background, navigation
+markers, stellar presentation and warp shader from that final view. `main.gd`
+remains later for proximity checks and HUD updates.
+
+CameraController retains input, orbit/zoom easing and follow state, but has no
+autonomous `_process()` or process-priority requirement. Its
+`apply_origin_rebase()` moves the camera and cached target together; callers do
+not separately mutate its transform. The keep-player-fixed rebase path leaves
+both untouched. Without a session, WorldPresentation still advances camera and
+background, allowing offline review scenes without changing their authored FOV.
+
+WorldPresentation holds the session, ship-node map and cached body array supplied
+during setup. The body array is updated in place when the sector map changes,
+not rebuilt per frame. Only the ship-presentation / WorldPresentation / main
+schedule remains scene-tree ordered; camera and effects are explicitly ordered
+within the presentation owner.
 
 ```text
 body record + observer absolute f64 position
