@@ -45,13 +45,8 @@ var _dragging    : bool    = false
 
 # ── ライフサイクル ────────────────────────────────────────────────────────────
 
-func _ready() -> void:
-	## ShipController advances its render transform during the same idle frame.
-	## Run the camera afterwards so follow/look_at consume the current position,
-	## rather than alternating between the current and previous ship transforms.
-	process_priority = 10
-
-func _process(delta: float) -> void:
+## WorldPresentation calls this once after ship motion and origin correction.
+func update_view(delta: float) -> void:
 	if _target_node != null and is_instance_valid(_target_node):
 		_target_pos = _target_node.global_position
 
@@ -104,11 +99,9 @@ func set_target(node: Node3D) -> void:
 		_target_pos     = node.global_position
 		global_position = _target_pos + _orbit_offset()
 
-## Called by main.gd when the floating origin rebases (ADR-0029): the whole world
-## (including the follow target) shifted by `shift`, so shift the cached target
-## too. main.gd already shifted our global_position, so the orbit offset and
-## look_at stay continuous and the view doesn't swing for a frame.
-func on_origin_rebased(shift: Vector3) -> void:
+## Move the view and its cached follow position together, preserving orbit easing.
+func apply_origin_rebase(shift: Vector3) -> void:
+	global_position += shift
 	_target_pos += shift
 
 func begin_orbit_drag(drag_position: Vector2) -> void:

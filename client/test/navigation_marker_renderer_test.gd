@@ -158,7 +158,7 @@ func test_spawn_body_markers_keeps_stars_selectable_without_a_second_disc() -> v
 	var star_marker: Node3D = bodies_root.get_child(0) as Node3D
 	assert_int(star_marker.get_meta("body_id")).is_equal(1)
 	assert_str(star_marker.get_meta("callout_text")).is_equal("Helios")
-	assert_bool(star_marker.has_meta("physical_body_mesh")).is_false()
+	assert_bool(star_marker.has_meta("physical_visual_mesh")).is_false()
 	assert_int(star_marker.get_child_count()).is_equal(1)
 	assert_bool(star_marker.get_child(0) is Sprite3D).is_true()
 

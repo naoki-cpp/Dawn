@@ -220,6 +220,12 @@ not assert a particular number of white pixels for every stellar distance.
 
 ## Galactic Background Verification
 
+`world_presentation_frame_test.gd` exercises the live frame owner: current ship
+motion precedes one explicit camera update, and rotation/zoom, warp FOV and
+origin rebases reach background, prominence projection and warp uniforms in the
+same frame. `camera_controller_test.gd` tests the explicit `update_view()`
+interface and atomic camera rebasing rather than asserting priority numbers.
+
 ADR-0059 moves population, dust and light-allocation tests to
 `dawn-client-core::galaxy`. `sky_background_test.gd` covers main-thread resource
 installation, retained output on failure, local-star independence and absence

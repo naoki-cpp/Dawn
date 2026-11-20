@@ -67,6 +67,12 @@ environment familyの分割は引き続きDefer。
 `CameraController -> WorldPresentation -> main.gd`の順に同一idle frameで所有する。
 これは画面効果の同期境界であり、C-20のvisual family分割triggerとは別。追加抽出は引き続きDefer。
 
+2026-11-20: ADR-0059で背景のmodel/generationをRustへ、Godotのresource lifetimeを
+`SkyBackground`へ集約。カメラの自動processは廃止し、`WorldPresentation`が
+原点補正・warp FOV・`CameraController.update_view()`・画面効果の順に明示更新する。
+camera本体とcached targetの原点補正も一操作へ集約した。新たな汎用schedulerや
+中継moduleは追加せず、実frame testで更新回数と同frameの姿勢/FOVを検証する。
+
 ## C-21 解消済み: test専用のsystem-name Dictionary投影
 
 Godot公開投影を削除。検証記録は[client-completed.md](./client-completed.md)を参照。

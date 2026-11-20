@@ -82,11 +82,11 @@ impl CelestialProjection {
         if !extent.is_finite() || extent < 0.0 || !distance.is_finite() || !finite(physical) {
             return None;
         }
-        let fits = view
-            .camera
-            .is_none_or(|camera| (distance + extent) * view.render_scale <= camera.far);
+        let fits = view.camera.is_none_or(|camera| {
+            length(sub(physical, camera.render_position)) + extent * view.render_scale <= camera.far
+        });
         let result = match geometry {
-            MarkerGeometry::Sphere { .. } if !fits => {
+            MarkerGeometry::Sphere { .. } | MarkerGeometry::Physical { .. } if !fits => {
                 let camera = view.camera?;
                 let relative = sub(physical, camera.render_position);
                 let span = length(relative) + extent * view.render_scale;
@@ -102,6 +102,19 @@ impl CelestialProjection {
             MarkerGeometry::Physical { .. } | MarkerGeometry::Sphere { .. } if fits => {
                 MarkerProjection {
                     render_position: physical,
+                    body_scale: 1.0,
+                }
+            }
+            MarkerGeometry::Clamped if view.camera.is_some() => {
+                let camera = view.camera?;
+                let relative = sub(physical, camera.render_position);
+                let distance = length(relative);
+                let limit = 30_000.0_f64.min(camera.far * 0.5);
+                MarkerProjection {
+                    render_position: add(
+                        camera.render_position,
+                        mul(relative, (limit / distance.max(limit)).min(1.0)),
+                    ),
                     body_scale: 1.0,
                 }
             }
@@ -200,6 +213,50 @@ mod tests {
                 .render_position,
             view().player_render
         );
+    }
+
+    #[test]
+    fn far_marker_keeps_physical_view_direction_when_camera_moves() {
+        let mut v = view();
+        let target = add(v.observer, [0.0, 0.0, 1.0e12]);
+        for camera_position in [[0.0; 3], [500_000.0, 20_000.0, 0.0]] {
+            v.camera = Some(ProjectionCamera {
+                render_position: camera_position,
+                far: 5.0e6,
+            });
+            let physical = add(v.player_render, [0.0, 0.0, -1.0e11]);
+            let expected = sub(physical, camera_position);
+            let expected = mul(expected, 1.0 / length(expected));
+            for geometry in [
+                MarkerGeometry::Clamped,
+                MarkerGeometry::Physical { extent: 350.0 },
+            ] {
+                let p = CelestialProjection::marker(v, target, geometry).unwrap();
+                let actual = sub(p.render_position, camera_position);
+                let actual = mul(actual, 1.0 / length(actual));
+                assert!(
+                    length(sub(actual, expected)) < 1e-10,
+                    "{geometry:?}: {actual:?} != {expected:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn distant_physical_geometry_preserves_angular_extent() {
+        let mut v = view();
+        let eye = [500_000.0, 20_000.0, 0.0];
+        v.camera = Some(ProjectionCamera {
+            render_position: eye,
+            far: 5.0e6,
+        });
+        let target = add(v.observer, [0.0, 0.0, 1.0e12]);
+        let physical = add(v.player_render, [0.0, 0.0, -1.0e11]);
+        let p = CelestialProjection::marker(v, target, MarkerGeometry::Physical { extent: 350.0 })
+            .unwrap();
+        let drawn_distance = length(sub(p.render_position, eye));
+        let actual_distance = length(sub(physical, eye));
+        assert!((p.body_scale / drawn_distance * actual_distance - 1.0).abs() < 1e-10);
     }
 
     #[test]
